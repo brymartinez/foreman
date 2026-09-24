@@ -424,3 +424,70 @@ Entry format:
   reviewer sees it as a settled requirement. Answering resets the budget.
 - **Consequence.** Handling a disagreement between agents adds no new states or
   commands.
+
+## D36. How CI is read
+
+- Date: 2026-09-24. Stage 6. Decided by the agent.
+- **Context.** `gh pr checks` exits 8 while checks are pending and non-zero when a
+  check failed, and it errors with "no checks reported" when a PR has none. The user
+  declined a live probe of real PRs, so the exact exit code with `--json` was not
+  observed.
+- **Options.** (A) Gate on required checks only (`--required`). (B) Gate on every check.
+- **Decision.** B, through `gh pr checks <n> --json name,bucket,link`. The exit code is
+  ignored whenever gh printed JSON, so both possible exit behaviors parse the same way.
+  Failing wins over pending, which wins over passing. `cancel` counts as failing and
+  `skipping` as passing. The names and links of failing checks are recorded.
+- **Consequence.** A flaky optional check holds a task back. That is safer than letting
+  a red PR reach the developer as ready.
+
+## D37. A PR with no checks passes the gate
+
+- Date: 2026-09-24. Stage 6. Decided by the agent.
+- **Options.** (A) Treat no checks as passing. (B) Never mark such a task ready.
+- **Decision.** A. The state is recorded as `none`, and inbox shows `✓ CI (no checks)`,
+  so the developer can see that nothing ran.
+- **Consequence.** Repos without CI still reach READY_FOR_HUMAN.
+
+## D38. Failing CI sends the implementer back, twice at most
+
+- Date: 2026-09-24. Stage 6. Decided by the agent. This answers the open question in
+  the Stage 6 plan.
+- **Options.** (A) Only show the failure. (B) Resume the implementer to fix it, with a
+  cap.
+- **Decision.** B. When the gate sees failing CI, it sets the task to WORKING,
+  increments `ci_fixes`, and launches the runner. The runner resumes the implementer
+  with the failing checks, or starts a fresh turn that lists them under "Failing CI".
+  The fix then goes through PR verification and a new competing review like any other
+  round. After `MaxCIFixes` (2), the task becomes FAILED with the failing check names.
+  Any implementer turn clears the stored CI result, because it no longer describes the
+  branch.
+- **Consequence.** `inbox` and `status` can launch a runner. They only do so for a task
+  that is idle and was already delegated, which matches "autonomous PR completion".
+
+## D39. When the readiness gate runs and what it changes
+
+- Date: 2026-09-24. Stage 6. Decided by the agent.
+- **Decision.** The gate runs at the start of `inbox` and `status`, after dead runners
+  are reaped. It only looks at tasks with a PR and no runner: REVIEWING tasks whose
+  latest review is clean and belongs to the current PR, and READY_FOR_HUMAN tasks.
+  - A merged PR sets the task to DONE.
+  - A PR closed without merging sets it to FAILED.
+  - For a REVIEWING task with an open PR, green CI sets it to READY_FOR_HUMAN, pending
+    CI records the state and changes nothing else, and failing CI follows D38.
+  - READY_FOR_HUMAN tasks are checked only for merge or close. CI is not re-checked
+    after the task is handed over.
+  - Separately, a closed issue ends any delegated task that no runner is driving.
+  - Gate changes are reported under CHANGED in `inbox`. Ready tasks appear in READY FOR
+    YOU with the draft's checklist: validation, CI, competing review, and decisions.
+- **Consequence.** `status` now calls gh once or twice per gated task.
+
+## D40. Clean re-reviews don't use up the review budget
+
+- Date: 2026-09-24. Stage 6. Decided by the agent. This refines D35.
+- **Context.** In the end-to-end run, two CI fixes produced three clean reviews. The
+  D35 budget counted them all, and the task escalated with "the reviewer still requests
+  changes" even though nothing was requested.
+- **Decision.** The budget counts only rounds that requested changes since the last
+  answer (`ChangeRequestsSinceDecision`). A loop of findings alone escalates at the
+  same point as before.
+- **Consequence.** A CI fix no longer triggers a false review escalation.

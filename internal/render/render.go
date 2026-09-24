@@ -29,8 +29,11 @@ func Inbox(w io.Writer, r app.InboxReport) {
 	}
 	if len(r.Ready) > 0 {
 		section("READY FOR YOU")
-		for _, rec := range r.Ready {
-			line(w, rec.Key, rec.Title, prSummary(rec))
+		for i, rec := range r.Ready {
+			if i > 0 {
+				fmt.Fprintln(w)
+			}
+			ready(w, rec)
 		}
 	}
 	if len(r.Changed) > 0 {
@@ -74,11 +77,66 @@ func pendingQuestion(rec *task.Record) string {
 	return "decision needed"
 }
 
-func prSummary(rec *task.Record) string {
-	if rec.Delegation != nil && rec.Delegation.PR > 0 {
-		return fmt.Sprintf("PR #%d", rec.Delegation.PR)
+// ready lists what the gate checked, so the developer knows what is left to review.
+func ready(w io.Writer, rec *task.Record) {
+	d := rec.Delegation
+	fmt.Fprintf(w, "  #%d  %s\n", rec.Number, rec.Title)
+	fmt.Fprintf(w, "        %s · %s → %s review\n", rec.Repo, agentName(d.Implementer.Agent), agentName(d.Reviewer))
+	pr := fmt.Sprintf("PR #%d", d.PR)
+	if d.PRURL != "" {
+		pr += " · " + d.PRURL
 	}
-	return "ready"
+	fmt.Fprintf(w, "        %s\n\n", pr)
+	for _, c := range rec.Validation {
+		fmt.Fprintf(w, "        %s %s\n", mark(c.Passed), c.Command)
+	}
+	ci := "CI"
+	if rec.CI != nil && rec.CI.State == task.CINone {
+		ci = "CI (no checks)"
+	}
+	fmt.Fprintf(w, "        %s %s\n", mark(rec.CI.Green()), ci)
+	latest := rec.LatestReview()
+	fmt.Fprintf(w, "        %s competing review\n", mark(latest != nil && latest.Clean))
+	var answers []string
+	for _, dec := range rec.Decisions {
+		if dec.Answer != "" {
+			answers = append(answers, dec.Answer)
+		}
+	}
+	if len(answers) > 0 {
+		fmt.Fprintf(w, "\n        Decisions:\n")
+		for _, a := range answers {
+			fmt.Fprintf(w, "        - %s\n", a)
+		}
+	}
+}
+
+func mark(ok bool) string {
+	if ok {
+		return "✓"
+	}
+	return "✗"
+}
+
+// ciBadge is the gate's last CI result; it is empty until the gate has looked.
+func ciBadge(c *task.CIStatus) string {
+	switch {
+	case c == nil:
+		return ""
+	case c.Green():
+		return " · CI ✓"
+	case c.State == task.CIPending:
+		return " · CI pending"
+	}
+	return " · CI ✗ " + checkNames(c.Failing)
+}
+
+func checkNames(checks []task.CheckRun) string {
+	names := make([]string, len(checks))
+	for i, c := range checks {
+		names[i] = c.Name
+	}
+	return strings.Join(names, ", ")
 }
 
 func Status(w io.Writer, recs []*task.Record) {
@@ -94,7 +152,7 @@ func Status(w io.Writer, recs []*task.Record) {
 		fmt.Fprintf(w, "#%-5d %-7s %s\n", r.Number, agentName(d.Implementer.Agent), r.State)
 		fmt.Fprintf(w, "       %s · %s\n", r.Title, r.Repo)
 		if d.PR > 0 {
-			fmt.Fprintf(w, "       PR #%d · reviewer: %s%s\n", d.PR, agentName(d.Reviewer), reviewBadge(r))
+			fmt.Fprintf(w, "       PR #%d · reviewer: %s%s%s\n", d.PR, agentName(d.Reviewer), ciBadge(r.CI), reviewBadge(r))
 		}
 	}
 }
@@ -139,18 +197,27 @@ func Show(w io.Writer, r *task.Record) {
 	if !r.LastGitHubSync.IsZero() {
 		row("Last synced", r.LastGitHubSync.Local().Format(time.DateTime))
 	}
+	if c := r.CI; c != nil {
+		ci := fmt.Sprintf("%s · checked %s", c.State, c.CheckedAt.Local().Format(time.DateTime))
+		if r.CIFixes > 0 {
+			ci += fmt.Sprintf(" · %d of %d fixes used", r.CIFixes, app.MaxCIFixes)
+		}
+		row("CI", ci)
+	}
 	if o := r.LastOutcome; o != nil {
 		row("Last outcome", fmt.Sprintf("%s · %s · %s", o.Status, o.At.Local().Format(time.DateTime), o.Summary))
 	}
 	tw.Flush()
+	if r.CI != nil && len(r.CI.Failing) > 0 {
+		fmt.Fprintln(w, "\nFailing checks")
+		for _, c := range r.CI.Failing {
+			fmt.Fprintf(w, "  ✗ %s %s\n", c.Name, c.Link)
+		}
+	}
 	if len(r.Validation) > 0 {
 		fmt.Fprintln(w, "\nValidation (reported by the agent)")
 		for _, c := range r.Validation {
-			mark := "✓"
-			if !c.Passed {
-				mark = "✗"
-			}
-			fmt.Fprintf(w, "  %s %s\n", mark, c.Command)
+			fmt.Fprintf(w, "  %s %s\n", mark(c.Passed), c.Command)
 		}
 	}
 	if latest := r.LatestReview(); latest != nil {

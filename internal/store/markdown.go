@@ -164,6 +164,14 @@ type frontmatter struct {
 	LastOutcome         *outcomeFM   `yaml:"last_outcome,omitempty"`
 	Validation          []task.Check `yaml:"validation,omitempty"`
 	Reviews             []reviewFM   `yaml:"reviews,omitempty"`
+	CI                  *ciFM        `yaml:"ci,omitempty"`
+	CIFixes             int          `yaml:"ci_fixes,omitempty"`
+}
+
+type ciFM struct {
+	State     task.CIState    `yaml:"state"`
+	Failing   []task.CheckRun `yaml:"failing,omitempty"`
+	CheckedAt time.Time       `yaml:"checked_at"`
 }
 
 type reviewFM struct {
@@ -293,6 +301,15 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 		}
 		rec.Reviews = append(rec.Reviews, task.Review{Round: r.Round, Reviewer: r.Reviewer, PR: r.PR, Clean: r.Verdict == "clean", Summary: r.Summary, Findings: r.Findings, At: r.At})
 	}
+	if c := fm.CI; c != nil {
+		switch c.State {
+		case task.CIPending, task.CIPassing, task.CIFailing, task.CINone:
+		default:
+			return nil, fmt.Errorf("ci has unknown state %q", c.State)
+		}
+		rec.CI = &task.CIStatus{State: c.State, Failing: c.Failing, CheckedAt: c.CheckedAt}
+	}
+	rec.CIFixes = fm.CIFixes
 	if o := fm.LastOutcome; o != nil {
 		rec.LastOutcome = &task.Outcome{Status: o.Status, Summary: o.Summary, At: o.At}
 	}
@@ -348,6 +365,10 @@ func fromRecord(rec *task.Record) frontmatter {
 		}
 		fm.Reviews = append(fm.Reviews, reviewFM{Round: r.Round, Reviewer: r.Reviewer, PR: r.PR, Verdict: verdict, Summary: r.Summary, Findings: r.Findings, At: r.At})
 	}
+	if c := rec.CI; c != nil {
+		fm.CI = &ciFM{State: c.State, Failing: c.Failing, CheckedAt: c.CheckedAt}
+	}
+	fm.CIFixes = rec.CIFixes
 	if o := rec.LastOutcome; o != nil {
 		fm.LastOutcome = &outcomeFM{Status: o.Status, Summary: o.Summary, At: o.At}
 	}

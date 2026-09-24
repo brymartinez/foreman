@@ -38,6 +38,9 @@ func delegated() *task.Record {
 				Findings: []task.Finding{{Severity: "blocking", File: "retry.go", Line: 40, Summary: "4xx retried", Detail: "guard"}}},
 			{Round: 2, Reviewer: task.Codex, PR: 912, Clean: true, Summary: "ok", At: time.Date(2026, 9, 24, 19, 0, 0, 0, time.UTC)},
 		},
+		CI: &task.CIStatus{State: task.CIFailing, CheckedAt: time.Date(2026, 9, 24, 19, 30, 0, 0, time.UTC),
+			Failing: []task.CheckRun{{Name: "test", Link: "https://github.com/ridezoomo/armada-backend/actions/runs/1"}}},
+		CIFixes: 1,
 		GitHub: &task.Snapshot{
 			UpdatedAt: time.Date(2026, 9, 24, 17, 0, 0, 0, time.UTC),
 			State:     "open",

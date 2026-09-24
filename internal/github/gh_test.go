@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -96,5 +97,46 @@ func TestPullRequests(t *testing.T) {
 	none, err := c.OpenPullRequestForBranch(context.Background(), "ridezoomo/armada-backend", "agent/1-none")
 	if err != nil || none != nil {
 		t.Fatalf("empty = %+v, %v", none, err)
+	}
+}
+
+func TestCIStatus(t *testing.T) {
+	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 912}
+	for _, tc := range []struct {
+		name    string
+		out     string
+		err     error
+		want    task.CIState
+		failing []string
+	}{
+		{"all pass or skipped", `[{"name":"test","bucket":"pass"},{"name":"deploy","bucket":"skipping"}]`, nil, task.CIPassing, nil},
+		{"pending exits 8", `[{"name":"test","bucket":"pass"},{"name":"lint","bucket":"pending"}]`, errors.New("exit status 8"), task.CIPending, nil},
+		{"failure wins over pending", `[{"name":"test","bucket":"fail","link":"https://ci/1"},{"name":"lint","bucket":"pending"},{"name":"e2e","bucket":"cancel"}]`, errors.New("exit status 1"), task.CIFailing, []string{"test", "e2e"}},
+		{"empty list", `[]`, nil, task.CINone, nil},
+		{"no checks at all", ``, errors.New("gh pr checks: exit status 1: no checks reported on the 'agent/825' branch"), task.CINone, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := Client{Run: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+				if got := strings.Join(args, " "); got != "pr checks 912 --repo ridezoomo/armada-backend --json name,bucket,link" {
+					t.Errorf("args = %s", got)
+				}
+				return []byte(tc.out), tc.err
+			}}
+			st, err := c.CIStatus(context.Background(), key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var names []string
+			for _, f := range st.Failing {
+				names = append(names, f.Name)
+			}
+			if st.State != tc.want || !slices.Equal(names, tc.failing) {
+				t.Errorf("got %s %v, want %s %v", st.State, names, tc.want, tc.failing)
+			}
+		})
+	}
+	c := Client{Run: func(context.Context, string, ...string) ([]byte, error) { return nil, errors.New("HTTP 502") }}
+	if _, err := c.CIStatus(context.Background(), key); err == nil {
+		t.Error("a gh failure without output must be an error")
 	}
 }

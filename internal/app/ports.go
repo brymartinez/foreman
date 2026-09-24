@@ -63,6 +63,8 @@ type GitHubClient interface {
 	GetPullRequest(ctx context.Context, key task.Key) (PullRequest, error)
 	// OpenPullRequestForBranch returns the open PR whose head is branch, or nil if none.
 	OpenPullRequestForBranch(ctx context.Context, repo task.Repo, branch string) (*PullRequest, error)
+	// CIStatus summarizes the checks on the PR's current head. CheckedAt is left zero.
+	CIStatus(ctx context.Context, pr task.Key) (task.CIStatus, error)
 }
 
 type WorktreeRequest struct {

@@ -43,6 +43,10 @@ func (a App) Inbox(ctx context.Context) (InboxReport, error) {
 	if err != nil {
 		return InboxReport{}, err
 	}
+	notes, err := a.gate(ctx, recs)
+	if err != nil {
+		return InboxReport{}, err
+	}
 	items, err := a.GitHub.InboxItems(ctx)
 	if err != nil {
 		return InboxReport{}, err
@@ -51,7 +55,7 @@ func (a App) Inbox(ctx context.Context) (InboxReport, error) {
 	if err != nil {
 		return InboxReport{}, err
 	}
-	report, dirty := Reconcile(append(items, tracked...), recs, a.Now())
+	report, dirty := Reconcile(append(items, tracked...), recs, notes, a.Now())
 	for _, seen := range dirty {
 		if _, err := a.Store.Update(ctx, seen.Key, func(cur *task.Record) (*task.Record, error) {
 			return mergeObserved(cur, seen), nil
@@ -70,7 +74,7 @@ func mergeObserved(cur, seen *task.Record) *task.Record {
 	}
 	cur.Title, cur.URL, cur.Kind = seen.Title, seen.URL, seen.Kind
 	cur.GitHub, cur.LastGitHubSync = seen.GitHub, seen.LastGitHubSync
-	if cur.State == task.Discovered && seen.State == task.Done {
+	if seen.State == task.Done && !running(cur.State) {
 		cur.State = task.Done
 	}
 	return cur
@@ -111,16 +115,19 @@ func (a App) fetchTracked(ctx context.Context, recs []*task.Record, found []Inbo
 	return out, nil
 }
 
-// Reconcile compares current GitHub items with stored records. It returns the report
-// and the records that must be saved (new, or with a changed snapshot). It is pure.
-func Reconcile(items []InboxItem, recs []*task.Record, now time.Time) (InboxReport, []*task.Record) {
+// Reconcile compares current GitHub items with stored records. notes are the readiness
+// gate's changes, reported with the item. It returns the report and the records that
+// must be saved (new, or with a changed snapshot). It is pure.
+func Reconcile(items []InboxItem, recs []*task.Record, notes map[task.Key][]string, now time.Time) (InboxReport, []*task.Record) {
 	byKey := map[task.Key]*task.Record{}
 	for _, r := range recs {
 		byKey[r.Key] = r
 	}
 	var report InboxReport
 	var dirty []*task.Record
+	reported := map[task.Key]bool{}
 	for _, it := range items {
+		reported[it.Key] = true
 		rec := byKey[it.Key]
 		if rec == nil {
 			rec = discovered(it, now)
@@ -132,16 +139,22 @@ func Reconcile(items []InboxItem, recs []*task.Record, now time.Time) (InboxRepo
 			continue
 		}
 		changes := describeChanges(rec.GitHub, it)
-		if len(changes) == 0 {
-			if !needsHuman(rec) {
-				report.Unchanged++
-			}
-			continue
+		if len(changes) > 0 {
+			observe(rec, it, now)
+			dirty = append(dirty, rec)
 		}
-		observe(rec, it, now)
-		dirty = append(dirty, rec)
-		if !needsHuman(rec) {
+		changes = append(changes, notes[it.Key]...)
+		switch {
+		case needsHuman(rec):
+		case len(changes) == 0:
+			report.Unchanged++
+		default:
 			report.Changed = append(report.Changed, InboxEntry{Item: it, Changes: changes})
+		}
+	}
+	for _, r := range recs {
+		if n := notes[r.Key]; len(n) > 0 && !reported[r.Key] && !needsHuman(r) {
+			report.Changed = append(report.Changed, InboxEntry{Item: InboxItem{Key: r.Key, Kind: r.Kind, Title: r.Title, URL: r.URL}, Changes: n})
 		}
 	}
 	for _, r := range recs {
@@ -180,7 +193,9 @@ func observe(rec *task.Record, it InboxItem, now time.Time) {
 	rec.Title, rec.URL, rec.Kind = it.Title, it.URL, it.Kind
 	rec.GitHub = &task.Snapshot{UpdatedAt: it.UpdatedAt, State: it.State, Reasons: reasons}
 	rec.LastGitHubSync = now
-	if rec.State == task.Discovered && it.State != "open" {
+	// A closed issue or merged PR ends the task unless a runner is still driving it;
+	// the gate ends those when their PR is merged or closed.
+	if it.State != "open" && !running(rec.State) {
 		rec.State = task.Done
 	}
 }

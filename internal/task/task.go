@@ -226,6 +226,10 @@ type Record struct {
 	Validation []Check
 	// Reviews are the competing agent's review rounds, oldest first.
 	Reviews []Review
+	// CI is the readiness gate's last look at the PR's checks. Any implementer turn clears it.
+	CI *CIStatus
+	// CIFixes counts the times the gate sent the implementer back to fix failing CI.
+	CIFixes int
 	// Body is the Markdown below the frontmatter, round-tripped untouched so human edits survive.
 	Body string
 }
@@ -256,9 +260,10 @@ func (r *Record) LatestReview() *Review {
 	return &r.Reviews[len(r.Reviews)-1]
 }
 
-// RoundsSinceDecision counts review rounds since the developer last answered a
-// question. The round cap (D11) applies per budget, and answering resets it.
-func (r *Record) RoundsSinceDecision() int {
+// ChangeRequestsSinceDecision counts review rounds that requested changes since the
+// developer last answered a question. The round cap (D11) limits fix rounds, so
+// clean re-reviews (after a CI fix) don't use it up (D40); answering resets it.
+func (r *Record) ChangeRequestsSinceDecision() int {
 	var last time.Time
 	for _, d := range r.Decisions {
 		if d.AnsweredAt.After(last) {
@@ -267,9 +272,38 @@ func (r *Record) RoundsSinceDecision() int {
 	}
 	n := 0
 	for _, rv := range r.Reviews {
-		if rv.At.After(last) {
+		if !rv.Clean && rv.At.After(last) {
 			n++
 		}
 	}
 	return n
+}
+
+type CIState string
+
+const (
+	CIPending CIState = "pending"
+	CIPassing CIState = "passing"
+	CIFailing CIState = "failing"
+	// CINone means the PR has no checks at all. The gate treats it as passing (D37).
+	CINone CIState = "none"
+)
+
+// CheckRun is one failing or pending CI check, kept so the implementer and the
+// developer can see which check to open.
+type CheckRun struct {
+	Name string `json:"name" yaml:"name"`
+	Link string `json:"link" yaml:"link,omitempty"`
+}
+
+type CIStatus struct {
+	State CIState
+	// Failing lists the checks that failed or were cancelled.
+	Failing   []CheckRun
+	CheckedAt time.Time
+}
+
+// Green reports whether CI lets the task through the readiness gate.
+func (c *CIStatus) Green() bool {
+	return c != nil && (c.State == CIPassing || c.State == CINone)
 }

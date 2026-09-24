@@ -47,9 +47,14 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
 foreman respond 825   -> save answer, state WORKING, spawn runner
                          runner: Resume(session, answer); on ErrNoSession, a fresh
                          Start whose prompt lists all recorded decisions
-foreman inbox|status  -> (per REVIEWING task with clean review) gh CI check
-                         all green -> READY_FOR_HUMAN
-                         runner pid dead while WORKING -> FAILED
+foreman inbox|status  -> runner pid dead while WORKING/REVIEWING -> FAILED
+                         readiness gate (gate.go), per idle task with a PR:
+                           PR merged -> DONE; PR closed -> FAILED
+                           REVIEWING + clean review: gh pr checks
+                             passing or no checks -> READY_FOR_HUMAN
+                             pending              -> record, wait
+                             failing              -> WORKING, spawn runner: Resume(session,
+                                                     failing checks); after 2 fixes FAILED
 ```
 
 Nothing runs in the background except the runner working on a task. The readiness and

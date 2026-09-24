@@ -50,7 +50,7 @@ func TestReconcile(t *testing.T) {
 		item(7, "open", t0, task.Tracked),
 		item(8, "open", t1, task.ReviewRequested),
 	}
-	report, dirty := Reconcile(items, recs, now)
+	report, dirty := Reconcile(items, recs, nil, now)
 
 	if got := entryNumbers(report.New); !slices.Equal(got, []int{8}) {
 		t.Errorf("new = %v", got)
@@ -95,7 +95,7 @@ func TestReconcile(t *testing.T) {
 
 func TestReconcileTrackedFetchKeepsSearchReasons(t *testing.T) {
 	rec := seen(7, task.Working, "open", t0, task.Assigned)
-	_, dirty := Reconcile([]InboxItem{item(7, "closed", t1, task.Tracked)}, []*task.Record{rec}, now)
+	_, dirty := Reconcile([]InboxItem{item(7, "closed", t1, task.Tracked)}, []*task.Record{rec}, nil, now)
 	if len(dirty) != 1 || !slices.Equal(rec.GitHub.Reasons, []task.InboxReason{task.Assigned}) {
 		t.Fatalf("reasons = %v", rec.GitHub.Reasons)
 	}
@@ -106,8 +106,8 @@ func TestReconcileTrackedFetchKeepsSearchReasons(t *testing.T) {
 
 func TestReconcileSecondRunIsQuiet(t *testing.T) {
 	items := []InboxItem{item(8, "open", t1, task.ReviewRequested)}
-	_, dirty := Reconcile(items, nil, now)
-	report, dirty2 := Reconcile(items, dirty, now.Add(time.Minute))
+	_, dirty := Reconcile(items, nil, nil, now)
+	report, dirty2 := Reconcile(items, dirty, nil, now.Add(time.Minute))
 	if len(report.New)+len(report.Changed) != 0 || len(dirty2) != 0 || report.Unchanged != 1 {
 		t.Fatalf("second run not quiet: %+v, dirty %d", report, len(dirty2))
 	}
@@ -158,6 +158,15 @@ type fakeGitHub struct {
 	issue   Issue
 	repo    RepoInfo
 	prs     map[int]PullRequest
+	ci      map[int]task.CIStatus
+}
+
+func (f *fakeGitHub) CIStatus(_ context.Context, k task.Key) (task.CIStatus, error) {
+	st, ok := f.ci[k.Number]
+	if !ok {
+		return task.CIStatus{}, fmt.Errorf("gh: no CI for %d", k.Number)
+	}
+	return st, nil
 }
 
 func (f *fakeGitHub) GetPullRequest(_ context.Context, k task.Key) (PullRequest, error) {

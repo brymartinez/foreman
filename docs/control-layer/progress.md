@@ -2,7 +2,7 @@
 
 ## Current stage
 
-Stage 5 (competing-agent review loop) is complete. Stage 6 has not started.
+Stage 6 (readiness gate) is complete. All stages in the design are built.
 
 ## Completed
 
@@ -133,9 +133,50 @@ Stage 5 (competing-agent review loop) is complete. Stage 6 has not started.
 - `scripts/probe-agents.sh` now has 16 checks, including that both reviewer modes
   can't write. It passes on Codex 0.156.1, which updated itself during the session.
 
+### Stage 6
+
+- `inbox` and `status` run the readiness gate on every idle task that has a PR (D39).
+  - A clean review with passing CI, or no checks at all (D37), makes the task
+    READY_FOR_HUMAN.
+  - A merged PR makes it DONE, and a closed one makes it FAILED.
+  - Pending CI is recorded and shown as `CI pending`.
+- Failing CI resumes the implementer with the failing checks, at most twice. Each fix
+  is re-verified and re-reviewed, and after that the task becomes FAILED (D38).
+- CI is read with `gh pr checks --json name,bucket,link`. Every check counts, and exit
+  codes are ignored whenever gh printed JSON (D36).
+- Views:
+  - `inbox` READY FOR YOU prints the draft's checklist: agents, PR link, each
+    validation command, CI, competing review, and decisions.
+  - `status` shows `CI ✓`, `CI pending`, or `CI ✗ <checks>`.
+  - `show` has a CI row and lists failing checks.
+- Fixed while validating: clean re-reviews no longer count toward the review budget
+  (D40).
+- Validated by unit tests for gh check parsing (pass, skipped, pending with exit 8,
+  failing plus cancelled with exit 1, empty, and "no checks reported"), and gate tests.
+  - Green or none becomes ready. Pending waits. A task with a live runner is skipped.
+  - Two CI fixes that resume with the failing checks, then FAILED. This runs with a
+    1-round review budget as a regression test for D40.
+  - A fresh-turn prompt carries the failing checks.
+  - Merged becomes DONE and closed becomes FAILED, reported under CHANGED.
+  - A closed issue ends idle tasks.
+  - Also covered: store round-trip and rendering.
+- Validated end to end with the built binary, a stand-in `gh` on PATH, and stub agents
+  in a scratch directory (`/tmp`), so no real repo was touched. The sequence:
+  - Pending: `CI pending`.
+  - Failing: CHANGED "CI failed (test); sent back to claude, fix 1 of 2". A real
+    detached runner resumed the session with the CI message, re-verified the PR, and
+    had it re-reviewed. The second fix went the same way.
+  - No checks: READY FOR YOU in the draft's format.
+  - Merged: CHANGED "PR #912 merged", DONE, and gone from `status`.
+  - User frontmatter keys and body notes survived.
+- Not exercised against a real PR's checks, because the live probe was declined (D36).
+
 ## Known limitations
 
-- READY_FOR_HUMAN is never reached yet. Stage 6 adds the CI gate.
+- The gate runs only when `inbox` or `status` runs. A READY_FOR_HUMAN task is not
+  re-checked for CI, and a push to the branch after a clean review is not re-reviewed.
+- `gh pr checks` handling is verified against gh's documented behavior and fixtures,
+  not a live PR (D36).
 - Validation results are self-reported by the agent (D32).
 - A restart after a crash reimplements rather than resuming a half-finished review.
 - Only one question can be pending at a time.
@@ -175,18 +216,12 @@ what it replaced. Current summary:
   D32. Self-reported validation is recorded.
 - D33. The review contract and read-only, disposable reviewers. D34. The runner drives
   the whole loop. D35. The review round cap is a budget per decision.
+- D36. All checks gate, read from `gh pr checks` JSON. D37. No checks passes.
+  D38. Failing CI is sent back to the implementer, at most twice. D39. When the gate
+  runs and what it changes. D40. Only rounds that request changes use the review budget.
 
 ## Next stage
 
-Stage 6 is the readiness gate.
-
-- Add `GitHubClient.CIStatus(pr)` over `gh pr checks <n> --json name,bucket` (and
-  `--required` when the repo has required checks). Decide how a repo with no checks is
-  treated and log it.
-- When `inbox` or `status` runs, every REVIEWING task whose latest review is clean and
-  whose PR is open has its CI checked. If CI is green, the task becomes READY_FOR_HUMAN.
-  If CI fails, show it (and decide whether the implementer should be sent back to fix
-  it). A merged PR or closed issue makes a delegated task DONE.
-- `inbox` READY FOR YOU and `show` list the gate: tests (reported validation), CI,
-  review, and the recorded decisions, matching the design doc's example.
-- The gate runs only when the CLI is invoked. No background service.
+None. Stages 0 to 6 of the design are complete. Any further work, such as re-checking
+CI on ready tasks, re-reviewing after a manual push, or required-checks-only mode, needs
+a new request.

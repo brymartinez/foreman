@@ -17,7 +17,12 @@ func TestInboxSectionsAndHiddenCount(t *testing.T) {
 		Changed: []app.InboxEntry{{Item: app.InboxItem{Key: k(812), Title: "Pagination"}, Changes: []string{"closed"}}},
 		NeedsDecision: []*task.Record{{Key: k(830), Title: "Event pagination",
 			Decisions: []task.Decision{{Question: task.Question{Issue: "Should retries apply to 4xx?"}}}}},
-		Ready:     []*task.Record{{Key: k(790), Title: "Done thing", Delegation: &task.Delegation{PR: 905}}},
+		Ready: []*task.Record{{Key: k(790), Title: "Provider retries",
+			Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912, PRURL: "https://github.com/ridezoomo/armada-backend/pull/912"},
+			Validation: []task.Check{{Command: "go test ./...", Passed: true}, {Command: "go vet ./...", Passed: true}},
+			CI:         &task.CIStatus{State: task.CIPassing},
+			Reviews:    []task.Review{{Round: 1}, {Round: 2, Clean: true}},
+			Decisions:  []task.Decision{{Answer: "Keep retries limited to 5xx."}, {Answer: ""}}}},
 		Unchanged: 17,
 	})
 	want := `NEEDS DECISION
@@ -25,8 +30,17 @@ func TestInboxSectionsAndHiddenCount(t *testing.T) {
         ridezoomo/armada-backend · Should retries apply to 4xx?
 
 READY FOR YOU
-  #790  Done thing
-        ridezoomo/armada-backend · PR #905
+  #790  Provider retries
+        ridezoomo/armada-backend · Claude → Codex review
+        PR #912 · https://github.com/ridezoomo/armada-backend/pull/912
+
+        ✓ go test ./...
+        ✓ go vet ./...
+        ✓ CI
+        ✓ competing review
+
+        Decisions:
+        - Keep retries limited to 5xx.
 
 CHANGED
   #812  Pagination
@@ -71,6 +85,38 @@ func TestStatus(t *testing.T) {
 	want = "#831   Claude  REVIEWING\n       Provider retries · ridezoomo/armada-backend\n       PR #912 · reviewer: Codex · review ✓\n"
 	if buf.String() != want {
 		t.Errorf("got:\n%q\nwant:\n%q", buf.String(), want)
+	}
+	for _, tc := range []struct {
+		ci   task.CIStatus
+		want string
+	}{
+		{task.CIStatus{State: task.CINone}, " · CI ✓ · review ✓"},
+		{task.CIStatus{State: task.CIPending}, " · CI pending · review ✓"},
+		{task.CIStatus{State: task.CIFailing, Failing: []task.CheckRun{{Name: "test"}, {Name: "lint"}}}, " · CI ✗ test, lint · review ✓"},
+	} {
+		buf.Reset()
+		Status(&buf, []*task.Record{{
+			Key: task.Key{Repo: "a/b", Number: 820}, State: task.ReadyForHuman, CI: &tc.ci,
+			Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex}, Reviewer: task.Claude, PR: 905},
+			Reviews:    []task.Review{{Round: 1, Clean: true}},
+		}})
+		if !strings.Contains(buf.String(), "PR #905 · reviewer: Claude"+tc.want+"\n") {
+			t.Errorf("%s: got %q", tc.ci.State, buf.String())
+		}
+	}
+}
+
+func TestShowCI(t *testing.T) {
+	var buf bytes.Buffer
+	Show(&buf, &task.Record{
+		Key: task.Key{Repo: "a/b", Number: 825}, State: task.Working, CIFixes: 1,
+		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912},
+		CI:         &task.CIStatus{State: task.CIFailing, Failing: []task.CheckRun{{Name: "test", Link: "https://ci/1"}}},
+	})
+	for _, want := range []string{"CI            failing · checked ", " · 1 of 2 fixes used\n", "Failing checks\n  ✗ test https://ci/1\n"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("missing %q in:\n%s", want, buf.String())
+		}
 	}
 }
 

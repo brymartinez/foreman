@@ -24,6 +24,9 @@ func (a App) Status(ctx context.Context) ([]*task.Record, error) {
 	if err != nil {
 		return nil, err
 	}
+	if _, err := a.gate(ctx, recs); err != nil {
+		return nil, err
+	}
 	var active []*task.Record
 	for _, r := range recs {
 		if _, ok := attention[r.State]; ok && r.Delegation != nil {

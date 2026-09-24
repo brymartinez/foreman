@@ -82,6 +82,10 @@ The user is authenticated through the keyring.
   `closingIssuesReferences`.
 - **CI.** `gh pr checks <n> --json name,state,bucket` gives each check a `bucket` of pass,
   fail, pending, skipping, or cancel. `--required` limits it to required checks.
+  According to `gh pr checks --help`, gh exits 8 while checks are pending. When a PR has
+  no checks, gh errors with "no checks reported on the '<branch>' branch". Foreman
+  ignores the exit code whenever JSON came back (D36). This was not probed live on a
+  real PR.
 - **Creating PRs.** `gh pr create --title --body --head` can run from inside the worktree.
 
 ## git worktree

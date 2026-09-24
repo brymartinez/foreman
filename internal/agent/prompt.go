@@ -21,6 +21,8 @@ type TaskBrief struct {
 	// OpenFindings are the latest review's findings when a fresh turn replaces a
 	// session that could not be resumed.
 	OpenFindings []task.Finding
+	// FailingCI are the PR's failing checks when the readiness gate sent the task back.
+	FailingCI []task.CheckRun
 }
 
 // ImplementationPrompt is the execution contract handed to the implementation agent.
@@ -60,6 +62,10 @@ func ImplementationPrompt(b TaskBrief) string {
 			s.WriteString("\n")
 		}
 		s.WriteString("\n")
+	}
+
+	if len(b.FailingCI) > 0 {
+		fmt.Fprintf(&s, "## Failing CI\n\nYour pull request passed review, but these CI checks failed. Fix the cause on the same branch.\n\n%s\n", checkList(b.FailingCI))
 	}
 
 	fmt.Fprintf(&s, `## Workspace
@@ -120,4 +126,25 @@ Decision: %s
 
 Continue the task with this decision under the same instructions as before. Record the decision in the pull request description. End with the same JSON outcome: pr_opened, blocked, or failed.
 `, d.Question.Issue, d.Answer)
+}
+
+// CIFailureMessage resumes the implementer after the readiness gate saw CI fail.
+func CIFailureMessage(pr int, failing []task.CheckRun) string {
+	return fmt.Sprintf(`CI failed on PR #%d after the review passed. Failing checks:
+
+%s
+Inspect the failures (for example `+"`gh pr checks %d`"+` and `+"`gh run view <run-id> --log-failed`"+`), fix the cause, rerun validation, commit, and push to the same branch and pull request. Do not open a new pull request. If the failure is unrelated to your change and you cannot fix it, report "blocked" and explain. End with the same JSON outcome: pr_opened (with the same PR), blocked, or failed.
+`, pr, checkList(failing), pr)
+}
+
+func checkList(checks []task.CheckRun) string {
+	var s strings.Builder
+	for _, c := range checks {
+		if c.Link != "" {
+			fmt.Fprintf(&s, "- %s: %s\n", c.Name, c.Link)
+		} else {
+			fmt.Fprintf(&s, "- %s\n", c.Name)
+		}
+	}
+	return s.String()
 }

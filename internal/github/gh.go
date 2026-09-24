@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -16,7 +17,7 @@ import (
 )
 
 // Runner executes gh with args in dir ("" for the current directory) and returns
-// stdout. Tests substitute recorded output.
+// stdout, also when gh exits non-zero. Tests substitute recorded output.
 type Runner func(ctx context.Context, dir string, args ...string) ([]byte, error)
 
 type Client struct {
@@ -30,7 +31,7 @@ func execGH(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	cmd.Dir, cmd.Stdout, cmd.Stderr = dir, &stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("gh %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+		return stdout.Bytes(), fmt.Errorf("gh %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.Bytes(), nil
 }
@@ -253,4 +254,50 @@ func (c Client) OpenPullRequestForBranch(ctx context.Context, repo task.Repo, br
 		}
 	}
 	return nil, nil
+}
+
+// CIStatus summarizes every check on the PR's head. gh exits 8 while checks are
+// pending and 1 when one failed, so the exit code is ignored whenever JSON came
+// back; a PR with no checks at all is an error from gh and becomes CINone.
+func (c Client) CIStatus(ctx context.Context, key task.Key) (task.CIStatus, error) {
+	out, err := c.Run(ctx, "", "pr", "checks", fmt.Sprint(key.Number), "--repo", string(key.Repo), "--json", "name,bucket,link")
+	if err != nil && strings.Contains(err.Error(), "no checks reported") {
+		return task.CIStatus{State: task.CINone}, nil
+	}
+	if err != nil && len(bytes.TrimSpace(out)) == 0 {
+		return task.CIStatus{}, err
+	}
+	var checks []checkJSON
+	if jsonErr := json.Unmarshal(out, &checks); jsonErr != nil {
+		return task.CIStatus{}, fmt.Errorf("parse checks for %s#%d: %w", key.Repo, key.Number, errors.Join(jsonErr, err))
+	}
+	return summarizeChecks(checks), nil
+}
+
+type checkJSON struct {
+	Name   string `json:"name"`
+	Bucket string `json:"bucket"`
+	Link   string `json:"link"`
+}
+
+// summarizeChecks ranks failing over pending over passing. Cancelled checks fail the
+// gate; skipped ones pass it.
+func summarizeChecks(checks []checkJSON) task.CIStatus {
+	st := task.CIStatus{State: task.CINone}
+	for _, ch := range checks {
+		switch ch.Bucket {
+		case "fail", "cancel":
+			st.State = task.CIFailing
+			st.Failing = append(st.Failing, task.CheckRun{Name: ch.Name, Link: ch.Link})
+		case "pending":
+			if st.State != task.CIFailing {
+				st.State = task.CIPending
+			}
+		default:
+			if st.State == task.CINone {
+				st.State = task.CIPassing
+			}
+		}
+	}
+	return st
 }

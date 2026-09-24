@@ -54,7 +54,7 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 			return err
 		}
 
-		if rec.RoundsSinceDecision() >= a.reviewRounds() {
+		if rec.ChangeRequestsSinceDecision() >= a.reviewRounds() {
 			_, err = a.Store.Update(final, key, func(cur *task.Record) (*task.Record, error) {
 				escalateReview(cur, a.reviewRounds(), a.Now())
 				return cur, nil
@@ -94,6 +94,8 @@ func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Rev
 		resume = agent.ResumeMessage(*dec)
 	} else if findings != nil {
 		resume = agent.FindingsMessage(*findings)
+	} else if ci := rec.CI; ci != nil && ci.State == task.CIFailing {
+		resume = agent.CIFailureMessage(d.PR, ci.Failing)
 	}
 	if resume != "" && d.Implementer.ID != "" {
 		fmt.Fprintf(log, "foreman: resuming %s session %s\n", adapter.Name(), d.Implementer.ID)
@@ -110,6 +112,9 @@ func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Rev
 	}
 	if latest := rec.LatestReview(); latest != nil && !latest.Clean {
 		brief.OpenFindings = latest.Findings
+	}
+	if ci := rec.CI; ci != nil && ci.State == task.CIFailing {
+		brief.FailingCI = ci.Failing
 	}
 	in.Prompt = agent.ImplementationPrompt(brief)
 	fmt.Fprintf(log, "foreman: starting %s in %s\n", adapter.Name(), d.Worktree)
@@ -213,6 +218,8 @@ func applyTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error,
 		rec.LastOutcome = &task.Outcome{Status: "failed", Summary: runErr.Error(), At: now}
 		return
 	}
+	// The agent acted on the branch, so the gate's last CI result no longer applies.
+	rec.CI = nil
 	for i := range rec.Decisions {
 		if d := &rec.Decisions[i]; d.Answer != "" && d.DeliveredAt.IsZero() {
 			d.DeliveredAt = now
@@ -234,7 +241,7 @@ func applyTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error,
 }
 
 // applyReview records a review round. Findings send the task back to WORKING for the
-// implementer; a clean review leaves it REVIEWING for the readiness gate (Stage 6).
+// implementer; a clean review leaves it REVIEWING for the readiness gate (gate.go).
 func applyReview(rec *task.Record, r agent.ReviewOutcome, reviewErr error, now time.Time) {
 	if reviewErr != nil {
 		rec.State = task.Failed

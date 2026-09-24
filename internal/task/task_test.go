@@ -54,14 +54,14 @@ func TestPendingAndUndelivered(t *testing.T) {
 	}
 }
 
-func TestRoundsSinceDecision(t *testing.T) {
+func TestChangeRequestsSinceDecision(t *testing.T) {
 	t0 := time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)
-	r := &Record{Reviews: []Review{{At: t0}, {At: t0.Add(time.Hour)}, {At: t0.Add(3 * time.Hour)}}}
-	if r.RoundsSinceDecision() != 3 || r.LatestReview().At != t0.Add(3*time.Hour) {
-		t.Fatal("without decisions every round counts")
+	r := &Record{Reviews: []Review{{At: t0}, {At: t0.Add(time.Hour)}, {At: t0.Add(90 * time.Minute), Clean: true}, {At: t0.Add(3 * time.Hour)}}}
+	if r.ChangeRequestsSinceDecision() != 3 || r.LatestReview().At != t0.Add(3*time.Hour) {
+		t.Fatal("without decisions every change request counts, and clean rounds don't")
 	}
 	r.Decisions = []Decision{{Answer: "A", AnsweredAt: t0.Add(2 * time.Hour)}}
-	if got := r.RoundsSinceDecision(); got != 1 {
+	if got := r.ChangeRequestsSinceDecision(); got != 1 {
 		t.Fatalf("rounds since answer = %d, want 1", got)
 	}
 }
