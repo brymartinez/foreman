@@ -45,6 +45,9 @@ func delegated() *task.Record {
 				Recommendation: "A",
 				ImpactIfWrong:  "Repeated client errors.",
 			},
+			Answer:      "A. 5xx only",
+			AnsweredAt:  synced,
+			DeliveredAt: synced,
 		}},
 		Body: "# #825 Provider retries\n\n## Decisions\n\n- Preserve existing retry behavior.\n",
 	}
@@ -64,6 +67,7 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatalf("times drifted: %v / %v", got.LastGitHubSync, got.Decisions[0].AskedAt)
 	}
 	got.LastGitHubSync, got.Decisions[0].AskedAt = want.LastGitHubSync, want.Decisions[0].AskedAt
+	got.Decisions[0].AnsweredAt, got.Decisions[0].DeliveredAt = want.Decisions[0].AnsweredAt, want.Decisions[0].DeliveredAt
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("round trip mismatch\n got: %+v\nwant: %+v", got, want)
 	}

@@ -16,6 +16,8 @@ type TaskBrief struct {
 	Branch     string
 	BaseBranch string
 	Worktree   string
+	// Decisions the developer already answered; a fresh turn must honor them.
+	Decisions []task.Decision
 }
 
 // ImplementationPrompt is the execution contract handed to the implementation agent.
@@ -35,6 +37,14 @@ func ImplementationPrompt(b TaskBrief) string {
 	if ctx := strings.TrimSpace(b.Context); ctx != "" {
 		s.WriteString("## Implementation context\n\nThis context comes from the developer and is authoritative. Where it conflicts with the issue text, follow it.\n\n")
 		s.WriteString(ctx + "\n\n")
+	}
+
+	if answered := answeredDecisions(b.Decisions); len(answered) > 0 {
+		s.WriteString("## Decisions already made\n\nThe developer answered these earlier. Treat them as settled requirements.\n\n")
+		for _, d := range answered {
+			fmt.Fprintf(&s, "- Q: %s\n  A: %s\n", d.Question.Issue, d.Answer)
+		}
+		s.WriteString("\nWork already committed on the branch may be from an earlier turn; inspect it before continuing.\n\n")
 	}
 
 	fmt.Fprintf(&s, `## Workspace
@@ -72,4 +82,25 @@ Reply with JSON matching the provided schema:
 Set fields that do not apply to null, or [] for validation.
 `, b.Worktree, b.Branch, b.BaseBranch, b.Branch, b.Branch, b.BaseBranch, b.Branch, b.Branch, b.Key.Number)
 	return s.String()
+}
+
+func answeredDecisions(ds []task.Decision) []task.Decision {
+	var out []task.Decision
+	for _, d := range ds {
+		if d.Answer != "" {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// ResumeMessage continues the session that asked the question.
+func ResumeMessage(d task.Decision) string {
+	return fmt.Sprintf(`The developer answered your question.
+
+Question: %s
+Decision: %s
+
+Continue the task with this decision under the same instructions as before. Record the decision in the pull request description. End with the same JSON outcome: pr_opened, blocked, or failed.
+`, d.Question.Issue, d.Answer)
 }

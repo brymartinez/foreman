@@ -180,6 +180,7 @@ type decisionFM struct {
 	Question   task.Question `yaml:"question"`
 	Answer     string        `yaml:"answer,omitempty"`
 	AnsweredAt *time.Time    `yaml:"answered_at,omitempty"`
+	Delivered  *time.Time    `yaml:"delivered_at,omitempty"`
 }
 
 // ownedKeys are the frontmatter keys foreman writes; every other key belongs to the user.
@@ -279,6 +280,9 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 		if d.AnsweredAt != nil {
 			dec.AnsweredAt = *d.AnsweredAt
 		}
+		if d.Delivered != nil {
+			dec.DeliveredAt = *d.Delivered
+		}
 		rec.Decisions = append(rec.Decisions, dec)
 	}
 	return rec, nil
@@ -323,6 +327,10 @@ func fromRecord(rec *task.Record) frontmatter {
 		if !d.AnsweredAt.IsZero() {
 			t := d.AnsweredAt
 			dec.AnsweredAt = &t
+		}
+		if !d.DeliveredAt.IsZero() {
+			t := d.DeliveredAt
+			dec.Delivered = &t
 		}
 		fm.Decisions = append(fm.Decisions, dec)
 	}

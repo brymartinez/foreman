@@ -33,14 +33,26 @@ func (f *fakeRunners) Spawn(k task.Key) (int, string, error) {
 func (f *fakeRunners) Alive(pid int) bool { return f.alive[pid] }
 
 type fakeAgent struct {
-	name   task.Agent
-	turn   agent.Turn
-	err    error
-	prompt string
+	name      task.Agent
+	turn      agent.Turn
+	err       error
+	prompt    string
+	starts    int
+	resumed   []string
+	resumeErr error
 }
 
 func (f *fakeAgent) Name() task.Agent { return f.name }
+func (f *fakeAgent) Resume(_ context.Context, s task.Session, in agent.StartInput) (agent.Turn, error) {
+	f.resumed = append(f.resumed, s.ID+": "+in.Prompt)
+	if f.resumeErr != nil {
+		return agent.Turn{}, f.resumeErr
+	}
+	return f.turn, f.err
+}
+
 func (f *fakeAgent) Start(_ context.Context, in agent.StartInput, onSession func(task.Session)) (agent.Turn, error) {
+	f.starts++
 	f.prompt = in.Prompt
 	onSession(f.turn.Session)
 	return f.turn, f.err

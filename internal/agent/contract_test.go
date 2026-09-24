@@ -31,6 +31,14 @@ func TestParseOutcomePROpenedNeedsPRFields(t *testing.T) {
 	}
 }
 
+func TestParseOutcomeRejectsSingleOptionQuestion(t *testing.T) {
+	wire := `{"status":"blocked","summary":"s","prNumber":null,"prUrl":null,"validation":[],
+"question":{"issue":"q","context":"c","options":[{"label":"A","description":"only"}],"recommendation":"A","impactIfWrong":"i"}}`
+	if _, err := ParseOutcome([]byte(wire)); err == nil || !strings.Contains(err.Error(), "two options") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestParseOutcomeRejectsUnknownStatus(t *testing.T) {
 	if _, err := ParseOutcome([]byte(`{"status":"thinking","summary":"s"}`)); err == nil {
 		t.Fatal("accepted unknown status")

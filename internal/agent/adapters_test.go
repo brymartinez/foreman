@@ -139,3 +139,54 @@ func TestImplementationPromptCarriesDurableContext(t *testing.T) {
 		t.Error("context section rendered without context")
 	}
 }
+
+func TestResumeArgvAndMissingSession(t *testing.T) {
+	var got Command
+	claudeExec := func(_ context.Context, c Command) error {
+		got = c
+		return errors.New("exit status 1")
+	}
+	_, err := Claude{Bin: "claude", Exec: claudeExec}.Resume(context.Background(), task.Session{Agent: task.Claude, ID: "sid-1"}, StartInput{Worktree: "/wt", Prompt: "answer"})
+	if !errors.Is(err, ErrNoSession) {
+		t.Errorf("claude missing session err = %v", err)
+	}
+	if argValue(got.Args, "--resume") != "sid-1" || argValue(got.Args, "-p") != "answer" || slices.Contains(got.Args, "--session-id") {
+		t.Errorf("claude resume argv = %q", got.Args)
+	}
+
+	codexExec := func(_ context.Context, c Command) error {
+		got = c
+		if c.Dir != "/wt" {
+			t.Errorf("codex resume dir = %q", c.Dir)
+		}
+		io.WriteString(c.Stdout, "{\"type\":\"thread.started\",\"thread_id\":\"th-1\"}\n")
+		return os.WriteFile(argValue(c.Args, "-o"), []byte(prOpened), 0o600)
+	}
+	turn, err := Codex{Bin: "codex", Exec: codexExec}.Resume(context.Background(), task.Session{Agent: task.Codex, ID: "th-1"}, StartInput{Worktree: "/wt", Prompt: "answer"})
+	if err != nil || turn.Session.ID != "th-1" {
+		t.Fatalf("codex resume: %v %v", turn, err)
+	}
+	n := len(got.Args)
+	if got.Args[0] != "exec" || got.Args[1] != "resume" || got.Args[n-2] != "th-1" || got.Args[n-1] != "answer" ||
+		!slices.Contains(got.Args, `sandbox_mode="workspace-write"`) || slices.Contains(got.Args, "-C") {
+		t.Errorf("codex resume argv = %q", got.Args)
+	}
+
+	noThread := func(_ context.Context, c Command) error { return errors.New("exit status 1") }
+	if _, err := (Codex{Bin: "codex", Exec: noThread}).Resume(context.Background(), task.Session{ID: "gone"}, StartInput{}); !errors.Is(err, ErrNoSession) {
+		t.Errorf("codex missing session err = %v", err)
+	}
+}
+
+func TestPromptIncludesAnsweredDecisions(t *testing.T) {
+	p := ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 1}, Decisions: []task.Decision{
+		{Question: task.Question{Issue: "Retry 4xx?"}, Answer: "A. 5xx only"},
+		{Question: task.Question{Issue: "Unanswered?"}},
+	}})
+	if !strings.Contains(p, "- Q: Retry 4xx?\n  A: A. 5xx only") || strings.Contains(p, "Unanswered?") {
+		t.Errorf("decisions section wrong:\n%s", p)
+	}
+	if !strings.Contains(ResumeMessage(task.Decision{Question: task.Question{Issue: "Retry 4xx?"}, Answer: "A"}), "Decision: A") {
+		t.Error("resume message lacks the answer")
+	}
+}

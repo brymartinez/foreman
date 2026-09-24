@@ -129,17 +129,32 @@ func Show(w io.Writer, r *task.Record) {
 		row("Last outcome", fmt.Sprintf("%s · %s · %s", o.Status, o.At.Local().Format(time.DateTime), o.Summary))
 	}
 	tw.Flush()
-	if len(r.Decisions) > 0 {
-		fmt.Fprintln(w, "\nDecisions")
-		for _, d := range r.Decisions {
-			fmt.Fprintf(w, "  Q: %s\n", d.Question.Issue)
-			if d.Answer == "" {
-				fmt.Fprintln(w, "  A: (awaiting your answer: foreman respond)")
-			} else {
-				fmt.Fprintf(w, "  A: %s\n", d.Answer)
-			}
+	var answered []task.Decision
+	for _, d := range r.Decisions {
+		if d.Answer != "" {
+			answered = append(answered, d)
 		}
 	}
+	if len(answered) > 0 {
+		fmt.Fprintln(w, "\nDecisions")
+		for _, d := range answered {
+			fmt.Fprintf(w, "  Q: %s\n  A: %s\n", d.Question.Issue, d.Answer)
+		}
+	}
+	if p := r.Pending(); p != nil && r.State == task.NeedsDecision {
+		fmt.Fprintln(w)
+		Blocked(w, p.Question)
+		fmt.Fprintf(w, "\nAnswer with: foreman respond %s#%d\n", r.Repo, r.Number)
+	}
+}
+
+// Blocked prints a question in the product's fixed escalation format.
+func Blocked(w io.Writer, q task.Question) {
+	fmt.Fprintf(w, "BLOCKED: Need decision\n\nIssue:\n%s\n\nContext:\n%s\n\nOptions:\n", strings.TrimSpace(q.Issue), strings.TrimSpace(q.Context))
+	for _, o := range q.Options {
+		fmt.Fprintf(w, "%s. %s\n", strings.TrimSpace(o.Label), strings.TrimSpace(o.Description))
+	}
+	fmt.Fprintf(w, "\nRecommendation:\n%s\n\nImpact if wrong:\n%s\n", strings.TrimSpace(q.Recommendation), strings.TrimSpace(q.ImpactIfWrong))
 }
 
 func Started(w io.Writer, r *task.Record) {

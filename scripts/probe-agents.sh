@@ -41,6 +41,8 @@ check "codex output-schema status" "$(jq -r .status x1.json)" blocked
 codex exec resume --json --output-schema "$schema" -o x2.json "$tid" "$resume_prompt" </dev/null >x2.jsonl 2>/dev/null
 check "codex resume keeps thread" "$(head -1 x2.jsonl | jq -r .thread_id)" "$tid"
 check "codex resume structured status" "$(jq -r .status x2.json)" failed
+codex exec resume --json -c 'sandbox_mode="workspace-write"' -o x6.txt "$tid" "Run: touch resumed.txt ; reply OK." </dev/null >/dev/null 2>&1
+check "codex resume can write via -c sandbox_mode" "$(test -f resumed.txt && echo yes || echo no)" yes
 codex exec -s workspace-write -c sandbox_workspace_write.network_access=true -o x3.txt \
   "Run exactly: curl -s -o /dev/null -w '%{http_code}' https://api.github.com ; reply with only the printed code." </dev/null >/dev/null 2>&1
 check "codex network with network_access=true" "$(tr -d '[:space:]' <x3.txt)" 200

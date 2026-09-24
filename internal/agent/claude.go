@@ -31,10 +31,18 @@ func (c Claude) Start(ctx context.Context, in StartInput, onSession func(task.Se
 	}
 	session := task.Session{Agent: task.Claude, ID: newID()}
 	onSession(session)
+	return c.run(ctx, in, session, "--session-id")
+}
 
+// Resume continues a session by id; `claude --resume` keeps the id.
+func (c Claude) Resume(ctx context.Context, s task.Session, in StartInput) (Turn, error) {
+	return c.run(ctx, in, s, "--resume")
+}
+
+func (c Claude) run(ctx context.Context, in StartInput, session task.Session, sessionFlag string) (Turn, error) {
 	args := []string{
 		"-p", in.Prompt,
-		"--session-id", session.ID,
+		sessionFlag, session.ID,
 		"--output-format", "json",
 		"--json-schema", string(OutcomeSchema),
 		"--permission-mode", "acceptEdits",
@@ -47,6 +55,9 @@ func (c Claude) Start(ctx context.Context, in StartInput, onSession func(task.Se
 	}
 	var stdout bytes.Buffer
 	runErr := c.Exec(ctx, Command{Name: c.Bin, Args: args, Dir: in.Worktree, Stdout: &stdout, Stderr: logOrDiscard(in.Log)})
+	if len(bytes.TrimSpace(stdout.Bytes())) == 0 {
+		return Turn{Session: session}, fmt.Errorf("claude printed no result (%v): %w", runErr, ErrNoSession)
+	}
 	outcome, err := parseClaudeResult(stdout.Bytes(), in.Log)
 	if err != nil {
 		if runErr != nil {

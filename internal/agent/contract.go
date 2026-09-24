@@ -68,6 +68,9 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 		if w.Question == nil {
 			return Outcome{}, errors.New("blocked outcome has no question")
 		}
+		if err := w.Question.Validate(); err != nil {
+			return Outcome{}, fmt.Errorf("blocked outcome: %w", err)
+		}
 		out.Question = w.Question
 	case FailedRun:
 	default:

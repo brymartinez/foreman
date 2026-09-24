@@ -2,7 +2,7 @@
 
 ## Current stage
 
-Stage 2 (dispatch) is complete. Stage 3 has not started.
+Stage 3 (decision escalation) is complete. Stage 4 has not started.
 
 ## Completed
 
@@ -17,7 +17,7 @@ Stage 2 (dispatch) is complete. Stage 3 has not started.
 - `internal/task/naming.go` gives the shared `<issue>-<slug>` name for branches and
   worktrees.
 - `scripts/probe-agents.sh` re-checks the agent CLI capabilities against the real
-  binaries (13 checks).
+  binaries (14 checks).
 - Validated with `go vet ./...`, `go test ./...`, `go build ./cmd/foreman`, and
   `scripts/probe-agents.sh`.
 
@@ -62,13 +62,39 @@ Stage 2 (dispatch) is complete. Stage 3 has not started.
     that they were on `agent/1-upgrade-to-nest-12`, saw the issue title, and saw a
     sentinel from the context file. Neither changed the worktree.
 
+### Stage 3
+
+- When an agent ends a turn blocked, the task becomes NEEDS_DECISION and the question is
+  saved in the `decisions` frontmatter. `inbox` lists it under NEEDS DECISION, and
+  `show` prints it in the `BLOCKED: Need decision` layout.
+- `foreman respond <issue>` shows the question, reads the answer (Enter picks the
+  recommendation, a label picks an option, or type free text), records it in the
+  frontmatter plus a readable line under `## Decisions` in the body, and relaunches the
+  runner.
+- The runner resumes the agent's own session with the answer. If that session is gone,
+  it starts a fresh turn whose prompt lists every decision already made.
+- Validated by unit tests for answer resolution, the decision note, resume vs. fresh
+  start, the no-session fallback, not falling back on other errors, question validation,
+  recommendation parsing, the BLOCKED layout, and resume argv for both CLIs.
+- Validated end to end against `brymartinez/nest-starter#1` with push disabled. The
+  context file told the agent to ask a question first, then report the answer it
+  received.
+  - Real Claude went to NEEDS_DECISION. Inbox and show displayed the question.
+    `echo B | foreman respond 1` recorded "B. Nest 11". The same session ID resumed and
+    reported "resumed | B. Nest 11".
+  - Real Codex did the same with a free-text answer, on the same thread ID.
+  - With a corrupted session ID, the runner logged "session is gone", started a fresh
+    session, and it reported the recorded answer.
+- `scripts/probe-agents.sh` gained a check that `codex exec resume` can write through
+  `-c sandbox_mode`.
+
 ## Known limitations
 
-- `respond` is not implemented (Stage 3). A NEEDS_DECISION task can't be answered yet.
 - The PR number from a `pr_opened` outcome is recorded but not yet checked with `gh`
   (Stage 4).
 - REVIEWING has no reviewer yet (Stage 5), and READY_FOR_HUMAN is never reached
   (Stage 6).
+- Only one question can be pending at a time. Agents ask one per turn.
 - Each search returns at most 100 results. Mentions only come from issues. A lost reason
   is not reported.
 
@@ -98,19 +124,21 @@ what it replaced. Current summary:
   runner and liveness checks.
 - D23. Agent CLI defaults. D24. The context file is stored as a path, and sessions are
   recorded early. D25. `FOREMAN_CONFIG`.
+- D26. How `respond` reads input. D27. Decisions go in the frontmatter plus an
+  append-only body note. D28. Resume first, rebuild only when the session is gone.
+  D29. Questions are validated at the boundary.
 
 ## Next stage
 
-Stage 3 is decision escalation: `foreman respond <issue>`.
+Stage 4 is autonomous PR completion. The agent already owns the push and the PR (D7, and
+the prompt since Stage 2). Stage 4 has foreman confirm the result and records it.
 
-- `show` and `inbox` present the structured question in the `BLOCKED: Need decision`
-  layout (issue, context, options, recommendation, impact if wrong).
-- `respond` shows the question, reads the answer from stdin (the recommended option is
-  the default), writes the answer and time into the decision, sets the task to WORKING,
-  and spawns the runner.
-- Add `AgentAdapter.Resume`. Claude uses `claude -p --resume <id>` and Codex uses
-  `codex exec resume <id>`, both with the outcome schema. If the resume fails, fall back
-  to a fresh turn whose prompt is rebuilt from durable state: the issue, the context
-  file, and every recorded decision.
-- Done when a real ambiguity leads to NEEDS_DECISION, then `inbox` and `status` show it,
-  `show` displays the question, `respond` records the answer, and the agent continues.
+- Add `GitHubClient.GetPullRequest`. When the outcome is `pr_opened`, check that the PR
+  exists, is open, has `headRefName` equal to the task branch, and is in the task's repo.
+  If any check fails, the task becomes FAILED with the reason.
+- If the agent reports `pr_opened` without a usable number, look the PR up by branch
+  (`gh pr list --head <branch>`).
+- Show the PR URL in `show`, and the PR number in `status` and `inbox`.
+- Done when `start`, then the agent's run, leaves a PR on GitHub whose number is in the
+  task file. The end-to-end check needs a repo where a real PR is acceptable. The
+  current probes stop before pushing.

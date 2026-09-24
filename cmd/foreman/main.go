@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -93,8 +96,7 @@ func run(argv []string) int {
 			return 1
 		}
 	case cli.Respond:
-		fmt.Fprintf(os.Stderr, "foreman respond: not implemented yet (Stage 3)\n")
-		return 2
+		return respond(ctx, a, cmd)
 	case cli.Run:
 		fmt.Printf("foreman: runner %d started %s\n", os.Getpid(), time.Now().Format(time.RFC3339))
 		if err := a.RunTask(ctx, task.Key{Repo: cmd.Repo, Number: cmd.Issue}, os.Getpid(), os.Stdout); err != nil {
@@ -102,6 +104,39 @@ func run(argv []string) int {
 		}
 		fmt.Printf("foreman: runner %d finished %s\n", os.Getpid(), time.Now().Format(time.RFC3339))
 	}
+	return 0
+}
+
+func respond(ctx context.Context, a app.App, cmd cli.Command) int {
+	rec, err := a.Find(ctx, cmd.Repo, cmd.Issue)
+	if err != nil {
+		return fail(err)
+	}
+	pending := rec.Pending()
+	if rec.State != task.NeedsDecision || pending == nil {
+		return fail(fmt.Errorf("%s#%d is %s, not waiting for a decision", rec.Repo, rec.Number, rec.State))
+	}
+	fmt.Printf("#%d %s\n\n", rec.Number, rec.Title)
+	render.Blocked(os.Stdout, pending.Question)
+	prompt := "\nDecision:\n> "
+	if o, ok := pending.Question.Recommended(); ok {
+		prompt = fmt.Sprintf("\nDecision (option label, your own answer, or Enter for %s):\n> ", o.Label)
+	}
+	fmt.Print(prompt)
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && line == "" && !errors.Is(err, io.EOF) {
+		return fail(err)
+	}
+	updated, err := a.Respond(ctx, rec.Key, line)
+	if err != nil {
+		return fail(err)
+	}
+	d := updated.Delegation
+	fmt.Printf("\nRecorded: %s\n", updated.Decisions[len(updated.Decisions)-1].Answer)
+	if updated.State == task.Failed {
+		return fail(errors.New(updated.LastOutcome.Summary))
+	}
+	fmt.Printf("%s continues in %s (log: %s)\nCheck progress with: foreman status\n", d.Implementer.Agent, d.Worktree, d.RunnerLog)
 	return 0
 }
 

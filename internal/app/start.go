@@ -97,6 +97,11 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		return nil, err
 	}
 
+	return a.launch(ctx, key)
+}
+
+// launch spawns the runner and records its log, or marks the task FAILED if it can't.
+func (a App) launch(ctx context.Context, key task.Key) (*task.Record, error) {
 	pid, logPath, spawnErr := a.Runners.Spawn(key)
 	return a.Store.Update(ctx, key, func(cur *task.Record) (*task.Record, error) {
 		if spawnErr != nil {
@@ -168,7 +173,17 @@ func (a App) implement(ctx context.Context, rec *task.Record, log io.Writer) (ag
 			return agent.Turn{}, fmt.Errorf("context file: %w", err)
 		}
 	}
-	prompt := agent.ImplementationPrompt(agent.TaskBrief{
+	in := agent.StartInput{Worktree: d.Worktree, Log: log}
+	if dec := rec.Undelivered(); dec != nil && d.Implementer.ID != "" {
+		fmt.Fprintf(log, "foreman: resuming %s session %s with the decision\n", adapter.Name(), d.Implementer.ID)
+		in.Prompt = agent.ResumeMessage(*dec)
+		turn, err := adapter.Resume(ctx, d.Implementer, in)
+		if !errors.Is(err, agent.ErrNoSession) {
+			return turn, err
+		}
+		fmt.Fprintf(log, "foreman: session is gone (%v); starting a fresh turn rebuilt from the task file\n", err)
+	}
+	in.Prompt = agent.ImplementationPrompt(agent.TaskBrief{
 		Key:        rec.Key,
 		Title:      issue.Title,
 		URL:        issue.URL,
@@ -177,9 +192,10 @@ func (a App) implement(ctx context.Context, rec *task.Record, log io.Writer) (ag
 		Branch:     d.Branch,
 		BaseBranch: d.BaseRef[len("origin/"):],
 		Worktree:   d.Worktree,
+		Decisions:  rec.Decisions,
 	})
 	fmt.Fprintf(log, "foreman: starting %s in %s\n", adapter.Name(), d.Worktree)
-	return adapter.Start(ctx, agent.StartInput{Worktree: d.Worktree, Prompt: prompt, Log: log}, func(s task.Session) {
+	return adapter.Start(ctx, in, func(s task.Session) {
 		_, _ = a.Store.Update(ctx, rec.Key, func(cur *task.Record) (*task.Record, error) {
 			cur.Delegation.Implementer = s
 			return cur, nil
@@ -187,8 +203,8 @@ func (a App) implement(ctx context.Context, rec *task.Record, log io.Writer) (ag
 	})
 }
 
-// applyTurn maps a finished turn onto the task. Stage 3 adds respond/resume for
-// blocked, Stage 4 PR verification, Stage 5 the review that follows pr_opened.
+// applyTurn maps a finished turn onto the task. A completed turn has received every
+// answered decision. Stage 4 adds PR verification, Stage 5 the review after pr_opened.
 func applyTurn(rec *task.Record, turn agent.Turn, runErr error, now time.Time) {
 	rec.Delegation.RunnerPID = 0
 	if turn.Session.ID != "" {
@@ -198,6 +214,11 @@ func applyTurn(rec *task.Record, turn agent.Turn, runErr error, now time.Time) {
 		rec.State = task.Failed
 		rec.LastOutcome = &task.Outcome{Status: "failed", Summary: runErr.Error(), At: now}
 		return
+	}
+	for i := range rec.Decisions {
+		if d := &rec.Decisions[i]; d.Answer != "" && d.DeliveredAt.IsZero() {
+			d.DeliveredAt = now
+		}
 	}
 	o := turn.Outcome
 	rec.LastOutcome = &task.Outcome{Status: string(o.Status), Summary: o.Summary, At: now}

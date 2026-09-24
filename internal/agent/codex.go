@@ -24,6 +24,33 @@ type Codex struct {
 func (Codex) Name() task.Agent { return task.Codex }
 
 func (c Codex) Start(ctx context.Context, in StartInput, onSession func(task.Session)) (Turn, error) {
+	return c.run(ctx, in, func(schema, last string) []string {
+		return []string{
+			"exec", "--json",
+			"-C", in.Worktree,
+			"-s", "workspace-write",
+			"-c", "sandbox_workspace_write.network_access=true",
+			"--output-schema", schema,
+			"-o", last,
+		}
+	}, "", onSession)
+}
+
+// Resume continues a thread by id. `codex exec resume` has no -s or -C flag, so the
+// sandbox is set through -c and the directory through the process cwd.
+func (c Codex) Resume(ctx context.Context, s task.Session, in StartInput) (Turn, error) {
+	return c.run(ctx, in, func(schema, last string) []string {
+		return []string{
+			"exec", "resume", "--json",
+			"-c", `sandbox_mode="workspace-write"`,
+			"-c", "sandbox_workspace_write.network_access=true",
+			"--output-schema", schema,
+			"-o", last,
+		}
+	}, s.ID, func(task.Session) {})
+}
+
+func (c Codex) run(ctx context.Context, in StartInput, baseArgs func(schema, last string) []string, resumeID string, onSession func(task.Session)) (Turn, error) {
 	dir, err := os.MkdirTemp("", "foreman-codex-*")
 	if err != nil {
 		return Turn{}, err
@@ -33,16 +60,12 @@ func (c Codex) Start(ctx context.Context, in StartInput, onSession func(task.Ses
 	if err := os.WriteFile(schemaPath, OutcomeSchema, 0o600); err != nil {
 		return Turn{}, err
 	}
-	args := []string{
-		"exec", "--json",
-		"-C", in.Worktree,
-		"-s", "workspace-write",
-		"-c", "sandbox_workspace_write.network_access=true",
-		"--output-schema", schemaPath,
-		"-o", lastPath,
-	}
+	args := baseArgs(schemaPath, lastPath)
 	if c.Model != "" {
 		args = append(args, "-m", c.Model)
+	}
+	if resumeID != "" {
+		args = append(args, resumeID)
 	}
 	args = append(args, in.Prompt)
 
@@ -58,7 +81,7 @@ func (c Codex) Start(ctx context.Context, in StartInput, onSession func(task.Ses
 
 	session := task.Session{Agent: task.Codex, ID: events.threadID}
 	if events.threadID == "" {
-		return Turn{}, fmt.Errorf("codex never started a thread: %v %s", runErr, events.lastError)
+		return Turn{}, fmt.Errorf("codex never started a thread (%v): %w", runErr, ErrNoSession)
 	}
 	last, err := os.ReadFile(lastPath)
 	if err != nil || len(last) == 0 {

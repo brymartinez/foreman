@@ -2,8 +2,10 @@
 package task
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -118,6 +120,55 @@ type Question struct {
 	ImpactIfWrong  string   `json:"impactIfWrong" yaml:"impact_if_wrong"`
 }
 
+func (q Question) Validate() error {
+	if strings.TrimSpace(q.Issue) == "" {
+		return errors.New("question has no issue")
+	}
+	if len(q.Options) < 2 {
+		return fmt.Errorf("question needs at least two options, got %d", len(q.Options))
+	}
+	seen := map[string]bool{}
+	for _, o := range q.Options {
+		label := strings.ToUpper(strings.TrimSpace(o.Label))
+		if label == "" || seen[label] {
+			return fmt.Errorf("option labels must be unique and non-empty, got %q", o.Label)
+		}
+		seen[label] = true
+	}
+	return nil
+}
+
+// Option finds an option by label, case-insensitively.
+func (q Question) Option(label string) (Option, bool) {
+	for _, o := range q.Options {
+		if strings.EqualFold(strings.TrimSpace(o.Label), strings.TrimSpace(label)) {
+			return o, true
+		}
+	}
+	return Option{}, false
+}
+
+// Recommended resolves the recommendation to an option. Agents are told to give the
+// bare label, but also write "A", "A.", "A: because…" or "Option A – …".
+func (q Question) Recommended() (Option, bool) {
+	rec := strings.TrimSpace(q.Recommendation)
+	rec = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(rec, "Option "), "option "))
+	for _, o := range q.Options {
+		label := strings.TrimSpace(o.Label)
+		if label == "" || len(rec) < len(label) || !strings.EqualFold(rec[:len(label)], label) {
+			continue
+		}
+		if rest := rec[len(label):]; rest == "" || !isWordChar(rest[0]) {
+			return o, true
+		}
+	}
+	return Option{}, false
+}
+
+func isWordChar(c byte) bool {
+	return c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+}
+
 type Option struct {
 	Label       string `json:"label" yaml:"label"`
 	Description string `json:"description" yaml:"description"`
@@ -128,6 +179,29 @@ type Decision struct {
 	Question   Question
 	Answer     string
 	AnsweredAt time.Time
+	// DeliveredAt is set once a runner has handed the answer to the agent.
+	DeliveredAt time.Time
+}
+
+// Pending is the unanswered decision, if any. Agents ask one question per turn.
+func (r *Record) Pending() *Decision {
+	for i := len(r.Decisions) - 1; i >= 0; i-- {
+		if r.Decisions[i].Answer == "" {
+			return &r.Decisions[i]
+		}
+	}
+	return nil
+}
+
+// Undelivered is the answered decision the agent has not received yet.
+func (r *Record) Undelivered() *Decision {
+	for i := range r.Decisions {
+		d := &r.Decisions[i]
+		if d.Answer != "" && d.DeliveredAt.IsZero() {
+			return d
+		}
+	}
+	return nil
 }
 
 type Record struct {

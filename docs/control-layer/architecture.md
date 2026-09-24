@@ -41,7 +41,9 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
                     findings -> implementer.Resume(session, findings); agent pushes fixes;
                                 loop (max 3 rounds)
 
-foreman respond 825   -> save answer, state WORKING, spawn runner with Resume(answer)
+foreman respond 825   -> save answer, state WORKING, spawn runner
+                         runner: Resume(session, answer); on ErrNoSession, a fresh
+                         Start whose prompt lists all recorded decisions
 foreman inbox|status  -> (per REVIEWING task with clean review) gh CI check
                          all green -> READY_FOR_HUMAN
                          runner pid dead while WORKING -> FAILED

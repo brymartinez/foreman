@@ -73,3 +73,52 @@ func TestShowUndelegated(t *testing.T) {
 		}
 	}
 }
+
+func TestShowPendingDecisionUsesBlockedFormat(t *testing.T) {
+	var buf bytes.Buffer
+	Show(&buf, &task.Record{
+		Key: task.Key{Repo: "ridezoomo/armada-backend", Number: 825}, Title: "Provider retries", State: task.NeedsDecision,
+		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex},
+		Decisions: []task.Decision{
+			{Question: task.Question{Issue: "Earlier?"}, Answer: "A. yes"},
+			{Question: task.Question{
+				Issue:   "Should retries apply to 4xx responses?",
+				Context: "Current code retries 5xx only.\nIssue text says \"retry failed requests.\"",
+				Options: []task.Option{
+					{Label: "A", Description: "5xx only — preserves current semantics"},
+					{Label: "B", Description: "4xx + 5xx — broader behavior change"},
+				},
+				Recommendation: "A",
+				ImpactIfWrong:  "Could cause unnecessary repeated client errors.",
+			}},
+		},
+	})
+	want := `BLOCKED: Need decision
+
+Issue:
+Should retries apply to 4xx responses?
+
+Context:
+Current code retries 5xx only.
+Issue text says "retry failed requests."
+
+Options:
+A. 5xx only — preserves current semantics
+B. 4xx + 5xx — broader behavior change
+
+Recommendation:
+A
+
+Impact if wrong:
+Could cause unnecessary repeated client errors.
+
+Answer with: foreman respond ridezoomo/armada-backend#825
+`
+	out := buf.String()
+	if !strings.HasSuffix(out, want) {
+		t.Errorf("got:\n%s", out)
+	}
+	if !strings.Contains(out, "Decisions\n  Q: Earlier?\n  A: A. yes\n") {
+		t.Errorf("answered decisions missing:\n%s", out)
+	}
+}

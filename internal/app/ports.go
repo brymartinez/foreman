@@ -71,6 +71,8 @@ type AgentAdapter interface {
 	// Start runs one headless turn to completion. onSession fires as soon as the session
 	// id is known, so it is recorded even if the turn later crashes.
 	Start(ctx context.Context, in agent.StartInput, onSession func(task.Session)) (agent.Turn, error)
+	// Resume continues s with a message. It returns agent.ErrNoSession when s no longer exists.
+	Resume(ctx context.Context, s task.Session, in agent.StartInput) (agent.Turn, error)
 }
 
 // Runners launches and observes the detached per-task runner process (D5).

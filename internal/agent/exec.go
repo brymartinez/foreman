@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -15,6 +16,10 @@ type StartInput struct {
 	// Log receives the agent's stderr and progress events; the runner points it at the task log.
 	Log io.Writer
 }
+
+// ErrNoSession means the CLI never produced a session: nothing ran. For Resume it
+// usually means the session is gone, and a fresh turn from durable state is safe.
+var ErrNoSession = errors.New("agent produced no session")
 
 type Turn struct {
 	Session task.Session

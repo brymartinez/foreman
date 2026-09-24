@@ -304,3 +304,49 @@ Entry format:
 - **Decision.** `FOREMAN_CONFIG` points foreman at another config file. The end-to-end
   checks use it to run with separate directories and stub agents without touching the
   user's config.
+
+## D26. How `respond` reads and records an answer
+
+- Date: 2026-09-24. Stage 3. Decided by the agent.
+- **Decision.** `respond <issue>` prints the question in the `BLOCKED: Need decision`
+  layout and reads one line from stdin. An empty line picks the recommended option. A
+  bare option label (case-insensitive) is expanded to `"<label>. <description>"`. Any
+  other text is recorded exactly as typed. If the recommendation doesn't name an option,
+  an empty line is rejected.
+- **Consequence.** Answers can be piped in (`echo B | foreman respond 825`). On an
+  empty or closed stdin, the recommended option is chosen.
+
+## D27. Where a decision is stored
+
+- Date: 2026-09-24. Stage 3. Decided by the agent.
+- **Context.** The design doc wants decisions saved in the task Markdown, and its example
+  shows them in a `## Decisions` body section. The body belongs to the user (D13).
+- **Decision.** The structured record (question, answer, `asked_at`, `answered_at`,
+  `delivered_at`) lives in the `decisions` frontmatter key. When an answer is recorded,
+  foreman also adds one readable line to the body's `## Decisions` section, creating the
+  section if it's missing. That is the only body edit foreman makes. It only adds, and
+  never rewrites existing text.
+
+## D28. Resume first, rebuild from the task file only if the session is gone
+
+- Date: 2026-09-24. Stage 3. Decided by the agent.
+- **Context.** The design doc says to use native resume where it's reliable and
+  otherwise rebuild the context from durable state.
+- **Decision.** When a task has an answered decision that hasn't been delivered, the
+  runner resumes the recorded session with the answer (`claude --resume`,
+  `codex exec resume`). It falls back to a fresh turn only on `agent.ErrNoSession`, which
+  means the CLI printed no result or started no thread. That's what both CLIs do for an
+  unknown session ID, which was verified. The fresh prompt lists every answered decision
+  under "Decisions already made". Any other resume error fails the task, so a second full
+  run isn't spent after a real failure. A decision is marked `delivered_at` once a turn
+  that received it finishes.
+- **Consequence.** Verified live: a corrupted session ID led to a fresh session that
+  reported the recorded answer.
+
+## D29. Questions are validated at the boundary
+
+- Date: 2026-09-24. Stage 3. Decided by the agent.
+- **Decision.** `ParseOutcome` rejects a blocked outcome whose question has no issue,
+  fewer than two options, or empty or duplicate labels. The task then becomes FAILED
+  with the reason. `Question.Recommended` accepts "A", "A.", "A: …", and "Option A – …",
+  so wordy recommendations still resolve to an option.
