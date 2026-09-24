@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"go.yaml.in/yaml/v3"
@@ -76,6 +77,32 @@ func (m Markdown) Save(_ context.Context, rec *task.Record) error {
 	return os.Rename(tmp.Name(), path)
 }
 
+// Update serializes read-modify-write across processes with a lock file in Dir.
+// The runner and inbox both write delegated tasks, so neither may save a stale copy.
+func (m Markdown) Update(ctx context.Context, key task.Key, fn func(cur *task.Record) (*task.Record, error)) (*task.Record, error) {
+	if err := os.MkdirAll(m.Dir, 0o755); err != nil {
+		return nil, err
+	}
+	lock, err := os.OpenFile(filepath.Join(m.Dir, ".foreman.lock"), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return nil, err
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	cur, err := m.Get(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	next, err := fn(cur)
+	if err != nil || next == nil {
+		return next, err
+	}
+	return next, m.Save(ctx, next)
+}
+
 // List returns every task file in Dir, sorted by repo then number.
 // Markdown files without a task frontmatter are ignored, so Dir can live inside a vault.
 func (m Markdown) List(_ context.Context) ([]*task.Record, error) {
@@ -124,13 +151,22 @@ type frontmatter struct {
 	SessionID           string       `yaml:"session_id,omitempty"`
 	ReviewAgent         task.Agent   `yaml:"review_agent,omitempty"`
 	Branch              string       `yaml:"branch,omitempty"`
+	BaseRef             string       `yaml:"base_ref,omitempty"`
 	Worktree            string       `yaml:"worktree,omitempty"`
 	ContextFile         string       `yaml:"context_file,omitempty"`
 	RunnerPID           int          `yaml:"runner_pid,omitempty"`
+	RunnerLog           string       `yaml:"runner_log,omitempty"`
 	PR                  int          `yaml:"pr,omitempty"`
 	GitHub              *snapshot    `yaml:"github,omitempty"`
 	LastGitHubSync      *time.Time   `yaml:"last_github_sync,omitempty"`
 	Decisions           []decisionFM `yaml:"decisions,omitempty"`
+	LastOutcome         *outcomeFM   `yaml:"last_outcome,omitempty"`
+}
+
+type outcomeFM struct {
+	Status  string    `yaml:"status"`
+	Summary string    `yaml:"summary"`
+	At      time.Time `yaml:"at"`
 }
 
 type snapshot struct {
@@ -218,9 +254,11 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 			Implementer: task.Session{Agent: impl, ID: fm.SessionID},
 			Reviewer:    impl.Reviewer(),
 			Branch:      fm.Branch,
+			BaseRef:     fm.BaseRef,
 			Worktree:    fm.Worktree,
 			ContextFile: fm.ContextFile,
 			RunnerPID:   fm.RunnerPID,
+			RunnerLog:   fm.RunnerLog,
 			PR:          fm.PR,
 		}
 		if fm.ReviewAgent != "" && fm.ReviewAgent != impl.Reviewer() {
@@ -232,6 +270,9 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 	}
 	if fm.LastGitHubSync != nil {
 		rec.LastGitHubSync = *fm.LastGitHubSync
+	}
+	if o := fm.LastOutcome; o != nil {
+		rec.LastOutcome = &task.Outcome{Status: o.Status, Summary: o.Summary, At: o.At}
 	}
 	for _, d := range fm.Decisions {
 		dec := task.Decision{AskedAt: d.AskedAt, Question: d.Question, Answer: d.Answer}
@@ -264,8 +305,8 @@ func fromRecord(rec *task.Record) frontmatter {
 		fm.ImplementationAgent = d.Implementer.Agent
 		fm.SessionID = d.Implementer.ID
 		fm.ReviewAgent = d.Reviewer
-		fm.Branch, fm.Worktree, fm.ContextFile = d.Branch, d.Worktree, d.ContextFile
-		fm.RunnerPID, fm.PR = d.RunnerPID, d.PR
+		fm.Branch, fm.BaseRef, fm.Worktree, fm.ContextFile = d.Branch, d.BaseRef, d.Worktree, d.ContextFile
+		fm.RunnerPID, fm.RunnerLog, fm.PR = d.RunnerPID, d.RunnerLog, d.PR
 	}
 	if s := rec.GitHub; s != nil {
 		fm.GitHub = &snapshot{UpdatedAt: s.UpdatedAt, State: s.State, Reasons: s.Reasons}
@@ -273,6 +314,9 @@ func fromRecord(rec *task.Record) frontmatter {
 	if !rec.LastGitHubSync.IsZero() {
 		t := rec.LastGitHubSync
 		fm.LastGitHubSync = &t
+	}
+	if o := rec.LastOutcome; o != nil {
+		fm.LastOutcome = &outcomeFM{Status: o.Status, Summary: o.Summary, At: o.At}
 	}
 	for _, d := range rec.Decisions {
 		dec := decisionFM{AskedAt: d.AskedAt, Question: d.Question, Answer: d.Answer}

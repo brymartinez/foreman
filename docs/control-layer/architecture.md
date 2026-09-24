@@ -9,8 +9,8 @@ internal/app          orchestration + ports.go (the interfaces below)
   ├── github          GitHubClient over `gh` (Stage 1)
   ├── store           TaskStore over Markdown + YAML frontmatter (Stage 1)
   ├── worktree        WorktreeManager over `git worktree` (Stage 2)
-  ├── agent           outcome contract (Stage 0), claude.go / codex.go adapters (Stage 2)
-  └── runner          detached per-task process that drives agent turns (Stage 2)
+  ├── agent           outcome contract, prompt, claude.go / codex.go adapters (Stage 2)
+  └── runner          spawns and checks the detached `foreman __run` process (Stage 2)
 internal/task         the durable model: Record, State, Delegation, Decision
 ```
 
@@ -23,11 +23,11 @@ Every agent interaction is one headless turn that runs to completion and returns
 `agent.Outcome`. There are no interactive sessions and no terminal scraping.
 
 ```
-foreman start 825 --agent claude
-  ├─ gh: fetch issue
+foreman start 825 --agent claude          (run from a checkout of the repo)
+  ├─ gh: repo + default branch of the checkout, fetch issue
   ├─ git: ensure worktree <root>/<owner>-<repo>/825-<slug> on branch agent/825-<slug>
   ├─ store: task file, state WORKING, session id
-  └─ spawn detached `foreman __run <repo> 825` (pid + log recorded), exit
+  └─ spawn detached `foreman __run owner/repo#825` (pid + log recorded), exit
 
 runner (one process per task, exits when the task leaves WORKING/REVIEWING):
   turn = implementer.Start(worktree, prompt)          # later: Resume(session, msg)
@@ -52,10 +52,10 @@ liveness checks happen whenever the user runs a command.
 
 ## Why each piece is shaped this way
 
-- **One runner per task.** The runner writes only its own task file, and each task has
-  its own worktree, so tasks share no mutable state and need no locking. `inbox` and
-  `status` only read runner-owned fields. The exception is that they set
-  `FAILED` / `READY_FOR_HUMAN` after checking that the runner has exited.
+- **One runner per task.** Each task has its own worktree and task file. The runner,
+  `inbox`, and `status` can all write the same task file, so every write goes through
+  `TaskStore.Update`, which re-reads the file under a lock file (D21). `inbox` only merges
+  in fields that come from GitHub.
 - **Structured outcomes.** Both CLIs validate the final message against
   `internal/agent/outcome.schema.json`. `ParseOutcome` is the single place where
   external agent output becomes typed data.

@@ -9,6 +9,7 @@ import (
 func TestLoadPrecedence(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("FOREMAN_CONFIG", "")
 	t.Setenv("FOREMAN_TASKS_DIR", "")
 
 	cfg, err := Load()
@@ -23,8 +24,37 @@ func TestLoadPrecedence(t *testing.T) {
 		t.Fatalf("config file: %+v %v", cfg, err)
 	}
 
+	alt := filepath.Join(home, "alt.yaml")
+	os.WriteFile(alt, []byte("tasks_dir: /alt/tasks\n"), 0o644)
+	t.Setenv("FOREMAN_CONFIG", alt)
+	if cfg, _ = Load(); cfg.TasksDir != "/alt/tasks" {
+		t.Fatalf("FOREMAN_CONFIG: %+v", cfg)
+	}
+
 	t.Setenv("FOREMAN_TASKS_DIR", "/tmp/tasks")
 	if cfg, _ = Load(); cfg.TasksDir != "/tmp/tasks" {
 		t.Fatalf("env override: %+v", cfg)
+	}
+}
+
+func TestAgentSettingsOverlayDefaults(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("FOREMAN_CONFIG", "")
+	t.Setenv("FOREMAN_TASKS_DIR", "")
+	os.MkdirAll(filepath.Join(home, ".config/foreman"), 0o755)
+	os.WriteFile(filepath.Join(home, ".config/foreman/config.yaml"), []byte("worktrees_dir: ~/wt\nclaude:\n  model: haiku\ncodex:\n  command: /opt/codex\n"), 0o644)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.WorktreesDir != filepath.Join(home, "wt") || cfg.LogDir != filepath.Join(home, ".local/share/foreman/logs") {
+		t.Errorf("dirs: %+v", cfg)
+	}
+	if cfg.Claude.Model != "haiku" || cfg.Claude.Command != "claude" || len(cfg.Claude.AllowedTools) != 3 {
+		t.Errorf("claude: %+v", cfg.Claude)
+	}
+	if cfg.Codex.Command != "/opt/codex" {
+		t.Errorf("codex: %+v", cfg.Codex)
 	}
 }

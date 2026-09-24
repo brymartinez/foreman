@@ -110,6 +110,7 @@ two worktrees at once, which prevents two agents from writing to the same checko
    Claude run shell commands headless. The adapter has to pass an explicit
    `--allowedTools` list. The default list must cover the repo's test, build, and lint
    commands, and it can be configured.
-5. **The recommendation field.** Claude filled `recommendation` with a full sentence, not
-   an option label. Stage 3 has to make its prompt stricter, or match the label at the
-   start of the text, before `respond` can offer the recommended option as the default.
+5. **The recommendation field.** In the probe, Claude filled `recommendation` with a full
+   sentence, not an option label. Since Stage 2, the implementation prompt says the
+   field must be the label only. Stage 3 should still accept text that starts with a
+   label.

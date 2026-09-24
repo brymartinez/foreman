@@ -93,10 +93,19 @@ type Delegation struct {
 	Implementer Session
 	Reviewer    Agent
 	Branch      string
+	BaseRef     string
 	Worktree    string
 	ContextFile string
 	RunnerPID   int
+	RunnerLog   string
 	PR          int
+}
+
+// Outcome is the last thing an agent turn (or the runner) reported, kept for show.
+type Outcome struct {
+	Status  string
+	Summary string
+	At      time.Time
 }
 
 // Question is the BLOCKED: Need decision payload. Agents return it as
@@ -131,6 +140,7 @@ type Record struct {
 	GitHub         *Snapshot
 	LastGitHubSync time.Time
 	Decisions      []Decision
+	LastOutcome    *Outcome
 	// Body is the Markdown below the frontmatter, round-tripped untouched so human edits survive.
 	Body string
 }

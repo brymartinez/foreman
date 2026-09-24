@@ -12,13 +12,15 @@ import (
 )
 
 func fixtures(t *testing.T) Runner {
-	return func(_ context.Context, args ...string) ([]byte, error) {
+	return func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		cmd := strings.Join(args, " ")
 		for flag, file := range map[string]string{
 			"--assignee=@me":                            "assigned",
 			"--mentions=@me":                            "mentioned",
 			"--review-requested=@me":                    "review_requested",
 			"repos/ridezoomo/armada-backend/issues/912": "merged_pr",
+			"issue view 825":                            "issue",
+			"repo view":                                 "repo",
 		} {
 			if strings.Contains(cmd, flag) {
 				if strings.HasPrefix(cmd, "search") && !strings.Contains(cmd, "--state=open") {
@@ -60,8 +62,20 @@ func TestGetItemDetectsMergedPR(t *testing.T) {
 }
 
 func TestSearchErrorPropagates(t *testing.T) {
-	failing := func(context.Context, ...string) ([]byte, error) { return nil, fmt.Errorf("gh: not logged in") }
+	failing := func(context.Context, string, ...string) ([]byte, error) { return nil, fmt.Errorf("gh: not logged in") }
 	if _, err := (Client{Run: failing}).InboxItems(context.Background()); err == nil {
 		t.Fatal("want error")
+	}
+}
+
+func TestGetIssueAndRepoAt(t *testing.T) {
+	c := Client{Run: fixtures(t)}
+	issue, err := c.GetIssue(context.Background(), task.Key{Repo: "ridezoomo/armada-backend", Number: 825})
+	if err != nil || issue.Title != "Provider retries" || !strings.Contains(issue.Body, "5xx") || issue.State != "open" {
+		t.Fatalf("issue = %+v, %v", issue, err)
+	}
+	info, err := c.RepoAt(context.Background(), "/some/checkout")
+	if err != nil || info.Repo != "ridezoomo/armada-backend" || info.DefaultBranch != "main" {
+		t.Fatalf("repo = %+v, %v", info, err)
 	}
 }

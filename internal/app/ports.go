@@ -1,5 +1,6 @@
 // Package app orchestrates the task lifecycle. It depends only on these interfaces;
-// gh, git, the Markdown store, and the agent CLIs live behind them.
+// gh, git, the Markdown store, the agent CLIs, and process spawning live behind them.
+// Ports grow with the stage that first needs them (D17).
 package app
 
 import (
@@ -14,6 +15,9 @@ type TaskStore interface {
 	Get(ctx context.Context, key task.Key) (*task.Record, error)
 	Save(ctx context.Context, rec *task.Record) error
 	List(ctx context.Context) ([]*task.Record, error)
+	// Update re-reads the record under a lock, applies fn, and saves the result, so the
+	// runner and inbox never overwrite each other. cur is nil when no file exists.
+	Update(ctx context.Context, key task.Key, fn func(cur *task.Record) (*task.Record, error)) (*task.Record, error)
 }
 
 type InboxItem struct {
@@ -26,53 +30,51 @@ type InboxItem struct {
 	Reasons   []task.InboxReason
 }
 
-// GitHubClient grows per stage: issue fetch (Stage 2), PR and CI status (Stage 6).
+type Issue struct {
+	Key       task.Key
+	Title     string
+	Body      string
+	URL       string
+	State     string
+	UpdatedAt time.Time
+}
+
+type RepoInfo struct {
+	Repo          task.Repo
+	DefaultBranch string
+}
+
 type GitHubClient interface {
 	InboxItems(ctx context.Context) ([]InboxItem, error)
 	// GetItem re-fetches a tracked item by key; it can drop out of search results once unassigned or closed.
 	GetItem(ctx context.Context, key task.Key) (InboxItem, error)
+	GetIssue(ctx context.Context, key task.Key) (Issue, error)
+	// RepoAt identifies the GitHub repository checked out at dir.
+	RepoAt(ctx context.Context, dir string) (RepoInfo, error)
 }
 
-type Worktree struct {
-	Path   string
-	Branch string
+type WorktreeRequest struct {
+	RepoDir string // any checkout of the repository
+	Path    string
+	Branch  string
+	BaseRef string // e.g. origin/main; fetched before a new branch is created
 }
 
 type WorktreeManager interface {
-	// Ensure is idempotent: it returns the existing worktree when path and branch already match.
-	Ensure(ctx context.Context, repoPath, branch, baseRef string) (Worktree, error)
+	// Ensure is idempotent: it reuses the worktree when Path already has Branch checked out,
+	// and reuses Branch when it exists without a worktree.
+	Ensure(ctx context.Context, req WorktreeRequest) error
 }
 
-type Turn struct {
-	Session task.Session
-	Outcome agent.Outcome
-}
-
-type ReviewInput struct {
-	Worktree string
-	BaseRef  string
-	Prompt   string
-}
-
-type Finding struct {
-	Severity string // blocking, should_fix
-	File     string
-	Line     int
-	Summary  string
-	Detail   string
-}
-
-type Review struct {
-	Clean    bool
-	Findings []Finding
-}
-
-// AgentAdapter runs one headless turn to completion per call.
-// The runner process owns lifetime; adapters just build argv and parse output.
 type AgentAdapter interface {
 	Name() task.Agent
-	// Start returns the session because Codex assigns its thread id at runtime (thread.started).
-	Start(ctx context.Context, worktree, prompt string) (Turn, error)
-	Resume(ctx context.Context, s task.Session, worktree, message string) (Turn, error)
-	Review(ctx context.Context, in ReviewInput) (Review, error)
+	// Start runs one headless turn to completion. onSession fires as soon as the session
+	// id is known, so it is recorded even if the turn later crashes.
+	Start(ctx context.Context, in agent.StartInput, onSession func(task.Session)) (agent.Turn, error)
+}
+
+// Runners launches and observes the detached per-task runner process (D5).
+type Runners interface {
+	Spawn(key task.Key) (pid int, logPath string, err error)
+	Alive(pid int) bool
 }

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -177,5 +178,32 @@ func TestGetMissingIsNil(t *testing.T) {
 	rec, err := Markdown{Dir: t.TempDir()}.Get(ctx, task.Key{Repo: "a/b", Number: 1})
 	if rec != nil || err != nil {
 		t.Fatalf("got %v, %v", rec, err)
+	}
+}
+
+func TestUpdateSerializesConcurrentWriters(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	rec := delegated()
+	rec.Delegation.PR = 0
+	if err := s.Save(ctx, rec); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := s.Update(ctx, rec.Key, func(cur *task.Record) (*task.Record, error) {
+				cur.Delegation.PR++
+				return cur, nil
+			}); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	got, _ := s.Get(ctx, rec.Key)
+	if got.Delegation.PR != 20 {
+		t.Fatalf("lost updates: PR counter = %d, want 20", got.Delegation.PR)
 	}
 }

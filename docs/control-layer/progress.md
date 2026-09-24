@@ -2,7 +2,7 @@
 
 ## Current stage
 
-Stage 1 (GitHub sync + Markdown state) is complete. Stage 2 has not started.
+Stage 2 (dispatch) is complete. Stage 3 has not started.
 
 ## Completed
 
@@ -38,14 +38,39 @@ Stage 1 (GitHub sync + Markdown state) is complete. Stage 2 has not started.
   `show 49` reported the ambiguity, and a delegated task edited by hand for a closed
   issue came up as CHANGED · closed with the user's comment, tags, and body intact.
 
+### Stage 2
+
+- `foreman start <issue> --agent claude|codex [--context path.md]`, run from a checkout.
+  It resolves the repo, fetches the issue, creates or reuses the worktree
+  (`agent/<issue>-<slug>` from a freshly fetched `origin/<default>`), writes the task file
+  as WORKING, and spawns a detached runner (`foreman __run`).
+- The runner builds the implementation prompt (issue, authoritative context file,
+  workspace, the full execution contract, and the decision rules), runs one turn through
+  the Claude or Codex adapter, records the session as soon as it's known, and maps the
+  outcome to REVIEWING, NEEDS_DECISION, or FAILED.
+- `status` and `inbox` mark a task FAILED when its runner died. Task writes are
+  serialized with a lock file.
+- Validated by unit tests for the adapters (argv and output parsing against recorded CLI
+  output), the prompt, start guards, branch reuse on restart, the outcome mapping,
+  reaping, and worktrees against real git with a bare origin.
+- Validated end to end with the real binary against `brymartinez/nest-starter#1` in a
+  throwaway clone with push disabled:
+  - A stub agent showed the detached runner going from WORKING to REVIEWING. A second
+    `start` was refused while it ran.
+  - Killing the runner showed the task as FAILED, with the log path.
+  - The real Claude (Haiku) and real Codex each confirmed, in their structured summary,
+    that they were on `agent/1-upgrade-to-nest-12`, saw the issue title, and saw a
+    sentinel from the context file. Neither changed the worktree.
+
 ## Known limitations
 
-- `start` and `respond` are not implemented yet (Stages 2 and 3).
-- Each search returns at most 100 results.
-- Mentions only come from issues. Mentions in PR comments are not searched.
-- A reason being lost (for example being unassigned) is not reported as a change.
-- `recommendation` in a blocked outcome is free text, not an option label (see
-  capabilities.md, item 5).
+- `respond` is not implemented (Stage 3). A NEEDS_DECISION task can't be answered yet.
+- The PR number from a `pr_opened` outcome is recorded but not yet checked with `gh`
+  (Stage 4).
+- REVIEWING has no reviewer yet (Stage 5), and READY_FOR_HUMAN is never reached
+  (Stage 6).
+- Each search returns at most 100 results. Mentions only come from issues. A lost reason
+  is not reported.
 
 ## Architectural decisions
 
@@ -67,20 +92,25 @@ what it replaced. Current summary:
 - D13. `go.yaml.in/yaml/v3`, with a merge that only touches owned keys.
   D14. Tasks directory resolution.
 - D15. Inbox semantics. D16. `owner/repo#N` references. D17. Ports grow per stage.
+- D18. The full execution contract and the outcome-to-state mapping arrive in Stage 2.
+  D19. `start` resolves the repo and base from the current checkout.
+- D20. The states `start` accepts. D21. Locked `Update` for task writes. D22. The detached
+  runner and liveness checks.
+- D23. Agent CLI defaults. D24. The context file is stored as a path, and sessions are
+  recorded early. D25. `FOREMAN_CONFIG`.
 
 ## Next stage
 
-Stage 2 is dispatch: `foreman start <issue> --agent claude|codex [--context path.md]`.
+Stage 3 is decision escalation: `foreman respond <issue>`.
 
-- Resolve the repo from `owner/repo#N`, or from the current checkout's `gh repo view`,
-  and add `GitHubClient.GetIssue`.
-- Implement `WorktreeManager.Ensure` over `git worktree`, using the D12 names and a
-  configurable worktrees root. It must be idempotent.
-- Create or update the task file: state WORKING, the delegation fields, and the context
-  file path.
-- Add the Claude and Codex adapters for `Start`: argv built per capabilities.md, stdin
-  from `/dev/null`, output parsed through `agent.ParseOutcome`.
-- Launch a detached runner for that one task (D5), and record its pid and log path.
-- Done when `inbox`, then `start 825 --agent claude --context 825.md`, creates the
-  worktree, starts Claude with the full task context, sets the task file to WORKING, and
-  `status` shows it.
+- `show` and `inbox` present the structured question in the `BLOCKED: Need decision`
+  layout (issue, context, options, recommendation, impact if wrong).
+- `respond` shows the question, reads the answer from stdin (the recommended option is
+  the default), writes the answer and time into the decision, sets the task to WORKING,
+  and spawns the runner.
+- Add `AgentAdapter.Resume`. Claude uses `claude -p --resume <id>` and Codex uses
+  `codex exec resume <id>`, both with the outcome schema. If the resume fails, fall back
+  to a fresh turn whose prompt is rebuilt from durable state: the issue, the context
+  file, and every recorded decision.
+- Done when a real ambiguity leads to NEEDS_DECISION, then `inbox` and `status` show it,
+  `show` displays the question, `respond` records the answer, and the agent continues.

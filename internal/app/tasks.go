@@ -20,7 +20,7 @@ var attention = map[task.State]int{
 
 // Status returns delegated work that is not finished, most urgent first.
 func (a App) Status(ctx context.Context) ([]*task.Record, error) {
-	recs, err := a.Store.List(ctx)
+	recs, err := a.listReaped(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -65,4 +65,34 @@ func (a App) Find(ctx context.Context, repo task.Repo, number int) (*task.Record
 		refs[i] = fmt.Sprintf("%s#%d", m.Repo, m.Number)
 	}
 	return nil, fmt.Errorf("#%d is ambiguous; use one of: %s", number, strings.Join(refs, ", "))
+}
+
+// listReaped lists tasks and marks WORKING tasks whose runner is gone as FAILED.
+// A runner clears its pid when it records an outcome, so a set pid on a dead
+// process means it crashed or was killed.
+func (a App) listReaped(ctx context.Context) ([]*task.Record, error) {
+	recs, err := a.Store.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i, r := range recs {
+		if r.State != task.Working || r.Delegation == nil || r.Delegation.RunnerPID == 0 || a.Runners.Alive(r.Delegation.RunnerPID) {
+			continue
+		}
+		updated, err := a.Store.Update(ctx, r.Key, func(cur *task.Record) (*task.Record, error) {
+			d := cur.Delegation
+			if cur.State != task.Working || d == nil || d.RunnerPID != r.Delegation.RunnerPID {
+				return cur, nil
+			}
+			cur.State = task.Failed
+			cur.LastOutcome = &task.Outcome{Status: "failed", Summary: fmt.Sprintf("runner (pid %d) exited without recording an outcome; see %s", d.RunnerPID, d.RunnerLog), At: a.Now()}
+			d.RunnerPID = 0
+			return cur, nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		recs[i] = updated
+	}
+	return recs, nil
 }

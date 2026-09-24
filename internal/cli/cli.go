@@ -20,6 +20,8 @@ const (
 	Show    Name = "show"
 	Start   Name = "start"
 	Respond Name = "respond"
+	// Run is the hidden verb the detached runner process executes (see internal/runner).
+	Run Name = "__run"
 )
 
 type Command struct {
@@ -66,6 +68,12 @@ func Parse(argv []string) (Command, error) {
 		return Command{Name: Name(name), Repo: repo, Issue: n}, err
 	case "start":
 		return parseStart(rest)
+	case string(Run):
+		repo, n, err := issueArg(name, rest)
+		if err == nil && repo == "" {
+			err = usagef("%s needs owner/repo#N", name)
+		}
+		return Command{Name: Run, Repo: repo, Issue: n}, err
 	}
 	return Command{}, usagef("unknown command %q", name)
 }

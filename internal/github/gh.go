@@ -15,8 +15,9 @@ import (
 	"github.com/brymartinez/foreman/internal/task"
 )
 
-// Runner executes gh with args and returns stdout. Tests substitute recorded output.
-type Runner func(ctx context.Context, args ...string) ([]byte, error)
+// Runner executes gh with args in dir ("" for the current directory) and returns
+// stdout. Tests substitute recorded output.
+type Runner func(ctx context.Context, dir string, args ...string) ([]byte, error)
 
 type Client struct {
 	Run Runner
@@ -24,10 +25,10 @@ type Client struct {
 
 func New() Client { return Client{Run: execGH} }
 
-func execGH(ctx context.Context, args ...string) ([]byte, error) {
+func execGH(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, "gh", args...)
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	cmd.Dir, cmd.Stdout, cmd.Stderr = dir, &stdout, &stderr
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("gh %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
@@ -94,7 +95,7 @@ func (c Client) InboxItems(ctx context.Context) ([]app.InboxItem, error) {
 
 func (c Client) search(ctx context.Context, s search) ([]app.InboxItem, error) {
 	args := append(append([]string{}, s.args...), "--state=open", "--limit=100", "--json="+searchFields)
-	out, err := c.Run(ctx, args...)
+	out, err := c.Run(ctx, "", args...)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +135,7 @@ type restIssue struct {
 
 // GetItem uses the REST issues endpoint, which serves both issues and pull requests.
 func (c Client) GetItem(ctx context.Context, key task.Key) (app.InboxItem, error) {
-	out, err := c.Run(ctx, "api", fmt.Sprintf("repos/%s/issues/%d", key.Repo, key.Number))
+	out, err := c.Run(ctx, "", "api", fmt.Sprintf("repos/%s/issues/%d", key.Repo, key.Number))
 	if err != nil {
 		return app.InboxItem{}, err
 	}
@@ -158,4 +159,46 @@ func (c Client) GetItem(ctx context.Context, key task.Key) (app.InboxItem, error
 		}
 	}
 	return item, nil
+}
+
+func (c Client) GetIssue(ctx context.Context, key task.Key) (app.Issue, error) {
+	out, err := c.Run(ctx, "", "issue", "view", fmt.Sprint(key.Number), "--repo", string(key.Repo), "--json", "number,title,body,url,state,updatedAt")
+	if err != nil {
+		return app.Issue{}, err
+	}
+	var r struct {
+		Title     string    `json:"title"`
+		Body      string    `json:"body"`
+		URL       string    `json:"url"`
+		State     string    `json:"state"`
+		UpdatedAt time.Time `json:"updatedAt"`
+	}
+	if err := json.Unmarshal(out, &r); err != nil {
+		return app.Issue{}, fmt.Errorf("parse issue %s#%d: %w", key.Repo, key.Number, err)
+	}
+	return app.Issue{Key: key, Title: r.Title, Body: r.Body, URL: r.URL, State: strings.ToLower(r.State), UpdatedAt: r.UpdatedAt}, nil
+}
+
+func (c Client) RepoAt(ctx context.Context, dir string) (app.RepoInfo, error) {
+	out, err := c.Run(ctx, dir, "repo", "view", "--json", "nameWithOwner,defaultBranchRef")
+	if err != nil {
+		return app.RepoInfo{}, err
+	}
+	var r struct {
+		NameWithOwner    string `json:"nameWithOwner"`
+		DefaultBranchRef struct {
+			Name string `json:"name"`
+		} `json:"defaultBranchRef"`
+	}
+	if err := json.Unmarshal(out, &r); err != nil {
+		return app.RepoInfo{}, fmt.Errorf("parse gh repo view: %w", err)
+	}
+	repo, err := task.ParseRepo(r.NameWithOwner)
+	if err != nil {
+		return app.RepoInfo{}, err
+	}
+	if r.DefaultBranchRef.Name == "" {
+		return app.RepoInfo{}, fmt.Errorf("%s has no default branch", repo)
+	}
+	return app.RepoInfo{Repo: repo, DefaultBranch: r.DefaultBranchRef.Name}, nil
 }

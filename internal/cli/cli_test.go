@@ -36,6 +36,7 @@ func TestParseRejects(t *testing.T) {
 		{"respond"},
 		{"inbox", "extra"},
 		{"deploy"},
+		{"__run", "825"},
 	} {
 		if _, err := Parse(argv); err == nil {
 			t.Errorf("Parse(%q) succeeded; want usage error", argv)
@@ -59,6 +60,9 @@ func TestParseSimple(t *testing.T) {
 	}
 	if got, _ := Parse([]string{"show", "#12"}); got != (Command{Name: Show, Issue: 12}) {
 		t.Errorf("show #12 parsed as %+v", got)
+	}
+	if got, _ := Parse([]string{"__run", "a/b#3"}); got != (Command{Name: Run, Repo: "a/b", Issue: 3}) {
+		t.Errorf("__run parsed as %+v", got)
 	}
 	if got, _ := Parse([]string{"show", "ridezoomo/armada-backend#825"}); got != (Command{Name: Show, Repo: "ridezoomo/armada-backend", Issue: 825}) {
 		t.Errorf("qualified show parsed as %+v", got)

@@ -5,14 +5,20 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"syscall"
 	"time"
 
+	"github.com/brymartinez/foreman/internal/agent"
 	"github.com/brymartinez/foreman/internal/app"
 	"github.com/brymartinez/foreman/internal/cli"
 	"github.com/brymartinez/foreman/internal/config"
 	"github.com/brymartinez/foreman/internal/github"
 	"github.com/brymartinez/foreman/internal/render"
+	"github.com/brymartinez/foreman/internal/runner"
 	"github.com/brymartinez/foreman/internal/store"
+	"github.com/brymartinez/foreman/internal/task"
+	"github.com/brymartinez/foreman/internal/worktree"
 )
 
 func main() {
@@ -33,9 +39,20 @@ func run(argv []string) int {
 	if err != nil {
 		return fail(err)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
-	a := app.App{Store: store.Markdown{Dir: cfg.TasksDir}, GitHub: github.New(), Now: func() time.Time { return time.Now().Truncate(time.Second) }}
+	a := app.App{
+		Store:     store.Markdown{Dir: cfg.TasksDir},
+		GitHub:    github.New(),
+		Worktrees: worktree.Git{},
+		Agents: map[task.Agent]app.AgentAdapter{
+			task.Claude: agent.Claude{Bin: cfg.Claude.Command, Model: cfg.Claude.Model, AllowedTools: cfg.Claude.AllowedTools, Exec: agent.RunCommand},
+			task.Codex:  agent.Codex{Bin: cfg.Codex.Command, Model: cfg.Codex.Model, Exec: agent.RunCommand},
+		},
+		Runners:      runner.Processes{LogDir: cfg.LogDir},
+		WorktreesDir: cfg.WorktreesDir,
+		Now:          func() time.Time { return time.Now().Truncate(time.Second) },
+	}
 
 	switch cmd.Name {
 	case cli.Inbox:
@@ -57,9 +74,33 @@ func run(argv []string) int {
 		}
 		render.Show(os.Stdout, rec)
 	case cli.Start:
-		return notYet(cmd.Name, 2)
+		dir, err := os.Getwd()
+		if err != nil {
+			return fail(err)
+		}
+		contextFile := cmd.ContextFile
+		if contextFile != "" {
+			if contextFile, err = filepath.Abs(contextFile); err != nil {
+				return fail(err)
+			}
+		}
+		rec, err := a.Start(ctx, app.StartRequest{Repo: cmd.Repo, Issue: cmd.Issue, Agent: cmd.Agent, ContextFile: contextFile, Dir: dir})
+		if err != nil {
+			return fail(err)
+		}
+		render.Started(os.Stdout, rec)
+		if rec.State == task.Failed {
+			return 1
+		}
 	case cli.Respond:
-		return notYet(cmd.Name, 3)
+		fmt.Fprintf(os.Stderr, "foreman respond: not implemented yet (Stage 3)\n")
+		return 2
+	case cli.Run:
+		fmt.Printf("foreman: runner %d started %s\n", os.Getpid(), time.Now().Format(time.RFC3339))
+		if err := a.RunTask(ctx, task.Key{Repo: cmd.Repo, Number: cmd.Issue}, os.Getpid(), os.Stdout); err != nil {
+			return fail(err)
+		}
+		fmt.Printf("foreman: runner %d finished %s\n", os.Getpid(), time.Now().Format(time.RFC3339))
 	}
 	return 0
 }
@@ -67,9 +108,4 @@ func run(argv []string) int {
 func fail(err error) int {
 	fmt.Fprintf(os.Stderr, "foreman: %v\n", err)
 	return 1
-}
-
-func notYet(name cli.Name, stage int) int {
-	fmt.Fprintf(os.Stderr, "foreman %s: not implemented yet (Stage %d)\n", name, stage)
-	return 2
 }

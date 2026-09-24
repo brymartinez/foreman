@@ -26,15 +26,19 @@ type InboxReport struct {
 }
 
 type App struct {
-	Store  TaskStore
-	GitHub GitHubClient
-	Now    func() time.Time
+	Store        TaskStore
+	GitHub       GitHubClient
+	Worktrees    WorktreeManager
+	Agents       map[task.Agent]AgentAdapter
+	Runners      Runners
+	WorktreesDir string
+	Now          func() time.Time
 }
 
 // Inbox fetches GitHub state, reports what changed since the last run, and records
 // the new state as seen. Only records that changed are rewritten.
 func (a App) Inbox(ctx context.Context) (InboxReport, error) {
-	recs, err := a.Store.List(ctx)
+	recs, err := a.listReaped(ctx)
 	if err != nil {
 		return InboxReport{}, err
 	}
@@ -47,12 +51,28 @@ func (a App) Inbox(ctx context.Context) (InboxReport, error) {
 		return InboxReport{}, err
 	}
 	report, dirty := Reconcile(append(items, tracked...), recs, a.Now())
-	for _, rec := range dirty {
-		if err := a.Store.Save(ctx, rec); err != nil {
+	for _, seen := range dirty {
+		if _, err := a.Store.Update(ctx, seen.Key, func(cur *task.Record) (*task.Record, error) {
+			return mergeObserved(cur, seen), nil
+		}); err != nil {
 			return InboxReport{}, err
 		}
 	}
 	return report, nil
+}
+
+// mergeObserved copies only the GitHub-derived fields onto the current file, so a
+// runner that saved since List keeps its state, session, and outcome.
+func mergeObserved(cur, seen *task.Record) *task.Record {
+	if cur == nil {
+		return seen
+	}
+	cur.Title, cur.URL, cur.Kind = seen.Title, seen.URL, seen.Kind
+	cur.GitHub, cur.LastGitHubSync = seen.GitHub, seen.LastGitHubSync
+	if cur.State == task.Discovered && seen.State == task.Done {
+		cur.State = task.Done
+	}
+	return cur
 }
 
 // fetchTracked re-fetches delegated tasks that no search returned, so a closed issue

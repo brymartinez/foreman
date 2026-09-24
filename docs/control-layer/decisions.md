@@ -119,6 +119,7 @@ Entry format:
   Items that are seen but not delegated are saved as `DISCOVERED`, so the inbox
   remembers what the user has already seen.
 - **Consequence.** No lock file is needed. The runner writes only its own task's file.
+  Superseded by D21: the runner and inbox can both write one file, so writes are locked.
 
 ## D10. Reviewers get disposable sessions built from durable state
 
@@ -221,3 +222,85 @@ Entry format:
 - **Decision.** `GitHubClient` currently has only `InboxItems` and `GetItem`. Issue
   fetch arrives in Stage 2, and PR and CI status in Stage 6, each added along with the
   stage that uses it.
+
+## D18. Stage 2 carries the full execution contract and outcome handling
+
+- Date: 2026-09-24. Stage 2. Decided by the agent.
+- **Context.** The design doc spreads the execution contract across Stages 2 to 5. But
+  the agent owns push and PR creation (D7), and every turn ends in `pr_opened`,
+  `blocked`, or `failed` (D4). A Stage 2 runner has to leave the task in a truthful
+  state whichever outcome comes back.
+- **Options.** A. A reduced Stage 2 prompt with an extra "implemented" status that
+  would be removed later. B. The full prompt now, plus a single mapping from outcome to
+  state.
+- **Decision.** B. `pr_opened` becomes REVIEWING and records the PR number. `blocked`
+  becomes NEEDS_DECISION and records the question. `failed`, or any runner error, becomes
+  FAILED. The prompt already requires `recommendation` to be an option label.
+- **Consequence.** Later stages add only the parts that are still missing: Stage 3 adds
+  `respond` and resume, Stage 4 checks the PR with `gh`, and Stage 5 adds the review that
+  follows REVIEWING. Until Stage 5, a REVIEWING task has no reviewer running.
+
+## D19. How `start` finds the repo, branch, and base
+
+- Date: 2026-09-24. Stage 2. Decided by the agent.
+- **Decision.** `start` must run from a checkout of the issue's repository.
+  `gh repo view` in that directory gives the repo and its default branch. An
+  `owner/repo#N` argument must match it. The base is `origin/<default>`, fetched before a
+  new branch is created. When the task is restarted, the stored branch is reused, so
+  editing the title doesn't create a second branch.
+- **Consequence.** No map from repos to local paths is needed. Starting from outside a
+  checkout gives a clear error.
+
+## D20. Which states `start` accepts
+
+- Date: 2026-09-24. Stage 2. Decided by the agent.
+- **Decision.** `start` accepts a task that is new, DISCOVERED, or FAILED, and a WORKING
+  or REVIEWING task whose runner has died. It refuses a task whose runner is alive, a
+  NEEDS_DECISION task (it points to `respond`), and READY_FOR_HUMAN and DONE tasks. A
+  restart can switch to the other agent.
+
+## D21. Writes to one task are serialized
+
+- Date: 2026-09-24. Stage 2. Decided by the agent.
+- **Context.** The runner and `inbox` can write the same task file at the same moment,
+  and D9's claim of no shared writers stopped being true once the runner existed.
+- **Decision.** `TaskStore.Update` takes an exclusive flock on `<tasks_dir>/.foreman.lock`,
+  re-reads the file, applies the change, and saves atomically. `inbox` merges in only the
+  fields that come from GitHub (title, URL, kind, snapshot, sync time), so it can't undo
+  a state the runner has just recorded.
+
+## D22. The runner process
+
+- Date: 2026-09-24. Stage 2. Decided by the agent.
+- **Decision.** `start` spawns `foreman __run owner/repo#N` (a hidden command) with
+  `Setsid`, so closing the terminal doesn't kill it. Its stdout and stderr are appended to
+  `<log_dir>/<owner>-<repo>-<n>.log`. The runner records its own pid and clears it after
+  writing the outcome. A runner counts as alive when `kill(pid, 0)` succeeds and `ps`
+  shows ` __run ` in its command line, which guards against pid reuse. `status` and
+  `inbox` mark a WORKING task whose runner is gone as FAILED and point to the log.
+
+## D23. Agent CLI defaults
+
+- Date: 2026-09-24. Stage 2. Decided by the agent. This refines D8.
+- **Decision.** Claude runs with `--permission-mode acceptEdits` and
+  `--allowedTools=Bash,WebFetch,WebSearch`. Codex runs with `-s workspace-write` and
+  network access enabled. The command, model, and Claude's tool list can all be set in
+  the config file.
+- **Consequence.** Claude's `Bash` access is unrestricted inside the worktree, which is
+  the same trust as running Claude yourself with Bash allowed. It is not a sandbox. Use
+  `claude.allowed_tools` to narrow it.
+
+## D24. Handling the context file and session ID
+
+- Date: 2026-09-24. Stage 2. Decided by the agent.
+- **Decision.** The context file is stored as an absolute path and read when the runner
+  runs. It is not copied into the task file. The session ID is recorded as soon as it's
+  known: Claude's is assigned by foreman with `--session-id`, and Codex's comes from the
+  `thread.started` event. That way a crashed turn can still be resumed in Stage 3.
+
+## D25. `FOREMAN_CONFIG`
+
+- Date: 2026-09-24. Stage 2. Decided by the agent.
+- **Decision.** `FOREMAN_CONFIG` points foreman at another config file. The end-to-end
+  checks use it to run with separate directories and stub agents without touching the
+  user's config.

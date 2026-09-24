@@ -108,8 +108,9 @@ func Show(w io.Writer, r *task.Record) {
 		row("Agent", fmt.Sprintf("%s (reviewer: %s)", agentName(d.Implementer.Agent), agentName(d.Reviewer)))
 		row("Session", d.Implementer.ID)
 		row("Context file", d.ContextFile)
-		row("Branch", d.Branch)
+		row("Branch", fmt.Sprintf("%s (from %s)", d.Branch, orDash(d.BaseRef)))
 		row("Worktree", d.Worktree)
+		row("Runner log", d.RunnerLog)
 		if d.PR > 0 {
 			row("PR", fmt.Sprintf("#%d", d.PR))
 		} else {
@@ -124,6 +125,9 @@ func Show(w io.Writer, r *task.Record) {
 	if !r.LastGitHubSync.IsZero() {
 		row("Last synced", r.LastGitHubSync.Local().Format(time.DateTime))
 	}
+	if o := r.LastOutcome; o != nil {
+		row("Last outcome", fmt.Sprintf("%s · %s · %s", o.Status, o.At.Local().Format(time.DateTime), o.Summary))
+	}
 	tw.Flush()
 	if len(r.Decisions) > 0 {
 		fmt.Fprintln(w, "\nDecisions")
@@ -136,6 +140,17 @@ func Show(w io.Writer, r *task.Record) {
 			}
 		}
 	}
+}
+
+func Started(w io.Writer, r *task.Record) {
+	d := r.Delegation
+	if r.State == task.Failed {
+		fmt.Fprintf(w, "#%d could not start: %s\n", r.Number, r.LastOutcome.Summary)
+		return
+	}
+	fmt.Fprintf(w, "Started #%d %s with %s\n", r.Number, r.Title, agentName(d.Implementer.Agent))
+	fmt.Fprintf(w, "  branch    %s\n  worktree  %s\n  log       %s\n", d.Branch, d.Worktree, d.RunnerLog)
+	fmt.Fprintf(w, "Check progress with: foreman status\n")
 }
 
 func agentName(a task.Agent) string {

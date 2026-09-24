@@ -127,6 +127,19 @@ func (f *fakeStore) Save(_ context.Context, r *task.Record) error {
 	f.recs[r.Key] = r
 	return nil
 }
+func (f *fakeStore) Update(ctx context.Context, k task.Key, fn func(*task.Record) (*task.Record, error)) (*task.Record, error) {
+	cur := f.recs[k]
+	if cur != nil {
+		c := *cur
+		cur = &c
+	}
+	next, err := fn(cur)
+	if err == nil && next != nil {
+		f.recs[k] = next
+	}
+	return next, err
+}
+
 func (f *fakeStore) List(context.Context) ([]*task.Record, error) {
 	var out []*task.Record
 	for _, r := range f.recs {
@@ -141,7 +154,17 @@ func (f *fakeStore) List(context.Context) ([]*task.Record, error) {
 type fakeGitHub struct {
 	items   []InboxItem
 	fetched []task.Key
+	issue   Issue
+	repo    RepoInfo
 }
+
+func (f *fakeGitHub) GetIssue(_ context.Context, k task.Key) (Issue, error) {
+	i := f.issue
+	i.Key = k
+	return i, nil
+}
+
+func (f *fakeGitHub) RepoAt(context.Context, string) (RepoInfo, error) { return f.repo, nil }
 
 func (f *fakeGitHub) InboxItems(context.Context) ([]InboxItem, error) { return f.items, nil }
 func (f *fakeGitHub) GetItem(_ context.Context, k task.Key) (InboxItem, error) {
@@ -160,7 +183,7 @@ func TestInboxFetchesOnlyDelegatedTasksMissingFromSearch(t *testing.T) {
 		key(1): seen(1, task.Discovered, "open", t0, task.Assigned),
 	}}
 	gh := &fakeGitHub{items: []InboxItem{item(1, "open", t0, task.Assigned)}}
-	report, err := App{Store: store, GitHub: gh, Now: func() time.Time { return now }}.Inbox(context.Background())
+	report, err := App{Store: store, GitHub: gh, Runners: &fakeRunners{}, Now: func() time.Time { return now }}.Inbox(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,6 +192,16 @@ func TestInboxFetchesOnlyDelegatedTasksMissingFromSearch(t *testing.T) {
 	}
 	if len(report.Changed) != 1 || report.Changed[0].Changes[0] != "closed" {
 		t.Errorf("changed = %+v", report.Changed)
+	}
+}
+
+func TestMergeObservedKeepsRunnerState(t *testing.T) {
+	cur := seen(7, task.Reviewing, "open", t0, task.Assigned)
+	cur.Delegation = &task.Delegation{PR: 912}
+	observed := seen(7, task.Working, "closed", t1, task.Assigned)
+	got := mergeObserved(cur, observed)
+	if got.State != task.Reviewing || got.Delegation.PR != 912 || got.GitHub.State != "closed" {
+		t.Fatalf("got %+v / %+v", got, got.GitHub)
 	}
 }
 
@@ -208,7 +241,7 @@ func TestStatusOrdersByAttention(t *testing.T) {
 		key(4): mk(4, task.Done),
 		key(5): seen(5, task.Discovered, "open", t0),
 	}}
-	recs, err := App{Store: store}.Status(context.Background())
+	recs, err := App{Store: store, Runners: &fakeRunners{}}.Status(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

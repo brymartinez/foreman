@@ -1,4 +1,4 @@
-// Package config resolves where foreman keeps its task files.
+// Package config resolves foreman's directories and agent CLI settings.
 package config
 
 import (
@@ -13,27 +13,48 @@ import (
 )
 
 type Config struct {
-	TasksDir string `yaml:"tasks_dir"`
+	TasksDir     string `yaml:"tasks_dir"`
+	WorktreesDir string `yaml:"worktrees_dir"`
+	LogDir       string `yaml:"log_dir"`
+	Claude       Claude `yaml:"claude"`
+	Codex        Codex  `yaml:"codex"`
 }
 
-// Load reads, in order of precedence: FOREMAN_TASKS_DIR, then tasks_dir in
-// ~/.config/foreman/config.yaml, then the default ~/.local/share/foreman/tasks.
+type Claude struct {
+	Command      string   `yaml:"command"`
+	Model        string   `yaml:"model"`
+	AllowedTools []string `yaml:"allowed_tools"`
+}
+
+type Codex struct {
+	Command string `yaml:"command"`
+	Model   string `yaml:"model"`
+}
+
+// Load starts from defaults, overlays the config file ($FOREMAN_CONFIG or
+// ~/.config/foreman/config.yaml), then FOREMAN_TASKS_DIR. Unset file keys keep their defaults.
 func Load() (Config, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return Config{}, err
 	}
-	cfg := Config{TasksDir: filepath.Join(home, ".local", "share", "foreman", "tasks")}
-	path := filepath.Join(home, ".config", "foreman", "config.yaml")
+	data := filepath.Join(home, ".local", "share", "foreman")
+	cfg := Config{
+		TasksDir:     filepath.Join(data, "tasks"),
+		WorktreesDir: filepath.Join(data, "worktrees"),
+		LogDir:       filepath.Join(data, "logs"),
+		Claude:       Claude{Command: "claude", AllowedTools: []string{"Bash", "WebFetch", "WebSearch"}},
+		Codex:        Codex{Command: "codex"},
+	}
+	path := os.Getenv("FOREMAN_CONFIG")
+	if path == "" {
+		path = filepath.Join(home, ".config", "foreman", "config.yaml")
+	}
 	raw, err := os.ReadFile(path)
 	switch {
 	case err == nil:
-		var file Config
-		if err := yaml.Unmarshal(raw, &file); err != nil {
+		if err := yaml.Unmarshal(raw, &cfg); err != nil {
 			return Config{}, fmt.Errorf("%s: %w", path, err)
-		}
-		if file.TasksDir != "" {
-			cfg.TasksDir = file.TasksDir
 		}
 	case !errors.Is(err, fs.ErrNotExist):
 		return Config{}, err
@@ -41,7 +62,9 @@ func Load() (Config, error) {
 	if env := os.Getenv("FOREMAN_TASKS_DIR"); env != "" {
 		cfg.TasksDir = env
 	}
-	cfg.TasksDir = expandHome(cfg.TasksDir, home)
+	for _, p := range []*string{&cfg.TasksDir, &cfg.WorktreesDir, &cfg.LogDir} {
+		*p = expandHome(*p, home)
+	}
 	return cfg, nil
 }
 
