@@ -16,6 +16,7 @@ type Config struct {
 	TasksDir     string `yaml:"tasks_dir"`
 	WorktreesDir string `yaml:"worktrees_dir"`
 	LogDir       string `yaml:"log_dir"`
+	ReviewRounds int    `yaml:"review_rounds"` // 0 means the default (3)
 	Claude       Claude `yaml:"claude"`
 	Codex        Codex  `yaml:"codex"`
 }

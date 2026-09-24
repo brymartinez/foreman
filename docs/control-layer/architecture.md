@@ -36,10 +36,13 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
     failed       -> state FAILED, exit
     pr_opened    -> (the agent pushed and ran gh pr create) gh: confirm PR exists
                     record PR, state REVIEWING
-                    review = reviewer.Review(fresh session, issue + context + diff)
-                    clean    -> record review, exit
-                    findings -> implementer.Resume(session, findings); agent pushes fixes;
-                                loop (max 3 rounds)
+                    review = reviewer.Review(disposable read-only session,
+                                             issue + context + decisions + git diff + earlier rounds)
+                    clean    -> record review, stay REVIEWING, exit
+                    findings -> WORKING; implementer.Resume(session, findings); agent pushes
+                                fixes and reports pr_opened again; re-verify; re-review
+                    review_rounds spent since the last answer -> NEEDS_DECISION (A: another
+                                round, B: accept remaining), exit
 
 foreman respond 825   -> save answer, state WORKING, spawn runner
                          runner: Resume(session, answer); on ErrNoSession, a fresh

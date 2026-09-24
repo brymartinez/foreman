@@ -193,3 +193,62 @@ func TestPromptIncludesAnsweredDecisions(t *testing.T) {
 		t.Error("resume message lacks the answer")
 	}
 }
+
+const reviewJSON = `{"verdict":"changes_requested","summary":"one bug","findings":[{"severity":"blocking","file":"retry.go","line":40,"summary":"4xx retried","detail":"guard missing"}]}`
+
+func TestReviewAdaptersAreReadOnlyAndDisposable(t *testing.T) {
+	var got Command
+	claudeExec := func(_ context.Context, c Command) error {
+		got = c
+		fmt.Fprintf(c.Stdout, `{"subtype":"success","is_error":false,"session_id":"r","structured_output":%s}`, reviewJSON)
+		return nil
+	}
+	r, err := Claude{Bin: "claude", AllowedTools: []string{"Bash"}, Exec: claudeExec}.Review(context.Background(), StartInput{Worktree: "/wt", Prompt: "review"})
+	if err != nil || r.Clean || len(r.Findings) != 1 || r.Findings[0].Line != 40 {
+		t.Fatalf("claude review: %+v %v", r, err)
+	}
+	if argValue(got.Args, "--permission-mode") != "dontAsk" || !slices.Contains(got.Args, "--no-session-persistence") ||
+		argValue(got.Args, "--json-schema") != string(ReviewSchema) || slices.Contains(got.Args, "--allowedTools=Bash") ||
+		!slices.Contains(got.Args, "--allowedTools="+strings.Join(ReviewTools, ",")) {
+		t.Errorf("claude review argv = %q", got.Args)
+	}
+
+	codexExec := func(_ context.Context, c Command) error {
+		got = c
+		schema, _ := os.ReadFile(argValue(c.Args, "--output-schema"))
+		if !bytes.Equal(schema, ReviewSchema) {
+			t.Error("codex review not given the review schema")
+		}
+		io.WriteString(c.Stdout, "{\"type\":\"thread.started\",\"thread_id\":\"r1\"}\n")
+		return os.WriteFile(argValue(c.Args, "-o"), []byte(reviewJSON), 0o600)
+	}
+	r, err = Codex{Bin: "codex", Exec: codexExec}.Review(context.Background(), StartInput{Worktree: "/wt", Prompt: "review"})
+	if err != nil || len(r.Findings) != 1 {
+		t.Fatalf("codex review: %+v %v", r, err)
+	}
+	if argValue(got.Args, "-s") != "read-only" || !slices.Contains(got.Args, "--ephemeral") || slices.Contains(got.Args, "sandbox_workspace_write.network_access=true") {
+		t.Errorf("codex review argv = %q", got.Args)
+	}
+}
+
+func TestReviewPromptIsBuiltFromDurableState(t *testing.T) {
+	p := ReviewPrompt(ReviewBrief{
+		TaskBrief: TaskBrief{Key: task.Key{Repo: "a/b", Number: 825}, Title: "Provider retries", IssueBody: "Retry failed requests.",
+			Context: "Preserve 5xx-only.", Branch: "agent/825-provider-retries", BaseBranch: "main",
+			Decisions: []task.Decision{{Question: task.Question{Issue: "4xx?"}, Answer: "A. 5xx only"}}},
+		PR: 912, Validation: []task.Check{{Command: "go test ./...", Passed: true}},
+		Previous: []task.Review{{Round: 1, Summary: "one bug", Findings: []task.Finding{{Severity: "blocking", Summary: "4xx retried"}}}},
+	})
+	for _, want := range []string{"pull request #912", "a/b#825", "Retry failed requests.", "Preserve 5xx-only.", "A: A. 5xx only",
+		"git diff origin/main...HEAD", "go test ./...: passed", "Round 1", "[blocking] 4xx retried", "Do not report style", "read-only"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("review prompt missing %q", want)
+		}
+	}
+	msg := FindingsMessage(task.Review{Round: 2, PR: 912, Reviewer: task.Codex, Findings: []task.Finding{{Severity: "blocking", File: "retry.go", Line: 40, Summary: "4xx retried", Detail: "guard missing"}}})
+	for _, want := range []string{"Review round 2 of PR #912 by codex", "1. [blocking] 4xx retried", "retry.go:40", "guard missing", "explain why"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("findings message missing %q", want)
+		}
+	}
+}

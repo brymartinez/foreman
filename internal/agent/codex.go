@@ -50,15 +50,42 @@ func (c Codex) Resume(ctx context.Context, s task.Session, in StartInput) (Turn,
 	}, s.ID, func(task.Session) {})
 }
 
+// Review runs a disposable (--ephemeral) session in the read-only sandbox.
+func (c Codex) Review(ctx context.Context, in StartInput) (ReviewOutcome, error) {
+	_, raw, err := c.exec(ctx, in, ReviewSchema, func(schema, last string) []string {
+		return []string{
+			"exec", "--json", "--ephemeral",
+			"-C", in.Worktree,
+			"-s", "read-only",
+			"--output-schema", schema,
+			"-o", last,
+		}
+	}, "", func(task.Session) {})
+	if err != nil {
+		return ReviewOutcome{}, err
+	}
+	return ParseReview(raw)
+}
+
 func (c Codex) run(ctx context.Context, in StartInput, baseArgs func(schema, last string) []string, resumeID string, onSession func(task.Session)) (Turn, error) {
+	session, raw, err := c.exec(ctx, in, OutcomeSchema, baseArgs, resumeID, onSession)
+	if err != nil {
+		return Turn{Session: session}, err
+	}
+	outcome, err := ParseOutcome(raw)
+	return Turn{Session: session, Outcome: outcome}, err
+}
+
+// exec runs codex with schema and returns the thread and the final message.
+func (c Codex) exec(ctx context.Context, in StartInput, schema []byte, baseArgs func(schema, last string) []string, resumeID string, onSession func(task.Session)) (task.Session, []byte, error) {
 	dir, err := os.MkdirTemp("", "foreman-codex-*")
 	if err != nil {
-		return Turn{}, err
+		return task.Session{}, nil, err
 	}
 	defer os.RemoveAll(dir)
-	schemaPath, lastPath := filepath.Join(dir, "outcome.schema.json"), filepath.Join(dir, "last.json")
-	if err := os.WriteFile(schemaPath, OutcomeSchema, 0o600); err != nil {
-		return Turn{}, err
+	schemaPath, lastPath := filepath.Join(dir, "schema.json"), filepath.Join(dir, "last.json")
+	if err := os.WriteFile(schemaPath, schema, 0o600); err != nil {
+		return task.Session{}, nil, err
 	}
 	args := baseArgs(schemaPath, lastPath)
 	if c.Model != "" {
@@ -81,14 +108,13 @@ func (c Codex) run(ctx context.Context, in StartInput, baseArgs func(schema, las
 
 	session := task.Session{Agent: task.Codex, ID: events.threadID}
 	if events.threadID == "" {
-		return Turn{}, fmt.Errorf("codex never started a thread (%v): %w", runErr, ErrNoSession)
+		return task.Session{}, nil, fmt.Errorf("codex never started a thread (%v): %w", runErr, ErrNoSession)
 	}
 	last, err := os.ReadFile(lastPath)
 	if err != nil || len(last) == 0 {
-		return Turn{Session: session}, fmt.Errorf("codex ended without a final message: %v %s", errors.Join(runErr, err), events.lastError)
+		return session, nil, fmt.Errorf("codex ended without a final message: %v %s", errors.Join(runErr, err), events.lastError)
 	}
-	outcome, err := ParseOutcome(last)
-	return Turn{Session: session, Outcome: outcome}, err
+	return session, last, nil
 }
 
 type codexEvents struct {

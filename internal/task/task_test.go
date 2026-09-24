@@ -1,6 +1,9 @@
 package task
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func question(rec string) Question {
 	return Question{Issue: "Retry 4xx?", Recommendation: rec, Options: []Option{
@@ -48,5 +51,17 @@ func TestPendingAndUndelivered(t *testing.T) {
 	r := &Record{Decisions: []Decision{{Answer: "A"}, {}}}
 	if r.Pending() != &r.Decisions[1] || r.Undelivered() != &r.Decisions[0] {
 		t.Fatal("wrong decision picked")
+	}
+}
+
+func TestRoundsSinceDecision(t *testing.T) {
+	t0 := time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)
+	r := &Record{Reviews: []Review{{At: t0}, {At: t0.Add(time.Hour)}, {At: t0.Add(3 * time.Hour)}}}
+	if r.RoundsSinceDecision() != 3 || r.LatestReview().At != t0.Add(3*time.Hour) {
+		t.Fatal("without decisions every round counts")
+	}
+	r.Decisions = []Decision{{Answer: "A", AnsweredAt: t0.Add(2 * time.Hour)}}
+	if got := r.RoundsSinceDecision(); got != 1 {
+		t.Fatalf("rounds since answer = %d, want 1", got)
 	}
 }

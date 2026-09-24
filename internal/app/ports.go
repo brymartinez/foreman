@@ -85,6 +85,8 @@ type AgentAdapter interface {
 	Start(ctx context.Context, in agent.StartInput, onSession func(task.Session)) (agent.Turn, error)
 	// Resume continues s with a message. It returns agent.ErrNoSession when s no longer exists.
 	Resume(ctx context.Context, s task.Session, in agent.StartInput) (agent.Turn, error)
+	// Review runs a disposable, read-only session as the competing agent.
+	Review(ctx context.Context, in agent.StartInput) (agent.ReviewOutcome, error)
 }
 
 // Runners launches and observes the detached per-task runner process (D5).

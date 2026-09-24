@@ -381,3 +381,46 @@ Entry format:
   independent check. The prompt now says to open a PR only when validation passes, to
   commit everything, and to take the number and URL from `gh pr view` instead of
   guessing.
+
+## D33. The review contract and reviewer isolation
+
+- Date: 2026-09-24. Stage 5. Decided by the agent.
+- **Decision.** The reviewer returns `internal/agent/review.schema.json`: a verdict of
+  `clean` or `changes_requested`, a summary, and findings, each with severity
+  (`blocking` or `should_fix`), file, line, summary, and detail. `clean` must have no
+  findings, and `changes_requested` must have at least one. The reviewer is read-only
+  and disposable.
+  - Claude runs with `--permission-mode dontAsk --no-session-persistence` and only
+    `Read, Grep, Glob, Bash(git diff|log|show|status:*)` allowed.
+  - Codex runs with `exec --ephemeral -s read-only`, with no network.
+  - The reviewer reads the change through local git (`git diff origin/<base>...HEAD`),
+    not through `gh`.
+- **Consequence.** The probe checks that neither reviewer can write. The reviewer's
+  prompt carries durable state: the issue, the context file, decisions, the reported
+  validation, and earlier review rounds. It never includes the implementer's session.
+
+## D34. The runner drives the whole loop
+
+- Date: 2026-09-24. Stage 5. Decided by the agent.
+- **Decision.** One runner process goes through implement, check the PR, review, and
+  fix, then back to review. Findings resume the implementer's own session with
+  `agent.FindingsMessage`. If the session is gone, a fresh turn lists them under
+  "Outstanding review findings". The task is WORKING while the implementer runs,
+  REVIEWING while the reviewer runs, and stays REVIEWING after a clean review until
+  Stage 6's gate. The runner keeps its pid for the whole loop, so a dead runner in
+  REVIEWING is caught like one in WORKING.
+- **Consequence.** A restart after a crash goes through `start`, which reimplements
+  (the agent reuses the branch and the existing PR) and doesn't resume a half-finished
+  review.
+
+## D35. The review round cap works as a budget per decision
+
+- Date: 2026-09-24. Stage 5. Decided by the agent. This refines D11.
+- **Decision.** Once `review_rounds` rounds (default 3, configurable) have passed since
+  the developer last answered a question, the task becomes NEEDS_DECISION with a normal
+  question: option A is to address the remaining findings in another round, and option
+  B is to accept them as they are. The recommendation is A if any finding is blocking,
+  otherwise B. The answer is delivered to the implementer like any decision. The
+  reviewer sees it as a settled requirement. Answering resets the budget.
+- **Consequence.** Handling a disagreement between agents adds no new states or
+  commands.

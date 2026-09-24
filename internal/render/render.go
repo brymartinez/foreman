@@ -94,9 +94,20 @@ func Status(w io.Writer, recs []*task.Record) {
 		fmt.Fprintf(w, "#%-5d %-7s %s\n", r.Number, agentName(d.Implementer.Agent), r.State)
 		fmt.Fprintf(w, "       %s · %s\n", r.Title, r.Repo)
 		if d.PR > 0 {
-			fmt.Fprintf(w, "       PR #%d · reviewer: %s\n", d.PR, agentName(d.Reviewer))
+			fmt.Fprintf(w, "       PR #%d · reviewer: %s%s\n", d.PR, agentName(d.Reviewer), reviewBadge(r))
 		}
 	}
+}
+
+func reviewBadge(r *task.Record) string {
+	latest := r.LatestReview()
+	switch {
+	case latest == nil:
+		return ""
+	case latest.Clean:
+		return " · review ✓"
+	}
+	return fmt.Sprintf(" · review round %d: %d %s", latest.Round, len(latest.Findings), plural(len(latest.Findings), "finding", "findings"))
 }
 
 func Show(w io.Writer, r *task.Record) {
@@ -140,6 +151,26 @@ func Show(w io.Writer, r *task.Record) {
 				mark = "✗"
 			}
 			fmt.Fprintf(w, "  %s %s\n", mark, c.Command)
+		}
+	}
+	if latest := r.LatestReview(); latest != nil {
+		verdict := "changes requested"
+		if latest.Clean {
+			verdict = "clean"
+		}
+		fmt.Fprintf(w, "\nLatest review (round %d of %d, %s, %s): %s\n", latest.Round, len(r.Reviews), agentName(latest.Reviewer), latest.At.Local().Format(time.DateTime), verdict)
+		if s := strings.TrimSpace(latest.Summary); s != "" {
+			fmt.Fprintf(w, "  %s\n", s)
+		}
+		for _, f := range latest.Findings {
+			loc := ""
+			if f.File != "" {
+				loc = " " + f.File
+				if f.Line > 0 {
+					loc += fmt.Sprintf(":%d", f.Line)
+				}
+			}
+			fmt.Fprintf(w, "  - [%s]%s %s\n", f.Severity, loc, f.Summary)
 		}
 	}
 	var answered []task.Decision

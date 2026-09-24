@@ -33,6 +33,10 @@ claude -p 'Run the shell command: touch allowed.txt. Then reply DONE.' --permiss
   --allowedTools Bash --output-format json --model haiku </dev/null >c3.json 2>/dev/null
 check "claude headless Bash via --allowedTools" "$(test -f allowed.txt && echo yes || echo no)" yes
 
+claude -p 'Run the shell command: touch reviewer-wrote.txt. Then reply DONE or DENIED.' --permission-mode dontAsk \
+  --allowedTools 'Read,Grep,Glob,Bash(git diff:*)' --no-session-persistence --output-format json --model haiku </dev/null >c4.json 2>/dev/null
+check "claude reviewer (dontAsk) cannot write" "$(test -f reviewer-wrote.txt && echo wrote || echo denied)" denied
+
 echo "# $(codex --version)"
 codex exec --json -s workspace-write --output-schema "$schema" -o x1.json "$blocked_prompt" </dev/null >x1.jsonl 2>/dev/null
 tid="$(head -1 x1.jsonl | jq -r 'select(.type=="thread.started").thread_id')"
@@ -52,6 +56,9 @@ check "codex sandbox can use gh credentials" "$(tr -d '[:space:]' <x5.txt)" "$(g
 codex exec -s workspace-write -o x4.txt \
   "Create f.txt containing hi, then run: git add f.txt && git commit -q -m probe. Reply OK or the git error." </dev/null >/dev/null 2>&1
 check "codex can commit inside a worktree" "$(git -C "$work" log --oneline agent/1-probe | wc -l | tr -d ' ')" 2
+
+codex exec --ephemeral -s read-only -o x7.txt "Run: touch reviewer-wrote-codex.txt ; reply OK or the error." </dev/null >/dev/null 2>&1
+check "codex reviewer (read-only) cannot write" "$(test -f reviewer-wrote-codex.txt && echo wrote || echo denied)" denied
 
 echo "# $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

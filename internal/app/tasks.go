@@ -67,7 +67,7 @@ func (a App) Find(ctx context.Context, repo task.Repo, number int) (*task.Record
 	return nil, fmt.Errorf("#%d is ambiguous; use one of: %s", number, strings.Join(refs, ", "))
 }
 
-// listReaped lists tasks and marks WORKING tasks whose runner is gone as FAILED.
+// listReaped lists tasks and marks running tasks whose runner is gone as FAILED.
 // A runner clears its pid when it records an outcome, so a set pid on a dead
 // process means it crashed or was killed.
 func (a App) listReaped(ctx context.Context) ([]*task.Record, error) {
@@ -76,12 +76,12 @@ func (a App) listReaped(ctx context.Context) ([]*task.Record, error) {
 		return nil, err
 	}
 	for i, r := range recs {
-		if r.State != task.Working || r.Delegation == nil || r.Delegation.RunnerPID == 0 || a.Runners.Alive(r.Delegation.RunnerPID) {
+		if !running(r.State) || r.Delegation == nil || r.Delegation.RunnerPID == 0 || a.Runners.Alive(r.Delegation.RunnerPID) {
 			continue
 		}
 		updated, err := a.Store.Update(ctx, r.Key, func(cur *task.Record) (*task.Record, error) {
 			d := cur.Delegation
-			if cur.State != task.Working || d == nil || d.RunnerPID != r.Delegation.RunnerPID {
+			if !running(cur.State) || d == nil || d.RunnerPID != r.Delegation.RunnerPID {
 				return cur, nil
 			}
 			cur.State = task.Failed
@@ -96,3 +96,6 @@ func (a App) listReaped(ctx context.Context) ([]*task.Record, error) {
 	}
 	return recs, nil
 }
+
+// running states are the ones a runner drives: implementing, or reviewing and fixing.
+func running(s task.State) bool { return s == task.Working || s == task.Reviewing }

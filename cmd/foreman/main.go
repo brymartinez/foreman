@@ -54,6 +54,7 @@ func run(argv []string) int {
 		},
 		Runners:      runner.Processes{LogDir: cfg.LogDir},
 		WorktreesDir: cfg.WorktreesDir,
+		ReviewRounds: cfg.ReviewRounds,
 		Now:          func() time.Time { return time.Now().Truncate(time.Second) },
 	}
 

@@ -32,6 +32,7 @@ type App struct {
 	Agents       map[task.Agent]AgentAdapter
 	Runners      Runners
 	WorktreesDir string
+	ReviewRounds int // 0 means DefaultReviewRounds
 	Now          func() time.Time
 }
 

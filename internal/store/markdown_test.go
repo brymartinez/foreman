@@ -33,6 +33,11 @@ func delegated() *task.Record {
 			PRURL:       "https://github.com/ridezoomo/armada-backend/pull/912",
 		},
 		Validation: []task.Check{{Command: "go test ./...", Passed: true}, {Command: "golangci-lint run", Passed: false}},
+		Reviews: []task.Review{
+			{Round: 1, Reviewer: task.Codex, PR: 912, Summary: "one bug", At: time.Date(2026, 9, 24, 18, 0, 0, 0, time.UTC),
+				Findings: []task.Finding{{Severity: "blocking", File: "retry.go", Line: 40, Summary: "4xx retried", Detail: "guard"}}},
+			{Round: 2, Reviewer: task.Codex, PR: 912, Clean: true, Summary: "ok", At: time.Date(2026, 9, 24, 19, 0, 0, 0, time.UTC)},
+		},
 		GitHub: &task.Snapshot{
 			UpdatedAt: time.Date(2026, 9, 24, 17, 0, 0, 0, time.UTC),
 			State:     "open",

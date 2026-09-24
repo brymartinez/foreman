@@ -163,6 +163,17 @@ type frontmatter struct {
 	Decisions           []decisionFM `yaml:"decisions,omitempty"`
 	LastOutcome         *outcomeFM   `yaml:"last_outcome,omitempty"`
 	Validation          []task.Check `yaml:"validation,omitempty"`
+	Reviews             []reviewFM   `yaml:"reviews,omitempty"`
+}
+
+type reviewFM struct {
+	Round    int            `yaml:"round"`
+	Reviewer task.Agent     `yaml:"reviewer"`
+	PR       int            `yaml:"pr"`
+	Verdict  string         `yaml:"verdict"`
+	Summary  string         `yaml:"summary"`
+	Findings []task.Finding `yaml:"findings,omitempty"`
+	At       time.Time      `yaml:"at"`
 }
 
 type outcomeFM struct {
@@ -276,6 +287,12 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 		rec.LastGitHubSync = *fm.LastGitHubSync
 	}
 	rec.Validation = fm.Validation
+	for _, r := range fm.Reviews {
+		if r.Verdict != "clean" && r.Verdict != "changes_requested" {
+			return nil, fmt.Errorf("review round %d has unknown verdict %q", r.Round, r.Verdict)
+		}
+		rec.Reviews = append(rec.Reviews, task.Review{Round: r.Round, Reviewer: r.Reviewer, PR: r.PR, Clean: r.Verdict == "clean", Summary: r.Summary, Findings: r.Findings, At: r.At})
+	}
 	if o := fm.LastOutcome; o != nil {
 		rec.LastOutcome = &task.Outcome{Status: o.Status, Summary: o.Summary, At: o.At}
 	}
@@ -324,6 +341,13 @@ func fromRecord(rec *task.Record) frontmatter {
 		fm.LastGitHubSync = &t
 	}
 	fm.Validation = rec.Validation
+	for _, r := range rec.Reviews {
+		verdict := "changes_requested"
+		if r.Clean {
+			verdict = "clean"
+		}
+		fm.Reviews = append(fm.Reviews, reviewFM{Round: r.Round, Reviewer: r.Reviewer, PR: r.PR, Verdict: verdict, Summary: r.Summary, Findings: r.Findings, At: r.At})
+	}
 	if o := rec.LastOutcome; o != nil {
 		fm.LastOutcome = &outcomeFM{Status: o.Status, Summary: o.Summary, At: o.At}
 	}

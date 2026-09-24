@@ -224,6 +224,52 @@ type Record struct {
 	LastOutcome    *Outcome
 	// Validation is what the implementation agent reported with its PR.
 	Validation []Check
+	// Reviews are the competing agent's review rounds, oldest first.
+	Reviews []Review
 	// Body is the Markdown below the frontmatter, round-tripped untouched so human edits survive.
 	Body string
+}
+
+type Finding struct {
+	Severity string `json:"severity" yaml:"severity"` // blocking, should_fix
+	File     string `json:"file" yaml:"file,omitempty"`
+	Line     int    `json:"line" yaml:"line,omitempty"`
+	Summary  string `json:"summary" yaml:"summary"`
+	Detail   string `json:"detail" yaml:"detail,omitempty"`
+}
+
+type Review struct {
+	Round    int
+	Reviewer Agent
+	PR       int
+	Clean    bool
+	Summary  string
+	Findings []Finding
+	At       time.Time
+}
+
+// LatestReview is the most recent review round, or nil.
+func (r *Record) LatestReview() *Review {
+	if len(r.Reviews) == 0 {
+		return nil
+	}
+	return &r.Reviews[len(r.Reviews)-1]
+}
+
+// RoundsSinceDecision counts review rounds since the developer last answered a
+// question. The round cap (D11) applies per budget, and answering resets it.
+func (r *Record) RoundsSinceDecision() int {
+	var last time.Time
+	for _, d := range r.Decisions {
+		if d.AnsweredAt.After(last) {
+			last = d.AnsweredAt
+		}
+	}
+	n := 0
+	for _, rv := range r.Reviews {
+		if rv.At.After(last) {
+			n++
+		}
+	}
+	return n
 }

@@ -50,22 +50,50 @@ func (c Claude) run(ctx context.Context, in StartInput, session task.Session, se
 	if len(c.AllowedTools) > 0 {
 		args = append(args, "--allowedTools="+strings.Join(c.AllowedTools, ","))
 	}
+	raw, err := c.exec(ctx, in, args)
+	if err != nil {
+		return Turn{Session: session}, err
+	}
+	outcome, err := ParseOutcome(raw)
+	return Turn{Session: session, Outcome: outcome}, err
+}
+
+// ReviewTools lets the reviewer read code and git history and nothing else; dontAsk
+// denies every other tool without prompting.
+var ReviewTools = []string{"Read", "Grep", "Glob", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)", "Bash(git status:*)"}
+
+// Review runs a disposable, read-only session.
+func (c Claude) Review(ctx context.Context, in StartInput) (ReviewOutcome, error) {
+	args := []string{
+		"-p", in.Prompt,
+		"--no-session-persistence",
+		"--output-format", "json",
+		"--json-schema", string(ReviewSchema),
+		"--permission-mode", "dontAsk",
+		"--allowedTools=" + strings.Join(ReviewTools, ","),
+	}
+	raw, err := c.exec(ctx, in, args)
+	if err != nil {
+		return ReviewOutcome{}, err
+	}
+	return ParseReview(raw)
+}
+
+// exec runs claude -p and returns its structured_output.
+func (c Claude) exec(ctx context.Context, in StartInput, args []string) (json.RawMessage, error) {
 	if c.Model != "" {
 		args = append(args, "--model", c.Model)
 	}
 	var stdout bytes.Buffer
 	runErr := c.Exec(ctx, Command{Name: c.Bin, Args: args, Dir: in.Worktree, Stdout: &stdout, Stderr: logOrDiscard(in.Log)})
 	if len(bytes.TrimSpace(stdout.Bytes())) == 0 {
-		return Turn{Session: session}, fmt.Errorf("claude printed no result (%v): %w", runErr, ErrNoSession)
+		return nil, fmt.Errorf("claude printed no result (%v): %w", runErr, ErrNoSession)
 	}
-	outcome, err := parseClaudeResult(stdout.Bytes(), in.Log)
-	if err != nil {
-		if runErr != nil {
-			return Turn{Session: session}, fmt.Errorf("claude exited: %w (%v)", runErr, err)
-		}
-		return Turn{Session: session}, err
+	raw, err := parseClaudeResult(stdout.Bytes(), in.Log)
+	if err != nil && runErr != nil {
+		return nil, fmt.Errorf("claude exited: %w (%v)", runErr, err)
 	}
-	return Turn{Session: session, Outcome: outcome}, nil
+	return raw, err
 }
 
 type claudeResult struct {
@@ -78,10 +106,10 @@ type claudeResult struct {
 	TotalCostUSD      float64           `json:"total_cost_usd"`
 }
 
-func parseClaudeResult(stdout []byte, log io.Writer) (Outcome, error) {
+func parseClaudeResult(stdout []byte, log io.Writer) (json.RawMessage, error) {
 	var r claudeResult
 	if err := json.Unmarshal(bytes.TrimSpace(stdout), &r); err != nil {
-		return Outcome{}, fmt.Errorf("claude output is not a JSON result: %w", err)
+		return nil, fmt.Errorf("claude output is not a JSON result: %w", err)
 	}
 	if log != nil {
 		fmt.Fprintf(log, "claude: subtype=%s cost=$%.2f permission_denials=%d\n", r.Subtype, r.TotalCostUSD, len(r.PermissionDenials))
@@ -90,9 +118,9 @@ func parseClaudeResult(stdout []byte, log io.Writer) (Outcome, error) {
 		}
 	}
 	if r.IsError || len(r.StructuredOutput) == 0 || string(r.StructuredOutput) == "null" {
-		return Outcome{}, fmt.Errorf("claude ended without a structured outcome (%s): %s", r.Subtype, truncate(r.Result, 500))
+		return nil, fmt.Errorf("claude ended without a structured outcome (%s): %s", r.Subtype, truncate(r.Result, 500))
 	}
-	return ParseOutcome(r.StructuredOutput)
+	return r.StructuredOutput, nil
 }
 
 func NewUUID() string {

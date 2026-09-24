@@ -18,6 +18,9 @@ type TaskBrief struct {
 	Worktree   string
 	// Decisions the developer already answered; a fresh turn must honor them.
 	Decisions []task.Decision
+	// OpenFindings are the latest review's findings when a fresh turn replaces a
+	// session that could not be resumed.
+	OpenFindings []task.Finding
 }
 
 // ImplementationPrompt is the execution contract handed to the implementation agent.
@@ -45,6 +48,18 @@ func ImplementationPrompt(b TaskBrief) string {
 			fmt.Fprintf(&s, "- Q: %s\n  A: %s\n", d.Question.Issue, d.Answer)
 		}
 		s.WriteString("\nWork already committed on the branch may be from an earlier turn; inspect it before continuing.\n\n")
+	}
+
+	if len(b.OpenFindings) > 0 {
+		s.WriteString("## Outstanding review findings\n\nA reviewer requested these changes on your pull request. Fix the valid ones; explain any you decline in your summary.\n\n")
+		for _, f := range b.OpenFindings {
+			fmt.Fprintf(&s, "- [%s] %s", f.Severity, f.Summary)
+			if f.File != "" {
+				fmt.Fprintf(&s, " (%s)", f.File)
+			}
+			s.WriteString("\n")
+		}
+		s.WriteString("\n")
 	}
 
 	fmt.Fprintf(&s, `## Workspace

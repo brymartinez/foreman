@@ -7,7 +7,7 @@ check fails, the adapter that depends on it needs attention.
 | Tool | Version |
 |---|---|
 | Claude Code | 2.1.281 |
-| Codex CLI | 0.155.1 |
+| Codex CLI | 0.155.1 (0.156.1 passes the probe since Stage 5) |
 | gh | 2.101.0 |
 | git | 2.50.1 |
 | Go | 1.27.1 |

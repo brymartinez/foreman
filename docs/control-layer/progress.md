@@ -2,7 +2,7 @@
 
 ## Current stage
 
-Stage 4 (autonomous PR completion) is complete. Stage 5 has not started.
+Stage 5 (competing-agent review loop) is complete. Stage 6 has not started.
 
 ## Completed
 
@@ -105,11 +105,39 @@ Stage 4 (autonomous PR completion) is complete. Stage 5 has not started.
   #99999 set the task to FAILED with gh's error. Real pushes and PR creation were not
   exercised (D30).
 
+### Stage 5
+
+- After a PR is checked, the runner has the competing agent review it: Codex reviews
+  Claude's work and Claude reviews Codex's. The reviewer runs in a disposable, read-only
+  session built only from durable state (D33).
+- Findings resume the implementer's session. It fixes, revalidates, and pushes, then
+  reports `pr_opened`. Foreman re-checks the PR, and the reviewer re-reviews with the
+  earlier rounds in its prompt. The loop ends when the review is clean. After
+  `review_rounds` rounds (default 3), the task escalates as a normal decision (D35).
+- Every round is saved in the `reviews` frontmatter. `status` shows `review ✓` or
+  `review round N: K findings`, and `show` prints the latest review's findings.
+- Validated by unit tests for a clean first round, fix then re-review, the round cap to
+  answer to budget reset, blocking during a fix, review failure, the reviewer mapping
+  (Codex implements, Claude reviews), the fresh-turn fallback carrying findings, the
+  review parser and schema, the reviewer argv (read-only, disposable), and rendering.
+- Validated live with real reviewers on a local fixture: a one-line diff that retries
+  4xx although the issue says 5xx only, with a stub implementer and a stand-in `gh` on
+  PATH for issue and PR metadata.
+  - Real Codex reviewed Claude's stub work and reported "[blocking] retry.go:6 4xx
+    client errors are retried". Foreman resumed the implementer with the finding,
+    re-checked the PR, and escalated at a 1-round cap.
+  - Real Claude (Haiku) reviewed Codex's stub work and found the same bug for $0.14.
+  - After the bug was fixed with tests, Codex returned clean, leaving the task
+    REVIEWING with `review ✓`.
+  - Neither reviewer changed the worktree.
+- `scripts/probe-agents.sh` now has 16 checks, including that both reviewer modes
+  can't write. It passes on Codex 0.156.1, which updated itself during the session.
+
 ## Known limitations
 
-- REVIEWING has no reviewer yet (Stage 5), and READY_FOR_HUMAN is never reached
-  (Stage 6).
+- READY_FOR_HUMAN is never reached yet. Stage 6 adds the CI gate.
 - Validation results are self-reported by the agent (D32).
+- A restart after a crash reimplements rather than resuming a half-finished review.
 - Only one question can be pending at a time.
 - Each search returns at most 100 results. Mentions only come from issues. A lost reason
   is not reported.
@@ -145,23 +173,20 @@ what it replaced. Current summary:
   D29. Questions are validated at the boundary.
 - D30. Real push and PR are assumed (user decision). D31. PR claims are checked with gh.
   D32. Self-reported validation is recorded.
+- D33. The review contract and read-only, disposable reviewers. D34. The runner drives
+  the whole loop. D35. The review round cap is a budget per decision.
 
 ## Next stage
 
-Stage 5 is the competing-agent review loop.
+Stage 6 is the readiness gate.
 
-- Add `AgentAdapter.Review` and a review outcome schema (`clean` or `changes_requested`
-  plus findings with severity, file, line, summary, and detail). The schema must be
-  strict-mode compatible.
-- The reviewer is the other agent, in a disposable session (`--no-session-persistence`
-  / `--ephemeral`) and read-only. Its prompt is built from durable state: the issue, the
-  context file, the recorded decisions, and `git diff origin/<base>...HEAD` in the
-  worktree. It never sees the implementer's conversation. Findings focus on substance,
-  not style.
-- The runner continues from REVIEWING: review, then if there are findings, resume the
-  implementer with them. The implementer fixes, revalidates, pushes, and reports
-  `pr_opened` again, which is re-checked, then re-reviewed. The loop stops when the
-  review is clean, and the clean result is recorded. After 3 rounds, the task becomes
-  NEEDS_DECISION with the outstanding findings (D11).
-- Record each review round in the task file (round, reviewer, verdict, findings) and
-  show the latest in `show`.
+- Add `GitHubClient.CIStatus(pr)` over `gh pr checks <n> --json name,bucket` (and
+  `--required` when the repo has required checks). Decide how a repo with no checks is
+  treated and log it.
+- When `inbox` or `status` runs, every REVIEWING task whose latest review is clean and
+  whose PR is open has its CI checked. If CI is green, the task becomes READY_FOR_HUMAN.
+  If CI fails, show it (and decide whether the implementer should be sent back to fix
+  it). A merged PR or closed issue makes a delegated task DONE.
+- `inbox` READY FOR YOU and `show` list the gate: tests (reported validation), CI,
+  review, and the recorded decisions, matching the design doc's example.
+- The gate runs only when the CLI is invoked. No background service.

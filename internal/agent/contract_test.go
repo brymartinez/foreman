@@ -50,9 +50,15 @@ func TestParseOutcomeRejectsUnknownStatus(t *testing.T) {
 }
 
 // Codex --output-schema is strict: every object must require all its properties and forbid extras.
-func TestSchemaIsStrictModeCompatible(t *testing.T) {
+func TestSchemasAreStrictModeCompatible(t *testing.T) {
+	for name, schema := range map[string][]byte{"outcome": OutcomeSchema, "review": ReviewSchema} {
+		t.Run(name, func(t *testing.T) { checkStrict(t, schema) })
+	}
+}
+
+func checkStrict(t *testing.T, schema []byte) {
 	var root any
-	if err := json.Unmarshal(OutcomeSchema, &root); err != nil {
+	if err := json.Unmarshal(schema, &root); err != nil {
 		t.Fatal(err)
 	}
 	var visit func(path string, n any)
@@ -88,5 +94,26 @@ func TestSchemaIsStrictModeCompatible(t *testing.T) {
 func TestReviewerIsTheOtherAgent(t *testing.T) {
 	if task.Claude.Reviewer() != task.Codex || task.Codex.Reviewer() != task.Claude {
 		t.Fatal("reviewer must be the competing agent")
+	}
+}
+
+func TestParseReview(t *testing.T) {
+	clean, err := ParseReview([]byte(`{"verdict":"clean","summary":"ok","findings":[]}`))
+	if err != nil || !clean.Clean {
+		t.Fatalf("clean: %+v %v", clean, err)
+	}
+	cr, err := ParseReview([]byte(`{"verdict":"changes_requested","summary":"s","findings":[{"severity":"blocking","file":"a.go","line":12,"summary":"nil deref","detail":"d"},{"severity":"should_fix","file":null,"line":null,"summary":"missing test","detail":""}]}`))
+	if err != nil || cr.Clean || len(cr.Findings) != 2 || cr.Findings[0].Line != 12 || cr.Findings[1].File != "" {
+		t.Fatalf("changes: %+v %v", cr, err)
+	}
+	for _, bad := range []string{
+		`{"verdict":"clean","summary":"s","findings":[{"severity":"blocking","file":null,"line":null,"summary":"x","detail":""}]}`,
+		`{"verdict":"changes_requested","summary":"s","findings":[]}`,
+		`{"verdict":"lgtm","summary":"s","findings":[]}`,
+		`{"verdict":"changes_requested","summary":"s","findings":[{"severity":"nit","file":null,"line":null,"summary":"x","detail":""}]}`,
+	} {
+		if _, err := ParseReview([]byte(bad)); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
 	}
 }

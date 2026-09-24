@@ -35,11 +35,37 @@ func (f *fakeRunners) Alive(pid int) bool { return f.alive[pid] }
 type fakeAgent struct {
 	name      task.Agent
 	turn      agent.Turn
+	turns     []agent.Turn // consumed before turn, one per Start/Resume
 	err       error
 	prompt    string
 	starts    int
 	resumed   []string
 	resumeErr error
+	reviews   []agent.ReviewOutcome // consumed in order; clean once empty
+	reviewErr error
+	reviewed  []string
+}
+
+func (f *fakeAgent) next() (agent.Turn, error) {
+	if len(f.turns) > 0 {
+		t := f.turns[0]
+		f.turns = f.turns[1:]
+		return t, nil
+	}
+	return f.turn, f.err
+}
+
+func (f *fakeAgent) Review(_ context.Context, in agent.StartInput) (agent.ReviewOutcome, error) {
+	f.reviewed = append(f.reviewed, in.Prompt)
+	if f.reviewErr != nil {
+		return agent.ReviewOutcome{}, f.reviewErr
+	}
+	if len(f.reviews) == 0 {
+		return agent.ReviewOutcome{Clean: true, Summary: "looks good"}, nil
+	}
+	r := f.reviews[0]
+	f.reviews = f.reviews[1:]
+	return r, nil
 }
 
 func (f *fakeAgent) Name() task.Agent { return f.name }
@@ -48,14 +74,15 @@ func (f *fakeAgent) Resume(_ context.Context, s task.Session, in agent.StartInpu
 	if f.resumeErr != nil {
 		return agent.Turn{}, f.resumeErr
 	}
-	return f.turn, f.err
+	return f.next()
 }
 
 func (f *fakeAgent) Start(_ context.Context, in agent.StartInput, onSession func(task.Session)) (agent.Turn, error) {
 	f.starts++
 	f.prompt = in.Prompt
-	onSession(f.turn.Session)
-	return f.turn, f.err
+	t, err := f.next()
+	onSession(t.Session)
+	return t, err
 }
 
 type fixture struct {
@@ -65,6 +92,7 @@ type fixture struct {
 	wt      *fakeWorktrees
 	runners *fakeRunners
 	claude  *fakeAgent
+	codex   *fakeAgent
 }
 
 func newFixture() fixture {
@@ -81,10 +109,11 @@ func newFixture() fixture {
 		wt:      &fakeWorktrees{},
 		runners: &fakeRunners{alive: map[int]bool{}},
 		claude:  &fakeAgent{name: task.Claude},
+		codex:   &fakeAgent{name: task.Codex},
 	}
 	f.app = App{
 		Store: f.store, GitHub: f.gh, Worktrees: f.wt, Runners: f.runners,
-		Agents:       map[task.Agent]AgentAdapter{task.Claude: f.claude, task.Codex: &fakeAgent{name: task.Codex}},
+		Agents:       map[task.Agent]AgentAdapter{task.Claude: f.claude, task.Codex: f.codex},
 		WorktreesDir: "/wt",
 		Now:          func() time.Time { return now },
 	}
