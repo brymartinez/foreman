@@ -122,3 +122,17 @@ Answer with: foreman respond ridezoomo/armada-backend#825
 		t.Errorf("answered decisions missing:\n%s", out)
 	}
 }
+
+func TestShowPRAndValidation(t *testing.T) {
+	var buf bytes.Buffer
+	Show(&buf, &task.Record{
+		Key: task.Key{Repo: "a/b", Number: 825}, Title: "T", State: task.Reviewing,
+		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912, PRURL: "https://github.com/a/b/pull/912"},
+		Validation: []task.Check{{Command: "go test ./...", Passed: true}, {Command: "golangci-lint run", Passed: false}},
+	})
+	for _, want := range []string{"PR            #912 · https://github.com/a/b/pull/912", "Validation (reported by the agent)\n  ✓ go test ./...\n  ✗ golangci-lint run\n"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("missing %q in:\n%s", want, buf.String())
+		}
+	}
+}

@@ -128,6 +128,9 @@ func TestImplementationPromptCarriesDurableContext(t *testing.T) {
 		"git push -u origin agent/825-provider-retries",
 		"gh pr create --base main --head agent/825-provider-retries",
 		"Closes #825",
+		"Open the pull request only when validation passes",
+		"the worktree must be clean",
+		"gh pr view --json number,url",
 		`status "blocked"`,
 		"recommendation: the label of the option you recommend, and nothing else",
 	} {

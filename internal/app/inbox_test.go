@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -156,6 +157,24 @@ type fakeGitHub struct {
 	fetched []task.Key
 	issue   Issue
 	repo    RepoInfo
+	prs     map[int]PullRequest
+}
+
+func (f *fakeGitHub) GetPullRequest(_ context.Context, k task.Key) (PullRequest, error) {
+	pr, ok := f.prs[k.Number]
+	if !ok {
+		return PullRequest{}, fmt.Errorf("gh: no pull requests found for %d", k.Number)
+	}
+	return pr, nil
+}
+
+func (f *fakeGitHub) OpenPullRequestForBranch(_ context.Context, _ task.Repo, branch string) (*PullRequest, error) {
+	for _, pr := range f.prs {
+		if pr.HeadRefName == branch && pr.State == "open" {
+			return &pr, nil
+		}
+	}
+	return nil, nil
 }
 
 func (f *fakeGitHub) GetIssue(_ context.Context, k task.Key) (Issue, error) {

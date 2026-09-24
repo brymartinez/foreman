@@ -29,7 +29,10 @@ func delegated() *task.Record {
 			Branch:      "agent/825-provider-retries",
 			Worktree:    "/wt/ridezoomo-armada-backend/825-provider-retries",
 			ContextFile: "/ctx/825.md",
+			PR:          912,
+			PRURL:       "https://github.com/ridezoomo/armada-backend/pull/912",
 		},
+		Validation: []task.Check{{Command: "go test ./...", Passed: true}, {Command: "golangci-lint run", Passed: false}},
 		GitHub: &task.Snapshot{
 			UpdatedAt: time.Date(2026, 9, 24, 17, 0, 0, 0, time.UTC),
 			State:     "open",

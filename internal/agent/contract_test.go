@@ -24,10 +24,14 @@ func TestParseOutcomeBlocked(t *testing.T) {
 	}
 }
 
-func TestParseOutcomePROpenedNeedsPRFields(t *testing.T) {
-	_, err := ParseOutcome([]byte(`{"status":"pr_opened","summary":"s","prNumber":null,"prUrl":null,"validation":[],"question":null}`))
-	if err == nil || !strings.Contains(err.Error(), "prNumber") {
-		t.Fatalf("err = %v", err)
+func TestParseOutcomePROpened(t *testing.T) {
+	_, err := ParseOutcome([]byte(`{"status":"pr_opened","summary":"s","prNumber":912,"prUrl":"u","validation":[],"question":null}`))
+	if err == nil || !strings.Contains(err.Error(), "validation") {
+		t.Fatalf("empty validation err = %v", err)
+	}
+	got, err := ParseOutcome([]byte(`{"status":"pr_opened","summary":"s","prNumber":null,"prUrl":null,"validation":[{"command":"go test ./...","passed":true}],"question":null}`))
+	if err != nil || got.PRNumber != 0 || len(got.Validation) != 1 {
+		t.Fatalf("missing number must parse as 0 for branch lookup: %+v %v", got, err)
 	}
 }
 

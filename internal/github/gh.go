@@ -202,3 +202,55 @@ func (c Client) RepoAt(ctx context.Context, dir string) (app.RepoInfo, error) {
 	}
 	return app.RepoInfo{Repo: repo, DefaultBranch: r.DefaultBranchRef.Name}, nil
 }
+
+const prFields = "number,url,state,headRefName,baseRefName,isCrossRepository"
+
+type prJSON struct {
+	Number            int    `json:"number"`
+	URL               string `json:"url"`
+	State             string `json:"state"`
+	HeadRefName       string `json:"headRefName"`
+	BaseRefName       string `json:"baseRefName"`
+	IsCrossRepository bool   `json:"isCrossRepository"`
+}
+
+func (p prJSON) toPR(repo task.Repo) app.PullRequest {
+	return app.PullRequest{
+		Key:               task.Key{Repo: repo, Number: p.Number},
+		URL:               p.URL,
+		State:             strings.ToLower(p.State),
+		HeadRefName:       p.HeadRefName,
+		BaseRefName:       p.BaseRefName,
+		IsCrossRepository: p.IsCrossRepository,
+	}
+}
+
+func (c Client) GetPullRequest(ctx context.Context, key task.Key) (app.PullRequest, error) {
+	out, err := c.Run(ctx, "", "pr", "view", fmt.Sprint(key.Number), "--repo", string(key.Repo), "--json", prFields)
+	if err != nil {
+		return app.PullRequest{}, err
+	}
+	var p prJSON
+	if err := json.Unmarshal(out, &p); err != nil {
+		return app.PullRequest{}, fmt.Errorf("parse PR %s#%d: %w", key.Repo, key.Number, err)
+	}
+	return p.toPR(key.Repo), nil
+}
+
+func (c Client) OpenPullRequestForBranch(ctx context.Context, repo task.Repo, branch string) (*app.PullRequest, error) {
+	out, err := c.Run(ctx, "", "pr", "list", "--repo", string(repo), "--head", branch, "--state", "open", "--limit", "2", "--json", prFields)
+	if err != nil {
+		return nil, err
+	}
+	var prs []prJSON
+	if err := json.Unmarshal(out, &prs); err != nil {
+		return nil, fmt.Errorf("parse PR list for %s: %w", branch, err)
+	}
+	for _, p := range prs {
+		if p.HeadRefName == branch && !p.IsCrossRepository {
+			pr := p.toPR(repo)
+			return &pr, nil
+		}
+	}
+	return nil, nil
+}

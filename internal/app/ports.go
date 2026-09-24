@@ -39,6 +39,15 @@ type Issue struct {
 	UpdatedAt time.Time
 }
 
+type PullRequest struct {
+	Key               task.Key
+	URL               string
+	State             string // open, closed, merged
+	HeadRefName       string
+	BaseRefName       string
+	IsCrossRepository bool
+}
+
 type RepoInfo struct {
 	Repo          task.Repo
 	DefaultBranch string
@@ -51,6 +60,9 @@ type GitHubClient interface {
 	GetIssue(ctx context.Context, key task.Key) (Issue, error)
 	// RepoAt identifies the GitHub repository checked out at dir.
 	RepoAt(ctx context.Context, dir string) (RepoInfo, error)
+	GetPullRequest(ctx context.Context, key task.Key) (PullRequest, error)
+	// OpenPullRequestForBranch returns the open PR whose head is branch, or nil if none.
+	OpenPullRequestForBranch(ctx context.Context, repo task.Repo, branch string) (*PullRequest, error)
 }
 
 type WorktreeRequest struct {

@@ -101,6 +101,13 @@ type Delegation struct {
 	RunnerPID   int
 	RunnerLog   string
 	PR          int
+	PRURL       string
+}
+
+// Check is one validation command the implementation agent ran, as it reported it.
+type Check struct {
+	Command string `json:"command" yaml:"command"`
+	Passed  bool   `json:"passed" yaml:"passed"`
 }
 
 // Outcome is the last thing an agent turn (or the runner) reported, kept for show.
@@ -215,6 +222,8 @@ type Record struct {
 	LastGitHubSync time.Time
 	Decisions      []Decision
 	LastOutcome    *Outcome
+	// Validation is what the implementation agent reported with its PR.
+	Validation []Check
 	// Body is the Markdown below the frontmatter, round-tripped untouched so human edits survive.
 	Body string
 }

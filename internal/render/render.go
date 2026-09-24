@@ -111,9 +111,12 @@ func Show(w io.Writer, r *task.Record) {
 		row("Branch", fmt.Sprintf("%s (from %s)", d.Branch, orDash(d.BaseRef)))
 		row("Worktree", d.Worktree)
 		row("Runner log", d.RunnerLog)
-		if d.PR > 0 {
+		switch {
+		case d.PR > 0 && d.PRURL != "":
+			row("PR", fmt.Sprintf("#%d · %s", d.PR, d.PRURL))
+		case d.PR > 0:
 			row("PR", fmt.Sprintf("#%d", d.PR))
-		} else {
+		default:
 			row("PR", "")
 		}
 	} else {
@@ -129,6 +132,16 @@ func Show(w io.Writer, r *task.Record) {
 		row("Last outcome", fmt.Sprintf("%s · %s · %s", o.Status, o.At.Local().Format(time.DateTime), o.Summary))
 	}
 	tw.Flush()
+	if len(r.Validation) > 0 {
+		fmt.Fprintln(w, "\nValidation (reported by the agent)")
+		for _, c := range r.Validation {
+			mark := "✓"
+			if !c.Passed {
+				mark = "✗"
+			}
+			fmt.Fprintf(w, "  %s %s\n", mark, c.Command)
+		}
+	}
 	var answered []task.Decision
 	for _, d := range r.Decisions {
 		if d.Answer != "" {

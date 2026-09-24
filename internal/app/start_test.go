@@ -73,6 +73,10 @@ func newFixture() fixture {
 		gh: &fakeGitHub{
 			repo:  RepoInfo{Repo: "ridezoomo/armada-backend", DefaultBranch: "main"},
 			issue: Issue{Title: "Provider retries", Body: "Retry failed requests.", URL: "https://x/825", State: "open", UpdatedAt: t0},
+			prs: map[int]PullRequest{912: {
+				Key: task.Key{Repo: "ridezoomo/armada-backend", Number: 912}, URL: "https://github.com/ridezoomo/armada-backend/pull/912",
+				State: "open", HeadRefName: "agent/825-provider-retries", BaseRefName: "main",
+			}},
 		},
 		wt:      &fakeWorktrees{},
 		runners: &fakeRunners{alive: map[int]bool{}},
@@ -181,10 +185,10 @@ func TestRunTaskAppliesOutcome(t *testing.T) {
 		state task.State
 		check func(t *testing.T, r *task.Record)
 	}{
-		{"pr opened", agent.Turn{Outcome: agent.Outcome{Status: agent.PROpened, Summary: "done", PRNumber: 912}}, nil, task.Reviewing,
+		{"pr opened", agent.Turn{Outcome: agent.Outcome{Status: agent.PROpened, Summary: "done", PRNumber: 912, Validation: []task.Check{{Command: "go test ./...", Passed: true}}}}, nil, task.Reviewing,
 			func(t *testing.T, r *task.Record) {
-				if r.Delegation.PR != 912 {
-					t.Errorf("pr = %d", r.Delegation.PR)
+				if r.Delegation.PR != 912 || r.Delegation.PRURL != "https://github.com/ridezoomo/armada-backend/pull/912" || len(r.Validation) != 1 {
+					t.Errorf("pr = %d %q validation %v", r.Delegation.PR, r.Delegation.PRURL, r.Validation)
 				}
 			}},
 		{"blocked", agent.Turn{Outcome: agent.Outcome{Status: agent.Blocked, Summary: "need input", Question: question}}, nil, task.NeedsDecision,
@@ -257,5 +261,51 @@ func TestStatusReapsDeadRunner(t *testing.T) {
 	f.store.recs[rec.Key].State, f.store.recs[rec.Key].Delegation.RunnerPID = task.Working, 4242
 	if recs, _ = f.app.Status(context.Background()); recs[0].State != task.Working {
 		t.Errorf("live runner reaped: %s", recs[0].State)
+	}
+}
+
+func TestRunTaskVerifiesReportedPR(t *testing.T) {
+	good := func() PullRequest {
+		return PullRequest{Key: task.Key{Repo: "ridezoomo/armada-backend", Number: 913}, URL: "u913", State: "open", HeadRefName: "agent/825-provider-retries", BaseRefName: "main"}
+	}
+	cases := []struct {
+		name     string
+		reported int
+		pr       func() PullRequest
+		want     task.State
+		wantPR   int
+		errPart  string
+	}{
+		{"number verified", 913, good, task.Reviewing, 913, ""},
+		{"no number, found by branch", 0, good, task.Reviewing, 913, ""},
+		{"unknown number", 404, good, task.Failed, 0, "could not be loaded"},
+		{"no PR for branch", 0, func() PullRequest { p := good(); p.HeadRefName = "other"; return p }, task.Failed, 0, "no open PR has head"},
+		{"closed", 913, func() PullRequest { p := good(); p.State = "closed"; return p }, task.Failed, 0, "not open"},
+		{"wrong branch", 913, func() PullRequest { p := good(); p.HeadRefName = "feature/x"; return p }, task.Failed, 0, "not the task branch"},
+		{"wrong base", 913, func() PullRequest { p := good(); p.BaseRefName = "develop"; return p }, task.Failed, 0, "targets develop"},
+		{"fork", 913, func() PullRequest { p := good(); p.IsCrossRepository = true; return p }, task.Failed, 0, "fork"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFixture()
+			f.gh.prs = map[int]PullRequest{913: c.pr()}
+			rec, err := f.app.Start(context.Background(), startReq(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.claude.turn = agent.Turn{Session: task.Session{Agent: task.Claude, ID: "s"}, Outcome: agent.Outcome{
+				Status: agent.PROpened, Summary: "opened", PRNumber: c.reported, Validation: []task.Check{{Command: "go test ./...", Passed: true}},
+			}}
+			if err := f.app.RunTask(context.Background(), rec.Key, 4242, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			got := f.store.recs[rec.Key]
+			if got.State != c.want || got.Delegation.PR != c.wantPR {
+				t.Errorf("state %s pr %d; want %s %d (%v)", got.State, got.Delegation.PR, c.want, c.wantPR, got.LastOutcome)
+			}
+			if c.errPart != "" && !strings.Contains(got.LastOutcome.Summary, c.errPart) {
+				t.Errorf("summary %q lacks %q", got.LastOutcome.Summary, c.errPart)
+			}
+		})
 	}
 }

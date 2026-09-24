@@ -2,7 +2,7 @@
 
 ## Current stage
 
-Stage 3 (decision escalation) is complete. Stage 4 has not started.
+Stage 4 (autonomous PR completion) is complete. Stage 5 has not started.
 
 ## Completed
 
@@ -88,13 +88,29 @@ Stage 3 (decision escalation) is complete. Stage 4 has not started.
 - `scripts/probe-agents.sh` gained a check that `codex exec resume` can write through
   `-c sandbox_mode`.
 
+### Stage 4
+
+- The implementation agent still owns implementing, validating, self-review, the push,
+  and the PR (D7). The prompt now requires passing validation, a clean committed tree,
+  and a PR number and URL read back from `gh pr view`.
+- Foreman checks every `pr_opened` claim with `gh` (D31): open, same repo, task branch,
+  and task base. If the number is missing, it looks the PR up by branch. The verified PR
+  number and URL, plus the agent's validation list, are saved in the task file. `show`
+  prints the PR link and the ✓/✗ validation lines.
+- Validated by unit tests for all eight verification outcomes, the `gh pr view` /
+  `gh pr list --head` parsing, the optional PR number, and rendering.
+- Validated end to end with read-only calls to real GitHub. A stub agent reported
+  `pr_opened` with no number for a task on `feat/event-idempotency-via-valkey`, and
+  foreman found and recorded the user's open `ridezoomo/sw-automations#90`. A made-up
+  #99999 set the task to FAILED with gh's error. Real pushes and PR creation were not
+  exercised (D30).
+
 ## Known limitations
 
-- The PR number from a `pr_opened` outcome is recorded but not yet checked with `gh`
-  (Stage 4).
 - REVIEWING has no reviewer yet (Stage 5), and READY_FOR_HUMAN is never reached
   (Stage 6).
-- Only one question can be pending at a time. Agents ask one per turn.
+- Validation results are self-reported by the agent (D32).
+- Only one question can be pending at a time.
 - Each search returns at most 100 results. Mentions only come from issues. A lost reason
   is not reported.
 
@@ -127,18 +143,25 @@ what it replaced. Current summary:
 - D26. How `respond` reads input. D27. Decisions go in the frontmatter plus an
   append-only body note. D28. Resume first, rebuild only when the session is gone.
   D29. Questions are validated at the boundary.
+- D30. Real push and PR are assumed (user decision). D31. PR claims are checked with gh.
+  D32. Self-reported validation is recorded.
 
 ## Next stage
 
-Stage 4 is autonomous PR completion. The agent already owns the push and the PR (D7, and
-the prompt since Stage 2). Stage 4 has foreman confirm the result and records it.
+Stage 5 is the competing-agent review loop.
 
-- Add `GitHubClient.GetPullRequest`. When the outcome is `pr_opened`, check that the PR
-  exists, is open, has `headRefName` equal to the task branch, and is in the task's repo.
-  If any check fails, the task becomes FAILED with the reason.
-- If the agent reports `pr_opened` without a usable number, look the PR up by branch
-  (`gh pr list --head <branch>`).
-- Show the PR URL in `show`, and the PR number in `status` and `inbox`.
-- Done when `start`, then the agent's run, leaves a PR on GitHub whose number is in the
-  task file. The end-to-end check needs a repo where a real PR is acceptable. The
-  current probes stop before pushing.
+- Add `AgentAdapter.Review` and a review outcome schema (`clean` or `changes_requested`
+  plus findings with severity, file, line, summary, and detail). The schema must be
+  strict-mode compatible.
+- The reviewer is the other agent, in a disposable session (`--no-session-persistence`
+  / `--ephemeral`) and read-only. Its prompt is built from durable state: the issue, the
+  context file, the recorded decisions, and `git diff origin/<base>...HEAD` in the
+  worktree. It never sees the implementer's conversation. Findings focus on substance,
+  not style.
+- The runner continues from REVIEWING: review, then if there are findings, resume the
+  implementer with them. The implementer fixes, revalidates, pushes, and reports
+  `pr_opened` again, which is re-checked, then re-reviewed. The loop stops when the
+  review is clean, and the clean result is recorded. After 3 rounds, the task becomes
+  NEEDS_DECISION with the outstanding findings (D11).
+- Record each review round in the task file (round, reviewer, verdict, findings) and
+  show the latest in `show`.

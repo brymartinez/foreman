@@ -157,10 +157,12 @@ type frontmatter struct {
 	RunnerPID           int          `yaml:"runner_pid,omitempty"`
 	RunnerLog           string       `yaml:"runner_log,omitempty"`
 	PR                  int          `yaml:"pr,omitempty"`
+	PRURL               string       `yaml:"pr_url,omitempty"`
 	GitHub              *snapshot    `yaml:"github,omitempty"`
 	LastGitHubSync      *time.Time   `yaml:"last_github_sync,omitempty"`
 	Decisions           []decisionFM `yaml:"decisions,omitempty"`
 	LastOutcome         *outcomeFM   `yaml:"last_outcome,omitempty"`
+	Validation          []task.Check `yaml:"validation,omitempty"`
 }
 
 type outcomeFM struct {
@@ -261,6 +263,7 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 			RunnerPID:   fm.RunnerPID,
 			RunnerLog:   fm.RunnerLog,
 			PR:          fm.PR,
+			PRURL:       fm.PRURL,
 		}
 		if fm.ReviewAgent != "" && fm.ReviewAgent != impl.Reviewer() {
 			return nil, fmt.Errorf("review_agent must be the competing agent %q, got %q", impl.Reviewer(), fm.ReviewAgent)
@@ -272,6 +275,7 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 	if fm.LastGitHubSync != nil {
 		rec.LastGitHubSync = *fm.LastGitHubSync
 	}
+	rec.Validation = fm.Validation
 	if o := fm.LastOutcome; o != nil {
 		rec.LastOutcome = &task.Outcome{Status: o.Status, Summary: o.Summary, At: o.At}
 	}
@@ -310,7 +314,7 @@ func fromRecord(rec *task.Record) frontmatter {
 		fm.SessionID = d.Implementer.ID
 		fm.ReviewAgent = d.Reviewer
 		fm.Branch, fm.BaseRef, fm.Worktree, fm.ContextFile = d.Branch, d.BaseRef, d.Worktree, d.ContextFile
-		fm.RunnerPID, fm.RunnerLog, fm.PR = d.RunnerPID, d.RunnerLog, d.PR
+		fm.RunnerPID, fm.RunnerLog, fm.PR, fm.PRURL = d.RunnerPID, d.RunnerLog, d.PR, d.PRURL
 	}
 	if s := rec.GitHub; s != nil {
 		fm.GitHub = &snapshot{UpdatedAt: s.UpdatedAt, State: s.State, Reasons: s.Reasons}
@@ -319,6 +323,7 @@ func fromRecord(rec *task.Record) frontmatter {
 		t := rec.LastGitHubSync
 		fm.LastGitHubSync = &t
 	}
+	fm.Validation = rec.Validation
 	if o := rec.LastOutcome; o != nil {
 		fm.LastOutcome = &outcomeFM{Status: o.Status, Summary: o.Summary, At: o.At}
 	}

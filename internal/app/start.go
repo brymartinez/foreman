@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/brymartinez/foreman/internal/agent"
@@ -150,11 +151,53 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 		return err
 	}
 	turn, runErr := a.implement(ctx, rec, log)
+	var pr *PullRequest
+	if runErr == nil && turn.Outcome.Status == agent.PROpened {
+		if pr, runErr = a.verifyPR(ctx, rec, turn.Outcome); runErr == nil {
+			fmt.Fprintf(log, "foreman: verified PR #%d %s\n", pr.Key.Number, pr.URL)
+		}
+	}
 	_, err = a.Store.Update(context.WithoutCancel(ctx), key, func(cur *task.Record) (*task.Record, error) {
-		applyTurn(cur, turn, runErr, a.Now())
+		applyTurn(cur, turn, pr, runErr, a.Now())
 		return cur, nil
 	})
 	return err
+}
+
+// verifyPR checks the agent's pr_opened claim against GitHub: the PR must be open,
+// in this repo, from the task branch into the task's base. Without a number, the
+// open PR for the branch is looked up.
+func (a App) verifyPR(ctx context.Context, rec *task.Record, o agent.Outcome) (*PullRequest, error) {
+	d := rec.Delegation
+	var pr PullRequest
+	if o.PRNumber > 0 {
+		got, err := a.GitHub.GetPullRequest(ctx, task.Key{Repo: rec.Repo, Number: o.PRNumber})
+		if err != nil {
+			return nil, fmt.Errorf("agent reported PR #%d, but it could not be loaded: %w", o.PRNumber, err)
+		}
+		pr = got
+	} else {
+		got, err := a.GitHub.OpenPullRequestForBranch(ctx, rec.Repo, d.Branch)
+		if err != nil {
+			return nil, err
+		}
+		if got == nil {
+			return nil, fmt.Errorf("agent reported a PR, but no open PR has head %s", d.Branch)
+		}
+		pr = *got
+	}
+	base := strings.TrimPrefix(d.BaseRef, "origin/")
+	switch {
+	case pr.State != "open":
+		return nil, fmt.Errorf("PR #%d is %s, not open", pr.Key.Number, pr.State)
+	case pr.IsCrossRepository:
+		return nil, fmt.Errorf("PR #%d comes from a fork, not %s", pr.Key.Number, rec.Repo)
+	case pr.HeadRefName != d.Branch:
+		return nil, fmt.Errorf("PR #%d is from %s, not the task branch %s", pr.Key.Number, pr.HeadRefName, d.Branch)
+	case pr.BaseRefName != base:
+		return nil, fmt.Errorf("PR #%d targets %s, not %s", pr.Key.Number, pr.BaseRefName, base)
+	}
+	return &pr, nil
 }
 
 func (a App) implement(ctx context.Context, rec *task.Record, log io.Writer) (agent.Turn, error) {
@@ -204,8 +247,8 @@ func (a App) implement(ctx context.Context, rec *task.Record, log io.Writer) (ag
 }
 
 // applyTurn maps a finished turn onto the task. A completed turn has received every
-// answered decision. Stage 4 adds PR verification, Stage 5 the review after pr_opened.
-func applyTurn(rec *task.Record, turn agent.Turn, runErr error, now time.Time) {
+// answered decision. pr is the verified PR for pr_opened; Stage 5 reviews it.
+func applyTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error, now time.Time) {
 	rec.Delegation.RunnerPID = 0
 	if turn.Session.ID != "" {
 		rec.Delegation.Implementer = turn.Session
@@ -225,7 +268,8 @@ func applyTurn(rec *task.Record, turn agent.Turn, runErr error, now time.Time) {
 	switch o.Status {
 	case agent.PROpened:
 		rec.State = task.Reviewing
-		rec.Delegation.PR = o.PRNumber
+		rec.Delegation.PR, rec.Delegation.PRURL = pr.Key.Number, pr.URL
+		rec.Validation = o.Validation
 	case agent.Blocked:
 		rec.State = task.NeedsDecision
 		rec.Decisions = append(rec.Decisions, task.Decision{AskedAt: now, Question: *o.Question})

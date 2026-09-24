@@ -58,7 +58,9 @@ Only change files inside this worktree. Commit your work to %s. Do not switch br
 - Plan internally, inspect the code, then implement. Resolve routine ambiguity yourself: if it can be inferred, tested, or fixed safely, do it.
 - Validate with the checks the repository supports: tests, typecheck, lint, build, and behavioral verification where practical.
 - Review your own diff for correctness, regressions, missing tests, and unnecessary complexity before you finish.
-- When the change is review-ready: push with `+"`git push -u origin %s`"+`, then open a pull request with `+"`gh pr create --base %s --head %s`"+`. If a pull request for this branch already exists (`+"`gh pr view %s`"+`), push to it instead of opening another. The pull request body must include "Closes #%d", a summary of the change, the validation you ran, and any decisions you made.
+- Open the pull request only when validation passes. If you cannot make it pass, report "failed" and say why.
+- When the change is review-ready: commit everything (the worktree must be clean), push with `+"`git push -u origin %s`"+`, then open a pull request with `+"`gh pr create --base %s --head %s`"+`. If a pull request for this branch already exists (`+"`gh pr view %s`"+`), push to it instead of opening another. The pull request body must include "Closes #%d", a summary of the change, the validation you ran, and any decisions you made.
+- Take prNumber and prUrl from `+"`gh pr view --json number,url`"+` after pushing; do not guess them.
 
 ## When you need a decision
 

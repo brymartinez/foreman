@@ -350,3 +350,34 @@ Entry format:
   fewer than two options, or empty or duplicate labels. The task then becomes FAILED
   with the reason. `Question.Recommended` accepts "A", "A.", "A: …", and "Option A – …",
   so wordy recommendations still resolve to an option.
+
+## D30. Real push and PR creation are assumed, not exercised
+
+- Date: 2026-09-24. Stage 4. Decided by the user ("Assume it can push and open a real
+  PR using `gh` cli").
+- **Context.** Proving that an agent pushes and opens a PR needs a repo where a
+  throwaway PR is acceptable.
+- **Decision.** No real push or PR is created during validation. The probe already
+  showed that `gh` and authenticated git work inside Codex's sandbox (D7). Stage 4 is
+  validated by checking what the agent reports against real GitHub PRs, read-only.
+
+## D31. How a PR report is checked
+
+- Date: 2026-09-24. Stage 4. Decided by the agent.
+- **Decision.** A `pr_opened` outcome only moves the task to REVIEWING after `gh`
+  confirms the PR is open, in the task's repo (not a fork), from the task branch, and
+  targeting the task's base branch. If the agent leaves `prNumber` null, foreman finds
+  the open PR by branch (`gh pr list --head`). Any failed check sets the task to FAILED
+  with the reason. The verified number and URL are what get recorded.
+- **Consequence.** A guessed or wrong PR number can't get into the task file, and an
+  agent that forgets the number doesn't need a second turn.
+
+## D32. Validation is recorded as the agent reported it
+
+- Date: 2026-09-24. Stage 4. Decided by the agent.
+- **Decision.** The `validation` list from `pr_opened` (command and passed) goes in the
+  `validation` frontmatter key and is shown by `show`. Foreman doesn't re-run it, because
+  the commands vary by repo and only the agent knows them. GitHub CI (Stage 6) is the
+  independent check. The prompt now says to open a PR only when validation passes, to
+  commit everything, and to take the number and URL from `gh pr view` instead of
+  guessing.

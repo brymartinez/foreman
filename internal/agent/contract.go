@@ -25,12 +25,10 @@ const (
 	FailedRun Status = "failed"
 )
 
-type Check struct {
-	Command string `json:"command"`
-	Passed  bool   `json:"passed"`
-}
+type Check = task.Check
 
-// Outcome is how every implementation turn ends. Exactly the fields for its Status are set.
+// Outcome is how every implementation turn ends. For pr_opened, PRNumber may be 0
+// when the agent could not report it; foreman then looks the PR up by branch.
 type Outcome struct {
 	Status     Status
 	Summary    string
@@ -60,10 +58,16 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 	out := Outcome{Status: w.Status, Summary: w.Summary}
 	switch w.Status {
 	case PROpened:
-		if w.PRNumber == nil || *w.PRNumber <= 0 || w.PRURL == nil || len(w.Validation) == 0 {
-			return Outcome{}, errors.New("pr_opened outcome needs prNumber, prUrl, and validation")
+		if len(w.Validation) == 0 {
+			return Outcome{}, errors.New("pr_opened outcome needs the validation that was run")
 		}
-		out.PRNumber, out.PRURL, out.Validation = *w.PRNumber, *w.PRURL, w.Validation
+		if w.PRNumber != nil && *w.PRNumber > 0 {
+			out.PRNumber = *w.PRNumber
+		}
+		if w.PRURL != nil {
+			out.PRURL = *w.PRURL
+		}
+		out.Validation = w.Validation
 	case Blocked:
 		if w.Question == nil {
 			return Outcome{}, errors.New("blocked outcome has no question")
