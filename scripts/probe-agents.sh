@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Re-verifies the agent CLI capabilities foreman's adapters depend on.
+# Rerun after upgrading claude or codex. Costs a few cents of model usage.
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+schema="$root/internal/agent/outcome.schema.json"
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+cd "$work"
+git init -q -b main && git commit -q --allow-empty -m init
+git worktree add -q -b agent/1-probe "$work/wt"
+cd "$work/wt"
+
+pass=0 fail=0
+check() { if [ "$2" = "$3" ]; then echo "ok   $1"; pass=$((pass+1)); else echo "FAIL $1: got '$2' want '$3'"; fail=$((fail+1)); fi; }
+
+blocked_prompt='You must not change any files. Report status "blocked" with a question asking whether retries should apply to 4xx responses, two options A and B, recommendation A.'
+resume_prompt='Decision: A. Report status "failed" with summary "probe complete". Do not change files.'
+
+echo "# claude $(claude --version)"
+sid="$(uuidgen | tr 'A-Z' 'a-z')"
+claude -p "$blocked_prompt" --session-id "$sid" --output-format json --json-schema "$(cat "$schema")" \
+  --permission-mode acceptEdits --model haiku </dev/null >c1.json 2>/dev/null
+check "claude honors --session-id" "$(jq -r .session_id c1.json)" "$sid"
+check "claude structured_output status" "$(jq -r .structured_output.status c1.json)" blocked
+check "claude structured_output has question" "$(jq -r '.structured_output.question | type' c1.json)" object
+claude -p "$resume_prompt" --resume "$sid" --output-format json --json-schema "$(cat "$schema")" \
+  --permission-mode acceptEdits --model haiku </dev/null >c2.json 2>/dev/null
+check "claude resume keeps session" "$(jq -r .session_id c2.json)" "$sid"
+check "claude resume structured status" "$(jq -r .structured_output.status c2.json)" failed
+claude -p 'Run the shell command: touch allowed.txt. Then reply DONE.' --permission-mode acceptEdits \
+  --allowedTools Bash --output-format json --model haiku </dev/null >c3.json 2>/dev/null
+check "claude headless Bash via --allowedTools" "$(test -f allowed.txt && echo yes || echo no)" yes
+
+echo "# $(codex --version)"
+codex exec --json -s workspace-write --output-schema "$schema" -o x1.json "$blocked_prompt" </dev/null >x1.jsonl 2>/dev/null
+tid="$(head -1 x1.jsonl | jq -r 'select(.type=="thread.started").thread_id')"
+check "codex emits thread.started" "$([ -n "$tid" ] && echo yes || echo no)" yes
+check "codex output-schema status" "$(jq -r .status x1.json)" blocked
+codex exec resume --json --output-schema "$schema" -o x2.json "$tid" "$resume_prompt" </dev/null >x2.jsonl 2>/dev/null
+check "codex resume keeps thread" "$(head -1 x2.jsonl | jq -r .thread_id)" "$tid"
+check "codex resume structured status" "$(jq -r .status x2.json)" failed
+codex exec -s workspace-write -c sandbox_workspace_write.network_access=true -o x3.txt \
+  "Run exactly: curl -s -o /dev/null -w '%{http_code}' https://api.github.com ; reply with only the printed code." </dev/null >/dev/null 2>&1
+check "codex network with network_access=true" "$(tr -d '[:space:]' <x3.txt)" 200
+codex exec -s workspace-write -c sandbox_workspace_write.network_access=true -o x5.txt \
+  "Run exactly: gh api user --jq .login ; reply with only its stdout, or FAILED." </dev/null >/dev/null 2>&1
+check "codex sandbox can use gh credentials" "$(tr -d '[:space:]' <x5.txt)" "$(gh api user --jq .login)"
+codex exec -s workspace-write -o x4.txt \
+  "Create f.txt containing hi, then run: git add f.txt && git commit -q -m probe. Reply OK or the git error." </dev/null >/dev/null 2>&1
+check "codex can commit inside a worktree" "$(git -C "$work" log --oneline agent/1-probe | wc -l | tr -d ' ')" 2
+
+echo "# $pass passed, $fail failed"
+[ "$fail" -eq 0 ]

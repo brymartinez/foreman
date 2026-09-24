@@ -1,0 +1,115 @@
+# Stage 0: agent and tooling capabilities
+
+Verified on 2026-09-24 against the installed CLIs, by reading `--help` and by running
+`scripts/probe-agents.sh`. Rerun that script after upgrading either agent CLI. If a
+check fails, the adapter that depends on it needs attention.
+
+| Tool | Version |
+|---|---|
+| Claude Code | 2.1.281 |
+| Codex CLI | 0.155.1 |
+| gh | 2.101.0 |
+| git | 2.50.1 |
+| Go | 1.27.1 |
+
+## Claude Code
+
+Headless mode is `claude -p <prompt>`. Every feature below was checked with a real run.
+
+- **Working directory.** Claude uses the process cwd. There is no `--cd` flag, so the
+  runner starts Claude with `cmd.Dir = worktree`. `CLAUDE.md`, skills, and project
+  settings load from that directory.
+- **Structured output.** `--output-format json --json-schema '<schema>'` returns one JSON
+  object on stdout. The validated result is in `structured_output`, and `result` holds
+  the same data as a string. Other useful fields are `session_id`, `is_error`,
+  `subtype`, `permission_denials`, and `total_cost_usd`.
+- **Session IDs.** `--session-id <uuid>` is honored, so foreman can assign the ID before
+  launch and record it before the agent starts working.
+- **Resume.** `--resume <uuid> -p <message>` continues the same session and keeps the
+  same ID. It works with `--json-schema`.
+- **Permissions.** Any tool call that isn't pre-approved is denied, not prompted, and
+  shows up in `permission_denials`. Both `--permission-mode auto` and `manual` refused a
+  plain `touch`. `--permission-mode acceptEdits --allowedTools Bash` worked.
+  `bypassPermissions` exists, but foreman does not default to it.
+- **Stdin.** When stdin is not a TTY, Claude waits 3s for piped input. The runner must
+  connect stdin to `/dev/null`.
+- **Hooks.** The user's global hooks still run in headless sessions. A broken SessionEnd
+  hook only wrote to stderr, and stdout stayed valid JSON. Keep stdout and stderr in
+  separate streams.
+- **Other options.** `--no-session-persistence` gives disposable reviewer sessions.
+  `--max-budget-usd` caps spend. `--output-format stream-json` streams progress events
+  for logs.
+
+## Codex CLI
+
+Headless mode is `codex exec <prompt>`.
+
+- **Working directory.** `-C <dir>` sets it, and cwd also works. `AGENTS.md` loads from
+  there.
+- **Structured output.** `--output-schema <file>` constrains the final message, and
+  `-o <file>` writes that message to a file. The schema must follow OpenAI strict mode:
+  every property listed in `required` and `additionalProperties: false`. A unit test
+  enforces this.
+- **Session IDs.** Codex assigns the ID at runtime. `--json` prints JSONL events, and the
+  first one is `{"type":"thread.started","thread_id":...}`. The adapter reads the ID
+  from there. It cannot be assigned in advance.
+- **Resume.** `codex exec resume <thread_id> <message>` continues the thread and keeps
+  the ID. It accepts `--output-schema`, `--json`, and `-o`. It has no `-s` flag, so the
+  sandbox is set with `-c sandbox_mode=...` or comes from config.
+- **Sandbox.** `-s workspace-write` blocks network access by default. With it, curl to
+  api.github.com returned `000`. Adding `-c sandbox_workspace_write.network_access=true`
+  made it return `200`.
+- **GitHub credentials in the sandbox.** With network access on, `gh` and git over HTTPS
+  work inside the Codex sandbox using the user's keyring login.
+- **Worktrees.** Codex with `-s workspace-write` can commit inside a linked git worktree.
+  That needs write access to the main repo's `.git/worktrees/<name>`, and it worked
+  without `--add-dir`.
+- **Review.** `codex exec review --base <branch>` is a built-in review command and accepts
+  `--output-schema`. Foreman doesn't use it. It uses plain `codex exec` with its own
+  review prompt, so both reviewers get the same inputs and return the same schema.
+- **Other options.** `--ephemeral` gives disposable reviewer sessions. `codex exec` also
+  has a `--worktree` flag, which foreman doesn't use because it manages worktrees itself.
+
+## gh
+
+The user is authenticated through the keyring.
+
+- **Inbox search.** `gh search issues --assignee=@me --state=open --json number,title,repository,updatedAt,url`
+  works. Other queries use `--mentions=@me`, and `gh search prs --review-requested=@me`.
+  The results include `repository.nameWithOwner`.
+- **Pull requests.** `gh pr view <n> --json` exposes `state`, `reviewDecision`,
+  `latestReviews`, `statusCheckRollup`, `headRefName`, `mergedAt`, and
+  `closingIssuesReferences`.
+- **CI.** `gh pr checks <n> --json name,state,bucket` gives each check a `bucket` of pass,
+  fail, pending, skipping, or cancel. `--required` limits it to required checks.
+- **Creating PRs.** `gh pr create --title --body --head` can run from inside the worktree.
+
+## git worktree
+
+`git worktree add -b <branch> <path> <base>` creates an isolated checkout.
+`git worktree list --porcelain` makes the operation idempotent: if the branch is already
+checked out at the expected path, foreman reuses it. Git refuses to check out a branch in
+two worktrees at once, which prevents two agents from writing to the same checkout.
+
+## Assumptions in the design doc that the tooling doesn't support as written
+
+1. **"The agent asks me mid-run."** A headless turn can't stop and wait for input. What
+   works instead is that the agent ends its turn with `status: blocked` and a
+   `question`. Foreman stores the question, and `respond` resumes the same session with
+   the answer. From the user's side this behaves the same, and both CLIs support it.
+2. **`AgentAdapter.getStatus`.** Neither CLI can report on a turn that's still running.
+   Foreman gets status from its own records instead: the task file, whether the runner
+   process is alive, and the runner's log. `getStatus` was removed from the interface.
+3. **"The agent runs `git push` and `gh pr create`."** Both agents can do this. Codex
+   needs `-c sandbox_workspace_write.network_access=true`. With that set, `gh api user`
+   and an authenticated `git ls-remote` both work inside the Codex sandbox, because gh
+   and git reach the keyring normally. The probe checks this. The agent reports the PR
+   in its outcome (`pr_opened`, `prNumber`, `prUrl`), and foreman confirms with `gh`
+   that the PR exists (D7).
+4. **Unattended permissions.** Neither `auto` nor the default permission mode lets
+   Claude run shell commands headless. The adapter has to pass an explicit
+   `--allowedTools` list. The default list must cover the repo's test, build, and lint
+   commands, and it can be configured.
+5. **The recommendation field.** Claude filled `recommendation` with a full sentence, not
+   an option label. Stage 3 has to make its prompt stricter, or match the label at the
+   start of the text, before `respond` can offer the recommended option as the default.
