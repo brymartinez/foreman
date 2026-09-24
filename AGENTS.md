@@ -14,7 +14,7 @@ A local CLI that delegates GitHub issues to Claude Code or Codex. Design and sta
   scope, tooling, and any user correction. Supersede old entries; never rewrite them.
 - Work one stage at a time. Stop at the stage boundary, and don't build later stages early.
 - Each stage leaves working software, tests, and a clean tree.
-- Go standard library first. Add a dependency only with a stated reason in progress.md.
+- Go standard library first. Add a dependency only with a logged decision in decisions.md.
 - `internal/app` depends only on the interfaces in `ports.go`.
 - Agent output enters the program only through `agent.ParseOutcome`.
 

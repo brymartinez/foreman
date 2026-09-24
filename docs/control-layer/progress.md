@@ -2,7 +2,7 @@
 
 ## Current stage
 
-Stage 0 (capability research and architecture) is complete. Stage 1 has not started.
+Stage 1 (GitHub sync + Markdown state) is complete. Stage 2 has not started.
 
 ## Completed
 
@@ -21,9 +21,29 @@ Stage 0 (capability research and architecture) is complete. Stage 1 has not star
 - Validated with `go vet ./...`, `go test ./...`, `go build ./cmd/foreman`, and
   `scripts/probe-agents.sh`.
 
+### Stage 1
+
+- `foreman inbox` runs the `gh` searches, re-fetches tracked tasks, compares them with the
+  task files, prints NEEDS DECISION, READY FOR YOU, CHANGED, and NEW, and marks what it
+  showed as seen.
+- `foreman status` lists delegated work, most urgent first. `foreman show <issue>` shows
+  one task's durable state and accepts `owner/repo#N`.
+- `internal/store` (`Markdown`) keeps user frontmatter keys, comments, and the body.
+  `internal/github` wraps `gh`, `internal/config` locates the tasks directory, and
+  `internal/render` formats terminal output.
+- Validated by unit tests for store round-trips and human edits, the reconcile table,
+  `gh` JSON parsing against fixtures, config precedence, and render output. Also run end
+  to end against the user's real GitHub account in a throwaway tasks directory: the first
+  inbox listed 41 NEW items, the second showed "Nothing new" with 41 hidden, a bare
+  `show 49` reported the ambiguity, and a delegated task edited by hand for a closed
+  issue came up as CHANGED · closed with the user's comment, tags, and body intact.
+
 ## Known limitations
 
-- No command is implemented yet.
+- `start` and `respond` are not implemented yet (Stages 2 and 3).
+- Each search returns at most 100 results.
+- Mentions only come from issues. Mentions in PR comments are not searched.
+- A reason being lost (for example being unassigned) is not reported as a change.
 - `recommendation` in a blocked outcome is free text, not an option label (see
   capabilities.md, item 5).
 
@@ -44,16 +64,23 @@ what it replaced. Current summary:
   D11. At most 3 review rounds.
 - D12. The branch is `agent/<issue>-<slug>` and the worktree directory is
   `<issue>-<slug>`, with at most 5 words and 40 characters.
+- D13. `go.yaml.in/yaml/v3`, with a merge that only touches owned keys.
+  D14. Tasks directory resolution.
+- D15. Inbox semantics. D16. `owner/repo#N` references. D17. Ports grow per stage.
 
 ## Next stage
 
-Stage 1 implements `inbox`, `status`, and `show`.
+Stage 2 is dispatch: `foreman start <issue> --agent claude|codex [--context path.md]`.
 
-- `internal/store` holds `MarkdownTaskStore`, using `go.yaml.in/yaml/v3`. The tasks
-  directory comes from `FOREMAN_TASKS_DIR` or `~/.config/foreman/config.yaml`.
-- `internal/github` wraps `gh search issues|prs` and `gh issue|pr view`.
-- `internal/app/inbox.go` holds a pure diff function that compares GitHub items with
-  stored snapshots and groups them as NEW, CHANGED, NEEDS DECISION, READY FOR YOU, and
-  hidden.
-- Tests cover the diff table, store round-trips (including human edits to the body),
-  and the `gh` JSON parsing using recorded fixtures.
+- Resolve the repo from `owner/repo#N`, or from the current checkout's `gh repo view`,
+  and add `GitHubClient.GetIssue`.
+- Implement `WorktreeManager.Ensure` over `git worktree`, using the D12 names and a
+  configurable worktrees root. It must be idempotent.
+- Create or update the task file: state WORKING, the delegation fields, and the context
+  file path.
+- Add the Claude and Codex adapters for `Start`: argv built per capabilities.md, stdin
+  from `/dev/null`, output parsed through `agent.ParseOutcome`.
+- Launch a detached runner for that one task (D5), and record its pid and log path.
+- Done when `inbox`, then `start 825 --agent claude --context 825.md`, creates the
+  worktree, starts Claude with the full task context, sets the task file to WORKING, and
+  `status` shows it.

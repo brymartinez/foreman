@@ -3,6 +3,8 @@
 ```
 cmd/foreman           wiring: build adapters, call app, render output
 internal/cli          argv -> Command; no I/O beyond parsing
+internal/config       tasks directory resolution (Stage 1)
+internal/render       terminal formatting of app results (Stage 1)
 internal/app          orchestration + ports.go (the interfaces below)
   ├── github          GitHubClient over `gh` (Stage 1)
   ├── store           TaskStore over Markdown + YAML frontmatter (Stage 1)

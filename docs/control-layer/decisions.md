@@ -151,3 +151,73 @@ Entry format:
   `agent/825-provider-retries` in `…/ridezoomo-armada-backend/825-provider-retries`.
 - **Consequence.** The name is computed once at `start` and stored in the task file.
   Editing the title later doesn't rename anything. The code is in `internal/task/naming.go`.
+
+## D13. YAML library and frontmatter merge
+
+- Date: 2026-09-24. Stage 1. Decided by the agent.
+- **Context.** Task files must stay editable by hand and in Obsidian. The Go standard
+  library has no YAML package.
+- **Options.** A. `gopkg.in/yaml.v3`, which is archived. B. `go.yaml.in/yaml/v3`, the
+  maintained successor from the YAML org. C. A hand-rolled parser.
+- **Decision.** B, and it's the only runtime dependency. On save, foreman decodes the
+  existing frontmatter into a `yaml.Node` and replaces only the keys it owns (the tags on
+  `store.frontmatter`). Keys the user added (`tags`, `aliases`, and anything else) keep
+  their position and comments, and comments on owned keys are kept too. The body is
+  written back exactly as it was.
+- **Consequence.** A new owned key that the user already uses would collide, so owned
+  keys are all snake_case task terms. Saves are atomic (temp file + rename).
+
+## D14. Tasks directory location
+
+- Date: 2026-09-24. Stage 1. Decided by the agent.
+- **Context.** The vault location is still unknown, and the design doc says it can be
+  configured later.
+- **Decision.** In order of precedence: `FOREMAN_TASKS_DIR`, then `tasks_dir` in
+  `~/.config/foreman/config.yaml` (with `~` expansion), then the default
+  `~/.local/share/foreman/tasks`. Markdown files without task frontmatter are ignored,
+  so the directory can live inside a vault.
+
+## D15. Inbox semantics
+
+- Date: 2026-09-24. Stage 1. Decided by the agent.
+- **Context.** The inbox has to answer "what changed since I last looked", and that
+  needs a definition.
+- **Decision.**
+  - The sources are three `gh search` queries, all limited to open items with at most
+    100 results each: issues assigned to me, issues mentioning me, and PRs requesting my
+    review. Delegated tasks that aren't DONE and that no search returned are also
+    re-fetched through `gh api repos/{repo}/issues/{n}`, which covers both issues and PRs
+    and detects merges.
+  - An item is **new** when it has no task file. It is **changed** when its state
+    differs (closed, merged, or reopened), when it has gained a reason (for example it
+    is now assigned to me), or, if neither, when its `updatedAt` has moved forward. A
+    reason being lost doesn't count as a change.
+  - Each item appears in one section only, in priority order: NEEDS DECISION, then
+    READY FOR YOU, then CHANGED, then NEW. Unchanged items only add to the hidden count.
+  - Running `inbox` marks what it showed as seen. Only new or changed records are
+    written, so repeat runs don't touch unchanged files. That means `last_github_sync`
+    is the last time foreman recorded a change for that item.
+  - A DISCOVERED item that is no longer open becomes DONE. Inbox never changes the state
+    of a delegated task. That belongs to Stage 6 and later stages.
+- **Consequence.** The first run lists everything as NEW (41 items on the user's
+  account), and later runs show only differences.
+
+## D16. Issue references across repos
+
+- Date: 2026-09-24. Stage 1. Decided by the agent.
+- **Context.** `show <issue>` takes only a number, but the same number can exist in
+  several repos. On the user's account, #49 exists in both billing-bridge and
+  sw-automations.
+- **Decision.** `<issue>` accepts `825`, `#825`, or `owner/repo#825`. A bare number that
+  matches more than one tracked repo is an error that lists the qualified choices.
+- **Consequence.** Stage 2's `start` uses the same parser. For `start`, a bare number
+  will resolve against the current checkout's repo.
+
+## D17. Ports grow per stage
+
+- Date: 2026-09-24. Stage 1. Decided by the agent.
+- **Context.** Go interfaces are satisfied implicitly, so a large port definition forces
+  stub methods that do nothing.
+- **Decision.** `GitHubClient` currently has only `InboxItems` and `GetItem`. Issue
+  fetch arrives in Stage 2, and PR and CI status in Stage 6, each added along with the
+  stage that uses it.

@@ -102,16 +102,16 @@ type Delegation struct {
 // Question is the BLOCKED: Need decision payload. Agents return it as
 // structured output; foreman never scrapes it from terminal text.
 type Question struct {
-	Issue          string   `json:"issue"`
-	Context        string   `json:"context"`
-	Options        []Option `json:"options"`
-	Recommendation string   `json:"recommendation"`
-	ImpactIfWrong  string   `json:"impactIfWrong"`
+	Issue          string   `json:"issue" yaml:"issue"`
+	Context        string   `json:"context" yaml:"context"`
+	Options        []Option `json:"options" yaml:"options"`
+	Recommendation string   `json:"recommendation" yaml:"recommendation"`
+	ImpactIfWrong  string   `json:"impactIfWrong" yaml:"impact_if_wrong"`
 }
 
 type Option struct {
-	Label       string `json:"label"`
-	Description string `json:"description"`
+	Label       string `json:"label" yaml:"label"`
+	Description string `json:"description" yaml:"description"`
 }
 
 type Decision struct {
@@ -125,6 +125,7 @@ type Record struct {
 	Key
 	Kind           Kind
 	Title          string
+	URL            string
 	State          State
 	Delegation     *Delegation
 	GitHub         *Snapshot

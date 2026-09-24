@@ -16,15 +16,6 @@ type TaskStore interface {
 	List(ctx context.Context) ([]*task.Record, error)
 }
 
-type Issue struct {
-	Key       task.Key
-	Title     string
-	Body      string
-	URL       string
-	State     string
-	UpdatedAt time.Time
-}
-
 type InboxItem struct {
 	Key       task.Key
 	Kind      task.Kind
@@ -35,31 +26,11 @@ type InboxItem struct {
 	Reasons   []task.InboxReason
 }
 
-type PullRequest struct {
-	Key            task.Key
-	URL            string
-	State          string
-	HeadRefName    string
-	ReviewDecision string
-	UpdatedAt      time.Time
-}
-
-type CIStatus string
-
-const (
-	CIPending CIStatus = "pending"
-	CIPassing CIStatus = "passing"
-	CIFailing CIStatus = "failing"
-	CINone    CIStatus = "none"
-)
-
+// GitHubClient grows per stage: issue fetch (Stage 2), PR and CI status (Stage 6).
 type GitHubClient interface {
-	GetIssue(ctx context.Context, key task.Key) (Issue, error)
 	InboxItems(ctx context.Context) ([]InboxItem, error)
 	// GetItem re-fetches a tracked item by key; it can drop out of search results once unassigned or closed.
 	GetItem(ctx context.Context, key task.Key) (InboxItem, error)
-	GetPullRequest(ctx context.Context, key task.Key) (PullRequest, error)
-	CIStatus(ctx context.Context, pr task.Key) (CIStatus, error)
 }
 
 type Worktree struct {

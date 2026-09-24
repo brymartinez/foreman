@@ -24,6 +24,7 @@ const (
 
 type Command struct {
 	Name        Name
+	Repo        task.Repo // set when the issue is given as owner/repo#825
 	Issue       int
 	Agent       task.Agent
 	ContextFile string
@@ -37,6 +38,8 @@ Usage:
   foreman show <issue>                            Durable state for one task
   foreman start <issue> --agent claude|codex [--context path.md]
   foreman respond <issue>                         Answer a NEEDS_DECISION task
+
+<issue> is 825, #825, or owner/repo#825 when the number exists in several repos.
 `
 
 type UsageError struct{ msg string }
@@ -59,8 +62,8 @@ func Parse(argv []string) (Command, error) {
 		}
 		return Command{Name: Name(name)}, nil
 	case "show", "respond":
-		n, err := issueArg(name, rest)
-		return Command{Name: Name(name), Issue: n}, err
+		repo, n, err := issueArg(name, rest)
+		return Command{Name: Name(name), Repo: repo, Issue: n}, err
 	case "start":
 		return parseStart(rest)
 	}
@@ -89,7 +92,7 @@ func parseStart(rest []string) (Command, error) {
 	if err := fs.Parse(flags); err != nil {
 		return Command{}, usagef("start: %v", err)
 	}
-	n, err := issueArg("start", positionals)
+	repo, n, err := issueArg("start", positionals)
 	if err != nil {
 		return Command{}, err
 	}
@@ -97,16 +100,28 @@ func parseStart(rest []string) (Command, error) {
 	if err != nil {
 		return Command{}, usagef("start needs --agent claude|codex")
 	}
-	return Command{Name: Start, Issue: n, Agent: a, ContextFile: *contextFlag}, nil
+	return Command{Name: Start, Repo: repo, Issue: n, Agent: a, ContextFile: *contextFlag}, nil
 }
 
-func issueArg(name string, rest []string) (int, error) {
+func issueArg(name string, rest []string) (task.Repo, int, error) {
 	if len(rest) != 1 {
-		return 0, usagef("%s needs one issue number", name)
+		return "", 0, usagef("%s needs one issue number", name)
 	}
-	n, err := strconv.Atoi(strings.TrimPrefix(rest[0], "#"))
+	repoPart, numPart, qualified := strings.Cut(rest[0], "#")
+	if !qualified {
+		numPart = repoPart
+	}
+	var repo task.Repo
+	if qualified && repoPart != "" {
+		r, err := task.ParseRepo(repoPart)
+		if err != nil {
+			return "", 0, usagef("%s: %v", name, err)
+		}
+		repo = r
+	}
+	n, err := strconv.Atoi(numPart)
 	if err != nil || n <= 0 {
-		return 0, usagef("%s needs one issue number", name)
+		return "", 0, usagef("%s needs one issue number", name)
 	}
-	return n, nil
+	return repo, n, nil
 }
