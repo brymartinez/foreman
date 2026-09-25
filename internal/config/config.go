@@ -20,6 +20,9 @@ type Config struct {
 	Claude       Claude  `yaml:"claude"`
 	Codex        Codex   `yaml:"codex"`
 	Cleanup      Cleanup `yaml:"cleanup"`
+	// StagesDir holds the global stage instructions: stages/ next to the config file,
+	// so ~/.config/foreman/stages by default. It is a convention, not a setting (D48).
+	StagesDir string `yaml:"-"`
 }
 
 // Cleanup controls what happens to a task's worktree once the task is DONE (D42).
@@ -70,6 +73,7 @@ func Load() (Config, error) {
 	case !errors.Is(err, fs.ErrNotExist):
 		return Config{}, err
 	}
+	cfg.StagesDir = filepath.Join(filepath.Dir(path), "stages")
 	if env := os.Getenv("FOREMAN_TASKS_DIR"); env != "" {
 		cfg.TasksDir = env
 	}

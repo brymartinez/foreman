@@ -27,7 +27,7 @@ func TestLoadPrecedence(t *testing.T) {
 	alt := filepath.Join(home, "alt.yaml")
 	os.WriteFile(alt, []byte("tasks_dir: /alt/tasks\n"), 0o644)
 	t.Setenv("FOREMAN_CONFIG", alt)
-	if cfg, _ = Load(); cfg.TasksDir != "/alt/tasks" {
+	if cfg, _ = Load(); cfg.TasksDir != "/alt/tasks" || cfg.StagesDir != filepath.Join(home, "stages") {
 		t.Fatalf("FOREMAN_CONFIG: %+v", cfg)
 	}
 
@@ -56,6 +56,9 @@ func TestAgentSettingsOverlayDefaults(t *testing.T) {
 	}
 	if cfg.Codex.Command != "/opt/codex" {
 		t.Errorf("codex: %+v", cfg.Codex)
+	}
+	if cfg.StagesDir != filepath.Join(home, ".config/foreman/stages") {
+		t.Errorf("stages dir = %s", cfg.StagesDir)
 	}
 	if !cfg.Cleanup.OnDone || cfg.Cleanup.DeleteMergedBranch {
 		t.Errorf("cleanup: an explicit false must override its default, and unset keys keep theirs: %+v", cfg.Cleanup)

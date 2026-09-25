@@ -207,6 +207,31 @@ Stage 6 (readiness gate) is complete. All stages in the design are built.
     binary reported `foreman v0.0.0-test`.
   - The workflow has not run: the repo has no GitHub remote yet.
 
+## Stage instructions
+
+This is a separate staged track from the user's "Foreman Stage Instructions" spec. It
+has five stages: resolver, then implement, then review, then pr, then CLI inspection.
+
+### Stage 1 (complete): stage model and resolver
+
+- `task.Stage` (`implement`, `review`, `pr`) and `task.StageInstructions`, which keeps
+  the path and text of each layer (D47).
+- `internal/stages.Files` resolves `<config dir>/stages/<stage>.md` and then
+  `<repo>/.foreman/<stage>.md`, joining them global first and repo second.
+  `Config.StagesDir` follows the config file (D48). pr.md will be loaded into the
+  implementation turn (D49).
+- Nothing is wired into prompts yet.
+- Validated by tests for:
+  - no files, global only, repo only, both, and global before repo;
+  - blank files adding nothing;
+  - the right file chosen for each stage, and an unknown stage rejected;
+  - the repo layer read from the repo root, not the working directory, and skipped
+    when there is no root;
+  - permission denied and a directory in place of a file, each reported with its path;
+  - `StagesDir` following `FOREMAN_CONFIG`.
+
+Next is Stage 2: wire `implement` into the implementation prompt and test it end to end.
+
 ## Known limitations
 
 - The gate runs only when `inbox` or `status` runs. A push to the branch after a clean
@@ -258,6 +283,8 @@ what it replaced. Current summary:
 - D41. What cleanup removes. D42. Automatic cleanup from inbox, configurable.
   D43. GitHub releases through a script and a tag workflow. D44. Version stamping.
 - D45. Branches use a conventional-commit type prefix instead of `agent/`.
+- D47. Stage instructions and their resolver. D48. Global layer next to the config
+  file; repo layer from the worktree. D49. pr.md goes in the implementation turn.
 - D46 (supersedes D38). CI belongs to the repo owners: foreman reads GitHub's checks and
   hands failures to the developer.
 

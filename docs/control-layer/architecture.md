@@ -10,7 +10,8 @@ internal/app          orchestration + ports.go (the interfaces below)
   ├── store           TaskStore over Markdown + YAML frontmatter (Stage 1)
   ├── worktree        WorktreeManager over `git worktree` (Stage 2)
   ├── agent           outcome contract, prompt, claude.go / codex.go adapters (Stage 2)
-  └── runner          spawns and checks the detached `foreman __run` process (Stage 2)
+  ├── runner          spawns and checks the detached `foreman __run` process (Stage 2)
+  └── stages          resolves ~/.config/foreman/stages/<stage>.md + <repo>/.foreman/<stage>.md (D47)
 internal/task         the durable model: Record, State, Delegation, Decision
 ```
 

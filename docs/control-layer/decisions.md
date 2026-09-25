@@ -584,3 +584,51 @@ Entry format:
   - Tests are still the agent's reported validation (D32).
 - **Consequence.** Foreman never spends agent time on CI it doesn't own. A red PR can
   now reach READY FOR YOU, and the checklist marks it clearly.
+
+## D47. Stage instructions are the developer's workflow layer
+
+- Date: 2026-09-25. Stage-instructions work, Stage 1. Specified by the user. The agent
+  chose the shape.
+- **Context.** The user wants their own reusable instructions per workflow stage, such
+  as a three-pass review or a PR description format. A repo can extend them. The
+  agents' own instruction files must stay the agents' concern.
+- **Decision.**
+  - `task.Stage` has the values `implement`, `review`, and `pr` (`task.Stages`,
+    `ParseStage`).
+  - `stages.Files{GlobalDir}.Resolve(repoRoot, stage)` reads
+    `<GlobalDir>/<stage>.md` and then `<repoRoot>/.foreman/<stage>.md`. It returns a
+    `task.StageInstructions` that keeps each layer's path and text.
+  - `Content()` joins the non-blank layers, global first and repo second.
+  - A missing file is not an error. A stat or read failure is an error that names the
+    path, and so is a path that isn't a regular file.
+  - Foreman never reads CLAUDE.md or AGENTS.md, never interprets the Markdown, and never
+    merges task context into stage text.
+- **Consequence.** One small, pure-I/O component holds all resolution logic, so the
+  wiring stages only decide which stage's `Content()` goes into which prompt.
+
+## D48. Where the two stage layers are read from
+
+- Date: 2026-09-25. Stage-instructions work, Stage 1. Decided by the agent. The user
+  was told and did not object.
+- **Decision.**
+  - The global layer is `stages/` next to the config file: `~/.config/foreman/stages/`
+    by default, or next to `$FOREMAN_CONFIG` when that is set. `Config.StagesDir` is
+    derived, not a YAML key, because the user wants convention over configuration.
+  - The repo layer is read from the task's worktree root. That is the committed
+    `.foreman/` on the task's base branch, not the folder `start` was run from.
+- **Consequence.** A stage file that is edited but not committed in the main checkout
+  doesn't affect tasks. Moving the config file moves the stage files with it.
+
+## D49. pr.md is loaded in the implementation turn
+
+- Date: 2026-09-25. Stage-instructions work. Decided by the user (option A, the
+  recommendation).
+- **Context.** The implementation agent opens the PR and writes its description in the
+  same turn (D7). There is no separate PR step.
+- **Options.** (A) Load pr.md into the implementation prompt, in its own section for
+  writing the PR description. (B) Add a separate turn that opens the PR with only
+  pr.md.
+- **Decision.** A. The implementation prompt carries `implement` and `pr`, each in its
+  own section. It never carries `review`. The review prompt carries only `review`.
+- **Consequence.** No extra agent turn, and no change to the runner loop or the D7
+  contract.
