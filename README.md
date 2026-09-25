@@ -62,6 +62,7 @@ foreman show 825                               # everything recorded for one tas
 foreman respond 825                            # answer a question from the agent
 foreman clean --dry-run                        # which worktrees would be removed
 foreman clean                                  # remove worktrees of DONE tasks
+foreman config stages                          # which stage instruction files apply here
 foreman version
 ```
 
@@ -96,6 +97,34 @@ retry behavior". The agent treats it as part of the task.
      whether a failure comes from the change or from CI itself.
    - A repo with no checks shows `✓ CI (no checks)`.
    - A merged PR marks the task DONE.
+
+## Stage instructions
+
+You can give the agents your own standing instructions for each stage of the work. For
+example, a three-pass review, or how PR descriptions should read. They add to the
+agents' own `CLAUDE.md` and `AGENTS.md`, which the agents keep loading as usual. Foreman
+never reads or changes those files.
+
+| Stage | Given to | Global file | Repo file (committed) |
+|---|---|---|---|
+| `implement` | the implementer | `~/.config/foreman/stages/implement.md` | `.foreman/implement.md` |
+| `review` | the competing reviewer | `~/.config/foreman/stages/review.md` | `.foreman/review.md` |
+| `pr` | the implementer, for the PR description | `~/.config/foreman/stages/pr.md` | `.foreman/pr.md` |
+
+- All the files are optional.
+- When both files exist, the agent gets both: global first, then the repo's more
+  specific rules.
+- The task's `--context` file and your recorded decisions take precedence over stage
+  instructions.
+- Tasks read `.foreman/` from their worktree, so only the version committed on the base
+  branch counts.
+- A PR body always includes `Closes #N`. A review always ends in foreman's JSON format.
+  Otherwise the text is passed through as written.
+
+```bash
+foreman config stages          # where each stage's instructions come from
+foreman config stage review    # the combined text the reviewer gets
+```
 
 ## Cleaning up worktrees
 

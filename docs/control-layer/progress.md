@@ -284,7 +284,23 @@ has five stages: resolver, then implement, then review, then pr, then CLI inspec
     the section.
   - The reviewer's prompt had neither, and only the reviewer had GLOBAL-REVIEW.
 
-Next is Stage 5: inspect the effective stage instructions from the CLI.
+### Stage 5 (complete): CLI inspection
+
+- `foreman config stages` shows each stage's sources, and `foreman config stage <stage>`
+  shows the combined text as agents get it (D53).
+- Validated by tests for parsing (both forms, an unknown stage, bad shapes),
+  `RepoRoot` (from a subdirectory, and outside a repo), and rendering (found, not
+  configured with its path, outside a repo, a read error, and empty content).
+- Validated end to end with the built binary:
+  - from a repo subfolder, all six sources found;
+  - `config stage review` printing global then repo text;
+  - outside a repo, "not in a git repository";
+  - a mode-000 file showing an error and exit 1;
+  - an unknown stage giving usage and exit 64;
+  - the user's real config location listing everything as not configured, with the
+    `~/.config/foreman/stages/…` paths.
+
+The stage-instructions track is complete.
 
 ## Known limitations
 
@@ -342,6 +358,7 @@ what it replaced. Current summary:
   D50. Implement instructions are resolved per fresh turn, before the task context.
   D51. Review instructions go to every review round, and the built-in checklist becomes
   the fallback. D52. pr instructions sit with the PR rules, and "Closes #N" stays required.
+  D53. `foreman config stages` and `foreman config stage <stage>`.
 - D46 (supersedes D38). CI belongs to the repo owners: foreman reads GitHub's checks and
   hands failures to the developer.
 

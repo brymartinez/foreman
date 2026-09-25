@@ -243,3 +243,44 @@ func TestReadyShowsFailingCIForTheDeveloper(t *testing.T) {
 		t.Errorf("missing %q in:\n%s", want, buf.String())
 	}
 }
+
+func TestStageSources(t *testing.T) {
+	g := "/home/u/.config/foreman/stages/"
+	r := "/src/widgets/.foreman/"
+	var buf bytes.Buffer
+	StageSources(&buf, []StageReport{
+		{Instructions: task.StageInstructions{Stage: task.StageImplement, GlobalPath: g + "implement.md", RepoPath: r + "implement.md"}, GlobalWhere: g + "implement.md", RepoWhere: r + "implement.md"},
+		{Instructions: task.StageInstructions{Stage: task.StageReview, GlobalPath: g + "review.md"}, GlobalWhere: g + "review.md", RepoWhere: r + "review.md"},
+		{Instructions: task.StageInstructions{Stage: task.StagePR}, Err: errors.New("stage instructions /x/pr.md: permission denied")},
+	}, "/home/u", "/src/widgets")
+	want := `IMPLEMENT
+  global: ~/.config/foreman/stages/implement.md
+  repo:   .foreman/implement.md
+
+REVIEW
+  global: ~/.config/foreman/stages/review.md
+  repo:   not configured (.foreman/review.md)
+
+PR
+  error:  stage instructions /x/pr.md: permission denied
+
+Tasks read .foreman/ from their worktree: the version committed on the base branch.
+`
+	if buf.String() != want {
+		t.Errorf("got:\n%s\nwant:\n%s", buf.String(), want)
+	}
+}
+
+func TestStageContent(t *testing.T) {
+	var buf bytes.Buffer
+	StageContent(&buf, StageReport{Instructions: task.StageInstructions{Stage: task.StageReview, GlobalPath: "/g/review.md", Global: "Three passes.", Repo: "Check migrations.", RepoPath: "/r/.foreman/review.md"},
+		GlobalWhere: "/g/review.md", RepoWhere: "/r/.foreman/review.md"}, "", "/r")
+	if want := "REVIEW\n  global: /g/review.md\n  repo:   .foreman/review.md\n\nThree passes.\n\nCheck migrations.\n"; buf.String() != want {
+		t.Errorf("got:\n%s\nwant:\n%s", buf.String(), want)
+	}
+	buf.Reset()
+	StageContent(&buf, StageReport{Instructions: task.StageInstructions{Stage: task.StagePR}, GlobalWhere: "/g/pr.md"}, "", "")
+	if want := "PR\n  global: not configured (/g/pr.md)\n  repo:   not in a git repository\n\n(no instructions; agents get only their own CLAUDE.md or AGENTS.md)\n"; buf.String() != want {
+		t.Errorf("got:\n%s\nwant:\n%s", buf.String(), want)
+	}
+}

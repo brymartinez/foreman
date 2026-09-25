@@ -4,6 +4,7 @@ package render
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -318,6 +319,75 @@ func Cleaned(w io.Writer, results []app.CleanResult, dryRun bool) {
 			fmt.Fprintf(w, "  #%d  %s %s\n        branch %s kept\n", r.Rec.Number, removed, d.Worktree, d.Branch)
 		}
 	}
+}
+
+// StageReport is one stage as `foreman config` resolved it. Where is where each layer
+// is looked up, for "not configured" lines; Err is a read failure.
+type StageReport struct {
+	Instructions task.StageInstructions
+	GlobalWhere  string
+	RepoWhere    string // "" outside a repository
+	Err          error
+}
+
+// StageSources prints where each stage's instructions come from. home shortens paths
+// to ~ and repoRoot makes repo paths relative.
+func StageSources(w io.Writer, reports []StageReport, home, repoRoot string) {
+	for i, r := range reports {
+		if i > 0 {
+			fmt.Fprintln(w)
+		}
+		stageHeader(w, r, home, repoRoot)
+	}
+	fmt.Fprintln(w, "\nTasks read .foreman/ from their worktree: the version committed on the base branch.")
+}
+
+// StageContent prints one stage's sources and the combined text agents receive.
+func StageContent(w io.Writer, r StageReport, home, repoRoot string) {
+	stageHeader(w, r, home, repoRoot)
+	if r.Err != nil {
+		return
+	}
+	content := r.Instructions.Content()
+	if content == "" {
+		content = "(no instructions; agents get only their own CLAUDE.md or AGENTS.md)"
+	}
+	fmt.Fprintf(w, "\n%s\n", content)
+}
+
+func stageHeader(w io.Writer, r StageReport, home, repoRoot string) {
+	fmt.Fprintln(w, strings.ToUpper(string(r.Instructions.Stage)))
+	if r.Err != nil {
+		fmt.Fprintf(w, "  error:  %v\n", r.Err)
+		return
+	}
+	fmt.Fprintf(w, "  global: %s\n", source(r.Instructions.GlobalPath, r.GlobalWhere, home, ""))
+	if r.RepoWhere == "" {
+		fmt.Fprintf(w, "  repo:   not in a git repository\n")
+		return
+	}
+	fmt.Fprintf(w, "  repo:   %s\n", source(r.Instructions.RepoPath, r.RepoWhere, home, repoRoot))
+}
+
+func source(found, where, home, base string) string {
+	if found != "" {
+		return displayPath(found, home, base)
+	}
+	return "not configured (" + displayPath(where, home, base) + ")"
+}
+
+func displayPath(p, home, base string) string {
+	if base != "" {
+		if rel, err := filepath.Rel(base, p); err == nil && !strings.HasPrefix(rel, "..") {
+			return rel
+		}
+	}
+	if home != "" {
+		if rest, ok := strings.CutPrefix(p, home+string(filepath.Separator)); ok {
+			return "~/" + rest
+		}
+	}
+	return p
 }
 
 func agentName(a task.Agent) string {

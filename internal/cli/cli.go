@@ -21,6 +21,7 @@ const (
 	Start   Name = "start"
 	Respond Name = "respond"
 	Clean   Name = "clean"
+	Config  Name = "config"
 	Version Name = "version"
 	// Run is the hidden verb the detached runner process executes (see internal/runner).
 	Run Name = "__run"
@@ -34,6 +35,8 @@ type Command struct {
 	ContextFile string
 	BranchType  task.BranchType
 	DryRun      bool
+	// Stage is set for `config stage <stage>`; `config stages` leaves it empty.
+	Stage task.Stage
 }
 
 const Usage = `foreman: delegate GitHub issues to Claude Code or Codex
@@ -45,6 +48,8 @@ Usage:
   foreman start <issue> --agent claude|codex [--context path.md] [--type fix]
   foreman respond <issue>                         Answer a NEEDS_DECISION task
   foreman clean [<issue>] [--dry-run]             Remove worktrees of DONE tasks (or one DONE/FAILED task)
+  foreman config stages                           Where each stage's instructions come from
+  foreman config stage <implement|review|pr>      The combined instructions for one stage
   foreman version
 
 <issue> is 825, #825, or owner/repo#825 when the number exists in several repos.
@@ -68,6 +73,8 @@ func Parse(argv []string) (Command, error) {
 		return Command{Name: Version}, nil
 	case "clean":
 		return parseClean(rest)
+	case "config":
+		return parseConfig(rest)
 	case "inbox", "status":
 		if len(rest) > 0 {
 			return Command{}, usagef("%s takes no arguments", name)
@@ -126,6 +133,20 @@ func parseStart(rest []string) (Command, error) {
 		}
 	}
 	return Command{Name: Start, Repo: repo, Issue: n, Agent: a, ContextFile: *contextFlag, BranchType: bt}, nil
+}
+
+func parseConfig(rest []string) (Command, error) {
+	switch {
+	case len(rest) == 1 && rest[0] == "stages":
+		return Command{Name: Config}, nil
+	case len(rest) == 2 && rest[0] == "stage":
+		st, err := task.ParseStage(rest[1])
+		if err != nil {
+			return Command{}, usagef("config stage: %v", err)
+		}
+		return Command{Name: Config, Stage: st}, nil
+	}
+	return Command{}, usagef("config needs \"stages\" or \"stage <implement|review|pr>\"")
 }
 
 func parseClean(rest []string) (Command, error) {

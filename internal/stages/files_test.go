@@ -1,7 +1,9 @@
 package stages
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -109,5 +111,22 @@ func TestResolveReportsRealFilesystemErrors(t *testing.T) {
 	_, err = Files{}.Resolve(l.repo, task.StagePR)
 	if err == nil || !strings.Contains(err.Error(), "not a regular file") {
 		t.Errorf("want a file-type error for a directory, got %v", err)
+	}
+}
+
+func TestRepoRoot(t *testing.T) {
+	root := t.TempDir()
+	if out, err := exec.Command("git", "init", "-q", root).CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	sub := filepath.Join(root, "a", "b")
+	os.MkdirAll(sub, 0o755)
+	got, err := RepoRoot(context.Background(), sub)
+	want, _ := filepath.EvalSymlinks(root)
+	if err != nil || got != want {
+		t.Errorf("RepoRoot(sub) = %q, %v; want %q", got, err, want)
+	}
+	if got, err := RepoRoot(context.Background(), t.TempDir()); err != nil || got != "" {
+		t.Errorf("outside a repo: %q, %v", got, err)
 	}
 }

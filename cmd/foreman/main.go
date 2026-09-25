@@ -120,6 +120,8 @@ func run(argv []string) int {
 		}
 	case cli.Respond:
 		return respond(ctx, a, cmd)
+	case cli.Config:
+		return stageConfig(ctx, cfg, cmd.Stage)
 	case cli.Run:
 		fmt.Printf("foreman: runner %d started %s\n", os.Getpid(), time.Now().Format(time.RFC3339))
 		if err := a.RunTask(ctx, task.Key{Repo: cmd.Repo, Number: cmd.Issue}, os.Getpid(), os.Stdout); err != nil {
@@ -161,6 +163,42 @@ func respond(ctx context.Context, a app.App, cmd cli.Command) int {
 	}
 	fmt.Printf("%s continues in %s (log: %s)\nCheck progress with: foreman status\n", d.Implementer.Agent, d.Worktree, d.RunnerLog)
 	return 0
+}
+
+// stageConfig shows the stage instructions in effect for the repository at the
+// current directory. An empty stage lists every stage's sources.
+func stageConfig(ctx context.Context, cfg config.Config, only task.Stage) int {
+	dir, err := os.Getwd()
+	if err != nil {
+		return fail(err)
+	}
+	root, err := stages.RepoRoot(ctx, dir)
+	if err != nil {
+		return fail(err)
+	}
+	files := stages.Files{GlobalDir: cfg.StagesDir}
+	var reports []render.StageReport
+	code := 0
+	for _, st := range task.Stages {
+		if only != "" && st != only {
+			continue
+		}
+		r := render.StageReport{GlobalWhere: filepath.Join(cfg.StagesDir, string(st)+".md")}
+		if root != "" {
+			r.RepoWhere = filepath.Join(root, stages.RepoDir, string(st)+".md")
+		}
+		if r.Instructions, r.Err = files.Resolve(root, st); r.Err != nil {
+			r.Instructions.Stage, code = st, 1
+		}
+		reports = append(reports, r)
+	}
+	home, _ := os.UserHomeDir()
+	if only != "" {
+		render.StageContent(os.Stdout, reports[0], home, root)
+	} else {
+		render.StageSources(os.Stdout, reports, home, root)
+	}
+	return code
 }
 
 func fail(err error) int {

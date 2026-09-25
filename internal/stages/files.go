@@ -4,11 +4,15 @@
 package stages
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/brymartinez/foreman/internal/task"
 )
@@ -62,4 +66,19 @@ func read(path string) (string, string, error) {
 		return "", "", fmt.Errorf("stage instructions %s: %w", path, err)
 	}
 	return path, string(b), nil
+}
+
+// RepoRoot is the top of the git working tree containing dir, or "" when dir is not
+// inside one. `foreman config` uses it; tasks use their worktree instead (D48).
+func RepoRoot(ctx context.Context, dir string) (string, error) {
+	var stdout, stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--show-toplevel")
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		if strings.Contains(stderr.String(), "not a git repository") {
+			return "", nil
+		}
+		return "", fmt.Errorf("git rev-parse --show-toplevel: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return strings.TrimSpace(stdout.String()), nil
 }

@@ -38,6 +38,10 @@ func TestParseRejects(t *testing.T) {
 		{"deploy"},
 		{"__run", "825"},
 		{"clean", "--force"},
+		{"config"},
+		{"config", "stage"},
+		{"config", "stage", "deploy"},
+		{"config", "stages", "extra"},
 		{"start", "825", "--agent", "claude", "--type", "agent"},
 		{"clean", "1", "2"},
 	} {
@@ -69,6 +73,12 @@ func TestParseSimple(t *testing.T) {
 	}
 	if got, err := Parse([]string{"start", "825", "--type", "Fix", "--agent", "codex"}); err != nil || got.BranchType != "fix" {
 		t.Errorf("start --type parsed as %+v, %v", got, err)
+	}
+	if got, _ := Parse([]string{"config", "stages"}); got != (Command{Name: Config}) {
+		t.Errorf("config stages parsed as %+v", got)
+	}
+	if got, _ := Parse([]string{"config", "stage", "Review"}); got != (Command{Name: Config, Stage: task.StageReview}) {
+		t.Errorf("config stage parsed as %+v", got)
 	}
 	if got, _ := Parse([]string{"clean", "--dry-run", "a/b#3"}); got != (Command{Name: Clean, Repo: "a/b", Issue: 3, DryRun: true}) {
 		t.Errorf("clean parsed as %+v", got)

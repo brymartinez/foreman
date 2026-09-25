@@ -679,3 +679,24 @@ Entry format:
     agent runs.
 - **Consequence.** The developer owns the PR format, and foreman keeps only the issue
   link it depends on.
+
+## D53. Inspecting stage instructions from the CLI
+
+- Date: 2026-09-25. Stage-instructions work, Stage 5. Decided by the agent, following
+  the shape the spec suggested.
+- **Decision.**
+  - `foreman config stages` lists each stage's global and repo source. A missing file
+    shows as "not configured (<where it would be>)", so the user knows where to create
+    it.
+  - `foreman config stage <stage>` prints the sources and then the combined text,
+    exactly as agents receive it.
+  - The repo layer is found from the git root of the current directory
+    (`git rev-parse --show-toplevel`). Outside a repository it shows "not in a git
+    repository".
+  - A footer notes that tasks read the committed `.foreman/` from their worktree (D48),
+    because an uncommitted local file shows here but doesn't reach tasks.
+  - A read error is shown on its stage and exits 1.
+  - `config` has only these two subcommands for now. The command goes straight to the
+    resolver and doesn't go through `app`, because it reads no task state.
+- **Consequence.** Everything that shapes an agent's stage instructions can be seen
+  without running a task.
