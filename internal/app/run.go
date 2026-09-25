@@ -114,8 +114,8 @@ func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Rev
 	}
 	in := agent.StartInput{Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD}
 	resume := ""
-	if dec := rec.Undelivered(); dec != nil {
-		resume = agent.ResumeMessage(*dec)
+	if decs := rec.Undelivered(); len(decs) > 0 {
+		resume = agent.ResumeMessage(decs)
 	} else if findings != nil {
 		resume = agent.FindingsMessage(*findings)
 	}
@@ -313,7 +313,9 @@ func applyTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error,
 		rec.Validation = o.Validation
 	case agent.Blocked:
 		rec.State = task.NeedsDecision
-		rec.Decisions = append(rec.Decisions, task.Decision{AskedAt: now, Question: *o.Question})
+		for _, q := range o.Questions {
+			rec.Decisions = append(rec.Decisions, task.Decision{AskedAt: now, Question: q})
+		}
 	case agent.FailedRun:
 		rec.State = task.Failed
 	}

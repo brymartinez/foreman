@@ -82,12 +82,14 @@ func kindLabel(k task.Kind) string {
 }
 
 func pendingQuestion(rec *task.Record) string {
-	for i := len(rec.Decisions) - 1; i >= 0; i-- {
-		if rec.Decisions[i].Answer == "" {
-			return rec.Decisions[i].Question.Issue
-		}
+	p := rec.Pending()
+	if p == nil {
+		return "decision needed"
 	}
-	return "decision needed"
+	if n := rec.PendingCount(); n > 1 {
+		return fmt.Sprintf("%s (+%d more)", p.Question.Issue, n-1)
+	}
+	return p.Question.Issue
 }
 
 // ready lists what the gate checked, so the developer knows what is left to review.
@@ -291,6 +293,9 @@ func Show(w io.Writer, r *task.Record) {
 	}
 	if p := r.Pending(); p != nil && r.State == task.NeedsDecision {
 		fmt.Fprintln(w)
+		if n := r.PendingCount(); n > 1 {
+			fmt.Fprintf(w, "%d questions are waiting; this is the first.\n\n", n)
+		}
 		Blocked(w, p.Question)
 		fmt.Fprintf(w, "\nAnswer with: foreman respond %s#%d\n", r.Repo, r.Number)
 	}

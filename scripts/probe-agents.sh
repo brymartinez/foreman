@@ -15,7 +15,7 @@ cd "$work/wt"
 pass=0 fail=0
 check() { if [ "$2" = "$3" ]; then echo "ok   $1"; pass=$((pass+1)); else echo "FAIL $1: got '$2' want '$3'"; fail=$((fail+1)); fi; }
 
-blocked_prompt='You must not change any files. Report status "blocked" with a question asking whether retries should apply to 4xx responses, two options A and B, recommendation A.'
+blocked_prompt='You must not change any files. Report status "blocked" with one entry in questions asking whether retries should apply to 4xx responses, two options A and B, recommendation A.'
 resume_prompt='Decision: A. Report status "failed" with summary "probe complete". Do not change files.'
 
 echo "# claude $(claude --version)"
@@ -24,7 +24,7 @@ claude -p "$blocked_prompt" --session-id "$sid" --output-format json --json-sche
   --permission-mode acceptEdits --model haiku </dev/null >c1.json 2>/dev/null
 check "claude honors --session-id" "$(jq -r .session_id c1.json)" "$sid"
 check "claude structured_output status" "$(jq -r .structured_output.status c1.json)" blocked
-check "claude structured_output has question" "$(jq -r '.structured_output.question | type' c1.json)" object
+check "claude structured_output has questions" "$(jq -r '.structured_output.questions | length' c1.json)" 1
 claude -p "$resume_prompt" --resume "$sid" --output-format json --json-schema "$(cat "$schema")" \
   --permission-mode acceptEdits --model haiku </dev/null >c2.json 2>/dev/null
 check "claude resume keeps session" "$(jq -r .session_id c2.json)" "$sid"
@@ -42,6 +42,7 @@ codex exec --json -s workspace-write --output-schema "$schema" -o x1.json "$bloc
 tid="$(head -1 x1.jsonl | jq -r 'select(.type=="thread.started").thread_id')"
 check "codex emits thread.started" "$([ -n "$tid" ] && echo yes || echo no)" yes
 check "codex output-schema status" "$(jq -r .status x1.json)" blocked
+check "codex output-schema has questions" "$(jq -r '.questions | length' x1.json)" 1
 codex exec resume --json --output-schema "$schema" -o x2.json "$tid" "$resume_prompt" </dev/null >x2.jsonl 2>/dev/null
 check "codex resume keeps thread" "$(head -1 x2.jsonl | jq -r .thread_id)" "$tid"
 check "codex resume structured status" "$(jq -r .status x2.json)" failed

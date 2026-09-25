@@ -117,7 +117,7 @@ func TestReviewLoopStopsWhenImplementerBlocksDuringFix(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	q := retryQuestion
-	f.claude.turns = []agent.Turn{prTurn("sid-1"), {Session: task.Session{Agent: task.Claude, ID: "sid-1"}, Outcome: agent.Outcome{Status: agent.Blocked, Summary: "?", Question: &q}}}
+	f.claude.turns = []agent.Turn{prTurn("sid-1"), {Session: task.Session{Agent: task.Claude, ID: "sid-1"}, Outcome: agent.Outcome{Status: agent.Blocked, Summary: "?", Questions: []task.Question{q}}}}
 	f.codex.reviews = []agent.ReviewOutcome{findings("blocking")}
 	f.app.RunTask(context.Background(), key, 4242, io.Discard)
 	if got := f.store.recs[key]; got.State != task.NeedsDecision || len(got.Reviews) != 1 {

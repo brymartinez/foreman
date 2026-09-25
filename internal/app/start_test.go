@@ -285,7 +285,7 @@ func TestRunTaskAppliesOutcome(t *testing.T) {
 					t.Errorf("pr = %d %q validation %v", r.Delegation.PR, r.Delegation.PRURL, r.Validation)
 				}
 			}},
-		{"blocked", agent.Turn{Outcome: agent.Outcome{Status: agent.Blocked, Summary: "need input", Question: question}}, nil, task.NeedsDecision,
+		{"blocked", agent.Turn{Outcome: agent.Outcome{Status: agent.Blocked, Summary: "need input", Questions: []task.Question{*question}}}, nil, task.NeedsDecision,
 			func(t *testing.T, r *task.Record) {
 				if len(r.Decisions) != 1 || r.Decisions[0].Question.Issue != "Retry 4xx?" || r.Decisions[0].Answer != "" {
 					t.Errorf("decisions = %+v", r.Decisions)

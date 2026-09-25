@@ -35,16 +35,16 @@ type Outcome struct {
 	PRNumber   int
 	PRURL      string
 	Validation []Check
-	Question   *task.Question
+	Questions  []task.Question
 }
 
 type wireOutcome struct {
-	Status     Status         `json:"status"`
-	Summary    string         `json:"summary"`
-	PRNumber   *int           `json:"prNumber"`
-	PRURL      *string        `json:"prUrl"`
-	Validation []Check        `json:"validation"`
-	Question   *task.Question `json:"question"`
+	Status     Status          `json:"status"`
+	Summary    string          `json:"summary"`
+	PRNumber   *int            `json:"prNumber"`
+	PRURL      *string         `json:"prUrl"`
+	Validation []Check         `json:"validation"`
+	Questions  []task.Question `json:"questions"`
 }
 
 func ParseOutcome(raw []byte) (Outcome, error) {
@@ -69,13 +69,15 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 		}
 		out.Validation = w.Validation
 	case Blocked:
-		if w.Question == nil {
-			return Outcome{}, errors.New("blocked outcome has no question")
+		if len(w.Questions) == 0 {
+			return Outcome{}, errors.New("blocked outcome has no questions")
 		}
-		if err := w.Question.Validate(); err != nil {
-			return Outcome{}, fmt.Errorf("blocked outcome: %w", err)
+		for i, q := range w.Questions {
+			if err := q.Validate(); err != nil {
+				return Outcome{}, fmt.Errorf("blocked outcome, question %d: %w", i+1, err)
+			}
 		}
-		out.Question = w.Question
+		out.Questions = w.Questions
 	case FailedRun:
 	default:
 		return Outcome{}, fmt.Errorf("unknown outcome status %q", w.Status)

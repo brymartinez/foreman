@@ -313,3 +313,13 @@ func TestInboxWarnsWhenASearchHitsTheLimit(t *testing.T) {
 		t.Errorf("missing %q in:\n%s", want, buf.String())
 	}
 }
+
+func TestInboxCountsWaitingQuestions(t *testing.T) {
+	var buf bytes.Buffer
+	q := task.Question{Issue: "Retry 4xx?"}
+	Inbox(&buf, app.InboxReport{NeedsDecision: []*task.Record{{Key: task.Key{Repo: "a/b", Number: 825}, Title: "T", State: task.NeedsDecision,
+		Decisions: []task.Decision{{Question: q}, {Question: task.Question{Issue: "Cap retries?"}}}}}})
+	if want := "a/b · Retry 4xx? (+1 more)"; !strings.Contains(buf.String(), want) {
+		t.Errorf("missing %q in:\n%s", want, buf.String())
+	}
+}

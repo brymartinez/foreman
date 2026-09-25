@@ -48,9 +48,12 @@ func TestValidate(t *testing.T) {
 }
 
 func TestPendingAndUndelivered(t *testing.T) {
-	r := &Record{Decisions: []Decision{{Answer: "A"}, {}}}
-	if r.Pending() != &r.Decisions[1] || r.Undelivered() != &r.Decisions[0] {
-		t.Fatal("wrong decision picked")
+	r := &Record{Decisions: []Decision{{Answer: "A", DeliveredAt: time.Now()}, {Answer: "B"}, {}, {}}}
+	if r.Pending() != &r.Decisions[2] || r.PendingCount() != 2 {
+		t.Fatalf("pending %p of %d", r.Pending(), r.PendingCount())
+	}
+	if u := r.Undelivered(); len(u) != 1 || u[0].Answer != "B" {
+		t.Fatalf("undelivered = %+v", u)
 	}
 }
 

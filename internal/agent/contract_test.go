@@ -10,26 +10,29 @@ import (
 )
 
 const blockedWire = `{"status":"blocked","summary":"s","prNumber":null,"prUrl":null,"validation":[],
-"question":{"issue":"Should retries apply to 4xx?","context":"Retries 5xx only.",
+"questions":[{"issue":"Should retries apply to 4xx?","context":"Retries 5xx only.",
 "options":[{"label":"A","description":"5xx only"},{"label":"B","description":"4xx + 5xx"}],
-"recommendation":"A","impactIfWrong":"Repeated client errors."}}`
+"recommendation":"A","impactIfWrong":"Repeated client errors."},
+{"issue":"Cap the retry count?","context":"No cap today.",
+"options":[{"label":"A","description":"3 tries"},{"label":"B","description":"no cap"}],
+"recommendation":"A","impactIfWrong":"Unbounded retries."}]}`
 
 func TestParseOutcomeBlocked(t *testing.T) {
 	got, err := ParseOutcome([]byte(blockedWire))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Status != Blocked || got.Question == nil || got.Question.Recommendation != "A" || len(got.Question.Options) != 2 {
+	if got.Status != Blocked || len(got.Questions) != 2 || got.Questions[0].Recommendation != "A" || got.Questions[1].Issue != "Cap the retry count?" {
 		t.Fatalf("got %+v", got)
 	}
 }
 
 func TestParseOutcomePROpened(t *testing.T) {
-	_, err := ParseOutcome([]byte(`{"status":"pr_opened","summary":"s","prNumber":912,"prUrl":"u","validation":[],"question":null}`))
+	_, err := ParseOutcome([]byte(`{"status":"pr_opened","summary":"s","prNumber":912,"prUrl":"u","validation":[],"questions":[]}`))
 	if err == nil || !strings.Contains(err.Error(), "validation") {
 		t.Fatalf("empty validation err = %v", err)
 	}
-	got, err := ParseOutcome([]byte(`{"status":"pr_opened","summary":"s","prNumber":null,"prUrl":null,"validation":[{"command":"go test ./...","passed":true}],"question":null}`))
+	got, err := ParseOutcome([]byte(`{"status":"pr_opened","summary":"s","prNumber":null,"prUrl":null,"validation":[{"command":"go test ./...","passed":true}],"questions":[]}`))
 	if err != nil || got.PRNumber != 0 || len(got.Validation) != 1 {
 		t.Fatalf("missing number must parse as 0 for branch lookup: %+v %v", got, err)
 	}
@@ -37,7 +40,7 @@ func TestParseOutcomePROpened(t *testing.T) {
 
 func TestParseOutcomeRejectsSingleOptionQuestion(t *testing.T) {
 	wire := `{"status":"blocked","summary":"s","prNumber":null,"prUrl":null,"validation":[],
-"question":{"issue":"q","context":"c","options":[{"label":"A","description":"only"}],"recommendation":"A","impactIfWrong":"i"}}`
+"questions":[{"issue":"q","context":"c","options":[{"label":"A","description":"only"}],"recommendation":"A","impactIfWrong":"i"}]}`
 	if _, err := ParseOutcome([]byte(wire)); err == nil || !strings.Contains(err.Error(), "two options") {
 		t.Fatalf("err = %v", err)
 	}
@@ -115,5 +118,12 @@ func TestParseReview(t *testing.T) {
 		if _, err := ParseReview([]byte(bad)); err == nil {
 			t.Errorf("accepted %s", bad)
 		}
+	}
+}
+
+func TestParseOutcomeRejectsBlockedWithoutQuestions(t *testing.T) {
+	wire := `{"status":"blocked","summary":"s","prNumber":null,"prUrl":null,"validation":[],"questions":[]}`
+	if _, err := ParseOutcome([]byte(wire)); err == nil || !strings.Contains(err.Error(), "no questions") {
+		t.Fatalf("err = %v", err)
 	}
 }

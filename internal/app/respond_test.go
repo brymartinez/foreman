@@ -27,7 +27,7 @@ func blockedTask(t *testing.T) (fixture, task.Key) {
 		t.Fatal(err)
 	}
 	q := retryQuestion
-	f.claude.turn = agent.Turn{Session: task.Session{Agent: task.Claude, ID: "sid-1"}, Outcome: agent.Outcome{Status: agent.Blocked, Summary: "need input", Question: &q}}
+	f.claude.turn = agent.Turn{Session: task.Session{Agent: task.Claude, ID: "sid-1"}, Outcome: agent.Outcome{Status: agent.Blocked, Summary: "need input", Questions: []task.Question{q}}}
 	if err := f.app.RunTask(context.Background(), rec.Key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -142,6 +142,50 @@ func TestAppendDecisionNote(t *testing.T) {
 	for body, want := range cases {
 		if got := appendDecisionNote(body, d); got != want {
 			t.Errorf("appendDecisionNote(%q)\n got %q\nwant %q", body, got, want)
+		}
+	}
+}
+
+func TestRespondWaitsForEveryQuestionThenResumesOnce(t *testing.T) {
+	f := newFixture()
+	rec, err := f.app.Start(context.Background(), startReq(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	capQuestion := retryQuestion
+	capQuestion.Issue = "Cap the retry count?"
+	f.claude.turn = agent.Turn{Session: task.Session{Agent: task.Claude, ID: "sid-1"}, Outcome: agent.Outcome{Status: agent.Blocked, Summary: "need input", Questions: []task.Question{retryQuestion, capQuestion}}}
+	if err := f.app.RunTask(context.Background(), rec.Key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	f.runners.spawned = nil
+
+	first, err := f.app.Respond(context.Background(), rec.Key, "B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.State != task.NeedsDecision || first.Pending().Question.Issue != "Cap the retry count?" || len(f.runners.spawned) != 0 {
+		t.Fatalf("after one answer: state %s pending %+v spawned %d", first.State, first.Pending(), len(f.runners.spawned))
+	}
+	second, err := f.app.Respond(context.Background(), rec.Key, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.State != task.Working || len(f.runners.spawned) != 1 {
+		t.Fatalf("after both answers: state %s spawned %d", second.State, len(f.runners.spawned))
+	}
+
+	f.claude.turn = prTurn("sid-1")
+	if err := f.app.RunTask(context.Background(), rec.Key, 4243, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.claude.resumed) != 1 {
+		t.Fatalf("resumed %d times, want once: %q", len(f.claude.resumed), f.claude.resumed)
+	}
+	msg := f.claude.resumed[0]
+	for _, want := range []string{"answered your questions", "Decision: B. 4xx + 5xx", "Cap the retry count?\nDecision: A. 5xx only"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("resume message lacks %q:\n%s", want, msg)
 		}
 	}
 }

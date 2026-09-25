@@ -905,3 +905,28 @@ Entry format:
     truncated searches, and `Reconcile` takes whether the searches were complete.
 - **Consequence.** Unassigning the developer shows up in the inbox. Items in
   NEEDS DECISION and READY FOR YOU still appear only in their own section (D15).
+
+## D65. A blocked turn can ask several questions
+
+- Date: 2026-09-25. Closes the "one question pending at a time" limitation on the
+  user's request to fix everything the repository review found.
+- **Context.** The outcome carried one `question`. An agent with two decisions
+  stopped, waited, resumed, and stopped again, paying a resume and a wait per
+  decision.
+- **Decision.**
+  - The outcome schema replaces `question` with `questions`, an array. A blocked
+    outcome needs at least one, and each is validated as before (D29). The prompt
+    asks the agent to raise every decision it already knows about in one turn.
+  - Each question becomes its own decision. `Pending` is the oldest unanswered one,
+    so questions are answered in the order they were asked.
+  - `Respond` answers one question. The task stays NEEDS_DECISION until the last
+    answer, and then the runner is launched once. The resume message carries every
+    answer the agent hasn't received.
+  - `foreman respond` asks each waiting question in turn. If input ends before an
+    answer is typed, it stops and says how many are still waiting, instead of
+    accepting a recommendation the developer never saw.
+  - Inbox shows the first question with "(+N more)", and `show` says how many
+    are waiting.
+- **Consequence.** `scripts/probe-agents.sh` checks that both CLIs return a
+  `questions` array under the strict schema (17 checks, passing on Claude Code
+  2.1.281 and Codex 0.156.1).

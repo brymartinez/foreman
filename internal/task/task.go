@@ -204,9 +204,10 @@ type Decision struct {
 	DeliveredAt time.Time
 }
 
-// Pending is the unanswered decision, if any. Agents ask one question per turn.
+// Pending is the oldest unanswered decision, if any. A blocked turn can ask several
+// questions; they are answered in the order they were asked.
 func (r *Record) Pending() *Decision {
-	for i := len(r.Decisions) - 1; i >= 0; i-- {
+	for i := range r.Decisions {
 		if r.Decisions[i].Answer == "" {
 			return &r.Decisions[i]
 		}
@@ -214,15 +215,26 @@ func (r *Record) Pending() *Decision {
 	return nil
 }
 
-// Undelivered is the answered decision the agent has not received yet.
-func (r *Record) Undelivered() *Decision {
-	for i := range r.Decisions {
-		d := &r.Decisions[i]
-		if d.Answer != "" && d.DeliveredAt.IsZero() {
-			return d
+// PendingCount is how many decisions are waiting for an answer.
+func (r *Record) PendingCount() int {
+	n := 0
+	for _, d := range r.Decisions {
+		if d.Answer == "" {
+			n++
 		}
 	}
-	return nil
+	return n
+}
+
+// Undelivered lists the answered decisions the agent has not received yet.
+func (r *Record) Undelivered() []Decision {
+	var out []Decision
+	for _, d := range r.Decisions {
+		if d.Answer != "" && d.DeliveredAt.IsZero() {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 type Record struct {
@@ -334,7 +346,7 @@ func (r *Record) CommitsSinceReview() bool {
 // review, or after new commits on a PR that had a clean review (D63).
 func (r *Record) ReviewPending() bool {
 	d := r.Delegation
-	if d == nil || d.PR == 0 || d.PRHead == "" || r.Undelivered() != nil {
+	if d == nil || d.PR == 0 || d.PRHead == "" || len(r.Undelivered()) > 0 {
 		return false
 	}
 	latest := r.LatestReview()

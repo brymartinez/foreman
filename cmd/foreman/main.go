@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"syscall"
 	"time"
 
@@ -220,32 +221,52 @@ func respond(ctx context.Context, a app.App, cmd cli.Command) int {
 	if err != nil {
 		return fail(err)
 	}
-	pending := rec.Pending()
-	if rec.State != task.NeedsDecision || pending == nil {
+	if rec.State != task.NeedsDecision || rec.Pending() == nil {
 		return fail(fmt.Errorf("%s#%d is %s, not waiting for a decision", rec.Repo, rec.Number, rec.State))
 	}
-	fmt.Printf("%s#%d %s\n\n", rec.Repo, rec.Number, rec.Title)
-	render.Blocked(os.Stdout, pending.Question)
-	prompt := "\nDecision:\n> "
-	if o, ok := pending.Question.Recommended(); ok {
-		prompt = fmt.Sprintf("\nDecision (option label, your own answer, or Enter for %s):\n> ", o.Label)
+	fmt.Printf("%s#%d %s\n", rec.Repo, rec.Number, rec.Title)
+	stdin := bufio.NewReader(os.Stdin)
+	total := rec.PendingCount()
+	for i := 1; rec.State == task.NeedsDecision; i++ {
+		idx := slices.IndexFunc(rec.Decisions, func(d task.Decision) bool { return d.Answer == "" })
+		pending := rec.Decisions[idx]
+		fmt.Println()
+		if total > 1 {
+			fmt.Printf("Question %d of %d\n", i, total)
+		}
+		render.Blocked(os.Stdout, pending.Question)
+		prompt := "\nDecision:\n> "
+		if o, ok := pending.Question.Recommended(); ok {
+			prompt = fmt.Sprintf("\nDecision (option label, your own answer, or Enter for %s):\n> ", o.Label)
+		}
+		fmt.Print(prompt)
+		line, err := stdin.ReadString('\n')
+		if err != nil && line == "" {
+			if errors.Is(err, io.EOF) {
+				// No answer typed: never accept a recommendation the developer didn't see through.
+				fmt.Printf("\n%d %s still waiting; run foreman respond %s#%d again.\n", rec.PendingCount(), plural(rec.PendingCount(), "question is", "questions are"), rec.Repo, rec.Number)
+				return 1
+			}
+			return fail(err)
+		}
+		if rec, err = a.Respond(ctx, rec.Key, line); err != nil {
+			return fail(err)
+		}
+		fmt.Printf("\nRecorded: %s\n", rec.Decisions[idx].Answer)
 	}
-	fmt.Print(prompt)
-	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
-	if err != nil && line == "" && !errors.Is(err, io.EOF) {
-		return fail(err)
-	}
-	updated, err := a.Respond(ctx, rec.Key, line)
-	if err != nil {
-		return fail(err)
-	}
-	d := updated.Delegation
-	fmt.Printf("\nRecorded: %s\n", updated.Decisions[len(updated.Decisions)-1].Answer)
-	if updated.State == task.Failed {
-		return fail(errors.New(updated.LastOutcome.Summary))
+	d := rec.Delegation
+	if rec.State == task.Failed {
+		return fail(errors.New(rec.LastOutcome.Summary))
 	}
 	fmt.Printf("%s continues in %s (log: %s)\nCheck progress with: foreman status\n", d.Implementer.Agent, d.Worktree, d.RunnerLog)
 	return 0
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 // stageConfig shows the stage instructions in effect for the repository at the

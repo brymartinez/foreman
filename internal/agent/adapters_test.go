@@ -14,7 +14,7 @@ import (
 	"github.com/brymartinez/foreman/internal/task"
 )
 
-const prOpened = `{"status":"pr_opened","summary":"Added 4xx guard","prNumber":912,"prUrl":"https://github.com/a/b/pull/912","validation":[{"command":"go test ./...","passed":true}],"question":null}`
+const prOpened = `{"status":"pr_opened","summary":"Added 4xx guard","prNumber":912,"prUrl":"https://github.com/a/b/pull/912","validation":[{"command":"go test ./...","passed":true}],"questions":[]}`
 
 func argValue(args []string, flag string) string {
 	i := slices.Index(args, flag)
@@ -192,7 +192,7 @@ func TestPromptIncludesAnsweredDecisions(t *testing.T) {
 	if !strings.Contains(p, "- Q: Retry 4xx?\n  A: A. 5xx only") || strings.Contains(p, "Unanswered?") {
 		t.Errorf("decisions section wrong:\n%s", p)
 	}
-	if !strings.Contains(ResumeMessage(task.Decision{Question: task.Question{Issue: "Retry 4xx?"}, Answer: "A"}), "Decision: A") {
+	if !strings.Contains(ResumeMessage([]task.Decision{{Question: task.Question{Issue: "Retry 4xx?"}, Answer: "A"}}), "Decision: A") {
 		t.Error("resume message lacks the answer")
 	}
 }

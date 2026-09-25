@@ -9,11 +9,12 @@ import (
 	"github.com/brymartinez/foreman/internal/task"
 )
 
-// Respond records the developer's answer to the pending question and relaunches the
-// runner, which resumes the agent's session with it.
+// Respond records the developer's answer to the oldest pending question. Once every
+// question is answered it relaunches the runner, which resumes the agent's session
+// with all the answers.
 func (a App) Respond(ctx context.Context, key task.Key, raw string) (*task.Record, error) {
 	now := a.Now()
-	_, err := a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
+	rec, err := a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
 		if cur == nil || cur.State != task.NeedsDecision || cur.Pending() == nil {
 			return nil, fmt.Errorf("%s#%d is not waiting for a decision", key.Repo, key.Number)
 		}
@@ -24,12 +25,14 @@ func (a App) Respond(ctx context.Context, key task.Key, raw string) (*task.Recor
 		}
 		d.Answer, d.AnsweredAt = answer, now
 		cur.Body = appendDecisionNote(cur.Body, *d)
-		cur.State = task.Working
+		if cur.Pending() == nil {
+			cur.State = task.Working
+		}
 		cur.LastOutcome = &task.Outcome{Status: "answered", Summary: answer, At: now}
 		return cur, nil
 	})
-	if err != nil {
-		return nil, err
+	if err != nil || rec.State == task.NeedsDecision {
+		return rec, err
 	}
 	return a.launch(ctx, key)
 }

@@ -105,14 +105,26 @@ if [[ " $* " == *" --no-session-persistence "* ]]; then
 	echo '{"session_id":"r1","subtype":"success","total_cost_usd":0.05,"structured_output":{"verdict":"clean","summary":"looks right","findings":[]}}'
 	exit 0
 fi
-echo "claude implement" >>"$E2E_STATE/agents.log"
+if [[ " $* " == *" --resume "* ]]; then
+	echo "claude resume" >>"$E2E_STATE/agents.log"
+	printf '%s' "$2" >"$E2E_STATE/resume-prompt.txt"
+else
+	echo "claude implement" >>"$E2E_STATE/agents.log"
+fi
+if [ -f "$E2E_STATE/block-once" ]; then
+	rm "$E2E_STATE/block-once"
+	q() { printf '{"issue":"%s","context":"c","options":[{"label":"A","description":"%s"},{"label":"B","description":"%s"}],"recommendation":"A","impactIfWrong":"i"}' "$1" "$2" "$3"; }
+	printf '{"session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"blocked","summary":"two decisions","prNumber":null,"prUrl":null,"validation":[],"questions":[%s,%s]}}\n' \
+		"$(q 'Retry 4xx?' '5xx only' '4xx and 5xx')" "$(q 'Cap retries?' '3 tries' 'no cap')"
+	exit 0
+fi
 sleep "${E2E_AGENT_SLEEP:-1}"
 branch=$(git branch --show-current)
 echo "// retries" >>widgets.go
 git -c user.email=e2e@example.com -c user.name=e2e commit -qam "feat: retries"
 printf '{"number":900,"url":"https://github.com/acme/widgets/pull/900","state":"OPEN","headRefName":"%s","headRefOid":"%s","baseRefName":"main","isCrossRepository":false}\n' "$branch" "$(git rev-parse HEAD)" >"$E2E_STATE/pr-900.json"
 echo "claude stderr progress" >&2
-echo '{"session_id":"s1","subtype":"success","total_cost_usd":0.25,"structured_output":{"status":"pr_opened","summary":"added retries","prNumber":900,"prUrl":"https://github.com/acme/widgets/pull/900","validation":[{"command":"go test ./...","passed":true}],"question":null}}'
+echo '{"session_id":"s1","subtype":"success","total_cost_usd":0.25,"structured_output":{"status":"pr_opened","summary":"added retries","prNumber":900,"prUrl":"https://github.com/acme/widgets/pull/900","validation":[{"command":"go test ./...","passed":true}],"questions":[]}}'
 EOF
 
 	# Reviewer (and implementer, when E2E_CODEX_IMPLEMENTS is set) on the codex JSONL protocol.
@@ -137,6 +149,8 @@ EOF
 issue() { # issue <number> <title> [labels-json]
 	printf '{"number":%s,"title":"%s","body":"do it","labels":%s,"url":"https://github.com/acme/widgets/issues/%s","state":"OPEN","updatedAt":"2026-09-25T10:00:00Z"}\n' \
 		"$1" "$2" "${3:-[]}" "$1" >"$state/issue-$1.json"
+	printf '{"number":%s,"title":"%s","html_url":"https://github.com/acme/widgets/issues/%s","state":"open","updated_at":"2026-09-25T10:00:00Z"}\n' \
+		"$1" "$2" "$1" >"$state/api-$1.json"
 }
 
 scenario_runner() {
@@ -233,7 +247,6 @@ scenario_inbox() {
 
 	echo "[$(hit acme/widgets 43 'Fix pagination')]" >"$state/search-issues-assignee.json"
 	echo "[$(hit acme/widgets 951 'Mention me')]" >"$state/search-prs-mentions.json"
-	echo '{"number":42,"title":"Add retries","html_url":"https://github.com/acme/widgets/issues/42","state":"open","updated_at":"2026-09-25T10:00:00Z"}' >"$state/api-42.json"
 	foreman inbox --non-interactive </dev/null >"$sandbox/report2.txt"
 	check "PR mentions are listed" contains "$sandbox/report2.txt" "acme/widgets#951"
 	echo "[$(hit acme/widgets 43 'Fix pagination')]" >"$state/search-issues-mentions.json"
@@ -276,7 +289,24 @@ scenario_rereview() {
 	check "without implementing again" test "$(turns 'claude implement')" = 2
 }
 
-scenarios=${*:-runner notify logs inbox rereview}
+scenario_respond() {
+	echo "respond: several questions from one turn, answered in one sitting"
+	setup respond
+	touch "$state/block-once"
+	foreman start 42 --agent claude >/dev/null
+	check "the task waits on both questions" wait_status "NEEDS_DECISION"
+	foreman inbox --non-interactive </dev/null >"$sandbox/inbox.txt"
+	check "inbox counts the second question" contains "$sandbox/inbox.txt" "Retry 4xx? (+1 more)"
+	check "input ending early answers nothing more" bash -c "printf 'B\\n' | (cd '$FOREMAN_CWD' && '$work/foreman' respond 42) | grep -q '1 question is still waiting'"
+	check "the task still waits" wait_status "NEEDS_DECISION" 1
+	printf '\n' | foreman respond 42 >"$sandbox/respond.txt"
+	check "respond relaunches once every question is answered" wait_status "review ✓"
+	check "the agent resumed once, with both answers" test "$(turns 'claude resume')" = 1
+	check "resume carries the first answer" contains "$state/resume-prompt.txt" "Decision: B. 4xx and 5xx"
+	check "resume carries the second answer" contains "$state/resume-prompt.txt" "Decision: A. 3 tries"
+}
+
+scenarios=${*:-runner notify logs inbox rereview respond}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"

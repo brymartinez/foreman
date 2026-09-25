@@ -89,7 +89,7 @@ Only change files inside this worktree. Commit your work to %s. Do not switch br
 
 Stop and ask only when the choice materially affects product behavior, public API semantics, persistent schema semantics, security or authorization, destructive or irreversible data changes, an important architecture tradeoff, conflicting acceptance criteria, or a requirement that cannot be safely inferred.
 
-To ask, end your turn with status "blocked" and fill "question":
+To ask, end your turn with status "blocked" and fill "questions", one entry per decision. Ask every decision you already know you need in the same turn; the developer answers them together. Each entry has:
 - issue: the decision needed, as one question
 - context: what the code does today and what the issue says
 - options: two or more, each with a short label (A, B, ...) and what it means
@@ -104,7 +104,7 @@ Reply with JSON matching the provided schema:
 - "pr_opened" once the pull request exists: set prNumber, prUrl, and validation (each command you ran and whether it passed).
 - "blocked" when you need a decision, as described above.
 - "failed" when you cannot complete the task: say why in summary.
-Set fields that do not apply to null, or [] for validation.
+Set fields that do not apply to null, or [] for validation and questions.
 `, b.Worktree, b.Branch, b.BaseBranch, b.Branch, b.Branch, b.BaseBranch, b.Branch, b.Branch, b.Key.Number, prBodyRule(b.PRInstructions), prSection(b.PRInstructions))
 	return s.String()
 }
@@ -119,15 +119,19 @@ func answeredDecisions(ds []task.Decision) []task.Decision {
 	return out
 }
 
-// ResumeMessage continues the session that asked the question.
-func ResumeMessage(d task.Decision) string {
-	return fmt.Sprintf(`The developer answered your question.
-
-Question: %s
-Decision: %s
-
-Continue the task with this decision under the same instructions as before. Record the decision in the pull request description. End with the same JSON outcome: pr_opened, blocked, or failed.
-`, d.Question.Issue, d.Answer)
+// ResumeMessage continues the session that asked the questions, with every answer.
+func ResumeMessage(ds []task.Decision) string {
+	var s strings.Builder
+	if len(ds) == 1 {
+		s.WriteString("The developer answered your question.\n\n")
+	} else {
+		s.WriteString("The developer answered your questions.\n\n")
+	}
+	for _, d := range ds {
+		fmt.Fprintf(&s, "Question: %s\nDecision: %s\n\n", d.Question.Issue, d.Answer)
+	}
+	s.WriteString("Continue the task with these decisions under the same instructions as before. Record them in the pull request description. End with the same JSON outcome: pr_opened, blocked, or failed.\n")
+	return s.String()
 }
 
 // stageSection passes the developer's stage instructions through as written. The
