@@ -950,3 +950,13 @@ Entry format:
     "Stage 7" (D57) becomes Stage 10, Stages 7 to 9 move out of the
     stage-instructions track, and the review is Stage 11.
 - **Consequence.** The known limitations in `progress.md` are exactly these.
+
+## D67. Picking up at the review has two exceptions (amends D63)
+
+- Date: 2026-09-25. Found reviewing the D63 change before handing it over.
+- **Decision.**
+  - A run that would pick up at the review, but whose PR is no longer open or no
+    longer matches the task branch, logs why and runs the implementer instead of
+    failing the task. The implementer opens a new PR as usual.
+  - A restart keeps the PR only when the implementer agent is the same. Another
+    implementer starts over, because its reviewer is the agent that wrote the PR.

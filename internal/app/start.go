@@ -92,7 +92,8 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			ContextFile: req.ContextFile,
 		}
 		// The same branch has the same PR, so a restart can pick up at its review (D63).
-		if prev != nil && prev.Branch == wt.Branch {
+		// Another implementer starts over: its reviewer wrote the existing PR.
+		if prev != nil && prev.Branch == wt.Branch && prev.Implementer.Agent == req.Agent {
 			cur.Delegation.PR, cur.Delegation.PRURL, cur.Delegation.PRHead = prev.PR, prev.PRURL, prev.PRHead
 		}
 		cur.LastOutcome = &task.Outcome{Status: "started", Summary: fmt.Sprintf("dispatched to %s", req.Agent), At: now}

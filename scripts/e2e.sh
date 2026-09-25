@@ -122,12 +122,14 @@ sleep "${E2E_AGENT_SLEEP:-1}"
 branch=$(git branch --show-current)
 echo "// retries" >>widgets.go
 git -c user.email=e2e@example.com -c user.name=e2e commit -qam "feat: retries"
-printf '{"number":900,"url":"https://github.com/acme/widgets/pull/900","state":"OPEN","headRefName":"%s","headRefOid":"%s","baseRefName":"main","isCrossRepository":false}\n' "$branch" "$(git rev-parse HEAD)" >"$E2E_STATE/pr-900.json"
+issue=${branch#*/}
+pr=$((900 + ${issue%%-*}))
+printf '{"number":%s,"url":"https://github.com/acme/widgets/pull/%s","state":"OPEN","headRefName":"%s","headRefOid":"%s","baseRefName":"main","isCrossRepository":false}\n' "$pr" "$pr" "$branch" "$(git rev-parse HEAD)" >"$E2E_STATE/pr-$pr.json"
 echo "claude stderr progress" >&2
-echo '{"session_id":"s1","subtype":"success","total_cost_usd":0.25,"structured_output":{"status":"pr_opened","summary":"added retries","prNumber":900,"prUrl":"https://github.com/acme/widgets/pull/900","validation":[{"command":"go test ./...","passed":true}],"questions":[]}}'
+printf '{"session_id":"s1","subtype":"success","total_cost_usd":0.25,"structured_output":{"status":"pr_opened","summary":"added retries","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s","validation":[{"command":"go test ./...","passed":true}],"questions":[]}}\n' "$pr" "$pr"
 EOF
 
-	# Reviewer (and implementer, when E2E_CODEX_IMPLEMENTS is set) on the codex JSONL protocol.
+	# Reviewer on the codex JSONL protocol.
 	cat >"$sandbox/bin/codex" <<'EOF'
 #!/usr/bin/env bash
 if [[ " $* " == *" --ephemeral "* ]]; then echo "codex review"; else echo "codex implement"; fi >>"$E2E_STATE/agents.log"
@@ -271,7 +273,7 @@ scenario_rereview() {
 	echo '[{"name":"test","bucket":"pending","link":"https://ci/1"}]' >"$state/checks.json"
 	foreman start 42 --agent claude >/dev/null
 	wait_status "CI pending" || true
-	sed -i.bak 's/"headRefOid":"[0-9a-f]*"/"headRefOid":"feedfacefeedfacefeedfacefeedfacefeedface"/' "$state/pr-900.json"
+	sed -i.bak 's/"headRefOid":"[0-9a-f]*"/"headRefOid":"feedfacefeedfacefeedfacefeedfacefeedface"/' "$state/pr-942.json"
 	foreman status >/dev/null
 	check "a push after the clean review is reviewed again" wait_status "CI pending"
 	check "by the reviewer alone" test "$(turns 'claude implement') $(turns 'codex review')" = "1 2"

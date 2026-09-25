@@ -40,15 +40,22 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 	var findings *task.Review
 	for reviewNext := rec.ReviewPending(); ; reviewNext = false {
 		if reviewNext {
-			// The PR is verified but its head has no review: pick up at the review.
+			// The PR is verified but its head has no review: pick up at the review. A
+			// PR that is no longer open can't be reviewed, so the implementer takes over.
 			pr, verifyErr := a.verifyPR(ctx, rec, agent.Outcome{PRNumber: rec.Delegation.PR})
-			if rec, err = a.update(final, key, existing(func(cur *task.Record) {
-				applyPRHead(cur, pr, verifyErr, a.Now())
-			})); err != nil || rec.State != task.Reviewing {
-				return err
+			if verifyErr != nil {
+				fmt.Fprintf(log, "foreman: can't review PR #%d (%v); implementing instead\n", rec.Delegation.PR, verifyErr)
+				reviewNext = false
+			} else {
+				if rec, err = a.update(final, key, existing(func(cur *task.Record) {
+					applyPRHead(cur, pr)
+				})); err != nil {
+					return err
+				}
+				fmt.Fprintf(log, "foreman: PR #%d head %s has no review yet; reviewing\n", pr.Key.Number, short(pr.HeadSHA))
 			}
-			fmt.Fprintf(log, "foreman: PR #%d head %s has no review yet; reviewing\n", pr.Key.Number, short(pr.HeadSHA))
-		} else {
+		}
+		if !reviewNext {
 			turn, runErr := a.implement(ctx, rec, findings, log)
 			var pr *PullRequest
 			if runErr == nil && turn.Outcome.Status == agent.PROpened {
@@ -321,14 +328,8 @@ func applyTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error,
 	}
 }
 
-// applyPRHead records the PR head a resumed run is about to review, or fails the
-// task when the PR can no longer be reviewed.
-func applyPRHead(rec *task.Record, pr *PullRequest, verifyErr error, now time.Time) {
-	if verifyErr != nil {
-		rec.State = task.Failed
-		rec.LastOutcome = &task.Outcome{Status: "failed", Summary: verifyErr.Error(), At: now}
-		return
-	}
+// applyPRHead records the PR head a resumed run is about to review.
+func applyPRHead(rec *task.Record, pr *PullRequest) {
 	rec.State = task.Reviewing
 	rec.CI = nil
 	rec.Delegation.PRHead = pr.HeadSHA

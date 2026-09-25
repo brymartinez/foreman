@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/brymartinez/foreman/internal/agent"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -111,4 +112,41 @@ func inboxText(r InboxReport) string {
 		fmt.Fprintf(&b, "%s#%d %s\n", e.Item.Key.Repo, e.Item.Key.Number, strings.Join(e.Changes, "; "))
 	}
 	return b.String()
+}
+
+func TestRestartImplementsWhenThePendingReviewsPRIsNoLongerOpen(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	f.claude.turn = prTurn("sid-1")
+	f.codex.reviewErr = errors.New("killed")
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	f.codex.reviewErr = nil
+	setPR(f, "closed")
+	starts := f.claude.starts
+	key = started(t, f, startReq(t))
+	f.claude.turn = agent.Turn{Session: task.Session{Agent: task.Claude, ID: "sid-2"}, Outcome: agent.Outcome{Status: agent.FailedRun, Summary: "gave up"}}
+	if err := f.app.RunTask(context.Background(), key, 4243, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if f.claude.starts != starts+1 {
+		t.Errorf("the implementer didn't take over from a closed PR (%d starts)", f.claude.starts-starts)
+	}
+}
+
+func TestRestartWithTheOtherAgentDoesNotKeepThePR(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	f.claude.turn = prTurn("sid-1")
+	f.codex.reviewErr = errors.New("killed")
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	req := startReq(t)
+	req.Agent = task.Codex
+	key = started(t, f, req)
+	if got := f.store.recs[key]; got.Delegation.PR != 0 || got.ReviewPending() {
+		t.Fatalf("kept PR #%d for a different implementer", got.Delegation.PR)
+	}
 }
