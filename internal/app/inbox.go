@@ -33,7 +33,11 @@ type App struct {
 	Runners      Runners
 	WorktreesDir string
 	ReviewRounds int // 0 means DefaultReviewRounds
-	Now          func() time.Time
+	// CleanOnDone removes a DONE task's worktree when inbox runs (D42).
+	CleanOnDone bool
+	// DeleteMergedBranches deletes the local branch with the worktree once its PR is merged.
+	DeleteMergedBranches bool
+	Now                  func() time.Time
 }
 
 // Inbox fetches GitHub state, reports what changed since the last run, and records
@@ -46,6 +50,9 @@ func (a App) Inbox(ctx context.Context) (InboxReport, error) {
 	notes, err := a.gate(ctx, recs)
 	if err != nil {
 		return InboxReport{}, err
+	}
+	if a.CleanOnDone {
+		a.cleanDone(ctx, recs, notes)
 	}
 	items, err := a.GitHub.InboxItems(ctx)
 	if err != nil {

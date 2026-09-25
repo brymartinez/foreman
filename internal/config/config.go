@@ -13,12 +13,21 @@ import (
 )
 
 type Config struct {
-	TasksDir     string `yaml:"tasks_dir"`
-	WorktreesDir string `yaml:"worktrees_dir"`
-	LogDir       string `yaml:"log_dir"`
-	ReviewRounds int    `yaml:"review_rounds"` // 0 means the default (3)
-	Claude       Claude `yaml:"claude"`
-	Codex        Codex  `yaml:"codex"`
+	TasksDir     string  `yaml:"tasks_dir"`
+	WorktreesDir string  `yaml:"worktrees_dir"`
+	LogDir       string  `yaml:"log_dir"`
+	ReviewRounds int     `yaml:"review_rounds"` // 0 means the default (3)
+	Claude       Claude  `yaml:"claude"`
+	Codex        Codex   `yaml:"codex"`
+	Cleanup      Cleanup `yaml:"cleanup"`
+}
+
+// Cleanup controls what happens to a task's worktree once the task is DONE (D42).
+type Cleanup struct {
+	// OnDone removes DONE tasks' worktrees when inbox runs. Off means only `foreman clean`.
+	OnDone bool `yaml:"on_done"`
+	// DeleteMergedBranch deletes the local branch too, when its PR is merged.
+	DeleteMergedBranch bool `yaml:"delete_merged_branch"`
 }
 
 type Claude struct {
@@ -46,6 +55,7 @@ func Load() (Config, error) {
 		LogDir:       filepath.Join(data, "logs"),
 		Claude:       Claude{Command: "claude", AllowedTools: []string{"Bash", "WebFetch", "WebSearch"}},
 		Codex:        Codex{Command: "codex"},
+		Cleanup:      Cleanup{OnDone: true, DeleteMergedBranch: true},
 	}
 	path := os.Getenv("FOREMAN_CONFIG")
 	if path == "" {

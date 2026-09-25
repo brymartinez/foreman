@@ -1,0 +1,253 @@
+# foreman
+
+A local CLI that hands GitHub issues to Claude Code or Codex, and gives the PR back to
+you only once it is ready for your review.
+
+```
+foreman start 825 --agent claude
+        ↓
+  Claude implements in its own worktree, pushes, and opens the PR
+        ↓
+  Codex reviews it, Claude fixes, repeat until clean
+        ↓
+  foreman reads the PR's CI checks on GitHub
+        ↓
+foreman inbox  →  READY FOR YOU
+```
+
+You review and merge. Foreman never merges, and it doesn't run as a background service.
+Nothing happens between commands except the per-task runner that works on an issue you
+started.
+
+## Requirements
+
+- Go 1.27 or newer, to build.
+- [`gh`](https://cli.github.com), authenticated (`gh auth status`).
+- [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude`) and/or
+  [Codex](https://github.com/openai/codex) (`codex`), both logged in. Each agent reviews
+  the other's work, so install both for the review loop.
+
+## Install
+
+Download the archive for your platform from
+[GitHub Releases](https://github.com/brymartinez/foreman/releases), for example:
+
+```bash
+gh release download --repo brymartinez/foreman --pattern '*darwin_arm64.tar.gz'
+tar -xzf foreman_*_darwin_arm64.tar.gz
+mv foreman_*_darwin_arm64/foreman ~/.local/bin/
+```
+
+The binaries are not notarized. If you downloaded the archive in a browser, macOS may
+block the binary; run `xattr -d com.apple.quarantine ~/.local/bin/foreman` to allow it.
+
+To build from source instead:
+
+```bash
+go build -o ~/.local/bin/foreman ./cmd/foreman
+```
+
+## Usage
+
+Run `start` from any checkout of the repository. Foreman reads the repo and its default
+branch from that checkout.
+
+```bash
+foreman inbox                                  # what changed, and what needs me?
+foreman start 825 --agent claude               # delegate issue #825
+foreman start 825 --agent codex --context ./context/825.md
+foreman start 825 --agent claude --type fix    # force the branch prefix
+foreman status                                 # delegated work, most urgent first
+foreman show 825                               # everything recorded for one task
+foreman respond 825                            # answer a question from the agent
+foreman clean --dry-run                        # which worktrees would be removed
+foreman clean                                  # remove worktrees of DONE tasks
+foreman version
+```
+
+`<issue>` can be `825`, `#825`, or `owner/repo#825`. Use the last form when the same
+number is tracked in more than one repo.
+
+`--context` is a Markdown file with extra instructions, for example "keep the 5xx-only
+retry behavior". The agent treats it as part of the task.
+
+### What `start` does
+
+1. It creates a worktree and branch named after the issue, for example
+   `fix/825-provider-retries`. The slug is capped at 5 words, and the worktree directory
+   is `825-provider-retries`.
+   - The prefix is a conventional-commit type. Foreman takes it from the title's own
+     prefix (`fix: …`), otherwise from a label (`bug` → `fix`, `documentation` →
+     `docs`, …), otherwise it uses `feat`.
+   - `--type chore` overrides it.
+2. It launches a detached runner, logs to `~/.local/share/foreman/logs/`, and returns
+   immediately.
+3. The runner has the agent implement the issue, run validation, push, and open a PR
+   with `gh pr create`. Foreman then checks with GitHub that the PR exists and targets
+   the right branch.
+4. The other agent reviews the PR in a read-only, throwaway session. Findings go back
+   to the implementer's session, and the loop repeats until the review is clean.
+5. The next time you run `inbox` or `status`, foreman reads the PR's CI checks on
+   GitHub, the same list as at the bottom of the PR page. Once they finish, the task is
+   READY FOR YOU.
+   - Passing checks show as `✓ CI`. Failing checks are listed as `✗ CI: test`, with
+     links.
+   - CI belongs to the repo's owners, so foreman never runs or fixes it. You decide
+     whether a failure comes from the change or from CI itself.
+   - A repo with no checks shows `✓ CI (no checks)`.
+   - A merged PR marks the task DONE.
+
+## Cleaning up worktrees
+
+When `inbox` finds a task DONE, it removes the task's worktree. When the PR was merged,
+it also deletes the local `feat/...` or `fix/...` branch. `foreman clean` does the same on demand,
+and `foreman clean <issue>` also works for a FAILED task.
+
+- A worktree with uncommitted or untracked changes is never removed. Inbox reports it,
+  and you rerun `foreman clean <issue>` once it is tidy.
+- A branch whose PR wasn't merged is kept, so `foreman start` can pick the work up
+  again.
+- Remote branches are left to GitHub's "Automatically delete head branches" setting.
+
+Turn either behavior off in the config, under `cleanup`.
+
+## When the agent needs a decision
+
+Agents make routine calls themselves. When something needs your judgment, such as a
+product choice or conflicting requirements, the agent stops and returns a structured
+question. The task becomes `NEEDS_DECISION`, and the agent process ends. Nothing waits in
+a terminal.
+
+You find out the next time you run `foreman inbox` or `foreman status`. There is no push
+notification.
+
+```
+NEEDS DECISION
+  #825  Provider retries
+        acme/widgets · Should retries also apply to 4xx responses?
+```
+
+`foreman respond 825` shows the question and reads your answer:
+
+```
+BLOCKED: Need decision
+
+Issue:
+Should retries also apply to 4xx responses?
+
+Context:
+The retry queue only retries 5xx today. The issue says "retry failed requests".
+
+Options:
+A. Keep retries limited to 5xx
+B. Retry 4xx as well
+
+Recommendation:
+A
+
+Impact if wrong:
+Retrying 4xx repeats requests that will never succeed.
+
+Decision (option label, your own answer, or Enter for A):
+> A
+```
+
+You can type an option label, write your own answer, or press Enter to take the
+recommendation. Foreman saves the answer to the task file and resumes the same agent
+session with it. If that session is gone, it starts a fresh turn that includes every
+decision so far. The answer also appears in the READY FOR YOU summary and in the PR
+description.
+
+Foreman asks the same way after 3 review rounds that still end with findings: do another
+round, or accept the remaining findings.
+
+## States
+
+| State | Meaning | Your move |
+|---|---|---|
+| `WORKING` | The implementer is running | Wait |
+| `NEEDS_DECISION` | The agent asked a question | `foreman respond` |
+| `REVIEWING` | PR open; under review, or waiting on CI | Wait |
+| `READY_FOR_HUMAN` | Review clean, CI finished (✓ or ✗ shown) | Review and merge the PR |
+| `DONE` | PR merged or issue closed | Nothing |
+| `FAILED` | The agent failed, the runner died, or the PR was closed | `foreman show` to see why, then `foreman start` to retry |
+
+## Task files
+
+Each task is one Markdown file with YAML frontmatter, stored in
+`~/.local/share/foreman/tasks/<owner>-<repo>-<number>.md`. The frontmatter holds the
+state, session ids, PR, validation, review rounds, CI, and decisions. The body is yours,
+so you can add notes there.
+
+Foreman rewrites only the frontmatter keys it owns. Keys you add, such as `tags`,
+`aliases`, or anything else, stay in place along with their comments.
+
+### Obsidian
+
+The files are ready for Obsidian, but nothing is set up by default. To use them, point
+`tasks_dir` at a folder inside your vault:
+
+```yaml
+tasks_dir: ~/Documents/vault/foreman
+```
+
+Each task then appears as a note, and the frontmatter shows up as properties.
+
+## Configuration
+
+Foreman reads `~/.config/foreman/config.yaml`, or the file named in `$FOREMAN_CONFIG`.
+Every key is optional. These are the defaults:
+
+```yaml
+tasks_dir: ~/.local/share/foreman/tasks
+worktrees_dir: ~/.local/share/foreman/worktrees
+log_dir: ~/.local/share/foreman/logs
+review_rounds: 3
+claude:
+  command: claude
+  model: ""                       # CLI default
+  allowed_tools: [Bash, WebFetch, WebSearch]
+codex:
+  command: codex
+  model: ""
+cleanup:
+  on_done: true                   # inbox removes DONE tasks' worktrees
+  delete_merged_branch: true      # and the local branch, once the PR is merged
+```
+
+`FOREMAN_TASKS_DIR` overrides `tasks_dir`.
+
+## Permissions
+
+- **Claude as implementer.** Runs with `--permission-mode acceptEdits`, and only the
+  `allowed_tools` above are enabled.
+- **Codex as implementer.** Runs in the `workspace-write` sandbox with network access,
+  so it can push and use `gh`.
+- **Reviewers.** Read-only sessions that can't change the worktree.
+- The CLIs' dangerous bypass flags are never used.
+
+## Development
+
+```bash
+go vet ./... && go test ./...
+go build -o dist/foreman ./cmd/foreman
+scripts/probe-agents.sh   # re-checks the real agent CLIs (a few cents of model calls)
+scripts/release.sh v0.1.0 # build the release archives locally into dist/release
+```
+
+To publish a release, push a tag. The release workflow runs vet and the tests, builds
+the archives, and creates the GitHub release:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+Design, decisions, and status are in [`docs/control-layer/`](docs/control-layer/):
+
+- [progress.md](docs/control-layer/progress.md) covers each stage and the known
+  limitations.
+- [decisions.md](docs/control-layer/decisions.md) is the log of every decision.
+- [architecture.md](docs/control-layer/architecture.md) covers the package layout and
+  the execution model.
+- [capabilities.md](docs/control-layer/capabilities.md) lists the verified CLI
+  behavior.

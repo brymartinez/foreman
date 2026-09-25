@@ -140,8 +140,8 @@ Stage 6 (readiness gate) is complete. All stages in the design are built.
     READY_FOR_HUMAN.
   - A merged PR makes it DONE, and a closed one makes it FAILED.
   - Pending CI is recorded and shown as `CI pending`.
-- Failing CI resumes the implementer with the failing checks, at most twice. Each fix
-  is re-verified and re-reviewed, and after that the task becomes FAILED (D38).
+- Failing CI resumed the implementer, at most twice (D38). D46 later removed this
+  loop; see "After Stage 6".
 - CI is read with `gh pr checks --json name,bucket,link`. Every check counts, and exit
   codes are ignored whenever gh printed JSON (D36).
 - Views:
@@ -171,10 +171,46 @@ Stage 6 (readiness gate) is complete. All stages in the design are built.
   - User frontmatter keys and body notes survived.
 - Not exercised against a real PR's checks, because the live probe was declined (D36).
 
+## After Stage 6
+
+- Worktree cleanup, requested by the user (D41, D42).
+  - `foreman clean [<issue>] [--dry-run]` and automatic cleanup in `inbox`, configured
+    by `cleanup.on_done` and `cleanup.delete_merged_branch`.
+  - Validated by unit tests for dry run, merged-only branch deletion, the setting
+    turned off, a closed PR, active tasks refused, dirty worktrees kept, not cleaning
+    twice, and inbox notes. Also tested against real git: dirty refusal, idempotency,
+    and branch deletion.
+  - Validated end to end with real git and a stand-in `gh`. The sequence ran
+    `start` twice, then READY, then both PRs merged. Inbox removed #825's worktree and
+    branch and kept #826 because of an untracked file. `clean --dry-run` showed the plan,
+    and `clean` then removed #826. `show` marks the worktree as removed.
+- CI belongs to the repo owners, per the user (D46).
+  - Foreman only reads GitHub's check results. Failing checks go to READY FOR YOU,
+    listed with their links, instead of being sent back to the agent. Ready tasks have
+    their CI refreshed.
+  - The fix loop, `ci_fixes`, and the CI prompts are removed.
+  - Validated by tests for the hand-off (no runner and no resume) and for the refresh
+    on ready tasks, plus rendering.
+  - End to end with the built binary and a stand-in `gh`, the sequence was pending,
+    then failing (READY with `✗ CI: test` and its link, no runner started), then passing
+    (refreshed to `✓ CI`), then merged (DONE).
+- Conventional branch prefixes, requested by the user (D45).
+  - Branches are `feat/…`, `fix/…` and so on, picked from `--type`, then the title
+    prefix, then the labels, then `feat`. Stored `agent/…` branches keep working.
+  - Validated by table tests for the type inference, the `--type` parsing and override,
+    and labels parsed from `gh issue view`.
+  - End to end, an unlabeled issue got `feat/825-provider-retries` and a `bug`-labeled
+    issue got `fix/826-pagination`, and cleanup removed both.
+- GitHub releases (D43, D44).
+  - `scripts/release.sh` and `.github/workflows/release.yml`.
+  - A local build produced four archives with valid checksums, and the darwin/arm64
+    binary reported `foreman v0.0.0-test`.
+  - The workflow has not run: the repo has no GitHub remote yet.
+
 ## Known limitations
 
-- The gate runs only when `inbox` or `status` runs. A READY_FOR_HUMAN task is not
-  re-checked for CI, and a push to the branch after a clean review is not re-reviewed.
+- The gate runs only when `inbox` or `status` runs. A push to the branch after a clean
+  review is not re-reviewed.
 - `gh pr checks` handling is verified against gh's documented behavior and fixtures,
   not a live PR (D36).
 - Validation results are self-reported by the agent (D32).
@@ -198,7 +234,7 @@ what it replaced. Current summary:
   network access. The dangerous flags are never the default.
 - D9. One Markdown file per `repo + number`. D10. Disposable reviewer sessions.
   D11. At most 3 review rounds.
-- D12. The branch is `agent/<issue>-<slug>` and the worktree directory is
+- D12. The branch is `<type>/<issue>-<slug>` (type prefix per D45) and the worktree directory is
   `<issue>-<slug>`, with at most 5 words and 40 characters.
 - D13. `go.yaml.in/yaml/v3`, with a merge that only touches owned keys.
   D14. Tasks directory resolution.
@@ -219,6 +255,11 @@ what it replaced. Current summary:
 - D36. All checks gate, read from `gh pr checks` JSON. D37. No checks passes.
   D38. Failing CI is sent back to the implementer, at most twice. D39. When the gate
   runs and what it changes. D40. Only rounds that request changes use the review budget.
+- D41. What cleanup removes. D42. Automatic cleanup from inbox, configurable.
+  D43. GitHub releases through a script and a tag workflow. D44. Version stamping.
+- D45. Branches use a conventional-commit type prefix instead of `agent/`.
+- D46 (supersedes D38). CI belongs to the repo owners: foreman reads GitHub's checks and
+  hands failures to the developer.
 
 ## Next stage
 

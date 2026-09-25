@@ -37,6 +37,9 @@ func TestParseRejects(t *testing.T) {
 		{"inbox", "extra"},
 		{"deploy"},
 		{"__run", "825"},
+		{"clean", "--force"},
+		{"start", "825", "--agent", "claude", "--type", "agent"},
+		{"clean", "1", "2"},
 	} {
 		if _, err := Parse(argv); err == nil {
 			t.Errorf("Parse(%q) succeeded; want usage error", argv)
@@ -46,9 +49,12 @@ func TestParseRejects(t *testing.T) {
 
 func TestParseSimple(t *testing.T) {
 	for argv, want := range map[string]Command{
-		"":       {Name: Help},
-		"inbox":  {Name: Inbox},
-		"status": {Name: Status},
+		"":          {Name: Help},
+		"inbox":     {Name: Inbox},
+		"status":    {Name: Status},
+		"clean":     {Name: Clean},
+		"version":   {Name: Version},
+		"--version": {Name: Version},
 	} {
 		args := []string{}
 		if argv != "" {
@@ -60,6 +66,12 @@ func TestParseSimple(t *testing.T) {
 	}
 	if got, _ := Parse([]string{"show", "#12"}); got != (Command{Name: Show, Issue: 12}) {
 		t.Errorf("show #12 parsed as %+v", got)
+	}
+	if got, err := Parse([]string{"start", "825", "--type", "Fix", "--agent", "codex"}); err != nil || got.BranchType != "fix" {
+		t.Errorf("start --type parsed as %+v, %v", got, err)
+	}
+	if got, _ := Parse([]string{"clean", "--dry-run", "a/b#3"}); got != (Command{Name: Clean, Repo: "a/b", Issue: 3, DryRun: true}) {
+		t.Errorf("clean parsed as %+v", got)
 	}
 	if got, _ := Parse([]string{"__run", "a/b#3"}); got != (Command{Name: Run, Repo: "a/b", Issue: 3}) {
 		t.Errorf("__run parsed as %+v", got)

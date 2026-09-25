@@ -153,6 +153,7 @@ type frontmatter struct {
 	Branch              string       `yaml:"branch,omitempty"`
 	BaseRef             string       `yaml:"base_ref,omitempty"`
 	Worktree            string       `yaml:"worktree,omitempty"`
+	WorktreeRemovedAt   *time.Time   `yaml:"worktree_removed_at,omitempty"`
 	ContextFile         string       `yaml:"context_file,omitempty"`
 	RunnerPID           int          `yaml:"runner_pid,omitempty"`
 	RunnerLog           string       `yaml:"runner_log,omitempty"`
@@ -165,7 +166,6 @@ type frontmatter struct {
 	Validation          []task.Check `yaml:"validation,omitempty"`
 	Reviews             []reviewFM   `yaml:"reviews,omitempty"`
 	CI                  *ciFM        `yaml:"ci,omitempty"`
-	CIFixes             int          `yaml:"ci_fixes,omitempty"`
 }
 
 type ciFM struct {
@@ -284,6 +284,9 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 			PR:          fm.PR,
 			PRURL:       fm.PRURL,
 		}
+		if fm.WorktreeRemovedAt != nil {
+			rec.Delegation.WorktreeRemovedAt = *fm.WorktreeRemovedAt
+		}
 		if fm.ReviewAgent != "" && fm.ReviewAgent != impl.Reviewer() {
 			return nil, fmt.Errorf("review_agent must be the competing agent %q, got %q", impl.Reviewer(), fm.ReviewAgent)
 		}
@@ -309,7 +312,6 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 		}
 		rec.CI = &task.CIStatus{State: c.State, Failing: c.Failing, CheckedAt: c.CheckedAt}
 	}
-	rec.CIFixes = fm.CIFixes
 	if o := fm.LastOutcome; o != nil {
 		rec.LastOutcome = &task.Outcome{Status: o.Status, Summary: o.Summary, At: o.At}
 	}
@@ -348,6 +350,10 @@ func fromRecord(rec *task.Record) frontmatter {
 		fm.SessionID = d.Implementer.ID
 		fm.ReviewAgent = d.Reviewer
 		fm.Branch, fm.BaseRef, fm.Worktree, fm.ContextFile = d.Branch, d.BaseRef, d.Worktree, d.ContextFile
+		if !d.WorktreeRemovedAt.IsZero() {
+			t := d.WorktreeRemovedAt
+			fm.WorktreeRemovedAt = &t
+		}
 		fm.RunnerPID, fm.RunnerLog, fm.PR, fm.PRURL = d.RunnerPID, d.RunnerLog, d.PR, d.PRURL
 	}
 	if s := rec.GitHub; s != nil {
@@ -368,7 +374,6 @@ func fromRecord(rec *task.Record) frontmatter {
 	if c := rec.CI; c != nil {
 		fm.CI = &ciFM{State: c.State, Failing: c.Failing, CheckedAt: c.CheckedAt}
 	}
-	fm.CIFixes = rec.CIFixes
 	if o := rec.LastOutcome; o != nil {
 		fm.LastOutcome = &outcomeFM{Status: o.Status, Summary: o.Summary, At: o.At}
 	}

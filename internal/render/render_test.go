@@ -2,6 +2,8 @@ package render
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -109,11 +111,11 @@ func TestStatus(t *testing.T) {
 func TestShowCI(t *testing.T) {
 	var buf bytes.Buffer
 	Show(&buf, &task.Record{
-		Key: task.Key{Repo: "a/b", Number: 825}, State: task.Working, CIFixes: 1,
+		Key: task.Key{Repo: "a/b", Number: 825}, State: task.ReadyForHuman,
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912},
 		CI:         &task.CIStatus{State: task.CIFailing, Failing: []task.CheckRun{{Name: "test", Link: "https://ci/1"}}},
 	})
-	for _, want := range []string{"CI            failing · checked ", " · 1 of 2 fixes used\n", "Failing checks\n  ✗ test https://ci/1\n"} {
+	for _, want := range []string{"CI            failing · checked ", "Failing checks\n  ✗ test https://ci/1\n"} {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("missing %q in:\n%s", want, buf.String())
 		}
@@ -205,5 +207,39 @@ func TestShowLatestReview(t *testing.T) {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("missing %q in:\n%s", want, buf.String())
 		}
+	}
+}
+
+func TestCleaned(t *testing.T) {
+	rec := func(n int) *task.Record {
+		return &task.Record{Key: task.Key{Repo: "a/b", Number: n}, Delegation: &task.Delegation{Worktree: fmt.Sprintf("/wt/%d", n), Branch: fmt.Sprintf("agent/%d-x", n)}}
+	}
+	var buf bytes.Buffer
+	Cleaned(&buf, []app.CleanResult{{Rec: rec(1), BranchDeleted: true}, {Rec: rec(2)}, {Rec: rec(3), Err: errors.New("contains modified or untracked files")}}, false)
+	want := `  #1  removed /wt/1
+        branch deleted (PR merged) agent/1-x
+  #2  removed /wt/2
+        branch agent/2-x kept
+  #3  kept /wt/3
+        contains modified or untracked files
+`
+	if buf.String() != want {
+		t.Errorf("got:\n%s\nwant:\n%s", buf.String(), want)
+	}
+	buf.Reset()
+	Cleaned(&buf, nil, true)
+	if buf.String() != "No worktrees to clean.\n" {
+		t.Errorf("got %q", buf.String())
+	}
+}
+
+func TestReadyShowsFailingCIForTheDeveloper(t *testing.T) {
+	var buf bytes.Buffer
+	Inbox(&buf, app.InboxReport{Ready: []*task.Record{{Key: task.Key{Repo: "a/b", Number: 825}, Title: "T",
+		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912},
+		CI:         &task.CIStatus{State: task.CIFailing, Failing: []task.CheckRun{{Name: "test", Link: "https://ci/1"}, {Name: "lint"}}},
+		Reviews:    []task.Review{{Round: 1, Clean: true}}}}})
+	if want := "        ✗ CI: test, lint\n            test  https://ci/1\n        ✓ competing review\n"; !strings.Contains(buf.String(), want) {
+		t.Errorf("missing %q in:\n%s", want, buf.String())
 	}
 }

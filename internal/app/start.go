@@ -13,7 +13,10 @@ type StartRequest struct {
 	Issue       int
 	Agent       task.Agent
 	ContextFile string // absolute path, or ""
-	Dir         string // the checkout foreman start was run from
+	// BranchType overrides the type inferred from the issue title and labels. It only
+	// applies to a task's first start; a stored branch is always reused.
+	BranchType task.BranchType
+	Dir        string // the checkout foreman start was run from
 }
 
 // Start prepares the worktree and task file, then launches the detached runner.
@@ -50,11 +53,15 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		return nil, fmt.Errorf("%s#%d is %s", key.Repo, key.Number, issue.State)
 	}
 
-	branch := task.BranchName(task.WorkName(key.Number, issue.Title))
+	branchType := req.BranchType
+	if branchType == "" {
+		branchType = task.BranchTypeFor(issue.Title, issue.Labels)
+	}
+	branch := task.BranchName(branchType, task.WorkName(key.Number, issue.Title))
 	if existing != nil && existing.Delegation != nil && existing.Delegation.Branch != "" {
 		branch = existing.Delegation.Branch
 	}
-	workName := branch[len(task.BranchPrefix):]
+	workName := task.WorkNameOf(branch)
 	wt := WorktreeRequest{
 		RepoDir: req.Dir,
 		Path:    task.WorktreePath(a.WorktreesDir, key.Repo, workName),

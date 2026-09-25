@@ -97,11 +97,13 @@ type Delegation struct {
 	Branch      string
 	BaseRef     string
 	Worktree    string
-	ContextFile string
-	RunnerPID   int
-	RunnerLog   string
-	PR          int
-	PRURL       string
+	// WorktreeRemovedAt is set once `foreman clean` removed the worktree; the branch may remain.
+	WorktreeRemovedAt time.Time
+	ContextFile       string
+	RunnerPID         int
+	RunnerLog         string
+	PR                int
+	PRURL             string
 }
 
 // Check is one validation command the implementation agent ran, as it reported it.
@@ -226,10 +228,9 @@ type Record struct {
 	Validation []Check
 	// Reviews are the competing agent's review rounds, oldest first.
 	Reviews []Review
-	// CI is the readiness gate's last look at the PR's checks. Any implementer turn clears it.
+	// CI is the readiness gate's last look at the PR's checks on GitHub. Any implementer
+	// turn clears it.
 	CI *CIStatus
-	// CIFixes counts the times the gate sent the implementer back to fix failing CI.
-	CIFixes int
 	// Body is the Markdown below the frontmatter, round-tripped untouched so human edits survive.
 	Body string
 }

@@ -94,8 +94,6 @@ func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Rev
 		resume = agent.ResumeMessage(*dec)
 	} else if findings != nil {
 		resume = agent.FindingsMessage(*findings)
-	} else if ci := rec.CI; ci != nil && ci.State == task.CIFailing {
-		resume = agent.CIFailureMessage(d.PR, ci.Failing)
 	}
 	if resume != "" && d.Implementer.ID != "" {
 		fmt.Fprintf(log, "foreman: resuming %s session %s\n", adapter.Name(), d.Implementer.ID)
@@ -112,9 +110,6 @@ func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Rev
 	}
 	if latest := rec.LatestReview(); latest != nil && !latest.Clean {
 		brief.OpenFindings = latest.Findings
-	}
-	if ci := rec.CI; ci != nil && ci.State == task.CIFailing {
-		brief.FailingCI = ci.Failing
 	}
 	in.Prompt = agent.ImplementationPrompt(brief)
 	fmt.Fprintf(log, "foreman: starting %s in %s\n", adapter.Name(), d.Worktree)

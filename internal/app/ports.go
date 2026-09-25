@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/brymartinez/foreman/internal/agent"
@@ -34,6 +35,7 @@ type Issue struct {
 	Key       task.Key
 	Title     string
 	Body      string
+	Labels    []string
 	URL       string
 	State     string
 	UpdatedAt time.Time
@@ -74,10 +76,23 @@ type WorktreeRequest struct {
 	BaseRef string // e.g. origin/main; fetched before a new branch is created
 }
 
+// ErrWorktreeDirty means a worktree has uncommitted or untracked changes and was kept.
+var ErrWorktreeDirty = errors.New("it has uncommitted or untracked changes")
+
+// WorktreeRemoval names a task's worktree and, when DeleteBranch is set, its local branch.
+type WorktreeRemoval struct {
+	Path         string
+	Branch       string
+	DeleteBranch bool
+}
+
 type WorktreeManager interface {
 	// Ensure is idempotent: it reuses the worktree when Path already has Branch checked out,
 	// and reuses Branch when it exists without a worktree.
 	Ensure(ctx context.Context, req WorktreeRequest) error
+	// Remove deletes the worktree, and the branch if asked. It refuses a worktree with
+	// uncommitted or untracked changes. A path that no longer exists is already removed.
+	Remove(ctx context.Context, req WorktreeRemoval) error
 }
 
 type AgentAdapter interface {

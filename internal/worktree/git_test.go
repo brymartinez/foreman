@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -95,5 +96,48 @@ func TestEnsureRefusesConflicts(t *testing.T) {
 	strayReq := app.WorktreeRequest{RepoDir: clone, Path: stray, Branch: "agent/9-s", BaseRef: "origin/main"}
 	if err := (Git{}).Ensure(ctx, strayReq); err == nil || !strings.Contains(err.Error(), "not a worktree") {
 		t.Errorf("stray dir: %v", err)
+	}
+}
+
+func TestRemove(t *testing.T) {
+	clone, _ := repoWithOrigin(t)
+	ctx := context.Background()
+	req := app.WorktreeRequest{RepoDir: clone, Path: filepath.Join(t.TempDir(), "825-a"), Branch: "agent/825-a", BaseRef: "origin/main"}
+	if err := (Git{}).Ensure(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	rm := app.WorktreeRemoval{Path: req.Path, Branch: req.Branch}
+
+	os.WriteFile(filepath.Join(req.Path, "notes.txt"), []byte("wip"), 0o644)
+	if err := (Git{}).Remove(ctx, rm); !errors.Is(err, app.ErrWorktreeDirty) {
+		t.Fatalf("untracked work must block removal, got %v", err)
+	}
+	os.Remove(filepath.Join(req.Path, "notes.txt"))
+
+	if err := (Git{}).Remove(ctx, rm); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(req.Path); !os.IsNotExist(err) {
+		t.Errorf("worktree still on disk: %v", err)
+	}
+	if strings.Contains(run(t, clone, "worktree", "list"), "825-a") {
+		t.Error("worktree still registered")
+	}
+	if run(t, clone, "branch", "--list", req.Branch) == "" {
+		t.Error("branch deleted without DeleteBranch")
+	}
+	if err := (Git{}).Remove(ctx, rm); err != nil {
+		t.Errorf("removing again must be a no-op: %v", err)
+	}
+
+	if err := (Git{}).Ensure(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	rm.DeleteBranch = true
+	if err := (Git{}).Remove(ctx, rm); err != nil {
+		t.Fatal(err)
+	}
+	if run(t, clone, "branch", "--list", req.Branch) != "" {
+		t.Error("branch kept with DeleteBranch")
 	}
 }

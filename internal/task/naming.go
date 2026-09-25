@@ -8,14 +8,13 @@ import (
 )
 
 const (
-	BranchPrefix = "agent/"
 	slugMaxWords = 5
 	slugMaxLen   = 40
 )
 
 var (
 	// Matches a leading conventional-commit prefix such as "feat(stripe-handler): ".
-	conventionalPrefix = regexp.MustCompile(`^[a-zA-Z]+(\([^)]*\))?!?:\s*`)
+	conventionalPrefix = regexp.MustCompile(`^([a-zA-Z]+)(\([^)]*\))?!?:\s*`)
 	nonAlnum           = regexp.MustCompile(`[^a-z0-9]+`)
 	foldAccents        = strings.NewReplacer(
 		"à", "a", "á", "a", "â", "a", "ä", "a", "ã", "a", "å", "a",
@@ -55,8 +54,66 @@ func WorkName(issue int, title string) string {
 	return fmt.Sprintf("%d-%s", issue, Slug(title))
 }
 
-func BranchName(workName string) string {
-	return BranchPrefix + workName
+// BranchType is the conventional-commit type a branch is prefixed with: fix/825-….
+type BranchType string
+
+// BranchTypes are the prefixes foreman uses. Feat is the default.
+var BranchTypes = []BranchType{"feat", "fix", "chore", "docs", "refactor", "perf", "test", "build", "ci"}
+
+func ParseBranchType(s string) (BranchType, error) {
+	t := BranchType(strings.ToLower(strings.TrimSpace(s)))
+	for _, known := range BranchTypes {
+		if t == known {
+			return t, nil
+		}
+	}
+	return "", fmt.Errorf("unknown branch type %q; use one of %v", s, BranchTypes)
+}
+
+// labelTypes maps common GitHub labels to a branch type.
+var labelTypes = map[string]BranchType{
+	"bug": "fix", "fix": "fix", "bugfix": "fix", "regression": "fix",
+	"enhancement": "feat", "feature": "feat", "feat": "feat",
+	"documentation": "docs", "docs": "docs",
+	"chore": "chore", "maintenance": "chore", "dependencies": "chore",
+	"refactor": "refactor", "performance": "perf", "perf": "perf",
+	"test": "test", "tests": "test", "testing": "test", "ci": "ci", "build": "build",
+}
+
+// BranchTypeFor picks the type for an issue: a conventional prefix in the title
+// ("fix: …") wins, then the first label that names a type (with or without a
+// "type:" or "kind/" prefix), then feat.
+func BranchTypeFor(title string, labels []string) BranchType {
+	if m := conventionalPrefix.FindStringSubmatch(title); m != nil {
+		if t, err := ParseBranchType(m[1]); err == nil {
+			return t
+		}
+	}
+	for _, l := range labels {
+		name := strings.ToLower(strings.TrimSpace(l))
+		if _, rest, ok := strings.Cut(name, ":"); ok {
+			name = strings.TrimSpace(rest)
+		} else if _, rest, ok := strings.Cut(name, "/"); ok {
+			name = rest
+		}
+		if t, ok := labelTypes[name]; ok {
+			return t
+		}
+	}
+	return "feat"
+}
+
+func BranchName(t BranchType, workName string) string {
+	return string(t) + "/" + workName
+}
+
+// WorkNameOf recovers the work name from a stored branch, whatever its prefix, so tasks
+// started under the old agent/ prefix keep their branch and worktree.
+func WorkNameOf(branch string) string {
+	if _, name, ok := strings.Cut(branch, "/"); ok {
+		return name
+	}
+	return branch
 }
 
 // WorktreePath is <root>/<owner>-<repo>/<workName>, so equal repo names under different owners never collide.

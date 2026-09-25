@@ -20,6 +20,8 @@ const (
 	Show    Name = "show"
 	Start   Name = "start"
 	Respond Name = "respond"
+	Clean   Name = "clean"
+	Version Name = "version"
 	// Run is the hidden verb the detached runner process executes (see internal/runner).
 	Run Name = "__run"
 )
@@ -30,6 +32,8 @@ type Command struct {
 	Issue       int
 	Agent       task.Agent
 	ContextFile string
+	BranchType  task.BranchType
+	DryRun      bool
 }
 
 const Usage = `foreman: delegate GitHub issues to Claude Code or Codex
@@ -38,8 +42,10 @@ Usage:
   foreman inbox                                   What changed / needs me?
   foreman status                                  Delegated work and its state
   foreman show <issue>                            Durable state for one task
-  foreman start <issue> --agent claude|codex [--context path.md]
+  foreman start <issue> --agent claude|codex [--context path.md] [--type fix]
   foreman respond <issue>                         Answer a NEEDS_DECISION task
+  foreman clean [<issue>] [--dry-run]             Remove worktrees of DONE tasks (or one DONE/FAILED task)
+  foreman version
 
 <issue> is 825, #825, or owner/repo#825 when the number exists in several repos.
 `
@@ -58,6 +64,10 @@ func Parse(argv []string) (Command, error) {
 	switch name {
 	case "help", "-h", "--help":
 		return Command{Name: Help}, nil
+	case "version", "--version":
+		return Command{Name: Version}, nil
+	case "clean":
+		return parseClean(rest)
 	case "inbox", "status":
 		if len(rest) > 0 {
 			return Command{}, usagef("%s takes no arguments", name)
@@ -83,6 +93,7 @@ func parseStart(rest []string) (Command, error) {
 	fs.SetOutput(io.Discard)
 	agentFlag := fs.String("agent", "", "")
 	contextFlag := fs.String("context", "", "")
+	typeFlag := fs.String("type", "", "")
 	// Go's flag package stops at the first positional, so pull the issue number out first.
 	var positionals, flags []string
 	for i := 0; i < len(rest); i++ {
@@ -108,7 +119,34 @@ func parseStart(rest []string) (Command, error) {
 	if err != nil {
 		return Command{}, usagef("start needs --agent claude|codex")
 	}
-	return Command{Name: Start, Repo: repo, Issue: n, Agent: a, ContextFile: *contextFlag}, nil
+	var bt task.BranchType
+	if *typeFlag != "" {
+		if bt, err = task.ParseBranchType(*typeFlag); err != nil {
+			return Command{}, usagef("start: %v", err)
+		}
+	}
+	return Command{Name: Start, Repo: repo, Issue: n, Agent: a, ContextFile: *contextFlag, BranchType: bt}, nil
+}
+
+func parseClean(rest []string) (Command, error) {
+	cmd := Command{Name: Clean}
+	var positionals []string
+	for _, arg := range rest {
+		switch {
+		case arg == "--dry-run" || arg == "-n":
+			cmd.DryRun = true
+		case strings.HasPrefix(arg, "-"):
+			return Command{}, usagef("clean: unknown flag %s", arg)
+		default:
+			positionals = append(positionals, arg)
+		}
+	}
+	if len(positionals) == 0 {
+		return cmd, nil
+	}
+	repo, n, err := issueArg("clean", positionals)
+	cmd.Repo, cmd.Issue = repo, n
+	return cmd, err
 }
 
 func issueArg(name string, rest []string) (task.Repo, int, error) {

@@ -14,7 +14,19 @@ import (
 	"github.com/brymartinez/foreman/internal/task"
 )
 
-type fakeWorktrees struct{ reqs []WorktreeRequest }
+type fakeWorktrees struct {
+	reqs      []WorktreeRequest
+	removed   []WorktreeRemoval
+	removeErr error
+}
+
+func (f *fakeWorktrees) Remove(_ context.Context, r WorktreeRemoval) error {
+	if f.removeErr != nil {
+		return f.removeErr
+	}
+	f.removed = append(f.removed, r)
+	return nil
+}
 
 func (f *fakeWorktrees) Ensure(_ context.Context, r WorktreeRequest) error {
 	f.reqs = append(f.reqs, r)
@@ -103,7 +115,7 @@ func newFixture() fixture {
 			issue: Issue{Title: "Provider retries", Body: "Retry failed requests.", URL: "https://x/825", State: "open", UpdatedAt: t0},
 			prs: map[int]PullRequest{912: {
 				Key: task.Key{Repo: "ridezoomo/armada-backend", Number: 912}, URL: "https://github.com/ridezoomo/armada-backend/pull/912",
-				State: "open", HeadRefName: "agent/825-provider-retries", BaseRefName: "main",
+				State: "open", HeadRefName: "feat/825-provider-retries", BaseRefName: "main",
 			}},
 		},
 		wt:      &fakeWorktrees{},
@@ -136,7 +148,7 @@ func TestStartDispatches(t *testing.T) {
 	wantWT := WorktreeRequest{
 		RepoDir: "/src/armada-backend",
 		Path:    "/wt/ridezoomo-armada-backend/825-provider-retries",
-		Branch:  "agent/825-provider-retries",
+		Branch:  "feat/825-provider-retries",
 		BaseRef: "origin/main",
 	}
 	if len(f.wt.reqs) != 1 || f.wt.reqs[0] != wantWT {
@@ -295,7 +307,7 @@ func TestStatusReapsDeadRunner(t *testing.T) {
 
 func TestRunTaskVerifiesReportedPR(t *testing.T) {
 	good := func() PullRequest {
-		return PullRequest{Key: task.Key{Repo: "ridezoomo/armada-backend", Number: 913}, URL: "u913", State: "open", HeadRefName: "agent/825-provider-retries", BaseRefName: "main"}
+		return PullRequest{Key: task.Key{Repo: "ridezoomo/armada-backend", Number: 913}, URL: "u913", State: "open", HeadRefName: "feat/825-provider-retries", BaseRefName: "main"}
 	}
 	cases := []struct {
 		name     string
@@ -336,5 +348,24 @@ func TestRunTaskVerifiesReportedPR(t *testing.T) {
 				t.Errorf("summary %q lacks %q", got.LastOutcome.Summary, c.errPart)
 			}
 		})
+	}
+}
+
+func TestStartPicksBranchTypeFromLabelsOrOverride(t *testing.T) {
+	for _, tc := range []struct {
+		override task.BranchType
+		want     string
+	}{{"", "fix/825-provider-retries"}, {"chore", "chore/825-provider-retries"}} {
+		f := newFixture()
+		f.gh.issue.Labels = []string{"bug"}
+		req := startReq(t)
+		req.BranchType = tc.override
+		rec, err := f.app.Start(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rec.Delegation.Branch != tc.want || f.wt.reqs[0].Path != "/wt/ridezoomo-armada-backend/825-provider-retries" {
+			t.Errorf("override %q: branch %s path %s", tc.override, rec.Delegation.Branch, f.wt.reqs[0].Path)
+		}
 	}
 }

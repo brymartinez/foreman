@@ -90,11 +90,7 @@ func ready(w io.Writer, rec *task.Record) {
 	for _, c := range rec.Validation {
 		fmt.Fprintf(w, "        %s %s\n", mark(c.Passed), c.Command)
 	}
-	ci := "CI"
-	if rec.CI != nil && rec.CI.State == task.CINone {
-		ci = "CI (no checks)"
-	}
-	fmt.Fprintf(w, "        %s %s\n", mark(rec.CI.Green()), ci)
+	ciLine(w, rec.CI)
 	latest := rec.LatestReview()
 	fmt.Fprintf(w, "        %s competing review\n", mark(latest != nil && latest.Clean))
 	var answers []string
@@ -107,6 +103,28 @@ func ready(w io.Writer, rec *task.Record) {
 		fmt.Fprintf(w, "\n        Decisions:\n")
 		for _, a := range answers {
 			fmt.Fprintf(w, "        - %s\n", a)
+		}
+	}
+}
+
+// ciLine shows GitHub's check results. Failing checks are listed with their links,
+// because judging them is the developer's call (D46).
+func ciLine(w io.Writer, c *task.CIStatus) {
+	switch {
+	case c == nil:
+		fmt.Fprintf(w, "        ? CI not checked\n")
+	case c.State == task.CINone:
+		fmt.Fprintf(w, "        ✓ CI (no checks)\n")
+	case c.Green():
+		fmt.Fprintf(w, "        ✓ CI\n")
+	case c.State == task.CIPending:
+		fmt.Fprintf(w, "        … CI running\n")
+	default:
+		fmt.Fprintf(w, "        ✗ CI: %s\n", checkNames(c.Failing))
+		for _, f := range c.Failing {
+			if f.Link != "" {
+				fmt.Fprintf(w, "            %s  %s\n", f.Name, f.Link)
+			}
 		}
 	}
 }
@@ -178,7 +196,11 @@ func Show(w io.Writer, r *task.Record) {
 		row("Session", d.Implementer.ID)
 		row("Context file", d.ContextFile)
 		row("Branch", fmt.Sprintf("%s (from %s)", d.Branch, orDash(d.BaseRef)))
-		row("Worktree", d.Worktree)
+		if d.WorktreeRemovedAt.IsZero() {
+			row("Worktree", d.Worktree)
+		} else {
+			row("Worktree", fmt.Sprintf("%s (removed %s)", d.Worktree, d.WorktreeRemovedAt.Local().Format(time.DateTime)))
+		}
 		row("Runner log", d.RunnerLog)
 		switch {
 		case d.PR > 0 && d.PRURL != "":
@@ -198,11 +220,7 @@ func Show(w io.Writer, r *task.Record) {
 		row("Last synced", r.LastGitHubSync.Local().Format(time.DateTime))
 	}
 	if c := r.CI; c != nil {
-		ci := fmt.Sprintf("%s · checked %s", c.State, c.CheckedAt.Local().Format(time.DateTime))
-		if r.CIFixes > 0 {
-			ci += fmt.Sprintf(" · %d of %d fixes used", r.CIFixes, app.MaxCIFixes)
-		}
-		row("CI", ci)
+		row("CI", fmt.Sprintf("%s · checked %s", c.State, c.CheckedAt.Local().Format(time.DateTime)))
 	}
 	if o := r.LastOutcome; o != nil {
 		row("Last outcome", fmt.Sprintf("%s · %s · %s", o.Status, o.At.Local().Format(time.DateTime), o.Summary))
@@ -277,6 +295,29 @@ func Started(w io.Writer, r *task.Record) {
 	fmt.Fprintf(w, "Started #%d %s with %s\n", r.Number, r.Title, agentName(d.Implementer.Agent))
 	fmt.Fprintf(w, "  branch    %s\n  worktree  %s\n  log       %s\n", d.Branch, d.Worktree, d.RunnerLog)
 	fmt.Fprintf(w, "Check progress with: foreman status\n")
+}
+
+// Cleaned reports `foreman clean`. A kept worktree is named with git's reason.
+func Cleaned(w io.Writer, results []app.CleanResult, dryRun bool) {
+	if len(results) == 0 {
+		fmt.Fprintln(w, "No worktrees to clean.")
+		return
+	}
+	removed, branchNote := "removed", "branch deleted (PR merged)"
+	if dryRun {
+		removed, branchNote = "would remove", "would delete branch (PR merged)"
+	}
+	for _, r := range results {
+		d := r.Rec.Delegation
+		switch {
+		case r.Err != nil:
+			fmt.Fprintf(w, "  #%d  kept %s\n        %v\n", r.Rec.Number, d.Worktree, r.Err)
+		case r.BranchDeleted:
+			fmt.Fprintf(w, "  #%d  %s %s\n        %s %s\n", r.Rec.Number, removed, d.Worktree, branchNote, d.Branch)
+		default:
+			fmt.Fprintf(w, "  #%d  %s %s\n        branch %s kept\n", r.Rec.Number, removed, d.Worktree, d.Branch)
+		}
+	}
 }
 
 func agentName(a task.Agent) string {

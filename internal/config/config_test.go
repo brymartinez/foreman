@@ -43,7 +43,7 @@ func TestAgentSettingsOverlayDefaults(t *testing.T) {
 	t.Setenv("FOREMAN_CONFIG", "")
 	t.Setenv("FOREMAN_TASKS_DIR", "")
 	os.MkdirAll(filepath.Join(home, ".config/foreman"), 0o755)
-	os.WriteFile(filepath.Join(home, ".config/foreman/config.yaml"), []byte("worktrees_dir: ~/wt\nclaude:\n  model: haiku\ncodex:\n  command: /opt/codex\n"), 0o644)
+	os.WriteFile(filepath.Join(home, ".config/foreman/config.yaml"), []byte("worktrees_dir: ~/wt\nclaude:\n  model: haiku\ncodex:\n  command: /opt/codex\ncleanup:\n  delete_merged_branch: false\n"), 0o644)
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
@@ -56,5 +56,8 @@ func TestAgentSettingsOverlayDefaults(t *testing.T) {
 	}
 	if cfg.Codex.Command != "/opt/codex" {
 		t.Errorf("codex: %+v", cfg.Codex)
+	}
+	if !cfg.Cleanup.OnDone || cfg.Cleanup.DeleteMergedBranch {
+		t.Errorf("cleanup: an explicit false must override its default, and unset keys keep theirs: %+v", cfg.Cleanup)
 	}
 }

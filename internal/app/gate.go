@@ -9,14 +9,12 @@ import (
 	"github.com/brymartinez/foreman/internal/task"
 )
 
-// MaxCIFixes is how many times the gate sends the implementer back to fix failing CI
-// before it gives the task to the developer as FAILED (D38).
-const MaxCIFixes = 2
-
 // gate is the readiness gate. It runs whenever inbox or status is invoked, and
 // advances each task no runner is driving from what GitHub reports now: a merged PR
-// is DONE, a closed one FAILED, and a clean review with green CI READY_FOR_HUMAN.
-// Failing CI relaunches the implementer. It returns what changed, per task.
+// is DONE, a closed one FAILED, and a clean review with finished CI READY_FOR_HUMAN.
+// CI belongs to the repo's owners, so foreman only reads GitHub's check results and
+// hands failures to the developer instead of fixing them (D46). It returns what
+// changed, per task.
 func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]string, error) {
 	notes := map[task.Key][]string{}
 	for i, r := range recs {
@@ -28,18 +26,16 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			return nil, err
 		}
 		var ci task.CIStatus
-		if pr.State == "open" && r.State == task.Reviewing {
+		if pr.State == "open" {
 			if ci, err = a.GitHub.CIStatus(ctx, pr.Key); err != nil {
 				return nil, err
 			}
 			ci.CheckedAt = a.Now()
 		}
 		var note string
-		relaunch := false
 		updated, err := a.Store.Update(ctx, r.Key, func(cur *task.Record) (*task.Record, error) {
 			if gated(cur) && cur.Delegation.PR == r.Delegation.PR {
 				note = advance(cur, pr, ci, a.Now())
-				relaunch = cur.State == task.Working
 			}
 			return cur, nil
 		})
@@ -48,11 +44,6 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 		}
 		if note != "" {
 			notes[r.Key] = append(notes[r.Key], note)
-		}
-		if relaunch {
-			if updated, err = a.launch(ctx, r.Key); err != nil {
-				return nil, err
-			}
 		}
 		recs[i] = updated
 	}
@@ -76,7 +67,8 @@ func gated(r *task.Record) bool {
 }
 
 // advance applies the PR state and CI result to a gated task, and returns the
-// inbox note for the change, if the developer should hear about it.
+// inbox note for the change, if the developer should hear about it. A task that is
+// already READY_FOR_HUMAN only has its CI refreshed, so the view stays current.
 func advance(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) string {
 	d := rec.Delegation
 	outcome := func(status, summary string) string {
@@ -91,24 +83,32 @@ func advance(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) 
 		rec.State = task.Failed
 		return outcome("failed", fmt.Sprintf("PR #%d closed without merging", d.PR))
 	}
-	if rec.State != task.Reviewing {
+	prev := rec.CI
+	rec.CI = &ci
+	if rec.State == task.ReadyForHuman {
+		if prev != nil && prev.State != ci.State && ci.State != task.CIPending {
+			return fmt.Sprintf("CI now %s", ciText(ci))
+		}
 		return ""
 	}
-	rec.CI = &ci
 	switch {
+	case ci.State == task.CIPending:
+		return ""
 	case ci.Green():
 		rec.State = task.ReadyForHuman
 		outcome("ready", fmt.Sprintf("PR #%d passed review and CI", d.PR))
 		return ""
-	case ci.State == task.CIPending:
-		return ""
-	case rec.CIFixes < MaxCIFixes:
-		rec.CIFixes++
-		rec.State = task.Working
-		return outcome("ci_failed", fmt.Sprintf("CI failed (%s); sent back to %s, fix %d of %d", checkNames(ci.Failing), d.Implementer.Agent, rec.CIFixes, MaxCIFixes))
 	}
-	rec.State = task.Failed
-	return outcome("failed", fmt.Sprintf("CI still failing (%s) after %d fixes by %s", checkNames(ci.Failing), MaxCIFixes, d.Implementer.Agent))
+	rec.State = task.ReadyForHuman
+	outcome("ready", fmt.Sprintf("PR #%d passed review; CI failed (%s)", d.PR, checkNames(ci.Failing)))
+	return ""
+}
+
+func ciText(ci task.CIStatus) string {
+	if ci.State == task.CIFailing {
+		return fmt.Sprintf("failing (%s)", checkNames(ci.Failing))
+	}
+	return string(ci.State)
 }
 
 func checkNames(checks []task.CheckRun) string {

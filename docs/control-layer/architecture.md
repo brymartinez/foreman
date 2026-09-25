@@ -25,7 +25,7 @@ Every agent interaction is one headless turn that runs to completion and returns
 ```
 foreman start 825 --agent claude          (run from a checkout of the repo)
   ├─ gh: repo + default branch of the checkout, fetch issue
-  ├─ git: ensure worktree <root>/<owner>-<repo>/825-<slug> on branch agent/825-<slug>
+  ├─ git: ensure worktree <root>/<owner>-<repo>/825-<slug> on branch <type>/825-<slug>
   ├─ store: task file, state WORKING, session id
   └─ spawn detached `foreman __run owner/repo#825` (pid + log recorded), exit
 
@@ -50,11 +50,13 @@ foreman respond 825   -> save answer, state WORKING, spawn runner
 foreman inbox|status  -> runner pid dead while WORKING/REVIEWING -> FAILED
                          readiness gate (gate.go), per idle task with a PR:
                            PR merged -> DONE; PR closed -> FAILED
-                           REVIEWING + clean review: gh pr checks
-                             passing or no checks -> READY_FOR_HUMAN
+                           REVIEWING + clean review: gh pr checks (read only, D46)
                              pending              -> record, wait
-                             failing              -> WORKING, spawn runner: Resume(session,
-                                                     failing checks); after 2 fixes FAILED
+                             finished             -> READY_FOR_HUMAN, ✓ CI or ✗ CI: <checks>
+                           READY_FOR_HUMAN: refresh the CI result
+                         inbox only, cleanup.on_done: DONE task -> git worktree remove
+                           (kept if dirty); branch -D only if its PR merged
+foreman clean [<issue>] -> the same cleanup on demand; <issue> may also be FAILED
 ```
 
 Nothing runs in the background except the runner working on a task. The readiness and
@@ -76,7 +78,8 @@ liveness checks happen whenever the user runs a command.
   in the worktree.
 - **Naming.** `task.WorkName` gives `<issue>-<slug>`, for example
   `825-provider-retries`. The slug is at most 5 words and 40 characters, and a
-  conventional-commit prefix is removed. The branch is `agent/<workName>` and the
+  conventional-commit prefix is removed. The branch is `<type>/<workName>`, where the type is `feat`, `fix` and so on,
+  picked from `--type`, the title prefix, or the labels (D45), and the
   worktree directory is `<workName>`. The name is computed once at `start` and stored,
   so both agents and the user see the same name for the life of the task.
 - **Idempotent steps.** Creating the worktree and the task file each check whether the

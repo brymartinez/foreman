@@ -75,7 +75,7 @@ func TestSearchErrorPropagates(t *testing.T) {
 func TestGetIssueAndRepoAt(t *testing.T) {
 	c := Client{Run: fixtures(t)}
 	issue, err := c.GetIssue(context.Background(), task.Key{Repo: "ridezoomo/armada-backend", Number: 825})
-	if err != nil || issue.Title != "Provider retries" || !strings.Contains(issue.Body, "5xx") || issue.State != "open" {
+	if err != nil || issue.Title != "Provider retries" || !strings.Contains(issue.Body, "5xx") || issue.State != "open" || len(issue.Labels) != 1 || issue.Labels[0] != "bug" {
 		t.Fatalf("issue = %+v, %v", issue, err)
 	}
 	info, err := c.RepoAt(context.Background(), "/some/checkout")

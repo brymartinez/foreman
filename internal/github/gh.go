@@ -163,13 +163,16 @@ func (c Client) GetItem(ctx context.Context, key task.Key) (app.InboxItem, error
 }
 
 func (c Client) GetIssue(ctx context.Context, key task.Key) (app.Issue, error) {
-	out, err := c.Run(ctx, "", "issue", "view", fmt.Sprint(key.Number), "--repo", string(key.Repo), "--json", "number,title,body,url,state,updatedAt")
+	out, err := c.Run(ctx, "", "issue", "view", fmt.Sprint(key.Number), "--repo", string(key.Repo), "--json", "number,title,body,labels,url,state,updatedAt")
 	if err != nil {
 		return app.Issue{}, err
 	}
 	var r struct {
-		Title     string    `json:"title"`
-		Body      string    `json:"body"`
+		Title  string `json:"title"`
+		Body   string `json:"body"`
+		Labels []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
 		URL       string    `json:"url"`
 		State     string    `json:"state"`
 		UpdatedAt time.Time `json:"updatedAt"`
@@ -177,7 +180,11 @@ func (c Client) GetIssue(ctx context.Context, key task.Key) (app.Issue, error) {
 	if err := json.Unmarshal(out, &r); err != nil {
 		return app.Issue{}, fmt.Errorf("parse issue %s#%d: %w", key.Repo, key.Number, err)
 	}
-	return app.Issue{Key: key, Title: r.Title, Body: r.Body, URL: r.URL, State: strings.ToLower(r.State), UpdatedAt: r.UpdatedAt}, nil
+	labels := make([]string, len(r.Labels))
+	for i, l := range r.Labels {
+		labels[i] = l.Name
+	}
+	return app.Issue{Key: key, Title: r.Title, Body: r.Body, Labels: labels, URL: r.URL, State: strings.ToLower(r.State), UpdatedAt: r.UpdatedAt}, nil
 }
 
 func (c Client) RepoAt(ctx context.Context, dir string) (app.RepoInfo, error) {

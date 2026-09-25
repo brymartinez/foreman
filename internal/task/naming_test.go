@@ -25,10 +25,34 @@ func TestSlug(t *testing.T) {
 
 func TestBranchAndWorktreeShareWorkName(t *testing.T) {
 	name := WorkName(825, "Provider retries")
-	if got := BranchName(name); got != "agent/825-provider-retries" {
+	if got := BranchName("fix", name); got != "fix/825-provider-retries" || WorkNameOf(got) != name || WorkNameOf("agent/"+name) != name {
 		t.Errorf("branch = %q", got)
 	}
 	if got := WorktreePath("/wt", "ridezoomo/armada-backend", name); got != "/wt/ridezoomo-armada-backend/825-provider-retries" {
 		t.Errorf("worktree = %q", got)
+	}
+}
+
+func TestBranchTypeFor(t *testing.T) {
+	for _, tc := range []struct {
+		title  string
+		labels []string
+		want   BranchType
+	}{
+		{"Provider retries", nil, "feat"},
+		{"fix(queue): Retry storm on 5xx", []string{"enhancement"}, "fix"},
+		{"Docs!: Rewrite setup", nil, "docs"},
+		{"wip: Something", []string{"bug"}, "fix"},
+		{"Crash on empty payload", []string{"priority: high", "Bug"}, "fix"},
+		{"Speed up search", []string{"type: performance"}, "perf"},
+		{"Bump deps", []string{"kind/chore"}, "chore"},
+		{"Add dark mode", []string{"good first issue"}, "feat"},
+	} {
+		if got := BranchTypeFor(tc.title, tc.labels); got != tc.want {
+			t.Errorf("BranchTypeFor(%q, %v) = %s, want %s", tc.title, tc.labels, got, tc.want)
+		}
+	}
+	if _, err := ParseBranchType("agent"); err == nil {
+		t.Error("agent is not a branch type")
 	}
 }

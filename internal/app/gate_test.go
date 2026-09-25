@@ -76,52 +76,38 @@ func TestGateSkipsTasksARunnerIsDriving(t *testing.T) {
 	}
 }
 
-func TestGateFailingCISendsImplementerBackThenGivesUp(t *testing.T) {
+func TestGateHandsFailingCIToTheDeveloper(t *testing.T) {
 	f := newFixture()
-	f.app.ReviewRounds = 1 // clean re-reviews after a CI fix must not use up the review budget
 	key := reviewed(t, f)
 	setCI(f, failingCI)
-	for fix := 1; fix <= MaxCIFixes; fix++ {
-		if _, err := f.app.Status(context.Background()); err != nil {
-			t.Fatal(err)
-		}
-		got := f.store.recs[key]
-		if got.State != task.Working || got.CIFixes != fix || len(f.runners.spawned) != fix+1 || got.Delegation.RunnerPID != 4242 {
-			t.Fatalf("fix %d: state %s fixes %d spawned %d pid %d", fix, got.State, got.CIFixes, len(f.runners.spawned), got.Delegation.RunnerPID)
-		}
-		if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
-			t.Fatal(err)
-		}
-		resumed := f.claude.resumed[len(f.claude.resumed)-1]
-		if !strings.Contains(resumed, "sid-1: CI failed on PR #912") || !strings.Contains(resumed, "- test: https://ci/1") {
-			t.Fatalf("implementer not resumed with the CI failure: %q", resumed)
-		}
-		if got := f.store.recs[key]; got.State != task.Reviewing || got.CI != nil {
-			t.Fatalf("after fix %d: state %s ci %+v", fix, got.State, got.CI)
-		}
-	}
 	if _, err := f.app.Status(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.Failed || !strings.Contains(got.LastOutcome.Summary, "CI still failing (test) after 2 fixes") || len(f.runners.spawned) != MaxCIFixes+1 {
-		t.Errorf("state %s outcome %+v spawned %d", got.State, got.LastOutcome, len(f.runners.spawned))
+	if got.State != task.ReadyForHuman || got.CI.State != task.CIFailing || len(f.runners.spawned) != 1 || len(f.claude.resumed) != 0 {
+		t.Fatalf("state %s ci %+v spawned %d resumed %d", got.State, got.CI, len(f.runners.spawned), len(f.claude.resumed))
+	}
+	if !strings.Contains(got.LastOutcome.Summary, "CI failed (test)") {
+		t.Errorf("outcome %+v", got.LastOutcome)
 	}
 }
 
-func TestFreshTurnAfterCIFailureCarriesFailingChecks(t *testing.T) {
+func TestGateRefreshesCIOnReadyTasks(t *testing.T) {
 	f := newFixture()
 	key := reviewed(t, f)
 	setCI(f, failingCI)
-	if _, err := f.app.Status(context.Background()); err != nil {
+	f.gh.items = []InboxItem{item(825, "open", t0, task.Assigned)}
+	if _, err := f.app.Inbox(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	f.store.recs[key].Delegation.Implementer.ID = ""
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	setCI(f, task.CIStatus{State: task.CIPassing})
+	report, err := f.app.Inbox(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(f.claude.prompt, "## Failing CI") || !strings.Contains(f.claude.prompt, "- test: https://ci/1") {
-		t.Errorf("fresh prompt lacks failing CI:\n%s", f.claude.prompt)
+	got := f.store.recs[key]
+	if got.State != task.ReadyForHuman || got.CI.State != task.CIPassing || len(report.Ready) != 1 {
+		t.Errorf("state %s ci %+v ready %d", got.State, got.CI, len(report.Ready))
 	}
 }
 

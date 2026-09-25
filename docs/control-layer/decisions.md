@@ -146,7 +146,7 @@ Entry format:
   any leading conventional-commit prefix (`feat(x): `) removed, common accents folded to
   ASCII, and non-alphanumeric runs turned into `-`. It keeps at most 5 words and at most
   40 characters, cut on a word boundary. A title that produces nothing becomes `issue`.
-  The branch is `agent/<WorkName>`. The worktree is
+  The branch is `agent/<WorkName>` (prefix superseded by D45). The worktree is
   `<worktrees root>/<owner>-<repo>/<WorkName>`.
 - **Example.** Issue 825, "Provider retries", becomes branch
   `agent/825-provider-retries` in `…/ridezoomo-armada-backend/825-provider-retries`.
@@ -448,7 +448,7 @@ Entry format:
   so the developer can see that nothing ran.
 - **Consequence.** Repos without CI still reach READY_FOR_HUMAN.
 
-## D38. Failing CI sends the implementer back, twice at most
+## D38. Failing CI sends the implementer back, twice at most (superseded by D46)
 
 - Date: 2026-09-24. Stage 6. Decided by the agent. This answers the open question in
   the Stage 6 plan.
@@ -491,3 +491,96 @@ Entry format:
   answer (`ChangeRequestsSinceDecision`). A loop of findings alone escalates at the
   same point as before.
 - **Consequence.** A CI fix no longer triggers a false review escalation.
+
+## D41. What cleanup removes
+
+- Date: 2026-09-25. After Stage 6. Requested by the user. Details decided by the agent.
+- **Decision.** `foreman clean` removes the worktrees of DONE tasks. `foreman clean
+  <issue>` also accepts a FAILED task, and it refuses any other state.
+  - It runs plain `git worktree remove`, without `--force`, from the repository's
+    shared `.git`. A worktree with uncommitted or untracked changes is kept and
+    reported (`ErrWorktreeDirty`).
+  - The local branch is deleted only when GitHub reports the task's PR as merged and
+    `cleanup.delete_merged_branch` is on. It is deleted with `-D`, because a
+    squash-merged branch is not an ancestor of the base branch.
+  - Otherwise the branch stays, so a closed-by-hand issue or a FAILED task can be picked
+    up again with `start`.
+  - Remote branches are left to GitHub's "automatically delete head branches" setting.
+  - A path that no longer exists counts as already removed.
+  - `worktree_removed_at` is recorded, and `--dry-run` shows the plan without running
+    it.
+- **Consequence.** Cleanup never loses uncommitted work or unmerged commits.
+
+## D42. Cleanup runs automatically from inbox, and can be turned off
+
+- Date: 2026-09-25. After Stage 6. Decided by the agent.
+- **Options.** (A) Only the explicit command. (B) Also clean when `inbox` sees a task
+  DONE.
+- **Decision.** B by default. The `cleanup.on_done` and
+  `cleanup.delete_merged_branch` config keys are both on unless set to false. Results
+  show under CHANGED in inbox, for example "worktree and merged branch removed" or
+  "worktree kept: it has uncommitted or untracked changes". `status` doesn't clean,
+  so it stays a view.
+- **Consequence.** Merged work stops using disk space without an extra command. A
+  worktree the user is still working in stays because of D41.
+
+## D43. Releases are GitHub releases built by a script
+
+- Date: 2026-09-25. After Stage 6. Requested by the user: GitHub hosting only.
+- **Options.** (A) GoReleaser. (B) A shell script run by a tag-triggered GitHub Actions
+  workflow.
+- **Decision.** B. `scripts/release.sh <version>` builds `CGO_ENABLED=0 -trimpath`
+  binaries for darwin and linux on arm64 and amd64. Each archive holds the binary and
+  the README, and the script writes `checksums.txt`. Pushing a `v*` tag runs
+  `.github/workflows/release.yml`, which runs vet and the tests, then the script, then
+  `gh release create --generate-notes`. Windows is not built, because the runner uses
+  `setsid`. The binaries are not signed or notarized.
+- **Consequence.** No new tool to install or pin. The same script runs locally and in CI.
+
+## D44. Version stamping
+
+- Date: 2026-09-25. After Stage 6. Decided by the agent.
+- **Decision.** `main.version` defaults to `dev` and is set with
+  `-ldflags "-X main.version=<tag>"`. `foreman version` and `foreman --version` print
+  it.
+
+## D45. Branches use a conventional-commit type prefix
+
+- Date: 2026-09-25. After Stage 6. Requested by the user, who asked for `feat/**` or
+  `fix/**` instead of `agent/**`. The agent chose how the type is picked. This
+  supersedes the `agent/` prefix in D12. The slug rules and the worktree path from D12
+  are unchanged.
+- **Decision.** The branch is `<type>/<issue>-<slug>`. The type is one of `feat`,
+  `fix`, `chore`, `docs`, `refactor`, `perf`, `test`, `build`, or `ci`, chosen in this
+  order:
+  1. `foreman start --type <type>`.
+  2. A conventional prefix in the issue title (`fix(queue): …`).
+  3. The first issue label that names a type, with or without a `type:` or `kind/`
+     prefix. For example `bug` → `fix`, `enhancement` → `feat`, `documentation` →
+     `docs`, `performance` → `perf`, `dependencies` → `chore`.
+  4. `feat`.
+  
+  `gh issue view` now also reads `labels`. The worktree directory keeps the plain
+  `<issue>-<slug>` name.
+- **Consequence.** A task that already has a branch keeps it, including the old
+  `agent/…` branches, so restarts and cleanup still find their worktree
+  (`WorkNameOf`). The type is set on the first start and never changes after that.
+
+## D46. CI belongs to the repo owners; foreman only reads it
+
+- Date: 2026-09-25. After Stage 6. Decided by the user, who said CI is the repo owners'
+  responsibility and foreman only checks whether the tests pass and reads CI steps
+  such as GitHub Actions. This supersedes D38.
+- **Decision.** Foreman reads GitHub's check results for the PR with `gh pr checks`
+  (D36). It never runs, configures, or fixes CI.
+  - A clean review with finished CI makes the task READY_FOR_HUMAN, whether CI passed
+    or failed. Failing checks are listed with their links (`✗ CI: test`), and the
+    developer decides whether the change or the repo's CI is at fault. Pending CI still
+    waits.
+  - The CI fix loop is removed: the gate no longer launches runners, and `ci_fixes`,
+    the CI resume message, and the "Failing CI" prompt section are gone.
+  - READY_FOR_HUMAN tasks now have their CI refreshed on each gate run, so a check the
+    repo owners fix later shows as `✓ CI`. This replaces "not re-checked" in D39.
+  - Tests are still the agent's reported validation (D32).
+- **Consequence.** Foreman never spends agent time on CI it doesn't own. A red PR can
+  now reach READY FOR YOU, and the checklist marks it clearly.

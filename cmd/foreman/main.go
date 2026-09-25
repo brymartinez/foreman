@@ -24,6 +24,9 @@ import (
 	"github.com/brymartinez/foreman/internal/worktree"
 )
 
+// version is set at release time with -ldflags "-X main.version=v1.2.3".
+var version = "dev"
+
 func main() {
 	os.Exit(run(os.Args[1:]))
 }
@@ -34,8 +37,12 @@ func run(argv []string) int {
 		fmt.Fprintf(os.Stderr, "%v\n\n%s", err, cli.Usage)
 		return 64
 	}
-	if cmd.Name == cli.Help {
+	switch cmd.Name {
+	case cli.Help:
 		fmt.Print(cli.Usage)
+		return 0
+	case cli.Version:
+		fmt.Println("foreman", version)
 		return 0
 	}
 	cfg, err := config.Load()
@@ -52,10 +59,12 @@ func run(argv []string) int {
 			task.Claude: agent.Claude{Bin: cfg.Claude.Command, Model: cfg.Claude.Model, AllowedTools: cfg.Claude.AllowedTools, Exec: agent.RunCommand},
 			task.Codex:  agent.Codex{Bin: cfg.Codex.Command, Model: cfg.Codex.Model, Exec: agent.RunCommand},
 		},
-		Runners:      runner.Processes{LogDir: cfg.LogDir},
-		WorktreesDir: cfg.WorktreesDir,
-		ReviewRounds: cfg.ReviewRounds,
-		Now:          func() time.Time { return time.Now().Truncate(time.Second) },
+		Runners:              runner.Processes{LogDir: cfg.LogDir},
+		WorktreesDir:         cfg.WorktreesDir,
+		ReviewRounds:         cfg.ReviewRounds,
+		CleanOnDone:          cfg.Cleanup.OnDone,
+		DeleteMergedBranches: cfg.Cleanup.DeleteMergedBranch,
+		Now:                  func() time.Time { return time.Now().Truncate(time.Second) },
 	}
 
 	switch cmd.Name {
@@ -88,13 +97,24 @@ func run(argv []string) int {
 				return fail(err)
 			}
 		}
-		rec, err := a.Start(ctx, app.StartRequest{Repo: cmd.Repo, Issue: cmd.Issue, Agent: cmd.Agent, ContextFile: contextFile, Dir: dir})
+		rec, err := a.Start(ctx, app.StartRequest{Repo: cmd.Repo, Issue: cmd.Issue, Agent: cmd.Agent, ContextFile: contextFile, BranchType: cmd.BranchType, Dir: dir})
 		if err != nil {
 			return fail(err)
 		}
 		render.Started(os.Stdout, rec)
 		if rec.State == task.Failed {
 			return 1
+		}
+	case cli.Clean:
+		results, err := a.Clean(ctx, app.CleanRequest{Repo: cmd.Repo, Issue: cmd.Issue, DryRun: cmd.DryRun})
+		if err != nil {
+			return fail(err)
+		}
+		render.Cleaned(os.Stdout, results, cmd.DryRun)
+		for _, r := range results {
+			if r.Err != nil {
+				return 1
+			}
 		}
 	case cli.Respond:
 		return respond(ctx, a, cmd)

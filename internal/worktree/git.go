@@ -60,6 +60,31 @@ func (Git) Ensure(ctx context.Context, req app.WorktreeRequest) error {
 	return err
 }
 
+func (Git) Remove(ctx context.Context, req app.WorktreeRemoval) error {
+	if _, err := os.Stat(req.Path); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	// The worktree can't remove itself, so git runs from the repository's shared .git.
+	out, err := git(ctx, req.Path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return err
+	}
+	common := strings.TrimSpace(string(out))
+	if _, err := git(ctx, common, "worktree", "remove", req.Path); err != nil {
+		if strings.Contains(err.Error(), "contains modified or untracked files") {
+			return app.ErrWorktreeDirty
+		}
+		return err
+	}
+	if req.DeleteBranch {
+		// -D: a squash-merged branch is not an ancestor of the base, but its PR is merged.
+		_, err = git(ctx, common, "branch", "-D", req.Branch)
+	}
+	return err
+}
+
 type entry struct{ path, branch string }
 
 func parsePorcelain(out []byte) []entry {
