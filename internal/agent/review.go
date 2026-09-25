@@ -84,6 +84,7 @@ func ReviewPrompt(b ReviewBrief) string {
 	var s strings.Builder
 	fmt.Fprintf(&s, "You are reviewing pull request #%d for GitHub issue %s#%d. Another agent implemented it; you have not seen its reasoning. You are read-only: do not edit files, commit, or push.\n\n", b.PR, b.Key.Repo, b.Key.Number)
 	fmt.Fprintf(&s, "## Issue\n\n%s\n%s\n\n%s\n\n", b.Title, b.URL, orNone(b.IssueBody, "(The issue has no description.)"))
+	stageSection(&s, b.StageInstructions)
 	if ctx := strings.TrimSpace(b.Context); ctx != "" {
 		fmt.Fprintf(&s, "## Implementation context\n\nFrom the developer, authoritative:\n\n%s\n\n", ctx)
 	}
@@ -112,9 +113,11 @@ func ReviewPrompt(b ReviewBrief) string {
 		}
 		s.WriteString("\n")
 	}
-	s.WriteString(`## What to look for
-
-Substantive problems only: correctness, regressions, unmet acceptance criteria, security, authorization, concurrency, data integrity, API compatibility, architecture, missing tests, and unnecessary complexity. Do not report style, naming, or formatting preferences.
+	s.WriteString("## What to look for\n\n")
+	if strings.TrimSpace(b.StageInstructions) != "" {
+		s.WriteString("Where the developer workflow instructions above define how to review, follow them; the list below is the default. The final response format always applies.\n\n")
+	}
+	s.WriteString(`Substantive problems only: correctness, regressions, unmet acceptance criteria, security, authorization, concurrency, data integrity, API compatibility, architecture, missing tests, and unnecessary complexity. Do not report style, naming, or formatting preferences.
 
 Severity: "blocking" for defects that must be fixed before merge; "should_fix" for real but non-blocking problems.
 

@@ -138,6 +138,11 @@ func (a App) review(ctx context.Context, rec *task.Record, log io.Writer) (agent
 	if err != nil {
 		return agent.ReviewOutcome{}, err
 	}
+	instructions, err := a.Stages.Resolve(d.Worktree, task.StageReview)
+	if err != nil {
+		return agent.ReviewOutcome{}, err
+	}
+	brief.StageInstructions = instructions.Content()
 	fmt.Fprintf(log, "foreman: %s reviewing PR #%d (round %d)\n", reviewer.Name(), d.PR, len(rec.Reviews)+1)
 	return reviewer.Review(ctx, agent.StartInput{
 		Worktree: d.Worktree,

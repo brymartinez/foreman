@@ -194,3 +194,49 @@ func TestUnreadableStageInstructionsFailTheTask(t *testing.T) {
 		t.Errorf("state %s outcome %+v starts %d", got.State, got.LastOutcome, f.claude.starts)
 	}
 }
+
+func TestReviewPromptGetsOnlyReviewInstructions(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	f.claude.turn = prTurn("sid-1")
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	p := f.codex.reviewed[0]
+	if !strings.Contains(p, "## Developer workflow instructions") || !strings.Contains(p, "review instructions") {
+		t.Fatalf("review prompt lacks review instructions:\n%s", p)
+	}
+	if strings.Contains(p, "implement instructions") || strings.Contains(p, "pr instructions") {
+		t.Errorf("review prompt carries another stage's instructions:\n%s", p)
+	}
+	if got := f.stages.calls; len(got) != 2 || got[1] != "/wt/ridezoomo-armada-backend/825-provider-retries review" {
+		t.Errorf("lookups %q; want implement then review, both at the worktree root", got)
+	}
+}
+
+// failingStage fails only one stage's lookup.
+type failingStage struct {
+	fakeStages
+	stage task.Stage
+}
+
+func (f *failingStage) Resolve(root string, s task.Stage) (task.StageInstructions, error) {
+	if s == f.stage {
+		return task.StageInstructions{}, errors.New("stage instructions /repo/.foreman/review.md: not a regular file")
+	}
+	return f.fakeStages.Resolve(root, s)
+}
+
+func TestUnreadableReviewInstructionsFailTheReview(t *testing.T) {
+	f := newFixture()
+	f.app.Stages = &failingStage{stage: task.StageReview}
+	key := started(t, f, startReq(t))
+	f.claude.turn = prTurn("sid-1")
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Failed || !strings.Contains(got.LastOutcome.Summary, "review.md: not a regular file") || len(f.codex.reviewed) != 0 {
+		t.Errorf("state %s outcome %+v reviews %d", got.State, got.LastOutcome, len(f.codex.reviewed))
+	}
+}

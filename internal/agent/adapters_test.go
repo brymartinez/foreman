@@ -263,3 +263,16 @@ func TestImplementationPromptStageInstructions(t *testing.T) {
 		t.Error("blank instructions must add no section")
 	}
 }
+
+func TestReviewPromptStageInstructions(t *testing.T) {
+	brief := ReviewBrief{TaskBrief: TaskBrief{Key: task.Key{Repo: "a/b", Number: 1}, Context: "Keep 5xx-only.", StageInstructions: "Perform three review passes."}, PR: 9}
+	p := ReviewPrompt(brief)
+	stage, ctx := strings.Index(p, "## Developer workflow instructions"), strings.Index(p, "## Implementation context")
+	if stage < 0 || ctx < stage || !strings.Contains(p, "Perform three review passes.") || !strings.Contains(p, "the list below is the default") {
+		t.Errorf("review prompt must carry the instructions before the context and defer to them:\n%s", p)
+	}
+	brief.StageInstructions = ""
+	if p := ReviewPrompt(brief); strings.Contains(p, "## Developer workflow instructions") || strings.Contains(p, "the list below is the default") {
+		t.Errorf("no instructions must leave the default review prompt:\n%s", p)
+	}
+}

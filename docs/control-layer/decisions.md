@@ -649,3 +649,17 @@ Entry format:
   - The app reaches the resolver only through the `StageInstructionResolver` port.
 - **Consequence.** An edit to a stage file takes effect on a task's next fresh turn,
   not in the middle of a session.
+
+## D51. How review instructions enter the competing review
+
+- Date: 2026-09-25. Stage-instructions work, Stage 3. Decided by the agent.
+- **Decision.** Every review round resolves `review` for the worktree and adds it as
+  "Developer workflow instructions" after the issue and before the task context, like
+  D50.
+  - When the section is present, the built-in "What to look for" list becomes the
+    default, so a review process the developer defines, such as three passes, takes
+    precedence.
+  - The JSON verdict and findings format always applies, because the runner parses it.
+  - A resolve error fails the review, and so the task, before the reviewer runs.
+- **Consequence.** The developer's review process reaches both reviewers, Claude and
+  Codex, the same way. Foreman doesn't parse it.

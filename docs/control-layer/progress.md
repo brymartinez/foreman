@@ -250,7 +250,25 @@ has five stages: resolver, then implement, then review, then pr, then CLI inspec
   - A mode-000 global file set the task to FAILED with "stage instructions
     …/implement.md: permission denied".
 
-Next is Stage 3: wire `review` into the competing review.
+### Stage 3 (complete): review instructions in the competing review
+
+- Each review round resolves `review` for the worktree and adds it before the task
+  context. The built-in review checklist then becomes the fallback, and the JSON format
+  still applies. A read error fails the review before the reviewer runs (D51).
+- Validated by tests for:
+  - the review prompt carrying only `review`;
+  - the lookup order (implement, then review) at the worktree root;
+  - an unreadable `review.md` failing the task with no review run;
+  - the section placement, the fallback line, and no section when there's no text.
+- Validated end to end with the built binary, real stage files, a real git origin, and
+  a stub Codex reviewer that records its prompt.
+  - The review prompt had GLOBAL-REVIEW and then REPO-REVIEW (from the committed
+    `.foreman/review.md`), plus the fallback line.
+  - The implement and pr text were absent.
+  - The implementation prompt had no review text.
+
+Next is Stage 4: wire `pr` into PR description writing, in the implementation turn
+(D49).
 
 ## Known limitations
 
@@ -306,6 +324,8 @@ what it replaced. Current summary:
 - D47. Stage instructions and their resolver. D48. Global layer next to the config
   file; repo layer from the worktree. D49. pr.md goes in the implementation turn.
   D50. Implement instructions are resolved per fresh turn, before the task context.
+  D51. Review instructions go to every review round, and the built-in checklist becomes
+  the fallback.
 - D46 (supersedes D38). CI belongs to the repo owners: foreman reads GitHub's checks and
   hands failures to the developer.
 
