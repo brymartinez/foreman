@@ -174,7 +174,7 @@ func (e *codexEvents) consume(r io.Reader) {
 				e.usage.CodexOutputTokens += done.Usage.OutputTokens
 				e.usage.CodexReasoningTokens += done.Usage.ReasoningOutputTokens
 				e.usage.CodexTurns++
-				fmt.Fprintf(e.log, "codex: turn completed input=%d cached=%d output=%d reasoning=%d\n", done.Usage.InputTokens, done.Usage.CachedInputTokens, done.Usage.OutputTokens, done.Usage.ReasoningOutputTokens)
+				fmt.Fprintf(e.log, "codex: turn completed input=%d cached=%d output=%d reasoning=%d (USD unavailable)\n", done.Usage.InputTokens, done.Usage.CachedInputTokens, done.Usage.OutputTokens, done.Usage.ReasoningOutputTokens)
 			}
 		}
 	}

@@ -179,7 +179,28 @@ scenario_notify() {
 	pkill -f "sleep 30.017" || true
 }
 
-scenarios=${*:-runner notify}
+scenario_logs() {
+	echo "logs: clean, raw, and follow views of a run"
+	setup logs
+	E2E_AGENT_SLEEP=2 foreman start 42 --agent claude >/dev/null
+	foreman logs 42 --follow >"$sandbox/follow.txt" 2>&1 &
+	local follower=$!
+	wait_status "review ✓" || true
+	sleep 1
+	kill $follower 2>/dev/null || true
+	wait $follower 2>/dev/null || true
+	check "follow shows the run through to the end" contains "$sandbox/follow.txt" "finished"
+	check "follow never splits a line" bash -c "! grep -vE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' '$sandbox/follow.txt'"
+	foreman logs 42 >"$sandbox/clean.txt"
+	foreman logs 42 --raw >"$sandbox/raw.txt"
+	check "clean shows Claude's result" contains "$sandbox/clean.txt" 'claude: subtype=success cost=$0.25'
+	check "clean shows Codex usage without a price" contains "$sandbox/clean.txt" "(USD unavailable)"
+	check "clean hides Codex JSON" bash -c "! grep -q '\"type\"' '$sandbox/clean.txt'"
+	check "raw keeps Codex JSON" contains "$sandbox/raw.txt" '"type":"thread.started"'
+	check "show reports usage" bash -c "cd '$FOREMAN_CWD' && '$work/foreman' show 42 | grep -F 'Claude \$0.25 (1 turns) · Codex 125 tokens (1 turns)'"
+}
+
+scenarios=${*:-runner notify logs}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"

@@ -210,27 +210,7 @@ func showLogs(ctx context.Context, path string, raw, follow bool) error {
 		return err
 	}
 	defer f.Close()
-	if err := logs.Clean(os.Stdout, f, raw); err != nil {
-		return err
-	}
-	if !follow {
-		return nil
-	}
-	for {
-		timer := time.NewTimer(500 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return nil
-		case <-timer.C:
-		}
-		if _, err := f.Seek(0, io.SeekCurrent); err != nil {
-			return err
-		}
-		if err := logs.Clean(os.Stdout, f, raw); err != nil {
-			return err
-		}
-	}
+	return logs.Show(ctx, os.Stdout, f, raw, follow, 500*time.Millisecond)
 }
 
 func respond(ctx context.Context, a app.App, cmd cli.Command) int {

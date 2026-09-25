@@ -817,3 +817,15 @@ Entry format:
     SIGTERM on cancel, and sets a 5-second `WaitDelay`.
 - **Consequence.** Any new transition is announced without extra code. A stopped
   runner records FAILED within seconds and leaves no agent tools running.
+
+## D60. `foreman logs --follow` prints whole lines only
+
+- Date: 2026-09-25. Gaps against D57 found in the repository review.
+- **Context.** Follow mode re-scanned the file every 500 ms with a new scanner, so a
+  line the runner was still writing came out as two broken lines. D57 also says
+  the log reports Codex USD as unavailable, and it didn't.
+- **Decision.** `logs.Show` owns both modes. It holds back a partial line until its
+  newline arrives while following, and prints it as-is when not following. The
+  Codex usage line ends with `(USD unavailable)`.
+- **Consequence.** The follow view matches the clean view line for line. The
+  `logs` scenario in `scripts/e2e.sh` follows a live run.

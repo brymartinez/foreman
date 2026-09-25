@@ -2,7 +2,9 @@ package logs
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -51,20 +53,43 @@ func (w *Writer) line(s string) error {
 	return err
 }
 
-func Clean(w io.Writer, r io.Reader, raw bool) error {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 64*1024), 16*1024*1024)
-	for sc.Scan() {
-		line := sc.Text()
-		if raw {
-			fmt.Fprintln(w, line)
+// Show prints the log at r, cleaned unless raw. With follow it keeps reading as the
+// runner appends, until ctx ends, and holds back a line until it is complete.
+func Show(ctx context.Context, w io.Writer, r io.Reader, raw, follow bool, poll time.Duration) error {
+	br := bufio.NewReaderSize(r, 64*1024)
+	var partial string
+	for {
+		chunk, err := br.ReadString('\n')
+		partial += chunk
+		if err == nil {
+			printLine(w, strings.TrimSuffix(partial, "\n"), raw)
+			partial = ""
 			continue
 		}
-		if cleaned := cleanLine(line); cleaned != "" {
-			fmt.Fprintln(w, cleaned)
+		if !errors.Is(err, io.EOF) {
+			return err
+		}
+		if !follow {
+			if partial != "" {
+				printLine(w, partial, raw)
+			}
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(poll):
 		}
 	}
-	return sc.Err()
+}
+
+func printLine(w io.Writer, line string, raw bool) {
+	if !raw {
+		line = cleanLine(line)
+	}
+	if line != "" {
+		fmt.Fprintln(w, line)
+	}
 }
 
 func cleanLine(line string) string {
