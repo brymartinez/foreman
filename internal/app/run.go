@@ -111,6 +111,12 @@ func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Rev
 	if latest := rec.LatestReview(); latest != nil && !latest.Clean {
 		brief.OpenFindings = latest.Findings
 	}
+	// The repo layer comes from the worktree: the committed .foreman/ on the base (D48).
+	implement, err := a.Stages.Resolve(d.Worktree, task.StageImplement)
+	if err != nil {
+		return agent.Turn{}, err
+	}
+	brief.StageInstructions = implement.Content()
 	in.Prompt = agent.ImplementationPrompt(brief)
 	fmt.Fprintf(log, "foreman: starting %s in %s\n", adapter.Name(), d.Worktree)
 	return adapter.Start(ctx, in, func(s task.Session) {

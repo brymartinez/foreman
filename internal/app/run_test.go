@@ -162,3 +162,35 @@ func TestFreshTurnCarriesOpenFindingsWhenSessionIsGone(t *testing.T) {
 		t.Errorf("state %s", got.State)
 	}
 }
+
+func TestImplementationPromptGetsOnlyImplementInstructions(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	f.claude.turn = prTurn("sid-1")
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	p := f.claude.prompt
+	if !strings.Contains(p, "## Developer workflow instructions") || !strings.Contains(p, "implement instructions") {
+		t.Fatalf("implementation prompt lacks implement instructions:\n%s", p)
+	}
+	if strings.Contains(p, "review instructions") || strings.Contains(p, "pr instructions") {
+		t.Errorf("implementation prompt carries another stage's instructions:\n%s", p)
+	}
+	if got := f.stages.calls[0]; got != "/wt/ridezoomo-armada-backend/825-provider-retries implement" {
+		t.Errorf("resolved %q; want the worktree root and the implement stage", got)
+	}
+}
+
+func TestUnreadableStageInstructionsFailTheTask(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	f.stages.err = errors.New("stage instructions /cfg/stages/implement.md: permission denied")
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Failed || !strings.Contains(got.LastOutcome.Summary, "implement.md: permission denied") || f.claude.starts != 0 {
+		t.Errorf("state %s outcome %+v starts %d", got.State, got.LastOutcome, f.claude.starts)
+	}
+}

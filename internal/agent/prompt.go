@@ -8,14 +8,17 @@ import (
 )
 
 type TaskBrief struct {
-	Key        task.Key
-	Title      string
-	URL        string
-	IssueBody  string
-	Context    string // contents of the --context Markdown file, if any
-	Branch     string
-	BaseBranch string
-	Worktree   string
+	Key       task.Key
+	Title     string
+	URL       string
+	IssueBody string
+	Context   string // contents of the --context Markdown file, if any
+	// StageInstructions is the developer's instructions for the stage this prompt is
+	// for (implement, review), global then repo. Callers set only that stage's (D47).
+	StageInstructions string
+	Branch            string
+	BaseBranch        string
+	Worktree          string
 	// Decisions the developer already answered; a fresh turn must honor them.
 	Decisions []task.Decision
 	// OpenFindings are the latest review's findings when a fresh turn replaces a
@@ -36,6 +39,8 @@ func ImplementationPrompt(b TaskBrief) string {
 	}
 	s.WriteString(body + "\n\n")
 	fmt.Fprintf(&s, "Read the issue comments before planning: `gh issue view %d --repo %s --comments`.\n\n", b.Key.Number, b.Key.Repo)
+
+	stageSection(&s, b.StageInstructions)
 
 	if ctx := strings.TrimSpace(b.Context); ctx != "" {
 		s.WriteString("## Implementation context\n\nThis context comes from the developer and is authoritative. Where it conflicts with the issue text, follow it.\n\n")
@@ -120,4 +125,14 @@ Decision: %s
 
 Continue the task with this decision under the same instructions as before. Record the decision in the pull request description. End with the same JSON outcome: pr_opened, blocked, or failed.
 `, d.Question.Issue, d.Answer)
+}
+
+// stageSection passes the developer's stage instructions through as written. The
+// agent's own CLAUDE.md or AGENTS.md still load on their own; these add to them.
+func stageSection(s *strings.Builder, text string) {
+	if text = strings.TrimSpace(text); text == "" {
+		return
+	}
+	s.WriteString("## Developer workflow instructions\n\nThe developer's standing instructions for this stage of the work. Follow them alongside your usual repository instructions. Where they conflict with the task context or decisions below, the task context and decisions win.\n\n")
+	s.WriteString(text + "\n\n")
 }

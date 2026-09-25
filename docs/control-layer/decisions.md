@@ -632,3 +632,20 @@ Entry format:
   own section. It never carries `review`. The review prompt carries only `review`.
 - **Consequence.** No extra agent turn, and no change to the runner loop or the D7
   contract.
+
+## D50. How implement instructions enter the implementation prompt
+
+- Date: 2026-09-25. Stage-instructions work, Stage 2. Decided by the agent.
+- **Decision.** The runner resolves `implement` for the task's worktree each time it
+  builds a fresh implementation prompt. The text goes into a "Developer workflow
+  instructions" section after the issue and before the task context.
+  - A one-line preamble says to follow the section alongside the agent's own repository
+    instructions, and that the task context and recorded decisions win on conflict.
+    That matches the spec's precedence.
+  - Resume messages (answers, findings) don't repeat it, because the resumed session
+    already has it.
+  - A resolve error, such as an unreadable file, fails the task with the error before
+    any agent runs.
+  - The app reaches the resolver only through the `StageInstructionResolver` port.
+- **Consequence.** An edit to a stage file takes effect on a task's next fresh turn,
+  not in the middle of a session.

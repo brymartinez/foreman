@@ -230,7 +230,27 @@ has five stages: resolver, then implement, then review, then pr, then CLI inspec
   - permission denied and a directory in place of a file, each reported with its path;
   - `StagesDir` following `FOREMAN_CONFIG`.
 
-Next is Stage 2: wire `implement` into the implementation prompt and test it end to end.
+### Stage 2 (complete): implement instructions in the implementation prompt
+
+- The runner resolves `implement` for the worktree and adds it as "Developer workflow
+  instructions", before the task context. The task context and decisions win on
+  conflict. A read error fails the task (D50).
+- Validated by tests for:
+  - the implementation prompt carrying only `implement` (not `review` or `pr`);
+  - the lookup using the worktree root;
+  - an unreadable file failing the task before any agent runs;
+  - the section coming before the context, and blank text adding no section.
+- Validated end to end with the built binary, real stage files, a real git origin, and
+  stub agents:
+  - The prompt had GLOBAL-IMPLEMENT and then REPO-IMPLEMENT. The repo text came from the
+    `.foreman/implement.md` committed on origin/main.
+  - The global and repo `review.md` and `pr.md` were absent.
+  - An uncommitted `.foreman/implement.md` in the checkout that `start` ran from was
+    ignored.
+  - A mode-000 global file set the task to FAILED with "stage instructions
+    …/implement.md: permission denied".
+
+Next is Stage 3: wire `review` into the competing review.
 
 ## Known limitations
 
@@ -285,6 +305,7 @@ what it replaced. Current summary:
 - D45. Branches use a conventional-commit type prefix instead of `agent/`.
 - D47. Stage instructions and their resolver. D48. Global layer next to the config
   file; repo layer from the worktree. D49. pr.md goes in the implementation turn.
+  D50. Implement instructions are resolved per fresh turn, before the task context.
 - D46 (supersedes D38). CI belongs to the repo owners: foreman reads GitHub's checks and
   hands failures to the developer.
 

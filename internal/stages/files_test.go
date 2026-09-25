@@ -101,7 +101,7 @@ func TestResolveReportsRealFilesystemErrors(t *testing.T) {
 		t.Skip("running as a user who can read mode 000 files")
 	}
 	_, err := Files{GlobalDir: l.global}.Resolve(l.repo, task.StageReview)
-	if err == nil || !strings.Contains(err.Error(), unreadable) || !strings.Contains(err.Error(), "permission denied") {
+	if err == nil || err.Error() != "stage instructions "+unreadable+": permission denied" {
 		t.Errorf("want a permission error naming the file, got %v", err)
 	}
 

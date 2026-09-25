@@ -252,3 +252,14 @@ func TestReviewPromptIsBuiltFromDurableState(t *testing.T) {
 		}
 	}
 }
+
+func TestImplementationPromptStageInstructions(t *testing.T) {
+	p := ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 1}, StageInstructions: "Write the failing test first.", Context: "Keep 5xx-only."})
+	stage, ctx := strings.Index(p, "## Developer workflow instructions"), strings.Index(p, "## Implementation context")
+	if stage < 0 || ctx < stage || !strings.Contains(p, "Write the failing test first.") {
+		t.Errorf("stage instructions must appear, before the task context:\n%s", p)
+	}
+	if strings.Contains(ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 1}, StageInstructions: " \n"}), "## Developer workflow instructions") {
+		t.Error("blank instructions must add no section")
+	}
+}

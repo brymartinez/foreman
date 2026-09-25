@@ -19,6 +19,7 @@ import (
 	"github.com/brymartinez/foreman/internal/github"
 	"github.com/brymartinez/foreman/internal/render"
 	"github.com/brymartinez/foreman/internal/runner"
+	"github.com/brymartinez/foreman/internal/stages"
 	"github.com/brymartinez/foreman/internal/store"
 	"github.com/brymartinez/foreman/internal/task"
 	"github.com/brymartinez/foreman/internal/worktree"
@@ -60,6 +61,7 @@ func run(argv []string) int {
 			task.Codex:  agent.Codex{Bin: cfg.Codex.Command, Model: cfg.Codex.Model, Exec: agent.RunCommand},
 		},
 		Runners:              runner.Processes{LogDir: cfg.LogDir},
+		Stages:               stages.Files{GlobalDir: cfg.StagesDir},
 		WorktreesDir:         cfg.WorktreesDir,
 		ReviewRounds:         cfg.ReviewRounds,
 		CleanOnDone:          cfg.Cleanup.OnDone,

@@ -31,6 +31,7 @@ type App struct {
 	Worktrees    WorktreeManager
 	Agents       map[task.Agent]AgentAdapter
 	Runners      Runners
+	Stages       StageInstructionResolver
 	WorktreesDir string
 	ReviewRounds int // 0 means DefaultReviewRounds
 	// CleanOnDone removes a DONE task's worktree when inbox runs (D42).

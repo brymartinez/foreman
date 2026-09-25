@@ -106,6 +106,12 @@ type AgentAdapter interface {
 	Review(ctx context.Context, in agent.StartInput) (agent.ReviewOutcome, error)
 }
 
+// StageInstructionResolver loads the developer's instructions for a workflow stage:
+// the global layer, then repoRoot/.foreman. Missing files resolve to empty (D47).
+type StageInstructionResolver interface {
+	Resolve(repoRoot string, stage task.Stage) (task.StageInstructions, error)
+}
+
 // Runners launches and observes the detached per-task runner process (D5).
 type Runners interface {
 	Spawn(key task.Key) (pid int, logPath string, err error)

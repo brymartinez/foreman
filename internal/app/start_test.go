@@ -33,6 +33,20 @@ func (f *fakeWorktrees) Ensure(_ context.Context, r WorktreeRequest) error {
 	return nil
 }
 
+// fakeStages returns "<stage> instructions" for every stage and records each lookup.
+type fakeStages struct {
+	calls []string
+	err   error
+}
+
+func (f *fakeStages) Resolve(repoRoot string, s task.Stage) (task.StageInstructions, error) {
+	f.calls = append(f.calls, repoRoot+" "+string(s))
+	if f.err != nil {
+		return task.StageInstructions{}, f.err
+	}
+	return task.StageInstructions{Stage: s, GlobalPath: "/cfg/stages/" + string(s) + ".md", Global: string(s) + " instructions"}, nil
+}
+
 type fakeRunners struct {
 	spawned []task.Key
 	alive   map[int]bool
@@ -103,6 +117,7 @@ type fixture struct {
 	gh      *fakeGitHub
 	wt      *fakeWorktrees
 	runners *fakeRunners
+	stages  *fakeStages
 	claude  *fakeAgent
 	codex   *fakeAgent
 }
@@ -120,11 +135,12 @@ func newFixture() fixture {
 		},
 		wt:      &fakeWorktrees{},
 		runners: &fakeRunners{alive: map[int]bool{}},
+		stages:  &fakeStages{},
 		claude:  &fakeAgent{name: task.Claude},
 		codex:   &fakeAgent{name: task.Codex},
 	}
 	f.app = App{
-		Store: f.store, GitHub: f.gh, Worktrees: f.wt, Runners: f.runners,
+		Store: f.store, GitHub: f.gh, Worktrees: f.wt, Runners: f.runners, Stages: f.stages,
 		Agents:       map[task.Agent]AgentAdapter{task.Claude: f.claude, task.Codex: f.codex},
 		WorktreesDir: "/wt",
 		Now:          func() time.Time { return now },

@@ -56,7 +56,9 @@ func read(path string) (string, string, error) {
 		return "", "", fmt.Errorf("stage instructions %s: not a regular file", path)
 	}
 	b, err := os.ReadFile(path)
-	if err != nil {
+	if pe := (*fs.PathError)(nil); errors.As(err, &pe) {
+		return "", "", fmt.Errorf("stage instructions %s: %w", path, pe.Err)
+	} else if err != nil {
 		return "", "", fmt.Errorf("stage instructions %s: %w", path, err)
 	}
 	return path, string(b), nil
