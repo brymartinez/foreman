@@ -42,6 +42,11 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 		if err != nil {
 			return nil, err
 		}
+		if updated.State == task.Working && r.State != task.Working {
+			if updated, err = a.launch(ctx, r.Key); err != nil {
+				return nil, err
+			}
+		}
 		if note != "" {
 			notes[r.Key] = append(notes[r.Key], note)
 		}
@@ -82,6 +87,15 @@ func advance(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) 
 	case "closed":
 		rec.State = task.Failed
 		return outcome("failed", fmt.Sprintf("PR #%d closed without merging", d.PR))
+	}
+	if pr.HeadSHA != "" {
+		// A READY task's PR is the developer's; the checklist flags new commits.
+		d.PRHead = pr.HeadSHA
+		if rec.State == task.Reviewing && rec.CommitsSinceReview() {
+			// Commits landed after the clean review: review them before handing over (D63).
+			rec.State, rec.CI = task.Working, nil
+			return outcome("re_review", fmt.Sprintf("PR #%d has new commits since its clean review; %s is reviewing them", d.PR, d.Reviewer))
+		}
 	}
 	prev := rec.CI
 	rec.CI = &ci

@@ -147,7 +147,7 @@ func newFixture() fixture {
 			issue: Issue{Title: "Provider retries", Body: "Retry failed requests.", URL: "https://x/825", State: "open", UpdatedAt: t0},
 			prs: map[int]PullRequest{912: {
 				Key: task.Key{Repo: "ridezoomo/armada-backend", Number: 912}, URL: "https://github.com/ridezoomo/armada-backend/pull/912",
-				State: "open", HeadRefName: "feat/825-provider-retries", BaseRefName: "main",
+				State: "open", HeadRefName: "feat/825-provider-retries", BaseRefName: "main", HeadSHA: "c0ffee1",
 			}},
 		},
 		wt:      &fakeWorktrees{},

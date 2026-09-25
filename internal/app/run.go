@@ -38,19 +38,30 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 	}))
 
 	var findings *task.Review
-	for {
-		turn, runErr := a.implement(ctx, rec, findings, log)
-		var pr *PullRequest
-		if runErr == nil && turn.Outcome.Status == agent.PROpened {
-			if pr, runErr = a.verifyPR(ctx, rec, turn.Outcome); runErr == nil {
-				fmt.Fprintf(log, "foreman: verified PR #%d %s\n", pr.Key.Number, pr.URL)
+	for reviewNext := rec.ReviewPending(); ; reviewNext = false {
+		if reviewNext {
+			// The PR is verified but its head has no review: pick up at the review.
+			pr, verifyErr := a.verifyPR(ctx, rec, agent.Outcome{PRNumber: rec.Delegation.PR})
+			if rec, err = a.update(final, key, existing(func(cur *task.Record) {
+				applyPRHead(cur, pr, verifyErr, a.Now())
+			})); err != nil || rec.State != task.Reviewing {
+				return err
 			}
-		}
-		if rec, err = a.update(final, key, existing(func(cur *task.Record) {
-			applyTurn(cur, turn, pr, runErr, a.Now())
-			addUsage(&cur.Usage, turn.Usage)
-		})); err != nil || rec.State != task.Reviewing {
-			return err
+			fmt.Fprintf(log, "foreman: PR #%d head %s has no review yet; reviewing\n", pr.Key.Number, short(pr.HeadSHA))
+		} else {
+			turn, runErr := a.implement(ctx, rec, findings, log)
+			var pr *PullRequest
+			if runErr == nil && turn.Outcome.Status == agent.PROpened {
+				if pr, runErr = a.verifyPR(ctx, rec, turn.Outcome); runErr == nil {
+					fmt.Fprintf(log, "foreman: verified PR #%d %s at %s\n", pr.Key.Number, pr.URL, short(pr.HeadSHA))
+				}
+			}
+			if rec, err = a.update(final, key, existing(func(cur *task.Record) {
+				applyTurn(cur, turn, pr, runErr, a.Now())
+				addUsage(&cur.Usage, turn.Usage)
+			})); err != nil || rec.State != task.Reviewing {
+				return err
+			}
 		}
 
 		if rec.ChangeRequestsSinceDecision() >= a.reviewRounds() {
@@ -298,7 +309,7 @@ func applyTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error,
 	switch o.Status {
 	case agent.PROpened:
 		rec.State = task.Reviewing
-		rec.Delegation.PR, rec.Delegation.PRURL = pr.Key.Number, pr.URL
+		rec.Delegation.PR, rec.Delegation.PRURL, rec.Delegation.PRHead = pr.Key.Number, pr.URL, pr.HeadSHA
 		rec.Validation = o.Validation
 	case agent.Blocked:
 		rec.State = task.NeedsDecision
@@ -306,6 +317,26 @@ func applyTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error,
 	case agent.FailedRun:
 		rec.State = task.Failed
 	}
+}
+
+// applyPRHead records the PR head a resumed run is about to review, or fails the
+// task when the PR can no longer be reviewed.
+func applyPRHead(rec *task.Record, pr *PullRequest, verifyErr error, now time.Time) {
+	if verifyErr != nil {
+		rec.State = task.Failed
+		rec.LastOutcome = &task.Outcome{Status: "failed", Summary: verifyErr.Error(), At: now}
+		return
+	}
+	rec.State = task.Reviewing
+	rec.CI = nil
+	rec.Delegation.PRHead = pr.HeadSHA
+}
+
+func short(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
 }
 
 // applyReview records a review round. Findings send the task back to WORKING for the
@@ -320,6 +351,7 @@ func applyReview(rec *task.Record, r agent.ReviewOutcome, reviewErr error, now t
 		Round:    len(rec.Reviews) + 1,
 		Reviewer: rec.Delegation.Reviewer,
 		PR:       rec.Delegation.PR,
+		Head:     rec.Delegation.PRHead,
 		Clean:    r.Clean,
 		Summary:  r.Summary,
 		Findings: r.Findings,

@@ -114,6 +114,8 @@ type Delegation struct {
 	RunnerLog         string
 	PR                int
 	PRURL             string
+	// PRHead is the PR's head commit when foreman last read it. A review covers one head.
+	PRHead string
 }
 
 // Check is one validation command the implementation agent ran, as it reported it.
@@ -262,6 +264,7 @@ type Review struct {
 	Summary  string
 	Findings []Finding
 	At       time.Time
+	Head     string // the PR head commit reviewed; empty on records from before D63
 }
 
 // LatestReview is the most recent review round, or nil.
@@ -318,4 +321,22 @@ type CIStatus struct {
 // Green reports whether CI lets the task through the readiness gate.
 func (c *CIStatus) Green() bool {
 	return c != nil && (c.State == CIPassing || c.State == CINone)
+}
+
+// CommitsSinceReview reports whether the PR head moved after its latest review.
+func (r *Record) CommitsSinceReview() bool {
+	latest := r.LatestReview()
+	return r.Delegation != nil && latest != nil && latest.Head != "" && r.Delegation.PRHead != "" && latest.Head != r.Delegation.PRHead
+}
+
+// ReviewPending reports whether the verified PR head has not been reviewed, so a run
+// continues with the review instead of implementing again: after a crash during a
+// review, or after new commits on a PR that had a clean review (D63).
+func (r *Record) ReviewPending() bool {
+	d := r.Delegation
+	if d == nil || d.PR == 0 || d.PRHead == "" || r.Undelivered() != nil {
+		return false
+	}
+	latest := r.LatestReview()
+	return latest == nil || latest.PR != d.PR || latest.Head != d.PRHead
 }

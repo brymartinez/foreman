@@ -47,6 +47,7 @@ type PullRequest struct {
 	State             string // open, closed, merged
 	HeadRefName       string
 	BaseRefName       string
+	HeadSHA           string // the commit at the PR's head
 	IsCrossRepository bool
 }
 

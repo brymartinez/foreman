@@ -860,3 +860,26 @@ Entry format:
   runner never recreates a task the developer removed.
 - **Consequence.** Removing a task file is a way to drop a task. The runner logs
   why it stopped and exits.
+
+## D63. A review covers one PR head
+
+- Date: 2026-09-25. Closes two known limitations on the user's request to fix
+  everything the repository review found: a push after a clean review was never
+  re-reviewed, and a restart after a crash during a review reimplemented the task.
+- **Context.** Foreman didn't record which commit a review covered. A restart of a
+  FAILED task also rebuilt its delegation, which dropped the verified PR.
+- **Decision.**
+  - Foreman reads `headRefOid` with every PR. The delegation keeps it as `pr_head`,
+    and each review records the `head` it covered.
+  - `Record.ReviewPending` is true when the PR head has no review and no answer
+    is waiting to be delivered. A run then starts at the review: it re-verifies
+    the PR, records the head, and runs the reviewer. The implementer doesn't run.
+  - A restart on the same branch keeps the PR number, URL, and head.
+  - The gate compares the PR head with the latest clean review. A REVIEWING task
+    whose PR moved goes back to WORKING and gets a runner, which reviews the new
+    commits before the task can become READY_FOR_HUMAN.
+  - A READY_FOR_HUMAN PR belongs to the developer, so new commits there are
+    flagged in the checklist ("! new commits since the review") and not taken back.
+  - Records from before this decision have no heads, and keep the old behavior.
+- **Consequence.** The reviewer's verdict always matches the code the developer
+  receives. A crash during a review costs one review, not a reimplementation.

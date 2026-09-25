@@ -100,16 +100,17 @@ EOF
 	# Implementer: commits a change, records an open PR for its branch, and reports it.
 	cat >"$sandbox/bin/claude" <<'EOF'
 #!/usr/bin/env bash
-echo "claude $*" >>"$E2E_STATE/agents.log"
 if [[ " $* " == *" --no-session-persistence "* ]]; then
+	echo "claude review" >>"$E2E_STATE/agents.log"
 	echo '{"session_id":"r1","subtype":"success","total_cost_usd":0.05,"structured_output":{"verdict":"clean","summary":"looks right","findings":[]}}'
 	exit 0
 fi
+echo "claude implement" >>"$E2E_STATE/agents.log"
 sleep "${E2E_AGENT_SLEEP:-1}"
 branch=$(git branch --show-current)
 echo "// retries" >>widgets.go
 git -c user.email=e2e@example.com -c user.name=e2e commit -qam "feat: retries"
-printf '{"number":900,"url":"https://github.com/acme/widgets/pull/900","state":"OPEN","headRefName":"%s","baseRefName":"main","isCrossRepository":false}\n' "$branch" >"$E2E_STATE/pr-900.json"
+printf '{"number":900,"url":"https://github.com/acme/widgets/pull/900","state":"OPEN","headRefName":"%s","headRefOid":"%s","baseRefName":"main","isCrossRepository":false}\n' "$branch" "$(git rev-parse HEAD)" >"$E2E_STATE/pr-900.json"
 echo "claude stderr progress" >&2
 echo '{"session_id":"s1","subtype":"success","total_cost_usd":0.25,"structured_output":{"status":"pr_opened","summary":"added retries","prNumber":900,"prUrl":"https://github.com/acme/widgets/pull/900","validation":[{"command":"go test ./...","passed":true}],"question":null}}'
 EOF
@@ -117,10 +118,11 @@ EOF
 	# Reviewer (and implementer, when E2E_CODEX_IMPLEMENTS is set) on the codex JSONL protocol.
 	cat >"$sandbox/bin/codex" <<'EOF'
 #!/usr/bin/env bash
-echo "codex $*" >>"$E2E_STATE/agents.log"
+if [[ " $* " == *" --ephemeral "* ]]; then echo "codex review"; else echo "codex implement"; fi >>"$E2E_STATE/agents.log"
 last=
 while [ $# -gt 0 ]; do [ "$1" = -o ] && last=$2; shift; done
 echo '{"type":"thread.started","thread_id":"t1"}'
+sleep "${E2E_REVIEW_SLEEP:-0}"
 echo '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":20,"reasoning_output_tokens":5}}'
 echo '{"verdict":"clean","summary":"looks right","findings":[]}' >"$last"
 EOF
@@ -236,7 +238,33 @@ scenario_inbox() {
 	check "config --edit runs an editor with arguments" bash -c "cd '$sandbox' && EDITOR='editor -w' VISUAL= '$work/foreman' config --edit && grep -qF '$sandbox/config.yaml' '$sandbox/edited'"
 }
 
-scenarios=${*:-runner notify logs inbox}
+turns() { grep -cx "$1" "$state/agents.log" || true; }
+
+scenario_rereview() {
+	echo "rereview: new commits and interrupted reviews are reviewed without reimplementing"
+	setup rereview
+	echo '[{"name":"test","bucket":"pending","link":"https://ci/1"}]' >"$state/checks.json"
+	foreman start 42 --agent claude >/dev/null
+	wait_status "CI pending" || true
+	sed -i.bak 's/"headRefOid":"[0-9a-f]*"/"headRefOid":"feedfacefeedfacefeedfacefeedfacefeedface"/' "$state/pr-900.json"
+	foreman status >/dev/null
+	check "a push after the clean review is reviewed again" wait_status "CI pending"
+	check "by the reviewer alone" test "$(turns 'claude implement') $(turns 'codex review')" = "1 2"
+	check "the review covers the new head" grep -q 'head: feedface' "$sandbox/tasks/acme-widgets-42.md"
+
+	issue 43 "Fix pagination"
+	E2E_REVIEW_SLEEP=30.017 foreman start 43 --agent claude >/dev/null
+	local i=0
+	until [ "$(turns 'codex review')" = 3 ] || [ $i -gt 100 ]; do sleep 0.1; i=$((i + 1)); done
+	pkill -KILL -f "$work/foreman __run acme/widgets#43" || true
+	pkill -f "sleep 30.017" || true
+	check "a runner killed mid-review is reaped" wait_status "FAILED" 5
+	foreman start 43 --agent claude >/dev/null
+	check "the restart finishes the review" bash -c "cd '$FOREMAN_CWD' && for i in \$(seq 50); do '$work/foreman' show 43 | grep -q 'review ✓\\|Latest review' && exit 0; sleep 0.1; done; exit 1"
+	check "without implementing again" test "$(turns 'claude implement')" = 2
+}
+
+scenarios=${*:-runner notify logs inbox rereview}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"

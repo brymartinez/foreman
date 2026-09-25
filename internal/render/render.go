@@ -97,6 +97,9 @@ func ready(w io.Writer, rec *task.Record) {
 	ciLine(w, rec.CI)
 	latest := rec.LatestReview()
 	fmt.Fprintf(w, "        %s competing review\n", mark(latest != nil && latest.Clean))
+	if rec.CommitsSinceReview() {
+		fmt.Fprintln(w, "        ! new commits since the review")
+	}
 	var answers []string
 	for _, dec := range rec.Decisions {
 		if dec.Answer != "" {

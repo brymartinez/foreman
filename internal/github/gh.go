@@ -230,13 +230,14 @@ func (c Client) RepoAt(ctx context.Context, dir string) (app.RepoInfo, error) {
 	return app.RepoInfo{Repo: repo, DefaultBranch: r.DefaultBranchRef.Name}, nil
 }
 
-const prFields = "number,url,state,headRefName,baseRefName,isCrossRepository"
+const prFields = "number,url,state,headRefName,headRefOid,baseRefName,isCrossRepository"
 
 type prJSON struct {
 	Number            int    `json:"number"`
 	URL               string `json:"url"`
 	State             string `json:"state"`
 	HeadRefName       string `json:"headRefName"`
+	HeadRefOid        string `json:"headRefOid"`
 	BaseRefName       string `json:"baseRefName"`
 	IsCrossRepository bool   `json:"isCrossRepository"`
 }
@@ -248,6 +249,7 @@ func (p prJSON) toPR(repo task.Repo) app.PullRequest {
 		State:             strings.ToLower(p.State),
 		HeadRefName:       p.HeadRefName,
 		BaseRefName:       p.BaseRefName,
+		HeadSHA:           p.HeadRefOid,
 		IsCrossRepository: p.IsCrossRepository,
 	}
 }

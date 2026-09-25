@@ -159,6 +159,7 @@ type frontmatter struct {
 	RunnerLog           string       `yaml:"runner_log,omitempty"`
 	PR                  int          `yaml:"pr,omitempty"`
 	PRURL               string       `yaml:"pr_url,omitempty"`
+	PRHead              string       `yaml:"pr_head,omitempty"`
 	GitHub              *snapshot    `yaml:"github,omitempty"`
 	LastGitHubSync      *time.Time   `yaml:"last_github_sync,omitempty"`
 	Decisions           []decisionFM `yaml:"decisions,omitempty"`
@@ -183,6 +184,7 @@ type reviewFM struct {
 	Summary  string         `yaml:"summary"`
 	Findings []task.Finding `yaml:"findings,omitempty"`
 	At       time.Time      `yaml:"at"`
+	Head     string         `yaml:"head,omitempty"`
 }
 
 type outcomeFM struct {
@@ -294,6 +296,7 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 			RunnerLog:   fm.RunnerLog,
 			PR:          fm.PR,
 			PRURL:       fm.PRURL,
+			PRHead:      fm.PRHead,
 		}
 		if fm.WorktreeRemovedAt != nil {
 			rec.Delegation.WorktreeRemovedAt = *fm.WorktreeRemovedAt
@@ -313,7 +316,7 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 		if r.Verdict != "clean" && r.Verdict != "changes_requested" {
 			return nil, fmt.Errorf("review round %d has unknown verdict %q", r.Round, r.Verdict)
 		}
-		rec.Reviews = append(rec.Reviews, task.Review{Round: r.Round, Reviewer: r.Reviewer, PR: r.PR, Clean: r.Verdict == "clean", Summary: r.Summary, Findings: r.Findings, At: r.At})
+		rec.Reviews = append(rec.Reviews, task.Review{Round: r.Round, Reviewer: r.Reviewer, PR: r.PR, Clean: r.Verdict == "clean", Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head})
 	}
 	if c := fm.CI; c != nil {
 		switch c.State {
@@ -366,7 +369,7 @@ func fromRecord(rec *task.Record) frontmatter {
 			t := d.WorktreeRemovedAt
 			fm.WorktreeRemovedAt = &t
 		}
-		fm.RunnerPID, fm.RunnerLog, fm.PR, fm.PRURL = d.RunnerPID, d.RunnerLog, d.PR, d.PRURL
+		fm.RunnerPID, fm.RunnerLog, fm.PR, fm.PRURL, fm.PRHead = d.RunnerPID, d.RunnerLog, d.PR, d.PRURL, d.PRHead
 	}
 	if s := rec.GitHub; s != nil {
 		fm.GitHub = &snapshot{UpdatedAt: s.UpdatedAt, State: s.State, Reasons: s.Reasons}
@@ -381,7 +384,7 @@ func fromRecord(rec *task.Record) frontmatter {
 		if r.Clean {
 			verdict = "clean"
 		}
-		fm.Reviews = append(fm.Reviews, reviewFM{Round: r.Round, Reviewer: r.Reviewer, PR: r.PR, Verdict: verdict, Summary: r.Summary, Findings: r.Findings, At: r.At})
+		fm.Reviews = append(fm.Reviews, reviewFM{Round: r.Round, Reviewer: r.Reviewer, PR: r.PR, Verdict: verdict, Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head})
 	}
 	if c := rec.CI; c != nil {
 		fm.CI = &ciFM{State: c.State, Failing: c.Failing, CheckedAt: c.CheckedAt}

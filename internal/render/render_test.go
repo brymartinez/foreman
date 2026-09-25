@@ -294,3 +294,14 @@ func TestStageContent(t *testing.T) {
 		t.Errorf("got:\n%s\nwant:\n%s", buf.String(), want)
 	}
 }
+
+func TestReadyFlagsCommitsSinceTheReview(t *testing.T) {
+	var buf bytes.Buffer
+	Inbox(&buf, app.InboxReport{Ready: []*task.Record{{Key: task.Key{Repo: "a/b", Number: 825}, Title: "T",
+		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912, PRHead: "beef002"},
+		CI:         &task.CIStatus{State: task.CIPassing},
+		Reviews:    []task.Review{{Round: 1, Clean: true, Head: "c0ffee1"}}}}})
+	if want := "        ✓ competing review\n        ! new commits since the review\n"; !strings.Contains(buf.String(), want) {
+		t.Errorf("missing %q in:\n%s", want, buf.String())
+	}
+}

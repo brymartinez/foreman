@@ -107,7 +107,7 @@ func TestEnsureCheckoutClonesMissingRepository(t *testing.T) {
 func TestPullRequests(t *testing.T) {
 	c := Client{Run: fixtures(t)}
 	pr, err := c.GetPullRequest(context.Background(), task.Key{Repo: "ridezoomo/armada-backend", Number: 912})
-	if err != nil || pr.State != "open" || pr.HeadRefName != "agent/825-provider-retries" || pr.BaseRefName != "main" || pr.URL == "" {
+	if err != nil || pr.State != "open" || pr.HeadRefName != "agent/825-provider-retries" || pr.HeadSHA != "c0ffee1c0ffee1c0ffee1c0ffee1c0ffee1c0ffe" || pr.BaseRefName != "main" || pr.URL == "" {
 		t.Fatalf("pr = %+v, %v", pr, err)
 	}
 	found, err := c.OpenPullRequestForBranch(context.Background(), "ridezoomo/armada-backend", "agent/825-provider-retries")

@@ -82,6 +82,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			cur.GitHub = &task.Snapshot{UpdatedAt: issue.UpdatedAt, State: issue.State}
 			cur.LastGitHubSync = now
 		}
+		prev := cur.Delegation
 		cur.Delegation = &task.Delegation{
 			Implementer: task.Session{Agent: req.Agent},
 			Reviewer:    req.Agent.Reviewer(),
@@ -89,6 +90,10 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			BaseRef:     wt.BaseRef,
 			Worktree:    wt.Path,
 			ContextFile: req.ContextFile,
+		}
+		// The same branch has the same PR, so a restart can pick up at its review (D63).
+		if prev != nil && prev.Branch == wt.Branch {
+			cur.Delegation.PR, cur.Delegation.PRURL, cur.Delegation.PRHead = prev.PR, prev.PRURL, prev.PRHead
 		}
 		cur.LastOutcome = &task.Outcome{Status: "started", Summary: fmt.Sprintf("dispatched to %s", req.Agent), At: now}
 		return cur, nil
