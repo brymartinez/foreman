@@ -276,3 +276,17 @@ func TestReviewPromptStageInstructions(t *testing.T) {
 		t.Errorf("no instructions must leave the default review prompt:\n%s", p)
 	}
 }
+
+func TestImplementationPromptPRInstructions(t *testing.T) {
+	b := TaskBrief{Key: task.Key{Repo: "a/b", Number: 825}, Branch: "fix/825-x", BaseBranch: "main", PRInstructions: "## Summary\n2-4 bullets."}
+	p := ImplementationPrompt(b)
+	sec, decide := strings.Index(p, "## Pull request description"), strings.Index(p, "## When you need a decision")
+	if sec < 0 || decide < sec || !strings.Contains(p, "## Summary\n2-4 bullets.") || !strings.Contains(p, `must include "Closes #825"; otherwise write it as`) {
+		t.Errorf("PR instructions must sit with the PR rules and keep Closes #N:\n%s", p)
+	}
+	b.PRInstructions = ""
+	p = ImplementationPrompt(b)
+	if strings.Contains(p, "## Pull request description") || !strings.Contains(p, `"Closes #825", a summary of the change`) {
+		t.Errorf("without PR instructions the default body rule applies:\n%s", p)
+	}
+}

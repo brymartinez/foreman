@@ -16,9 +16,12 @@ type TaskBrief struct {
 	// StageInstructions is the developer's instructions for the stage this prompt is
 	// for (implement, review), global then repo. Callers set only that stage's (D47).
 	StageInstructions string
-	Branch            string
-	BaseBranch        string
-	Worktree          string
+	// PRInstructions is the developer's pr stage, for writing the PR description. The
+	// implementer writes the PR in the same turn, so it rides along (D49).
+	PRInstructions string
+	Branch         string
+	BaseBranch     string
+	Worktree       string
 	// Decisions the developer already answered; a fresh turn must honor them.
 	Decisions []task.Decision
 	// OpenFindings are the latest review's findings when a fresh turn replaces a
@@ -79,9 +82,9 @@ Only change files inside this worktree. Commit your work to %s. Do not switch br
 - Validate with the checks the repository supports: tests, typecheck, lint, build, and behavioral verification where practical.
 - Review your own diff for correctness, regressions, missing tests, and unnecessary complexity before you finish.
 - Open the pull request only when validation passes. If you cannot make it pass, report "failed" and say why.
-- When the change is review-ready: commit everything (the worktree must be clean), push with `+"`git push -u origin %s`"+`, then open a pull request with `+"`gh pr create --base %s --head %s`"+`. If a pull request for this branch already exists (`+"`gh pr view %s`"+`), push to it instead of opening another. The pull request body must include "Closes #%d", a summary of the change, the validation you ran, and any decisions you made.
+- When the change is review-ready: commit everything (the worktree must be clean), push with `+"`git push -u origin %s`"+`, then open a pull request with `+"`gh pr create --base %s --head %s`"+`. If a pull request for this branch already exists (`+"`gh pr view %s`"+`), push to it instead of opening another. The pull request body must include "Closes #%d"%s.
 - Take prNumber and prUrl from `+"`gh pr view --json number,url`"+` after pushing; do not guess them.
-
+%s
 ## When you need a decision
 
 Stop and ask only when the choice materially affects product behavior, public API semantics, persistent schema semantics, security or authorization, destructive or irreversible data changes, an important architecture tradeoff, conflicting acceptance criteria, or a requirement that cannot be safely inferred.
@@ -102,7 +105,7 @@ Reply with JSON matching the provided schema:
 - "blocked" when you need a decision, as described above.
 - "failed" when you cannot complete the task: say why in summary.
 Set fields that do not apply to null, or [] for validation.
-`, b.Worktree, b.Branch, b.BaseBranch, b.Branch, b.Branch, b.BaseBranch, b.Branch, b.Branch, b.Key.Number)
+`, b.Worktree, b.Branch, b.BaseBranch, b.Branch, b.Branch, b.BaseBranch, b.Branch, b.Branch, b.Key.Number, prBodyRule(b.PRInstructions), prSection(b.PRInstructions))
 	return s.String()
 }
 
@@ -135,4 +138,21 @@ func stageSection(s *strings.Builder, text string) {
 	}
 	s.WriteString("## Developer workflow instructions\n\nThe developer's standing instructions for this stage of the work. Follow them alongside your usual repository instructions. Where they conflict with the task context or decisions below, the task context and decisions win.\n\n")
 	s.WriteString(text + "\n\n")
+}
+
+// prBodyRule completes the PR bullet: the default contents, or a pointer to the
+// developer's PR instructions. "Closes #N" is required either way, so GitHub links the
+// issue and closes it on merge.
+func prBodyRule(pr string) string {
+	if strings.TrimSpace(pr) == "" {
+		return ", a summary of the change, the validation you ran, and any decisions you made"
+	}
+	return `; otherwise write it as the "Pull request description" section below says`
+}
+
+func prSection(text string) string {
+	if text = strings.TrimSpace(text); text == "" {
+		return ""
+	}
+	return "\n## Pull request description\n\nThe developer's instructions for the pull request body. Follow them when you open the pull request and whenever you update its description (`gh pr edit --body`). They apply only to the pull request, not to the code.\n\n" + text + "\n"
 }

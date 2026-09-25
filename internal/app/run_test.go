@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 
@@ -163,7 +165,8 @@ func TestFreshTurnCarriesOpenFindingsWhenSessionIsGone(t *testing.T) {
 	}
 }
 
-func TestImplementationPromptGetsOnlyImplementInstructions(t *testing.T) {
+// The implementer opens the PR in the same turn, so it gets implement and pr (D49).
+func TestImplementationPromptGetsImplementAndPRInstructionsOnly(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	f.claude.turn = prTurn("sid-1")
@@ -174,11 +177,15 @@ func TestImplementationPromptGetsOnlyImplementInstructions(t *testing.T) {
 	if !strings.Contains(p, "## Developer workflow instructions") || !strings.Contains(p, "implement instructions") {
 		t.Fatalf("implementation prompt lacks implement instructions:\n%s", p)
 	}
-	if strings.Contains(p, "review instructions") || strings.Contains(p, "pr instructions") {
-		t.Errorf("implementation prompt carries another stage's instructions:\n%s", p)
+	if !strings.Contains(p, "## Pull request description") || !strings.Contains(p, "pr instructions") {
+		t.Errorf("implementation prompt lacks pr instructions:\n%s", p)
 	}
-	if got := f.stages.calls[0]; got != "/wt/ridezoomo-armada-backend/825-provider-retries implement" {
-		t.Errorf("resolved %q; want the worktree root and the implement stage", got)
+	if strings.Contains(p, "review instructions") {
+		t.Errorf("implementation prompt carries review instructions:\n%s", p)
+	}
+	root := "/wt/ridezoomo-armada-backend/825-provider-retries "
+	if got := f.stages.calls[:2]; !slices.Equal(got, []string{root + "implement", root + "pr"}) {
+		t.Errorf("resolved %q; want implement and pr at the worktree root", got)
 	}
 }
 
@@ -209,8 +216,8 @@ func TestReviewPromptGetsOnlyReviewInstructions(t *testing.T) {
 	if strings.Contains(p, "implement instructions") || strings.Contains(p, "pr instructions") {
 		t.Errorf("review prompt carries another stage's instructions:\n%s", p)
 	}
-	if got := f.stages.calls; len(got) != 2 || got[1] != "/wt/ridezoomo-armada-backend/825-provider-retries review" {
-		t.Errorf("lookups %q; want implement then review, both at the worktree root", got)
+	if got := f.stages.calls; len(got) != 3 || got[2] != "/wt/ridezoomo-armada-backend/825-provider-retries review" {
+		t.Errorf("lookups %q; want implement, pr, then review, all at the worktree root", got)
 	}
 }
 
@@ -222,7 +229,7 @@ type failingStage struct {
 
 func (f *failingStage) Resolve(root string, s task.Stage) (task.StageInstructions, error) {
 	if s == f.stage {
-		return task.StageInstructions{}, errors.New("stage instructions /repo/.foreman/review.md: not a regular file")
+		return task.StageInstructions{}, fmt.Errorf("stage instructions /repo/.foreman/%s.md: not a regular file", s)
 	}
 	return f.fakeStages.Resolve(root, s)
 }
@@ -238,5 +245,17 @@ func TestUnreadableReviewInstructionsFailTheReview(t *testing.T) {
 	got := f.store.recs[key]
 	if got.State != task.Failed || !strings.Contains(got.LastOutcome.Summary, "review.md: not a regular file") || len(f.codex.reviewed) != 0 {
 		t.Errorf("state %s outcome %+v reviews %d", got.State, got.LastOutcome, len(f.codex.reviewed))
+	}
+}
+
+func TestUnreadablePRInstructionsFailBeforeTheImplementerRuns(t *testing.T) {
+	f := newFixture()
+	f.app.Stages = &failingStage{stage: task.StagePR}
+	key := started(t, f, startReq(t))
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.Failed || f.claude.starts != 0 {
+		t.Errorf("state %s starts %d", got.State, f.claude.starts)
 	}
 }

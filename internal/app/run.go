@@ -117,6 +117,11 @@ func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Rev
 		return agent.Turn{}, err
 	}
 	brief.StageInstructions = implement.Content()
+	pr, err := a.Stages.Resolve(d.Worktree, task.StagePR)
+	if err != nil {
+		return agent.Turn{}, err
+	}
+	brief.PRInstructions = pr.Content()
 	in.Prompt = agent.ImplementationPrompt(brief)
 	fmt.Fprintf(log, "foreman: starting %s in %s\n", adapter.Name(), d.Worktree)
 	return adapter.Start(ctx, in, func(s task.Session) {

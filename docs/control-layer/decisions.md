@@ -663,3 +663,19 @@ Entry format:
   - A resolve error fails the review, and so the task, before the reviewer runs.
 - **Consequence.** The developer's review process reaches both reviewers, Claude and
   Codex, the same way. Foreman doesn't parse it.
+
+## D52. How pr instructions enter the implementation turn
+
+- Date: 2026-09-25. Stage-instructions work, Stage 4. Decided by the agent, following
+  D49.
+- **Decision.** The runner resolves `pr` for the worktree alongside `implement` for
+  each fresh implementation prompt. It adds a "Pull request description" section next
+  to the PR rules, which says the instructions apply to the PR body, both at
+  `gh pr create` and on later `gh pr edit --body`, and not to the code.
+  - With the section present, the PR bullet keeps only the fixed rule ("Closes #N",
+    which GitHub needs to link and close the issue) and points to the section.
+  - Without it, the old default body rule applies: summary, validation, and decisions.
+  - The review prompt never gets `pr`, and a resolve error fails the task before the
+    agent runs.
+- **Consequence.** The developer owns the PR format, and foreman keeps only the issue
+  link it depends on.

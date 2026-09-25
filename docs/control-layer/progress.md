@@ -267,8 +267,24 @@ has five stages: resolver, then implement, then review, then pr, then CLI inspec
   - The implement and pr text were absent.
   - The implementation prompt had no review text.
 
-Next is Stage 4: wire `pr` into PR description writing, in the implementation turn
-(D49).
+### Stage 4 (complete): pr instructions for the PR description
+
+- Fresh implementation prompts also resolve `pr` and add it as a "Pull request
+  description" section next to the PR rules. "Closes #N" stays required, and the default
+  body rule applies only when there's no `pr` text (D49, D52).
+- Validated by tests for:
+  - the implementation prompt carrying `implement` and `pr` but not `review`, and the
+    review prompt carrying neither;
+  - the lookups (implement, pr, review) at the worktree root;
+  - an unreadable `pr.md` failing the task before the agent runs;
+  - the section placement, "Closes #N" kept, and the default rule when there's no text.
+- Validated end to end with the built binary, real global and committed repo `pr.md`
+  files, and stub agents:
+  - The implementer's prompt had GLOBAL-PR and then REPO-PR, and the PR rule pointed to
+    the section.
+  - The reviewer's prompt had neither, and only the reviewer had GLOBAL-REVIEW.
+
+Next is Stage 5: inspect the effective stage instructions from the CLI.
 
 ## Known limitations
 
@@ -325,7 +341,7 @@ what it replaced. Current summary:
   file; repo layer from the worktree. D49. pr.md goes in the implementation turn.
   D50. Implement instructions are resolved per fresh turn, before the task context.
   D51. Review instructions go to every review round, and the built-in checklist becomes
-  the fallback.
+  the fallback. D52. pr instructions sit with the PR rules, and "Closes #N" stays required.
 - D46 (supersedes D38). CI belongs to the repo owners: foreman reads GitHub's checks and
   hands failures to the developer.
 
