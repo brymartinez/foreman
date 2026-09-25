@@ -22,3 +22,18 @@ func TestWriterTimestampsLinesAndCleanSummarizesJSON(t *testing.T) {
 		t.Fatalf("clean log = %q", clean.String())
 	}
 }
+
+func TestWriterFlushKeepsAnUnterminatedLastLine(t *testing.T) {
+	var raw bytes.Buffer
+	w := &Writer{W: &raw}
+	_, _ = w.Write([]byte("partial"))
+	if raw.Len() != 0 {
+		t.Fatalf("wrote before the line ended: %q", raw.String())
+	}
+	if err := w.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(raw.String(), " partial\n") {
+		t.Fatalf("flushed log = %q", raw.String())
+	}
+}

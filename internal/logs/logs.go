@@ -10,6 +10,7 @@ import (
 	"time"
 )
 
+// Writer prefixes every complete line with the time it was written.
 type Writer struct {
 	W   io.Writer
 	buf string
@@ -31,6 +32,15 @@ func (w *Writer) Write(p []byte) (int, error) {
 		w.buf = w.buf[i+1:]
 	}
 	return len(p), nil
+}
+
+// Flush writes a final line that has no trailing newline.
+func (w *Writer) Flush() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	s := w.buf
+	w.buf = ""
+	return w.line(s)
 }
 
 func (w *Writer) line(s string) error {

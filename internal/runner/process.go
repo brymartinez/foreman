@@ -11,7 +11,6 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/brymartinez/foreman/internal/logs"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -23,7 +22,7 @@ type Processes struct {
 }
 
 // Spawn starts the runner in its own session so closing the terminal does not kill it.
-// Its stdout and stderr go to an append-only log per task.
+// Its stdout and stderr go to an append-only log per task; the runner timestamps its own lines.
 func (p Processes) Spawn(key task.Key) (int, string, error) {
 	exe, err := os.Executable()
 	if err != nil {
@@ -39,8 +38,9 @@ func (p Processes) Spawn(key task.Key) (int, string, error) {
 	}
 	defer log.Close()
 	cmd := exec.Command(exe, RunCommand, fmt.Sprintf("%s#%d", key.Repo, key.Number))
-	stamped := &logs.Writer{W: log}
-	cmd.Stdout, cmd.Stderr = stamped, stamped
+	// The log must be the file itself. Any other writer makes this process copy
+	// the output through a pipe, and the runner dies once this process exits.
+	cmd.Stdout, cmd.Stderr = log, log
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return 0, "", err

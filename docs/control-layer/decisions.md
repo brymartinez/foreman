@@ -778,3 +778,24 @@ Entry format:
 - **Consequence.** A detached run is readable without tailing raw JSON, typical
   Claude work is bounded, Codex usage is measurable but not falsely priced, and
   notifications remain actionable rather than noisy.
+
+## D58. The runner timestamps its own log
+
+- Date: 2026-09-25. Bug fix found in the repository review. Fixed on the user's
+  request to fix everything the review found.
+- **Context.** D57 wrapped the runner's log file in a timestamping writer inside
+  `runner.Processes.Spawn`. When a child's output isn't an `*os.File`, Go copies it
+  through a pipe owned by the parent. `foreman start`, `respond`, and `inbox` exit
+  right after spawning, so the pipe lost its reader and the runner died on its
+  next write. The next `status` reported it as FAILED.
+- **Decision.**
+  - `Spawn` passes the log file itself as the runner's stdout and stderr.
+  - The `__run` process wraps its own stdout in `logs.Writer` and hands that to
+    `RunTask`, so agent output and foreman's lines are stamped once, at write time,
+    by the process that lives as long as the run. A last line with no newline is
+    flushed on exit.
+  - `scripts/e2e.sh` runs the built binary against a local origin, a stand-in `gh`,
+    and stub agents. It is the check that a detached run survives its launcher.
+- **Consequence.** Delegation works again. The regression test in
+  `internal/runner` launches a runner from a process that exits at once, which is
+  the case unit tests with a live parent can't see.

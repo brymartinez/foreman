@@ -185,11 +185,14 @@ func run(argv []string) int {
 			return stageConfig(ctx, cfg)
 		}
 	case cli.Run:
-		fmt.Printf("foreman: runner %d started %s\n", os.Getpid(), time.Now().Format(time.RFC3339))
-		if err := a.RunTask(ctx, task.Key{Repo: cmd.Repo, Number: cmd.Issue}, os.Getpid(), os.Stdout); err != nil {
-			return fail(err)
+		log := &logs.Writer{W: os.Stdout}
+		defer log.Flush()
+		fmt.Fprintf(log, "foreman: runner %d started\n", os.Getpid())
+		if err := a.RunTask(ctx, task.Key{Repo: cmd.Repo, Number: cmd.Issue}, os.Getpid(), log); err != nil {
+			fmt.Fprintf(log, "foreman: %v\n", err)
+			return 1
 		}
-		fmt.Printf("foreman: runner %d finished %s\n", os.Getpid(), time.Now().Format(time.RFC3339))
+		fmt.Fprintf(log, "foreman: runner %d finished\n", os.Getpid())
 	}
 	return 0
 }
