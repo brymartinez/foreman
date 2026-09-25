@@ -799,3 +799,21 @@ Entry format:
 - **Consequence.** Delegation works again. The regression test in
   `internal/runner` launches a runner from a process that exits at once, which is
   the case unit tests with a live parent can't see.
+
+## D59. Notifications follow state transitions, and a stopped run stops its agent
+
+- Date: 2026-09-25. Bug fixes found in the repository review.
+- **Context.** D57 notified from two call sites, the runner's main loop and the
+  gate. A task escalated at the review-round cap, or marked FAILED because its
+  runner died, changed state without a notification. Driving a stopped runner end
+  to end also showed that SIGTERM left the runner waiting for any process the
+  agent had started, because Go's `Wait` blocks while a grandchild holds the
+  output pipe.
+- **Decision.**
+  - Every task write in `app` goes through `App.update`, which wraps
+    `Store.Update` and notifies when the state changes into NEEDS_DECISION,
+    FAILED, or READY_FOR_HUMAN. Call sites no longer decide.
+  - `agent.RunCommand` starts the agent in its own process group, sends the group
+    SIGTERM on cancel, and sets a 5-second `WaitDelay`.
+- **Consequence.** Any new transition is announced without extra code. A stopped
+  runner records FAILED within seconds and leaves no agent tools running.

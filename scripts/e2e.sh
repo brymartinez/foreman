@@ -9,7 +9,7 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/foreman-e2e.XXXXXX")
-trap 'rm -rf "$work"' EXIT
+trap '[ -n "${E2E_KEEP:-}" ] && echo "kept $work" || rm -rf "$work"' EXIT
 failures=0
 
 go build -o "$work/foreman" "$root/cmd/foreman"
@@ -150,7 +150,36 @@ scenario_runner() {
 	check "no line is stamped twice" bash -c "! grep -qE '^[^ ]+ [0-9]{4}-[0-9]{2}-[0-9]{2}T' '$log'"
 }
 
-scenarios=${*:-runner}
+scenario_notify() {
+	echo "notify: the developer hears about ready work and stopped runners"
+	setup notify
+	echo '[{"name":"test","bucket":"pending","link":"https://ci/1"}]' >"$state/checks.json"
+	foreman start 42 --agent claude >/dev/null
+	check "the runner reaches a clean review" wait_status "CI pending"
+	check "a clean review with pending CI stays quiet" bash -c "[ ! -s '$state/notifications.log' ]"
+	echo '[{"name":"test","bucket":"pass","link":"https://ci/1"}]' >"$state/checks.json"
+	foreman status >/dev/null
+	foreman status >/dev/null
+	check "ready work notifies once" bash -c "[ \$(grep -c 'Ready for human review' '$state/notifications.log') = 1 ]"
+
+	issue 43 "Fix pagination"
+	E2E_AGENT_SLEEP=30.017 foreman start 43 --agent claude >/dev/null
+	sleep 0.5
+	pkill -TERM -f "$work/foreman __run acme/widgets#43" || true
+	check "a stopped runner records FAILED promptly" wait_status "FAILED" 5
+	check "and notifies" grep -q 'Run failed.*acme/widgets#43' "$state/notifications.log"
+	check "and leaves no agent behind" bash -c "! pgrep -f 'sleep 30.017' >/dev/null"
+
+	issue 44 "Fix sorting"
+	E2E_AGENT_SLEEP=30.017 foreman start 44 --agent claude >/dev/null
+	sleep 0.5
+	pkill -KILL -f "$work/foreman __run acme/widgets#44" || true
+	foreman status >/dev/null
+	check "a killed runner is reaped and notifies" grep -q 'Run failed.*acme/widgets#44' "$state/notifications.log"
+	pkill -f "sleep 30.017" || true
+}
+
+scenarios=${*:-runner notify}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"

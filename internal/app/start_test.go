@@ -132,6 +132,7 @@ type fixture struct {
 	repos   *fakeRepositories
 	claude  *fakeAgent
 	codex   *fakeAgent
+	notes   *fakeNotifier
 }
 
 func newFixture() fixture {
@@ -151,9 +152,11 @@ func newFixture() fixture {
 		repos:   &fakeRepositories{info: RepoInfo{Repo: "ridezoomo/armada-backend", DefaultBranch: "main"}},
 		claude:  &fakeAgent{name: task.Claude},
 		codex:   &fakeAgent{name: task.Codex},
+		notes:   &fakeNotifier{},
 	}
 	f.app = App{
-		Store: f.store, GitHub: f.gh, Worktrees: f.wt, Runners: f.runners, Stages: f.stages,
+		Notifier: f.notes,
+		Store:    f.store, GitHub: f.gh, Worktrees: f.wt, Runners: f.runners, Stages: f.stages,
 		Agents:       map[task.Agent]AgentAdapter{task.Claude: f.claude, task.Codex: f.codex},
 		WorktreesDir: "/wt", Repositories: f.repos, RepositoriesDir: "/repos",
 		Now: func() time.Time { return now },

@@ -70,7 +70,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 	}
 
 	now := a.Now()
-	_, err = a.Store.Update(ctx, key, func(cur *task.Record) (*task.Record, error) {
+	_, err = a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
 		if cur == nil {
 			cur = &task.Record{Key: key, State: task.Discovered, Body: fmt.Sprintf("# #%d %s\n\n## Notes\n\n", key.Number, issue.Title)}
 		}
@@ -129,7 +129,7 @@ func (a App) sourceRepo(ctx context.Context, req *StartRequest) (RepoInfo, error
 // launch spawns the runner and records its log, or marks the task FAILED if it can't.
 func (a App) launch(ctx context.Context, key task.Key) (*task.Record, error) {
 	pid, logPath, spawnErr := a.Runners.Spawn(key)
-	return a.Store.Update(ctx, key, func(cur *task.Record) (*task.Record, error) {
+	return a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
 		if spawnErr != nil {
 			cur.State = task.Failed
 			cur.LastOutcome = &task.Outcome{Status: "failed", Summary: "could not launch runner: " + spawnErr.Error(), At: a.Now()}

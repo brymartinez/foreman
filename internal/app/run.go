@@ -20,7 +20,7 @@ const DefaultReviewRounds = 3
 // review → fix until the review is clean, the task needs the developer, or it fails.
 // Every step's result is written to the task file before the next one starts.
 func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) error {
-	rec, err := a.Store.Update(ctx, key, func(cur *task.Record) (*task.Record, error) {
+	rec, err := a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
 		if cur == nil || cur.Delegation == nil || cur.State != task.Working {
 			return nil, errors.New("task is not WORKING; nothing to run")
 		}
@@ -31,7 +31,7 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 		return err
 	}
 	final := context.WithoutCancel(ctx)
-	defer a.Store.Update(final, key, func(cur *task.Record) (*task.Record, error) {
+	defer a.update(final, key, func(cur *task.Record) (*task.Record, error) {
 		if cur.Delegation.RunnerPID == pid {
 			cur.Delegation.RunnerPID = 0
 		}
@@ -47,29 +47,27 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 				fmt.Fprintf(log, "foreman: verified PR #%d %s\n", pr.Key.Number, pr.URL)
 			}
 		}
-		if rec, err = a.Store.Update(final, key, func(cur *task.Record) (*task.Record, error) {
+		if rec, err = a.update(final, key, func(cur *task.Record) (*task.Record, error) {
 			applyTurn(cur, turn, pr, runErr, a.Now())
 			addUsage(&cur.Usage, turn.Usage)
 			return cur, nil
 		}); err != nil || rec.State != task.Reviewing {
-			a.notifyState(key, rec)
 			return err
 		}
 
 		if rec.ChangeRequestsSinceDecision() >= a.reviewRounds() {
-			_, err = a.Store.Update(final, key, func(cur *task.Record) (*task.Record, error) {
+			_, err = a.update(final, key, func(cur *task.Record) (*task.Record, error) {
 				escalateReview(cur, a.reviewRounds(), a.Now())
 				return cur, nil
 			})
 			return err
 		}
 		review, reviewErr := a.review(ctx, rec, log)
-		if rec, err = a.Store.Update(final, key, func(cur *task.Record) (*task.Record, error) {
+		if rec, err = a.update(final, key, func(cur *task.Record) (*task.Record, error) {
 			applyReview(cur, review, reviewErr, a.Now())
 			addUsage(&cur.Usage, review.Usage)
 			return cur, nil
 		}); err != nil || rec.State != task.Working {
-			a.notifyState(key, rec)
 			return err
 		}
 		findings = rec.LatestReview()
@@ -129,7 +127,7 @@ func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Rev
 	in.Prompt = agent.ImplementationPrompt(brief)
 	fmt.Fprintf(log, "foreman: starting %s in %s\n", adapter.Name(), d.Worktree)
 	return adapter.Start(ctx, in, func(s task.Session) {
-		_, _ = a.Store.Update(ctx, rec.Key, func(cur *task.Record) (*task.Record, error) {
+		_, _ = a.update(ctx, rec.Key, func(cur *task.Record) (*task.Record, error) {
 			cur.Delegation.Implementer = s
 			return cur, nil
 		})
@@ -171,12 +169,28 @@ func addUsage(total *task.Usage, turn task.Usage) {
 	total.CodexTurns += turn.CodexTurns
 }
 
-func (a App) notifyState(key task.Key, rec *task.Record) {
-	if a.Notifier == nil || rec == nil {
+// update is Store.Update plus the developer's notification: a task that moves into
+// a state that needs them announces it, whichever command or runner moved it.
+func (a App) update(ctx context.Context, key task.Key, fn func(cur *task.Record) (*task.Record, error)) (*task.Record, error) {
+	var before task.State
+	rec, err := a.Store.Update(ctx, key, func(cur *task.Record) (*task.Record, error) {
+		if cur != nil {
+			before = cur.State
+		}
+		return fn(cur)
+	})
+	if err == nil && rec != nil && rec.State != before {
+		a.notify(key, rec.State)
+	}
+	return rec, err
+}
+
+func (a App) notify(key task.Key, state task.State) {
+	if a.Notifier == nil {
 		return
 	}
 	var body string
-	switch rec.State {
+	switch state {
 	case task.NeedsDecision:
 		body = "Needs your decision"
 	case task.Failed:

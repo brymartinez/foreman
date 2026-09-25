@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"syscall"
+	"time"
 
 	"github.com/brymartinez/foreman/internal/task"
 )
@@ -41,9 +43,15 @@ type Command struct {
 type Exec func(ctx context.Context, c Command) error
 
 // RunCommand connects stdin to /dev/null: claude -p waits 3s for piped stdin otherwise.
+// The agent runs in its own process group so a cancelled run stops the tools it
+// started too; WaitDelay stops a leftover grandchild holding the output pipe from
+// keeping the runner waiting.
 func RunCommand(ctx context.Context, c Command) error {
 	cmd := exec.CommandContext(ctx, c.Name, c.Args...)
 	cmd.Dir, cmd.Stdout, cmd.Stderr = c.Dir, c.Stdout, c.Stderr
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
+	cmd.WaitDelay = 5 * time.Second
 	devnull, err := os.Open(os.DevNull)
 	if err != nil {
 		return err

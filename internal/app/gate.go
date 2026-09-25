@@ -33,7 +33,7 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			ci.CheckedAt = a.Now()
 		}
 		var note string
-		updated, err := a.Store.Update(ctx, r.Key, func(cur *task.Record) (*task.Record, error) {
+		updated, err := a.update(ctx, r.Key, func(cur *task.Record) (*task.Record, error) {
 			if gated(cur) && cur.Delegation.PR == r.Delegation.PR {
 				note = advance(cur, pr, ci, a.Now())
 			}
@@ -41,9 +41,6 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 		})
 		if err != nil {
 			return nil, err
-		}
-		if updated.State != r.State {
-			a.notifyState(r.Key, updated)
 		}
 		if note != "" {
 			notes[r.Key] = append(notes[r.Key], note)

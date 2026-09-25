@@ -82,7 +82,7 @@ func (a App) listReaped(ctx context.Context) ([]*task.Record, error) {
 		if !running(r.State) || r.Delegation == nil || r.Delegation.RunnerPID == 0 || a.Runners.Alive(r.Delegation.RunnerPID) {
 			continue
 		}
-		updated, err := a.Store.Update(ctx, r.Key, func(cur *task.Record) (*task.Record, error) {
+		updated, err := a.update(ctx, r.Key, func(cur *task.Record) (*task.Record, error) {
 			d := cur.Delegation
 			if !running(cur.State) || d == nil || d.RunnerPID != r.Delegation.RunnerPID {
 				return cur, nil

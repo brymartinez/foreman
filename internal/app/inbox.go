@@ -75,7 +75,7 @@ func (a App) Inbox(ctx context.Context) (InboxReport, error) {
 	}
 	report, dirty := Reconcile(append(items, tracked...), recs, notes, a.Now())
 	for _, seen := range dirty {
-		if _, err := a.Store.Update(ctx, seen.Key, func(cur *task.Record) (*task.Record, error) {
+		if _, err := a.update(ctx, seen.Key, func(cur *task.Record) (*task.Record, error) {
 			return mergeObserved(cur, seen), nil
 		}); err != nil {
 			return InboxReport{}, err

@@ -98,7 +98,7 @@ func (a App) clean(ctx context.Context, rec *task.Record, dryRun bool) CleanResu
 		res.Err, res.BranchDeleted = err, false
 		return res
 	}
-	updated, err := a.Store.Update(ctx, rec.Key, func(cur *task.Record) (*task.Record, error) {
+	updated, err := a.update(ctx, rec.Key, func(cur *task.Record) (*task.Record, error) {
 		cur.Delegation.WorktreeRemovedAt = a.Now()
 		return cur, nil
 	})
