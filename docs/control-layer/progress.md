@@ -380,7 +380,7 @@ request. Each fix is its own commit with a decision.
 - A runner whose task file is removed stops instead of crashing (D62).
 - Reviews record the PR head they covered. New commits after a clean review are
   reviewed before handover, and a restart after a crash mid-review goes straight to
-  the review (D63).
+  the review, unless that PR is no longer open or the implementer changed (D63, D67).
 - Searches ask for 1000 results and warn when one hits the limit. PR mentions are
   listed, and lost reasons are reported when every search is complete (D64).
 - A blocked turn can ask several questions, answered in one `respond` (D65).
@@ -461,6 +461,8 @@ what it replaced. Current summary:
   the runner.
 - D63. A review covers one PR head. D64 (amends D15). Complete inbox searches, PR
   mentions, and lost reasons. D65. A blocked turn can ask several questions.
+- D66. What the repository review left as designed. D67 (amends D63). When picking up
+  at the review falls back to implementing.
 
 ## Next stage
 
