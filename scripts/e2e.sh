@@ -213,7 +213,7 @@ scenario_logs() {
 	check "clean shows Codex usage without a price" contains "$sandbox/clean.txt" "(USD unavailable)"
 	check "clean hides Codex JSON" bash -c "! grep -q '\"type\"' '$sandbox/clean.txt'"
 	check "raw keeps Codex JSON" contains "$sandbox/raw.txt" '"type":"thread.started"'
-	check "show reports usage" bash -c "cd '$FOREMAN_CWD' && '$work/foreman' show 42 | grep -F 'Claude \$0.25 (1 turns) · Codex 125 tokens (1 turns)'"
+	check "show reports usage" bash -c "cd '$FOREMAN_CWD' && '$work/foreman' show 42 | grep -F 'Claude \$0.25 (1 turn) · Codex 125 tokens (1 turn)'"
 }
 
 hit() { # hit <repo> <number> <title>

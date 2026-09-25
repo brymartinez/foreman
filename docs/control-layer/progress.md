@@ -2,8 +2,7 @@
 
 ## Current stage
 
-Stage 7 (observability, cost controls, and notifications) is complete. All stages
-in the design are built.
+Stage 11 (repository review fixes) is complete. All stages in the design are built.
 
 ## Completed
 
@@ -288,7 +287,8 @@ has five stages: resolver, then implement, then review, then pr, then CLI inspec
 ### Stage 5 (complete): CLI inspection
 
 - `foreman config stages` shows each stage's sources, and `foreman config stage <stage>`
-  shows the combined text as agents get it (D53).
+  shows the combined text as agents get it (D53). Stage 8 replaced both with
+  `foreman config --stages` (D55).
 - Validated by tests for parsing (both forms, an unknown stage, bad shapes),
   `RepoRoot` (from a subdirectory, and outside a repo), and rendering (found, not
   configured with its path, outside a repo, a read error, and empty content).
@@ -302,6 +302,10 @@ has five stages: resolver, then implement, then review, then pr, then CLI inspec
     `~/.config/foreman/stages/…` paths.
 
 The stage-instructions track is complete.
+
+## Inbox and observability
+
+These stages continue the main track after Stage 6.
 
 ### Stage 7 (complete): interactive inbox and storage setup
 
@@ -326,8 +330,9 @@ The stage-instructions track is complete.
   `--edit` flags. `--show` prints resolved non-secret values, and `--edit` uses
   `$VISUAL`, `$EDITOR`, or `vi`.
 - Changed the unstamped version to `0.1.0-dev`; release stamping remains unchanged.
-- Validated with focused config, CLI, app, and rendering tests. Full vet, tests, build,
-  and diff checks follow at the stage boundary.
+- Validated with focused config, CLI, app, and rendering tests. The full vet, test,
+  build, and end-to-end checks ran in Stage 11, which also fixed `config --edit` for an
+  editor with arguments (D61).
 
 ### Stage 9 (complete): checkout-independent inbox delegation
 
@@ -337,18 +342,67 @@ The stage-instructions track is complete.
 - Explicit `foreman start` retains its existing checkout matching behavior.
 - Added regression coverage for selecting a repository different from the current
   checkout and for cloning a missing source checkout.
+- Stages 7 to 9 were first run end to end in Stage 11, which found and fixed lost
+  piped answers after first-run setup and PRs offered for delegation (D61).
+
+### Stage 10 (complete): observability, cost controls, and notifications
+
+This stage was first recorded as a second "Stage 7".
+
+
+- Added timestamped runner logs and `foreman logs`, with clean, follow, and raw modes.
+- Added durable per-task usage accounting. Claude spend is read from
+  `total_cost_usd`; Codex input, cached, output, and reasoning tokens are read from
+  `turn.completed` events.
+- Added configurable Claude per-turn budgets of $3.00 for implementation and $1.00
+  for review. The existing three-round cap and early clean-review exit remain active.
+- Added best-effort native notifications for NEEDS_DECISION, FAILED, and
+  READY_FOR_HUMAN transitions.
+- Validated with `go test ./...`, `go vet ./...`, `go build`, and the version command.
+  None of that ran a detached runner, and the new log writer killed every runner once
+  its launcher exited. Stage 11 found and fixed it (D58).
+
+### Stage 11 (complete): repository review fixes
+
+A review of the repository against this file and the commits, fixed on the user's
+request. Each fix is its own commit with a decision.
+
+- The detached runner died as soon as `start`, `respond`, or `inbox` exited, because
+  its log went through a pipe owned by the launcher. The runner now stamps its own
+  log (D58).
+- Every task write notifies on entering NEEDS_DECISION, FAILED, or READY_FOR_HUMAN,
+  which adds escalation at the round cap and a reaped runner. A stopped runner also
+  stops the tools its agent started (D59).
+- `logs --follow` prints whole lines only, and Codex usage lines say USD is
+  unavailable (D60).
+- Inbox prompts share one stdin reader, the picker offers only issues, and
+  `config --edit` accepts an editor with arguments (D61).
+- A runner whose task file is removed stops instead of crashing (D62).
+- Reviews record the PR head they covered. New commits after a clean review are
+  reviewed before handover, and a restart after a crash mid-review goes straight to
+  the review (D63).
+- Searches ask for 1000 results and warn when one hits the limit. PR mentions are
+  listed, and lost reasons are reported when every search is complete (D64).
+- A blocked turn can ask several questions, answered in one `respond` (D65).
+- `scripts/e2e.sh` runs the built binary against a local origin, a stand-in `gh`,
+  and stub agents. Its six scenarios cover the runner, notifications, logs, the
+  inbox with setup and filters, re-review, and multi-question respond.
+- Validated with `go vet ./...`, `go test ./...`, `go build`, `scripts/e2e.sh`, and
+  `scripts/probe-agents.sh` (17 checks on Claude Code 2.1.281 and Codex 0.156.1).
+  Each new test was also checked against the code before its fix, where it failed.
 
 ## Known limitations
 
-- The gate runs only when `inbox` or `status` runs. A push to the branch after a clean
-  review is not re-reviewed.
+- The gate runs only when `inbox` or `status` runs, because the design rules out
+  daemons and polling (D5). Notifications come from the runner and from those
+  commands.
 - `gh pr checks` handling is verified against gh's documented behavior and fixtures,
-  not a live PR (D36).
-- Validation results are self-reported by the agent (D32).
-- A restart after a crash reimplements rather than resuming a half-finished review.
-- Only one question can be pending at a time.
-- Each search returns at most 100 results. Mentions only come from issues. A lost reason
-  is not reported.
+  not a live PR, because the user declined the live probe (D36).
+- Validation results are self-reported by the agent (D32). CI is the independent
+  check, and foreman gates on it.
+- A search that returns 1000 results is flagged, and lost reasons aren't judged
+  while one is truncated (D64).
+- The release workflow has not run: the repo has no GitHub remote yet.
 
 ## Architectural decisions
 
@@ -394,22 +448,20 @@ what it replaced. Current summary:
   D50. Implement instructions are resolved per fresh turn, before the task context.
   D51. Review instructions go to every review round, and the built-in checklist becomes
   the fallback. D52. pr instructions sit with the PR rules, and "Closes #N" stays required.
-  D53. `foreman config stages` and `foreman config stage <stage>`.
+  D53. `foreman config stages` and `foreman config stage <stage>`, later replaced by
+  flags (D55).
 - D46 (supersedes D38). CI belongs to the repo owners: foreman reads GitHub's checks and
   hands failures to the developer.
-
-### Stage 7
-
-- Added timestamped runner logs and `foreman logs`, with clean, follow, and raw modes.
-- Added durable per-task usage accounting. Claude spend is read from
-  `total_cost_usd`; Codex input, cached, output, and reasoning tokens are read from
-  `turn.completed` events.
-- Added configurable Claude per-turn budgets of $3.00 for implementation and $1.00
-  for review. The existing three-round cap and early clean-review exit remain active.
-- Added best-effort native notifications for NEEDS_DECISION, FAILED, and
-  READY_FOR_HUMAN transitions.
-- Validated with `go test ./...`, `go vet ./...`, `go build`, and the version command.
+- D54. Interactive inbox and storage setup. D55 (supersedes D53). Repository filters
+  and `config --stages|--show|--edit`. D56. Inbox delegation is checkout-independent.
+- D57. Timestamped logs, bounded Claude spend, and notifications.
+- D58. The runner timestamps its own log. D59. Notifications follow state transitions,
+  and a stopped run stops its agent. D60. Follow logs by whole lines. D61. Shared
+  stdin, issues-only picker, editor through the shell. D62. A removed task file stops
+  the runner.
+- D63. A review covers one PR head. D64 (amends D15). Complete inbox searches, PR
+  mentions, and lost reasons. D65. A blocked turn can ask several questions.
 
 ## Next stage
 
-None. Stages 0 to 8 are complete. Further inbox features need a new request.
+None. Stages 0 to 11 are complete. Further work needs a new request.

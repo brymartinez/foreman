@@ -43,8 +43,6 @@ type Command struct {
 	ConfigEdit     bool
 	Follow         bool
 	RawLogs        bool
-	// Stage is set for `config stage <stage>`; `config stages` leaves it empty.
-	Stage task.Stage
 }
 
 const Usage = `foreman: delegate GitHub issues to Claude Code or Codex

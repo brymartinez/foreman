@@ -31,37 +31,44 @@ foreman start 825 --agent claude          (run from a checkout of the repo)
   └─ spawn detached `foreman __run owner/repo#825` (pid + log recorded), exit
 
 runner (one process per task, exits when the task leaves WORKING/REVIEWING):
+  if the verified PR head has no review (crash mid-review, or new commits, D63):
+    re-verify the PR, record its head, skip to the review below
   turn = implementer.Start(worktree, prompt)          # later: Resume(session, msg)
   switch turn.Outcome.Status
-    blocked      -> save Question, state NEEDS_DECISION, exit
+    blocked      -> save each of Questions as a decision, state NEEDS_DECISION, exit
     failed       -> state FAILED, exit
     pr_opened    -> (the agent pushed and ran gh pr create) gh: confirm PR exists
-                    record PR, state REVIEWING
+                    record PR and its head commit, state REVIEWING
                     review = reviewer.Review(disposable read-only session,
                                              issue + context + decisions + git diff + earlier rounds)
-                    clean    -> record review, stay REVIEWING, exit
+                    clean    -> record review and the head it covered, stay REVIEWING, exit
                     findings -> WORKING; implementer.Resume(session, findings); agent pushes
                                 fixes and reports pr_opened again; re-verify; re-review
                     review_rounds spent since the last answer -> NEEDS_DECISION (A: another
                                 round, B: accept remaining), exit
 
-foreman respond 825   -> save answer, state WORKING, spawn runner
-                         runner: Resume(session, answer); on ErrNoSession, a fresh
+foreman respond 825   -> answer each waiting question in order; after the last,
+                         state WORKING, spawn runner
+                         runner: Resume(session, all answers); on ErrNoSession, a fresh
                          Start whose prompt lists all recorded decisions
 foreman inbox|status  -> runner pid dead while WORKING/REVIEWING -> FAILED
                          readiness gate (gate.go), per idle task with a PR:
                            PR merged -> DONE; PR closed -> FAILED
+                           REVIEWING + clean review, PR head moved -> WORKING, spawn
+                             a runner that reviews the new commits (D63)
                            REVIEWING + clean review: gh pr checks (read only, D46)
                              pending              -> record, wait
                              finished             -> READY_FOR_HUMAN, ✓ CI or ✗ CI: <checks>
-                           READY_FOR_HUMAN: refresh the CI result
+                           READY_FOR_HUMAN: refresh the CI result; flag new commits
                         inbox only, cleanup.on_done: DONE task -> git worktree remove
                            (kept if dirty); branch -D only if its PR merged
 foreman clean [<issue>] -> the same cleanup on demand; <issue> may also be FAILED
 ```
 
 Nothing runs in the background except the runner working on a task. The readiness and
-liveness checks happen whenever the user runs a command.
+liveness checks happen whenever the user runs a command. Every task write goes through
+`App.update`, which sends a desktop notification when a task enters NEEDS_DECISION,
+FAILED, or READY_FOR_HUMAN (D59).
 
 ## Why each piece is shaped this way
 
@@ -69,6 +76,10 @@ liveness checks happen whenever the user runs a command.
   `inbox`, and `status` can all write the same task file, so every write goes through
   `TaskStore.Update`, which re-reads the file under a lock file (D21). `inbox` only merges
   in fields that come from GitHub.
+- **The runner owns its log.** `Spawn` hands the log file itself to the runner, and the
+  runner timestamps its own lines. A writer in the launcher would need a pipe, which
+  dies with the launcher (D58). Agents run in their own process group, so stopping a
+  runner stops the tools its agent started (D59).
 - **Structured outcomes.** Both CLIs validate the final message against
   `internal/agent/outcome.schema.json`. `ParseOutcome` is the single place where
   external agent output becomes typed data.

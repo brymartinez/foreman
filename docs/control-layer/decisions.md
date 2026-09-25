@@ -178,7 +178,7 @@ Entry format:
   `~/.local/share/foreman/tasks`. Markdown files without task frontmatter are ignored,
   so the directory can live inside a vault.
 
-## D15. Inbox semantics
+## D15. Inbox semantics (amended by D64)
 
 - Date: 2026-09-24. Stage 1. Decided by the agent.
 - **Context.** The inbox has to answer "what changed since I last looked", and that
@@ -680,7 +680,7 @@ Entry format:
 - **Consequence.** The developer owns the PR format, and foreman keeps only the issue
   link it depends on.
 
-## D53. Inspecting stage instructions from the CLI
+## D53. Inspecting stage instructions from the CLI (superseded by D55)
 
 - Date: 2026-09-25. Stage-instructions work, Stage 5. Decided by the agent, following
   the shape the spec suggested.
@@ -930,3 +930,23 @@ Entry format:
 - **Consequence.** `scripts/probe-agents.sh` checks that both CLIs return a
   `questions` array under the strict schema (17 checks, passing on Claude Code
   2.1.281 and Codex 0.156.1).
+
+## D66. What the repository review left as designed
+
+- Date: 2026-09-25. Scope decisions for the user's request to fix everything the
+  repository review found. Decided by the agent.
+- **Decision.**
+  - The gate still runs only on `inbox` and `status`. The design rules out daemons
+    and polling (D5), so a waiting runner or a watcher would reverse a user-level
+    constraint, not fix a defect.
+  - `gh pr checks` is still not probed against a live PR, because the user declined
+    that probe (D36).
+  - Validation stays self-reported (D32). Re-running agent-reported commands outside
+    the agent's sandbox would run untrusted shell. CI is the independent check.
+  - The release workflow still can't run until the repo has a GitHub remote.
+    `scripts/release.sh` was re-run locally: four archives, valid checksums, and a
+    stamped `foreman v0.0.0-test`.
+  - `progress.md` keeps the stage numbers the decisions refer to. The second
+    "Stage 7" (D57) becomes Stage 10, Stages 7 to 9 move out of the
+    stage-instructions track, and the review is Stage 11.
+- **Consequence.** The known limitations in `progress.md` are exactly these.

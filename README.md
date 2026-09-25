@@ -75,9 +75,14 @@ foreman version
 `<issue>` can be `825`, `#825`, or `owner/repo#825`. Use the last form when the same
 number is tracked in more than one repo.
 
-`foreman inbox` is interactive by default. It shows repo-qualified identities such as
-`acme/widgets#825`, asks which configured agent should implement the issue, and accepts
-an optional context Markdown file. Press `q` to leave without starting work. Use
+`foreman inbox` lists open issues assigned to you, open issues and PRs that mention
+you, and PRs that request your review. It also reports what changed since the last run,
+including a reason an item lost, such as "no longer assigned to you". Each search
+returns up to 1000 results, and the inbox warns when one hits that limit.
+
+The inbox is interactive by default. It shows repo-qualified identities such as
+`acme/widgets#825`, offers the issues for delegation, asks which configured agent should
+implement the chosen one, and accepts an optional context Markdown file. Press `q` to leave without starting work. Use
 `--non-interactive` for scripts and the report-style output. The interactive picker
 shows unchanged current items again on later runs and can be run from any directory.
 When you delegate an item, Foreman clones or reuses its source checkout under
@@ -111,6 +116,11 @@ retry behavior". The agent treats it as part of the task.
      whether a failure comes from the change or from CI itself.
    - A repo with no checks shows `✓ CI (no checks)`.
    - A merged PR marks the task DONE.
+6. Every review records the commit it covered. If the PR gets new commits after a clean
+   review, the next `inbox` or `status` has the reviewer look at them before the task
+   is READY FOR YOU. Once a task is READY FOR YOU, the PR is yours: new commits are
+   flagged in its checklist but not taken back. A runner that crashes during a review
+   picks up at the review when you run `foreman start` again.
 
 ## Stage instructions
 
@@ -156,12 +166,13 @@ Turn either behavior off in the config, under `cleanup`.
 ## When the agent needs a decision
 
 Agents make routine calls themselves. When something needs your judgment, such as a
-product choice or conflicting requirements, the agent stops and returns a structured
-question. The task becomes `NEEDS_DECISION`, and the agent process ends. Nothing waits in
+product choice or conflicting requirements, the agent stops and returns one or more structured
+questions. The task becomes `NEEDS_DECISION`, and the agent process ends. Nothing waits in
 a terminal.
 
-You find out the next time you run `foreman inbox` or `foreman status`. There is no push
-notification.
+Foreman sends a desktop notification (macOS Notification Center, or `notify-send` on
+Linux) when a task needs a decision, fails, or becomes ready. The inbox and `status`
+show the same thing the next time you run them.
 
 ```
 NEEDS DECISION
@@ -169,7 +180,7 @@ NEEDS DECISION
         acme/widgets · Should retries also apply to 4xx responses?
 ```
 
-`foreman respond 825` shows the question and reads your answer:
+`foreman respond 825` shows each waiting question in turn and reads your answers:
 
 ```
 BLOCKED: Need decision
@@ -195,8 +206,9 @@ Decision (option label, your own answer, or Enter for A):
 ```
 
 You can type an option label, write your own answer, or press Enter to take the
-recommendation. Foreman saves the answer to the task file and resumes the same agent
-session with it. If that session is gone, it starts a fresh turn that includes every
+recommendation. If input ends before you answer, the remaining questions keep
+waiting. Foreman saves each answer to the task file and, once all are answered, resumes
+the same agent session with them. If that session is gone, it starts a fresh turn that includes every
 decision so far. The answer also appears in the READY FOR YOU summary and in the PR
 description.
 
@@ -284,6 +296,7 @@ repositories are excluded from fresh inbox results and tracked-task refreshes.
 ```bash
 go vet ./... && go test ./...
 go build -o dist/foreman ./cmd/foreman
+scripts/e2e.sh            # the built binary against a local origin, stand-in gh, stub agents
 scripts/probe-agents.sh   # re-checks the real agent CLIs (a few cents of model calls)
 scripts/release.sh v0.1.0 # build the release archives locally into dist/release
 ```

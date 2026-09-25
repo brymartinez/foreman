@@ -98,9 +98,9 @@ two worktrees at once, which prevents two agents from writing to the same checko
 ## Assumptions in the design doc that the tooling doesn't support as written
 
 1. **"The agent asks me mid-run."** A headless turn can't stop and wait for input. What
-   works instead is that the agent ends its turn with `status: blocked` and a
-   `question`. Foreman stores the question, and `respond` resumes the same session with
-   the answer. From the user's side this behaves the same, and both CLIs support it.
+   works instead is that the agent ends its turn with `status: blocked` and its
+   `questions`. Foreman stores them, and `respond` resumes the same session with the
+   answers (D65). From the user's side this behaves the same, and both CLIs support it.
 2. **`AgentAdapter.getStatus`.** Neither CLI can report on a turn that's still running.
    Foreman gets status from its own records instead: the task file, whether the runner
    process is alive, and the runner's log. `getStatus` was removed from the interface.

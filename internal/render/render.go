@@ -244,7 +244,7 @@ func Show(w io.Writer, r *task.Record) {
 		row("Last outcome", fmt.Sprintf("%s · %s · %s", o.Status, o.At.Local().Format(time.DateTime), o.Summary))
 	}
 	if r.Usage.ClaudeTurns > 0 || r.Usage.CodexTurns > 0 {
-		row("Usage", fmt.Sprintf("Claude $%.2f (%d turns) · Codex %d tokens (%d turns)", r.Usage.ClaudeCostUSD, r.Usage.ClaudeTurns, r.Usage.CodexInputTokens+r.Usage.CodexOutputTokens+r.Usage.CodexReasoningTokens, r.Usage.CodexTurns))
+		row("Usage", fmt.Sprintf("Claude $%.2f (%d %s) · Codex %d tokens (%d %s)", r.Usage.ClaudeCostUSD, r.Usage.ClaudeTurns, plural(r.Usage.ClaudeTurns, "turn", "turns"), r.Usage.CodexInputTokens+r.Usage.CodexOutputTokens+r.Usage.CodexReasoningTokens, r.Usage.CodexTurns, plural(r.Usage.CodexTurns, "turn", "turns")))
 	}
 	tw.Flush()
 	if r.CI != nil && len(r.CI.Failing) > 0 {
