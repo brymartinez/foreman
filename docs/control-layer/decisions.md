@@ -848,3 +848,15 @@ Entry format:
 - **Consequence.** The `inbox` scenario in `scripts/e2e.sh` drives first-run setup,
   `ignore_repositories`, the picker, delegation from outside any checkout with a
   fresh clone, the non-interactive report, `config --show`, and `config --edit`.
+
+## D62. A runner stops when its task file is removed
+
+- Date: 2026-09-25. Bug found in the repository review.
+- **Context.** Every runner write assumed the task file still existed. Deleting it
+  during a run, for example from an Obsidian vault, crashed the runner with a nil
+  pointer.
+- **Decision.** Runner writes go through `existing`, which returns
+  `errTaskRemoved` and saves nothing when the file or its delegation is gone. The
+  runner never recreates a task the developer removed.
+- **Consequence.** Removing a task file is a way to drop a task. The runner logs
+  why it stopped and exits.

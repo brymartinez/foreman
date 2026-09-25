@@ -81,6 +81,7 @@ type fakeAgent struct {
 	reviews   []agent.ReviewOutcome // consumed in order; clean once empty
 	reviewErr error
 	reviewed  []string
+	during    func() // runs inside Start, while the turn is in progress
 }
 
 func (f *fakeAgent) next() (agent.Turn, error) {
@@ -116,6 +117,9 @@ func (f *fakeAgent) Resume(_ context.Context, s task.Session, in agent.StartInpu
 
 func (f *fakeAgent) Start(_ context.Context, in agent.StartInput, onSession func(task.Session)) (agent.Turn, error) {
 	f.starts++
+	if f.during != nil {
+		f.during()
+	}
 	f.prompt = in.Prompt
 	t, err := f.next()
 	onSession(t.Session)

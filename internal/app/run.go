@@ -31,12 +31,11 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 		return err
 	}
 	final := context.WithoutCancel(ctx)
-	defer a.update(final, key, func(cur *task.Record) (*task.Record, error) {
+	defer a.update(final, key, existing(func(cur *task.Record) {
 		if cur.Delegation.RunnerPID == pid {
 			cur.Delegation.RunnerPID = 0
 		}
-		return cur, nil
-	})
+	}))
 
 	var findings *task.Review
 	for {
@@ -47,30 +46,42 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 				fmt.Fprintf(log, "foreman: verified PR #%d %s\n", pr.Key.Number, pr.URL)
 			}
 		}
-		if rec, err = a.update(final, key, func(cur *task.Record) (*task.Record, error) {
+		if rec, err = a.update(final, key, existing(func(cur *task.Record) {
 			applyTurn(cur, turn, pr, runErr, a.Now())
 			addUsage(&cur.Usage, turn.Usage)
-			return cur, nil
-		}); err != nil || rec.State != task.Reviewing {
+		})); err != nil || rec.State != task.Reviewing {
 			return err
 		}
 
 		if rec.ChangeRequestsSinceDecision() >= a.reviewRounds() {
-			_, err = a.update(final, key, func(cur *task.Record) (*task.Record, error) {
+			_, err = a.update(final, key, existing(func(cur *task.Record) {
 				escalateReview(cur, a.reviewRounds(), a.Now())
-				return cur, nil
-			})
+			}))
 			return err
 		}
 		review, reviewErr := a.review(ctx, rec, log)
-		if rec, err = a.update(final, key, func(cur *task.Record) (*task.Record, error) {
+		if rec, err = a.update(final, key, existing(func(cur *task.Record) {
 			applyReview(cur, review, reviewErr, a.Now())
 			addUsage(&cur.Usage, review.Usage)
-			return cur, nil
-		}); err != nil || rec.State != task.Working {
+		})); err != nil || rec.State != task.Working {
 			return err
 		}
 		findings = rec.LatestReview()
+	}
+}
+
+// errTaskRemoved stops a runner whose task file was deleted while it ran.
+var errTaskRemoved = errors.New("the task file was removed; stopping")
+
+// existing adapts a change to a task the runner owns. A task without a file or a
+// delegation can't be advanced, so the run stops instead of recreating it.
+func existing(change func(cur *task.Record)) func(cur *task.Record) (*task.Record, error) {
+	return func(cur *task.Record) (*task.Record, error) {
+		if cur == nil || cur.Delegation == nil {
+			return nil, errTaskRemoved
+		}
+		change(cur)
+		return cur, nil
 	}
 }
 
@@ -127,10 +138,9 @@ func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Rev
 	in.Prompt = agent.ImplementationPrompt(brief)
 	fmt.Fprintf(log, "foreman: starting %s in %s\n", adapter.Name(), d.Worktree)
 	return adapter.Start(ctx, in, func(s task.Session) {
-		_, _ = a.update(ctx, rec.Key, func(cur *task.Record) (*task.Record, error) {
+		_, _ = a.update(ctx, rec.Key, existing(func(cur *task.Record) {
 			cur.Delegation.Implementer = s
-			return cur, nil
-		})
+		}))
 	})
 }
 

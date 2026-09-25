@@ -259,3 +259,16 @@ func TestUnreadablePRInstructionsFailBeforeTheImplementerRuns(t *testing.T) {
 		t.Errorf("state %s starts %d", got.State, f.claude.starts)
 	}
 }
+
+func TestRunTaskStopsWhenTheTaskFileIsRemoved(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	f.claude.turn = prTurn("sid-1")
+	f.claude.during = func() { delete(f.store.recs, key) }
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); !errors.Is(err, errTaskRemoved) {
+		t.Fatalf("err = %v, want errTaskRemoved", err)
+	}
+	if _, ok := f.store.recs[key]; ok {
+		t.Error("the runner recreated a removed task")
+	}
+}
