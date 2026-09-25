@@ -231,6 +231,18 @@ scenario_inbox() {
 	check "non-interactive reports new work" contains "$sandbox/report.txt" "acme/widgets#43"
 	check "non-interactive hides ignored repositories" bash -c "! grep -q 'acme/ignored' '$sandbox/report.txt'"
 
+	echo "[$(hit acme/widgets 43 'Fix pagination')]" >"$state/search-issues-assignee.json"
+	echo "[$(hit acme/widgets 951 'Mention me')]" >"$state/search-prs-mentions.json"
+	echo '{"number":42,"title":"Add retries","html_url":"https://github.com/acme/widgets/issues/42","state":"open","updated_at":"2026-09-25T10:00:00Z"}' >"$state/api-42.json"
+	foreman inbox --non-interactive </dev/null >"$sandbox/report2.txt"
+	check "PR mentions are listed" contains "$sandbox/report2.txt" "acme/widgets#951"
+	echo "[$(hit acme/widgets 43 'Fix pagination')]" >"$state/search-issues-mentions.json"
+	foreman inbox --non-interactive </dev/null >/dev/null
+	echo '[]' >"$state/search-issues-assignee.json"
+	foreman inbox --non-interactive </dev/null >"$sandbox/report3.txt"
+	check "a lost assignment is reported" contains "$sandbox/report3.txt" "no longer assigned to you"
+	check "searches ask for gh's maximum" contains "$state/gh.log" "--limit=1000"
+
 	foreman config --show >"$sandbox/show.txt"
 	check "config --show lists the ignored repository" contains "$sandbox/show.txt" "Ignore repositories: acme/ignored"
 	printf '#!/bin/sh\n[ "$1" = -w ] && echo "edited $2" >"%s/edited"\n' "$sandbox" >"$sandbox/bin/editor"

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -57,16 +58,21 @@ func execGH(ctx context.Context, dir string, args ...string) ([]byte, error) {
 
 const searchFields = "number,title,url,state,updatedAt,repository"
 
+// searchLimit is the most results gh search returns for one query.
+const searchLimit = 1000
+
 type search struct {
 	reason task.InboxReason
 	kind   task.Kind
+	what   string
 	args   []string
 }
 
 var inboxSearches = []search{
-	{task.Assigned, task.Issue, []string{"search", "issues", "--assignee=@me"}},
-	{task.Mentioned, task.Issue, []string{"search", "issues", "--mentions=@me"}},
-	{task.ReviewRequested, task.PullRequest, []string{"search", "prs", "--review-requested=@me"}},
+	{task.Assigned, task.Issue, "issues assigned to you", []string{"search", "issues", "--assignee=@me"}},
+	{task.Mentioned, task.Issue, "issues that mention you", []string{"search", "issues", "--mentions=@me"}},
+	{task.Mentioned, task.PullRequest, "pull requests that mention you", []string{"search", "prs", "--mentions=@me"}},
+	{task.ReviewRequested, task.PullRequest, "pull requests requesting your review", []string{"search", "prs", "--review-requested=@me"}},
 }
 
 type searchHit struct {
@@ -81,7 +87,7 @@ type searchHit struct {
 }
 
 // InboxItems runs the inbox searches concurrently and merges hits for the same item.
-func (c Client) InboxItems(ctx context.Context) ([]app.InboxItem, error) {
+func (c Client) InboxItems(ctx context.Context) (app.InboxSearch, error) {
 	results := make([][]app.InboxItem, len(inboxSearches))
 	errs := make([]error, len(inboxSearches))
 	var wg sync.WaitGroup
@@ -95,26 +101,31 @@ func (c Client) InboxItems(ctx context.Context) ([]app.InboxItem, error) {
 	wg.Wait()
 	for _, err := range errs {
 		if err != nil {
-			return nil, err
+			return app.InboxSearch{}, err
 		}
 	}
-	var merged []app.InboxItem
+	var out app.InboxSearch
 	index := map[task.Key]int{}
-	for _, items := range results {
+	for i, items := range results {
+		if len(items) >= searchLimit {
+			out.Truncated = append(out.Truncated, inboxSearches[i].what)
+		}
 		for _, it := range items {
-			if i, ok := index[it.Key]; ok {
-				merged[i].Reasons = append(merged[i].Reasons, it.Reasons...)
+			if j, ok := index[it.Key]; ok {
+				if !slices.Contains(out.Items[j].Reasons, it.Reasons[0]) {
+					out.Items[j].Reasons = append(out.Items[j].Reasons, it.Reasons...)
+				}
 				continue
 			}
-			index[it.Key] = len(merged)
-			merged = append(merged, it)
+			index[it.Key] = len(out.Items)
+			out.Items = append(out.Items, it)
 		}
 	}
-	return merged, nil
+	return out, nil
 }
 
 func (c Client) search(ctx context.Context, s search) ([]app.InboxItem, error) {
-	args := append(append([]string{}, s.args...), "--state=open", "--limit=100", "--json="+searchFields)
+	args := append(append([]string{}, s.args...), "--state=open", fmt.Sprintf("--limit=%d", searchLimit), "--json="+searchFields)
 	out, err := c.Run(ctx, "", args...)
 	if err != nil {
 		return nil, err

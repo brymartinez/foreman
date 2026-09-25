@@ -56,8 +56,16 @@ type RepoInfo struct {
 	DefaultBranch string
 }
 
+// InboxSearch is one run of the inbox searches.
+type InboxSearch struct {
+	Items []InboxItem
+	// Truncated describes each search that hit the result limit, so items past it are
+	// missing and an item's absence says nothing about its reasons.
+	Truncated []string
+}
+
 type GitHubClient interface {
-	InboxItems(ctx context.Context) ([]InboxItem, error)
+	InboxItems(ctx context.Context) (InboxSearch, error)
 	// GetItem re-fetches a tracked item by key; it can drop out of search results once unassigned or closed.
 	GetItem(ctx context.Context, key task.Key) (InboxItem, error)
 	GetIssue(ctx context.Context, key task.Key) (Issue, error)

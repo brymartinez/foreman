@@ -50,7 +50,8 @@ func TestReconcile(t *testing.T) {
 		item(7, "open", t0, task.Tracked),
 		item(8, "open", t1, task.ReviewRequested),
 	}
-	report, dirty := Reconcile(items, recs, nil, now)
+	// Incomplete searches: an item's absence from them says nothing (D15).
+	report, dirty := Reconcile(items, recs, nil, false, now)
 
 	if got := entryNumbers(report.New); !slices.Equal(got, []int{8}) {
 		t.Errorf("new = %v", got)
@@ -95,7 +96,7 @@ func TestReconcile(t *testing.T) {
 
 func TestReconcileTrackedFetchKeepsSearchReasons(t *testing.T) {
 	rec := seen(7, task.Working, "open", t0, task.Assigned)
-	_, dirty := Reconcile([]InboxItem{item(7, "closed", t1, task.Tracked)}, []*task.Record{rec}, nil, now)
+	_, dirty := Reconcile([]InboxItem{item(7, "closed", t1, task.Tracked)}, []*task.Record{rec}, nil, false, now)
 	if len(dirty) != 1 || !slices.Equal(rec.GitHub.Reasons, []task.InboxReason{task.Assigned}) {
 		t.Fatalf("reasons = %v", rec.GitHub.Reasons)
 	}
@@ -106,11 +107,11 @@ func TestReconcileTrackedFetchKeepsSearchReasons(t *testing.T) {
 
 func TestReconcileSecondRunIsQuiet(t *testing.T) {
 	items := []InboxItem{item(8, "open", t1, task.ReviewRequested)}
-	report1, dirty := Reconcile(items, nil, nil, now)
+	report1, dirty := Reconcile(items, nil, nil, true, now)
 	if len(report1.Current) != 1 || report1.Current[0].Item.Key != key(8) {
 		t.Fatalf("first current = %+v", report1.Current)
 	}
-	report, dirty2 := Reconcile(items, dirty, nil, now.Add(time.Minute))
+	report, dirty2 := Reconcile(items, dirty, nil, true, now.Add(time.Minute))
 	if len(report.New)+len(report.Changed) != 0 || len(dirty2) != 0 || report.Unchanged != 1 {
 		t.Fatalf("second run not quiet: %+v, dirty %d", report, len(dirty2))
 	}
@@ -167,12 +168,13 @@ func (f *fakeStore) List(context.Context) ([]*task.Record, error) {
 }
 
 type fakeGitHub struct {
-	items   []InboxItem
-	fetched []task.Key
-	issue   Issue
-	repo    RepoInfo
-	prs     map[int]PullRequest
-	ci      map[int]task.CIStatus
+	items     []InboxItem
+	truncated []string
+	fetched   []task.Key
+	issue     Issue
+	repo      RepoInfo
+	prs       map[int]PullRequest
+	ci        map[int]task.CIStatus
 }
 
 func (f *fakeGitHub) CIStatus(_ context.Context, k task.Key) (task.CIStatus, error) {
@@ -208,7 +210,9 @@ func (f *fakeGitHub) GetIssue(_ context.Context, k task.Key) (Issue, error) {
 
 func (f *fakeGitHub) RepoAt(context.Context, string) (RepoInfo, error) { return f.repo, nil }
 
-func (f *fakeGitHub) InboxItems(context.Context) ([]InboxItem, error) { return f.items, nil }
+func (f *fakeGitHub) InboxItems(context.Context) (InboxSearch, error) {
+	return InboxSearch{Items: f.items, Truncated: f.truncated}, nil
+}
 func (f *fakeGitHub) GetItem(_ context.Context, k task.Key) (InboxItem, error) {
 	f.fetched = append(f.fetched, k)
 	return item(k.Number, "closed", t1, task.Tracked), nil
@@ -293,5 +297,44 @@ func TestStatusOrdersByAttention(t *testing.T) {
 	}
 	if !slices.Equal(got, []int{3, 2, 1}) {
 		t.Errorf("status order = %v", got)
+	}
+}
+
+func TestReconcileReportsALostReasonOnceWhenSearchesAreComplete(t *testing.T) {
+	rec := seen(3, task.Discovered, "open", t0, task.Assigned, task.Mentioned)
+	items := []InboxItem{item(3, "open", t0, task.Mentioned)}
+	report, dirty := Reconcile(items, []*task.Record{rec}, nil, true, now)
+	if len(report.Changed) != 1 || !slices.Equal(report.Changed[0].Changes, []string{"no longer assigned to you"}) || len(dirty) != 1 {
+		t.Fatalf("changed %+v dirty %d", report.Changed, len(dirty))
+	}
+	if again, _ := Reconcile(items, []*task.Record{rec}, nil, true, now); len(again.Changed) != 0 {
+		t.Errorf("reported twice: %+v", again.Changed)
+	}
+}
+
+func TestReconcileTrustsATrackedFetchOnlyWhenSearchesAreComplete(t *testing.T) {
+	fetched := []InboxItem{item(7, "open", t0, task.Tracked)}
+
+	partial := seen(7, task.Working, "open", t0, task.Assigned)
+	if report, _ := Reconcile(fetched, []*task.Record{partial}, nil, false, now); len(report.Changed) != 0 {
+		t.Errorf("a truncated search reported a lost reason: %+v", report.Changed)
+	}
+
+	complete := seen(7, task.Working, "open", t0, task.Assigned)
+	report, _ := Reconcile(fetched, []*task.Record{complete}, nil, true, now)
+	if len(report.Changed) != 1 || !slices.Equal(report.Changed[0].Changes, []string{"no longer assigned to you"}) || len(complete.GitHub.Reasons) != 0 {
+		t.Fatalf("changed %+v reasons %v", report.Changed, complete.GitHub.Reasons)
+	}
+}
+
+func TestInboxReportsTruncatedSearches(t *testing.T) {
+	f := newFixture()
+	f.gh.truncated = []string{"issues that mention you"}
+	report, err := f.app.Inbox(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(report.Truncated, f.gh.truncated) {
+		t.Errorf("truncated = %q", report.Truncated)
 	}
 }

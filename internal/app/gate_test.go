@@ -154,7 +154,7 @@ func TestReconcileClosedIssueEndsIdleDelegatedTasks(t *testing.T) {
 	blocked := seen(7, task.NeedsDecision, "open", t0)
 	working := seen(8, task.Working, "open", t0)
 	items := []InboxItem{item(7, "closed", t1, task.Tracked), item(8, "closed", t1, task.Tracked)}
-	Reconcile(items, []*task.Record{blocked, working}, nil, now)
+	Reconcile(items, []*task.Record{blocked, working}, nil, true, now)
 	if blocked.State != task.Done || working.State != task.Working {
 		t.Errorf("blocked %s working %s", blocked.State, working.State)
 	}

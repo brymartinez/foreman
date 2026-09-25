@@ -102,6 +102,7 @@ func run(argv []string) int {
 			render.Inbox(os.Stdout, report)
 			break
 		}
+		render.SearchLimits(os.Stdout, report.Truncated)
 		selection, err := app.ChooseInbox(stdin, os.Stdout, report)
 		if err != nil {
 			return fail(err)

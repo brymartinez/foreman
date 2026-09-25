@@ -56,6 +56,15 @@ func Inbox(w io.Writer, r app.InboxReport) {
 	if r.Unchanged > 0 {
 		fmt.Fprintf(w, "\nNO CHANGE\n  %d tracked %s hidden\n", r.Unchanged, plural(r.Unchanged, "item", "items"))
 	}
+	SearchLimits(w, r.Truncated)
+}
+
+// SearchLimits warns about searches that returned their maximum, so the developer
+// knows older matches are missing.
+func SearchLimits(w io.Writer, truncated []string) {
+	for _, what := range truncated {
+		fmt.Fprintf(w, "\n! The search for %s hit gh's result limit; some matches are missing.\n", what)
+	}
 }
 
 func line(w io.Writer, k task.Key, title, detail string) {

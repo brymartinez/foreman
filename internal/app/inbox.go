@@ -26,6 +26,8 @@ type InboxReport struct {
 	NeedsDecision []*task.Record
 	Ready         []*task.Record
 	Unchanged     int
+	// Truncated lists searches that hit the result limit.
+	Truncated []string
 }
 
 type App struct {
@@ -64,16 +66,17 @@ func (a App) Inbox(ctx context.Context) (InboxReport, error) {
 	if a.CleanOnDone {
 		a.cleanDone(ctx, recs, notes)
 	}
-	items, err := a.GitHub.InboxItems(ctx)
+	search, err := a.GitHub.InboxItems(ctx)
 	if err != nil {
 		return InboxReport{}, err
 	}
-	items = filterInboxItems(items, a.IgnoredRepositories)
+	items := filterInboxItems(search.Items, a.IgnoredRepositories)
 	tracked, err := a.fetchTracked(ctx, recs, items)
 	if err != nil {
 		return InboxReport{}, err
 	}
-	report, dirty := Reconcile(append(items, tracked...), recs, notes, a.Now())
+	report, dirty := Reconcile(append(items, tracked...), recs, notes, len(search.Truncated) == 0, a.Now())
+	report.Truncated = search.Truncated
 	for _, seen := range dirty {
 		if _, err := a.update(ctx, seen.Key, func(cur *task.Record) (*task.Record, error) {
 			return mergeObserved(cur, seen), nil
@@ -151,9 +154,10 @@ func containsRepo(repos []task.Repo, want task.Repo) bool {
 }
 
 // Reconcile compares current GitHub items with stored records. notes are the readiness
-// gate's changes, reported with the item. It returns the report and the records that
-// must be saved (new, or with a changed snapshot). It is pure.
-func Reconcile(items []InboxItem, recs []*task.Record, notes map[task.Key][]string, now time.Time) (InboxReport, []*task.Record) {
+// gate's changes, reported with the item. complete says every search returned all its
+// results, so a reason missing from items was lost. It returns the report and the
+// records that must be saved (new, or with a changed snapshot). It is pure.
+func Reconcile(items []InboxItem, recs []*task.Record, notes map[task.Key][]string, complete bool, now time.Time) (InboxReport, []*task.Record) {
 	byKey := map[task.Key]*task.Record{}
 	for _, r := range recs {
 		byKey[r.Key] = r
@@ -174,14 +178,14 @@ func Reconcile(items []InboxItem, recs []*task.Record, notes map[task.Key][]stri
 			}
 			continue
 		}
-		changes := describeChanges(rec.GitHub, it)
+		changes := describeChanges(rec.GitHub, it, complete)
 		current := changes
 		if len(current) == 0 {
 			current = []string{"no change"}
 		}
 		report.Current = append(report.Current, InboxEntry{Item: it, Changes: current})
 		if len(changes) > 0 {
-			observe(rec, it, now)
+			observe(rec, it, complete, now)
 			dirty = append(dirty, rec)
 		}
 		changes = append(changes, notes[it.Key]...)
@@ -220,16 +224,21 @@ func discovered(it InboxItem, now time.Time) *task.Record {
 		State: task.Discovered,
 		Body:  fmt.Sprintf("# #%d %s\n\n## Notes\n\n", it.Key.Number, it.Title),
 	}
-	observe(rec, it, now)
+	observe(rec, it, true, now)
 	return rec
 }
 
-// observe records it as the seen GitHub state. Items fetched only because they are
-// tracked keep their earlier search reasons.
-func observe(rec *task.Record, it InboxItem, now time.Time) {
+// observe records it as the seen GitHub state.
+func observe(rec *task.Record, it InboxItem, complete bool, now time.Time) {
 	reasons := it.Reasons
-	if slices.Equal(reasons, []task.InboxReason{task.Tracked}) && rec.GitHub != nil {
-		reasons = rec.GitHub.Reasons
+	if slices.Equal(reasons, []task.InboxReason{task.Tracked}) {
+		// A tracked fetch means no search returned the item. The searches only return
+		// open items, so that proves an open item lost its reasons, when every search
+		// was complete.
+		reasons = nil
+		if (!complete || it.State != "open") && rec.GitHub != nil {
+			reasons = rec.GitHub.Reasons
+		}
 	}
 	rec.Title, rec.URL, rec.Kind = it.Title, it.URL, it.Kind
 	rec.GitHub = &task.Snapshot{UpdatedAt: it.UpdatedAt, State: it.State, Reasons: reasons}
@@ -241,7 +250,7 @@ func observe(rec *task.Record, it InboxItem, now time.Time) {
 	}
 }
 
-func describeChanges(seen *task.Snapshot, it InboxItem) []string {
+func describeChanges(seen *task.Snapshot, it InboxItem, complete bool) []string {
 	if seen == nil {
 		return []string{"now tracked"}
 	}
@@ -261,10 +270,29 @@ func describeChanges(seen *task.Snapshot, it InboxItem) []string {
 		}
 	}
 	changes = append(changes, reasonText(added)...)
+	if complete && it.State == "open" {
+		for _, r := range seen.Reasons {
+			if !slices.Contains(it.Reasons, r) {
+				changes = append(changes, lostText(r))
+			}
+		}
+	}
 	if len(changes) == 0 && it.UpdatedAt.After(seen.UpdatedAt) {
 		changes = append(changes, "new activity")
 	}
 	return changes
+}
+
+func lostText(r task.InboxReason) string {
+	switch r {
+	case task.Assigned:
+		return "no longer assigned to you"
+	case task.Mentioned:
+		return "no longer mentions you"
+	case task.ReviewRequested:
+		return "review no longer requested"
+	}
+	return "no longer " + string(r)
 }
 
 func reasonText(reasons []task.InboxReason) []string {

@@ -883,3 +883,25 @@ Entry format:
   - Records from before this decision have no heads, and keep the old behavior.
 - **Consequence.** The reviewer's verdict always matches the code the developer
   receives. A crash during a review costs one review, not a reimplementation.
+
+## D64. Inbox searches are complete or say so (supersedes parts of D15)
+
+- Date: 2026-09-25. Closes three known limitations on the user's request to fix
+  everything the repository review found: 100 results per search, mentions from
+  issues only, and lost reasons never reported.
+- **Context.** D15 capped each search at 100 results, so an item missing from a
+  search proved nothing, and it ignored lost reasons for that reason.
+- **Decision.**
+  - Each search asks for gh's maximum of 1000 results. A search that returns 1000
+    is reported as truncated, and the inbox and picker print a warning naming it.
+  - A fourth search lists open PRs that mention the developer.
+  - When no search was truncated, a reason an open item had and no longer has is
+    reported under CHANGED, once: "no longer assigned to you", "no longer mentions
+    you", "review no longer requested". A delegated item that only the tracked
+    re-fetch found has lost every reason, and its stored reasons are cleared.
+  - Closed items are never judged, because the searches only return open ones.
+    With a truncated search, D15's rule still holds.
+  - `GitHubClient.InboxItems` returns an `InboxSearch` with the items and the
+    truncated searches, and `Reconcile` takes whether the searches were complete.
+- **Consequence.** Unassigning the developer shows up in the inbox. Items in
+  NEEDS DECISION and READY FOR YOU still appear only in their own section (D15).

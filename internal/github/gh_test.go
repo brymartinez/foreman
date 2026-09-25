@@ -18,7 +18,8 @@ func fixtures(t *testing.T) Runner {
 		cmd := strings.Join(args, " ")
 		for flag, file := range map[string]string{
 			"--assignee=@me":                            "assigned",
-			"--mentions=@me":                            "mentioned",
+			"issues --mentions=@me":                     "mentioned",
+			"prs --mentions=@me":                        "mentioned_prs",
 			"--review-requested=@me":                    "review_requested",
 			"repos/ridezoomo/armada-backend/issues/912": "merged_pr",
 			"issue view 825":                            "issue",
@@ -39,11 +40,12 @@ func fixtures(t *testing.T) Runner {
 }
 
 func TestInboxItemsMergesReasons(t *testing.T) {
-	items, err := Client{Run: fixtures(t)}.InboxItems(context.Background())
+	search, err := Client{Run: fixtures(t)}.InboxItems(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 3 {
+	items := search.Items
+	if len(items) != 4 || len(search.Truncated) != 0 {
 		t.Fatalf("want 3 merged items, got %d: %+v", len(items), items)
 	}
 	first := items[0]
@@ -51,8 +53,31 @@ func TestInboxItemsMergesReasons(t *testing.T) {
 		!slices.Equal(first.Reasons, []task.InboxReason{task.Assigned, task.Mentioned}) {
 		t.Errorf("825 = %+v", first)
 	}
-	if pr := items[2]; pr.Kind != task.PullRequest || pr.Reasons[0] != task.ReviewRequested {
+	if pr := items[2]; pr.Kind != task.PullRequest || pr.Key.Number != 930 || pr.Reasons[0] != task.Mentioned {
+		t.Errorf("PR mention = %+v", pr)
+	}
+	if pr := items[3]; pr.Kind != task.PullRequest || pr.Reasons[0] != task.ReviewRequested {
 		t.Errorf("review request = %+v", pr)
+	}
+}
+
+func TestInboxItemsReportsSearchesAtTheLimit(t *testing.T) {
+	full := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if !slices.Contains(args, "--assignee=@me") {
+			return []byte("[]"), nil
+		}
+		hits := make([]string, searchLimit)
+		for i := range hits {
+			hits[i] = fmt.Sprintf(`{"number":%d,"title":"t","url":"u","state":"OPEN","updatedAt":"2026-09-24T10:00:00Z","repository":{"nameWithOwner":"a/b"}}`, i+1)
+		}
+		return []byte("[" + strings.Join(hits, ",") + "]"), nil
+	}
+	search, err := Client{Run: full}.InboxItems(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(search.Truncated, []string{"issues assigned to you"}) {
+		t.Fatalf("truncated = %q", search.Truncated)
 	}
 }
 

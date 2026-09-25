@@ -305,3 +305,11 @@ func TestReadyFlagsCommitsSinceTheReview(t *testing.T) {
 		t.Errorf("missing %q in:\n%s", want, buf.String())
 	}
 }
+
+func TestInboxWarnsWhenASearchHitsTheLimit(t *testing.T) {
+	var buf bytes.Buffer
+	Inbox(&buf, app.InboxReport{Truncated: []string{"issues that mention you"}})
+	if want := "! The search for issues that mention you hit gh's result limit; some matches are missing.\n"; !strings.Contains(buf.String(), want) {
+		t.Errorf("missing %q in:\n%s", want, buf.String())
+	}
+}
