@@ -829,3 +829,22 @@ Entry format:
   Codex usage line ends with `(USD unavailable)`.
 - **Consequence.** The follow view matches the clean view line for line. The
   `logs` scenario in `scripts/e2e.sh` follows a live run.
+
+## D61. Inbox prompts share stdin, the picker offers issues only, and the editor runs through the shell
+
+- Date: 2026-09-25. Bugs found running Stages 7 to 9 end to end for the first time,
+  on the user's request to fix everything the repository review found.
+- **Context.**
+  - First-run setup and the picker each wrapped stdin in their own scanner. With
+    piped input, setup's scanner read ahead and the picker saw end of input.
+  - The picker listed review-requested PRs. `start` only delegates issues, so
+    choosing one could only fail.
+  - `config --edit` ran `$EDITOR` as a single program name, so `code -w` failed.
+- **Decision.**
+  - `inbox` makes one `bufio.Reader` over stdin. `EnsureTasksDir` and
+    `ChooseInbox` take it and read one line per answer.
+  - `ChooseInbox` lists only issues. PRs stay in the non-interactive report.
+  - The editor runs as `sh -c '<editor> "$1"' sh <path>`, as git does.
+- **Consequence.** The `inbox` scenario in `scripts/e2e.sh` drives first-run setup,
+  `ignore_repositories`, the picker, delegation from outside any checkout with a
+  fresh clone, the non-interactive report, `config --show`, and `config --edit`.

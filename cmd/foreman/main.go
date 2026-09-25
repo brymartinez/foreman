@@ -80,12 +80,13 @@ func run(argv []string) int {
 
 	switch cmd.Name {
 	case cli.Inbox:
+		stdin := bufio.NewReader(os.Stdin)
 		if cmd.NonInteractive {
 			if _, err := os.Stat(cfg.TasksDir); err != nil {
 				return fail(fmt.Errorf("tasks directory %s is not ready; run interactive foreman inbox first: %w", cfg.TasksDir, err))
 			}
 		} else {
-			ready, err := config.EnsureTasksDir(os.Stdin, os.Stdout, cfg.TasksDir)
+			ready, err := config.EnsureTasksDir(stdin, os.Stdout, cfg.TasksDir)
 			if err != nil {
 				return fail(err)
 			}
@@ -101,7 +102,7 @@ func run(argv []string) int {
 			render.Inbox(os.Stdout, report)
 			break
 		}
-		selection, err := app.ChooseInbox(os.Stdin, os.Stdout, report)
+		selection, err := app.ChooseInbox(stdin, os.Stdout, report)
 		if err != nil {
 			return fail(err)
 		}
@@ -286,7 +287,8 @@ func editConfig(path string, cfg config.Config) int {
 	if editor == "" {
 		editor = "vi"
 	}
-	cmd := exec.Command(editor, path)
+	// Through the shell, as git does, so an editor with arguments ("code -w") works.
+	cmd := exec.Command("sh", "-c", editor+` "$1"`, "sh", path)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fail(fmt.Errorf("edit config with %s: %w", editor, err))

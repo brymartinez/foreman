@@ -200,7 +200,43 @@ scenario_logs() {
 	check "show reports usage" bash -c "cd '$FOREMAN_CWD' && '$work/foreman' show 42 | grep -F 'Claude \$0.25 (1 turns) · Codex 125 tokens (1 turns)'"
 }
 
-scenarios=${*:-runner notify logs}
+hit() { # hit <repo> <number> <title>
+	printf '{"number":%s,"title":"%s","url":"https://github.com/%s/issues/%s","state":"OPEN","updatedAt":"2026-09-25T10:00:00Z","repository":{"nameWithOwner":"%s"}}' "$2" "$3" "$1" "$2" "$1"
+}
+
+scenario_inbox() {
+	echo "inbox: first run, filters, and delegation from outside any checkout"
+	setup inbox
+	rm -rf "$sandbox/tasks"
+	printf 'ignore_repositories: [acme/ignored]\n' >>"$sandbox/config.yaml"
+	echo "[$(hit acme/widgets 42 'Add retries'),$(hit acme/ignored 7 'Ignore me')]" >"$state/search-issues-assignee.json"
+	echo "[$(hit acme/widgets 950 'Review me')]" >"$state/search-prs-review-requested.json"
+	FOREMAN_CWD=$sandbox
+
+	check "non-interactive refuses a missing tasks directory" bash -c "! (cd '$sandbox' && '$work/foreman' inbox --non-interactive)"
+	check "declining setup leaves no tasks directory" bash -c "echo n | (cd '$sandbox' && '$work/foreman' inbox) && [ ! -d '$sandbox/tasks' ]"
+
+	printf 'y\n1\nclaude\n\n' | foreman inbox >"$sandbox/inbox.txt" 2>&1 || true
+	check "setup creates the tasks directory" test -d "$sandbox/tasks"
+	check "the picker shows repo-qualified items" contains "$sandbox/inbox.txt" "acme/widgets#42"
+	check "ignored repositories are hidden" bash -c "! grep -q 'acme/ignored' '$sandbox/inbox.txt'"
+	check "review requests aren't offered for delegation" bash -c "! grep -q 'acme/widgets#950' '$sandbox/inbox.txt'"
+	check "the source checkout is cloned" test -d "$sandbox/repositories/acme-widgets/.git"
+	check "the selection is delegated" wait_status "review ✓"
+
+	echo "[$(hit acme/widgets 42 'Add retries'),$(hit acme/widgets 43 'Fix pagination'),$(hit acme/ignored 7 'Ignore me')]" >"$state/search-issues-assignee.json"
+	foreman inbox --non-interactive </dev/null >"$sandbox/report.txt"
+	check "non-interactive reports new work" contains "$sandbox/report.txt" "acme/widgets#43"
+	check "non-interactive hides ignored repositories" bash -c "! grep -q 'acme/ignored' '$sandbox/report.txt'"
+
+	foreman config --show >"$sandbox/show.txt"
+	check "config --show lists the ignored repository" contains "$sandbox/show.txt" "Ignore repositories: acme/ignored"
+	printf '#!/bin/sh\n[ "$1" = -w ] && echo "edited $2" >"%s/edited"\n' "$sandbox" >"$sandbox/bin/editor"
+	chmod +x "$sandbox/bin/editor"
+	check "config --edit runs an editor with arguments" bash -c "cd '$sandbox' && EDITOR='editor -w' VISUAL= '$work/foreman' config --edit && grep -qF '$sandbox/config.yaml' '$sandbox/edited'"
+}
+
+scenarios=${*:-runner notify logs inbox}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"

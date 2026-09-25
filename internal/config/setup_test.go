@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bufio"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,7 +10,7 @@ import (
 
 func TestEnsureTasksDirCreatesAfterConsent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vault", "tasks")
-	ready, err := EnsureTasksDir(strings.NewReader("y\n"), &strings.Builder{}, path)
+	ready, err := EnsureTasksDir(bufio.NewReader(strings.NewReader("y\n")), &strings.Builder{}, path)
 	if err != nil || !ready {
 		t.Fatal(err)
 	}
@@ -21,7 +22,7 @@ func TestEnsureTasksDirCreatesAfterConsent(t *testing.T) {
 func TestEnsureTasksDirDeclineLeavesMissing(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tasks")
 	var out strings.Builder
-	ready, err := EnsureTasksDir(strings.NewReader("n\n"), &out, path)
+	ready, err := EnsureTasksDir(bufio.NewReader(strings.NewReader("n\n")), &out, path)
 	if err != nil || ready {
 		t.Fatal(err)
 	}
@@ -38,15 +39,25 @@ func TestEnsureTasksDirRejectsFile(t *testing.T) {
 	if err := os.WriteFile(path, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := EnsureTasksDir(strings.NewReader("y\n"), &strings.Builder{}, path); err == nil {
+	if _, err := EnsureTasksDir(bufio.NewReader(strings.NewReader("y\n")), &strings.Builder{}, path); err == nil {
 		t.Fatal("file path accepted as tasks directory")
 	}
 }
 
 func TestEnsureTasksDirAcceptsExistingDirectoryWithoutInput(t *testing.T) {
 	path := t.TempDir()
-	ready, err := EnsureTasksDir(strings.NewReader(""), &strings.Builder{}, path)
+	ready, err := EnsureTasksDir(bufio.NewReader(strings.NewReader("")), &strings.Builder{}, path)
 	if err != nil || !ready {
 		t.Fatal(err)
+	}
+}
+
+func TestEnsureTasksDirLeavesLaterAnswersForTheNextPrompt(t *testing.T) {
+	in := bufio.NewReader(strings.NewReader("y\n1\nclaude\n"))
+	if _, err := EnsureTasksDir(in, &strings.Builder{}, filepath.Join(t.TempDir(), "tasks")); err != nil {
+		t.Fatal(err)
+	}
+	if next, _ := in.ReadString('\n'); next != "1\n" {
+		t.Fatalf("next prompt reads %q", next)
 	}
 }

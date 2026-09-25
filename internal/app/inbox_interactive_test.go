@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bufio"
 	"strings"
 	"testing"
 
@@ -12,7 +13,7 @@ func TestChooseInboxCollectsItemAgentAndContext(t *testing.T) {
 		{Item: InboxItem{Key: task.Key{Repo: "a/one", Number: 1}, Title: "First"}},
 		{Item: InboxItem{Key: task.Key{Repo: "b/two", Number: 2}, Title: "Second"}},
 	}}
-	got, err := ChooseInbox(strings.NewReader("2\ncodex\n/tmp/context.md\n"), &strings.Builder{}, report)
+	got, err := ChooseInbox(bufio.NewReader(strings.NewReader("2\ncodex\n/tmp/context.md\n")), &strings.Builder{}, report)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +25,7 @@ func TestChooseInboxCollectsItemAgentAndContext(t *testing.T) {
 func TestChooseInboxRepromptsAndAllowsQuit(t *testing.T) {
 	report := InboxReport{Current: []InboxEntry{{Item: InboxItem{Key: task.Key{Repo: "a/one", Number: 1}, Title: "First"}}}}
 	var out strings.Builder
-	got, err := ChooseInbox(strings.NewReader("9\nq\n"), &out, report)
+	got, err := ChooseInbox(bufio.NewReader(strings.NewReader("9\nq\n")), &out, report)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,5 +34,20 @@ func TestChooseInboxRepromptsAndAllowsQuit(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "choose a number from 1 to 1") {
 		t.Errorf("missing invalid-selection guidance: %s", out.String())
+	}
+}
+
+func TestChooseInboxOffersOnlyIssues(t *testing.T) {
+	report := InboxReport{Current: []InboxEntry{
+		{Item: InboxItem{Key: task.Key{Repo: "a/one", Number: 950}, Kind: task.PullRequest, Title: "Review me"}},
+		{Item: InboxItem{Key: task.Key{Repo: "a/one", Number: 42}, Kind: task.Issue, Title: "Add retries"}},
+	}}
+	var out strings.Builder
+	got, err := ChooseInbox(bufio.NewReader(strings.NewReader("1\nclaude\n\n")), &out, report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.Key.Number != 42 || strings.Contains(out.String(), "#950") {
+		t.Fatalf("selection %+v from:\n%s", got, out.String())
 	}
 }
