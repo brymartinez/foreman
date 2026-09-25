@@ -20,6 +20,17 @@ type fakeWorktrees struct {
 	removeErr error
 }
 
+type fakeRepositories struct {
+	path  string
+	info  RepoInfo
+	calls []task.Repo
+}
+
+func (f *fakeRepositories) Ensure(_ context.Context, repo task.Repo, _ string) (RepoInfo, error) {
+	f.calls = append(f.calls, repo)
+	return f.info, nil
+}
+
 func (f *fakeWorktrees) Remove(_ context.Context, r WorktreeRemoval) error {
 	if f.removeErr != nil {
 		return f.removeErr
@@ -118,6 +129,7 @@ type fixture struct {
 	wt      *fakeWorktrees
 	runners *fakeRunners
 	stages  *fakeStages
+	repos   *fakeRepositories
 	claude  *fakeAgent
 	codex   *fakeAgent
 }
@@ -136,16 +148,34 @@ func newFixture() fixture {
 		wt:      &fakeWorktrees{},
 		runners: &fakeRunners{alive: map[int]bool{}},
 		stages:  &fakeStages{},
+		repos:   &fakeRepositories{info: RepoInfo{Repo: "ridezoomo/armada-backend", DefaultBranch: "main"}},
 		claude:  &fakeAgent{name: task.Claude},
 		codex:   &fakeAgent{name: task.Codex},
 	}
 	f.app = App{
 		Store: f.store, GitHub: f.gh, Worktrees: f.wt, Runners: f.runners, Stages: f.stages,
 		Agents:       map[task.Agent]AgentAdapter{task.Claude: f.claude, task.Codex: f.codex},
-		WorktreesDir: "/wt",
-		Now:          func() time.Time { return now },
+		WorktreesDir: "/wt", Repositories: f.repos, RepositoriesDir: "/repos",
+		Now: func() time.Time { return now },
 	}
 	return f
+}
+
+func TestStartFromInboxUsesRepositoryCheckoutInsteadOfCurrentDirectory(t *testing.T) {
+	f := newFixture()
+	rec, err := f.app.Start(context.Background(), StartRequest{Repo: "ridezoomo/armada-backend", Issue: 825, Agent: task.Claude})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.repos.calls) != 1 || f.repos.calls[0] != "ridezoomo/armada-backend" {
+		t.Fatalf("repository checkout calls = %v", f.repos.calls)
+	}
+	if len(f.wt.reqs) != 1 || f.wt.reqs[0].RepoDir != "/repos/ridezoomo-armada-backend" {
+		t.Fatalf("worktree source = %+v", f.wt.reqs)
+	}
+	if rec.Repo != "ridezoomo/armada-backend" {
+		t.Fatalf("record repo = %s", rec.Repo)
+	}
 }
 
 func startReq(t *testing.T) StartRequest {

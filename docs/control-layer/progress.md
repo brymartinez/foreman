@@ -2,7 +2,8 @@
 
 ## Current stage
 
-Stage 6 (readiness gate) is complete. All stages in the design are built.
+Stage 7 (observability, cost controls, and notifications) is complete. All stages
+in the design are built.
 
 ## Completed
 
@@ -302,6 +303,41 @@ has five stages: resolver, then implement, then review, then pr, then CLI inspec
 
 The stage-instructions track is complete.
 
+### Stage 7 (complete): interactive inbox and storage setup
+
+- `foreman inbox` is interactive by default. It shows repo-qualified identities,
+  lets the user choose a current item, selects Claude or Codex, accepts an optional
+  context Markdown path, and delegates through the existing start flow.
+- `foreman inbox --non-interactive` preserves report output for scripts. Current
+  refresh items remain available on later inbox runs even when their GitHub snapshot
+  is unchanged.
+- The first interactive inbox checks the configured tasks directory and offers to
+  create it, explaining that the folder can be an Obsidian vault folder or a normal
+  directory. Markdown remains the only storage backend.
+- Validated with focused tests for command parsing, repo-qualified rendering,
+  repeatable current items, interactive selection, and storage setup outcomes.
+- Also validated with `go vet ./...`, `go test ./...`, `go build -o dist/foreman ./cmd/foreman`,
+  and `git diff --check`.
+
+### Stage 8 (complete): repository filters and configuration modes
+
+- Added exact `ignore_repositories` config filtering for fresh and tracked inbox data.
+- Replaced config subcommands with the mutually exclusive `--stages`, `--show`, and
+  `--edit` flags. `--show` prints resolved non-secret values, and `--edit` uses
+  `$VISUAL`, `$EDITOR`, or `vi`.
+- Changed the unstamped version to `0.1.0-dev`; release stamping remains unchanged.
+- Validated with focused config, CLI, app, and rendering tests. Full vet, tests, build,
+  and diff checks follow at the stage boundary.
+
+### Stage 9 (complete): checkout-independent inbox delegation
+
+- Interactive inbox no longer passes the current working directory into delegation.
+- A managed source checkout is cloned or reused under `repositories_dir`; agent
+  worktrees continue to use `worktrees_dir`.
+- Explicit `foreman start` retains its existing checkout matching behavior.
+- Added regression coverage for selecting a repository different from the current
+  checkout and for cloning a missing source checkout.
+
 ## Known limitations
 
 - The gate runs only when `inbox` or `status` runs. A push to the branch after a clean
@@ -362,8 +398,18 @@ what it replaced. Current summary:
 - D46 (supersedes D38). CI belongs to the repo owners: foreman reads GitHub's checks and
   hands failures to the developer.
 
+### Stage 7
+
+- Added timestamped runner logs and `foreman logs`, with clean, follow, and raw modes.
+- Added durable per-task usage accounting. Claude spend is read from
+  `total_cost_usd`; Codex input, cached, output, and reasoning tokens are read from
+  `turn.completed` events.
+- Added configurable Claude per-turn budgets of $3.00 for implementation and $1.00
+  for review. The existing three-round cap and early clean-review exit remain active.
+- Added best-effort native notifications for NEEDS_DECISION, FAILED, and
+  READY_FOR_HUMAN transitions.
+- Validated with `go test ./...`, `go vet ./...`, `go build`, and the version command.
+
 ## Next stage
 
-None. Stages 0 to 6 of the design are complete. Any further work, such as re-checking
-CI on ready tasks, re-reviewing after a manual push, or required-checks-only mode, needs
-a new request.
+None. Stages 0 to 8 are complete. Further inbox features need a new request.

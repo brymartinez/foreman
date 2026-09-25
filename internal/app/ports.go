@@ -69,6 +69,12 @@ type GitHubClient interface {
 	CIStatus(ctx context.Context, pr task.Key) (task.CIStatus, error)
 }
 
+// RepositoryManager provides a local source checkout for repository-independent
+// commands such as inbox. Explicit start still uses the caller's checkout.
+type RepositoryManager interface {
+	Ensure(ctx context.Context, repo task.Repo, path string) (RepoInfo, error)
+}
+
 type WorktreeRequest struct {
 	RepoDir string // any checkout of the repository
 	Path    string
@@ -116,4 +122,8 @@ type StageInstructionResolver interface {
 type Runners interface {
 	Spawn(key task.Key) (pid int, logPath string, err error)
 	Alive(pid int) bool
+}
+
+type Notifier interface {
+	Notify(title, body string) error
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"syscall"
@@ -17,6 +18,8 @@ import (
 	"github.com/brymartinez/foreman/internal/cli"
 	"github.com/brymartinez/foreman/internal/config"
 	"github.com/brymartinez/foreman/internal/github"
+	"github.com/brymartinez/foreman/internal/logs"
+	"github.com/brymartinez/foreman/internal/notifications"
 	"github.com/brymartinez/foreman/internal/render"
 	"github.com/brymartinez/foreman/internal/runner"
 	"github.com/brymartinez/foreman/internal/stages"
@@ -26,7 +29,7 @@ import (
 )
 
 // version is set at release time with -ldflags "-X main.version=v1.2.3".
-var version = "dev"
+var version = "0.1.0-dev"
 
 func main() {
 	os.Exit(run(os.Args[1:]))
@@ -53,9 +56,10 @@ func run(argv []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 	a := app.App{
-		Store:     store.Markdown{Dir: cfg.TasksDir},
-		GitHub:    github.New(),
-		Worktrees: worktree.Git{},
+		Store:        store.Markdown{Dir: cfg.TasksDir},
+		GitHub:       github.New(),
+		Repositories: github.New(),
+		Worktrees:    worktree.Git{},
 		Agents: map[task.Agent]app.AgentAdapter{
 			task.Claude: agent.Claude{Bin: cfg.Claude.Command, Model: cfg.Claude.Model, AllowedTools: cfg.Claude.AllowedTools, Exec: agent.RunCommand},
 			task.Codex:  agent.Codex{Bin: cfg.Codex.Command, Model: cfg.Codex.Model, Exec: agent.RunCommand},
@@ -63,19 +67,58 @@ func run(argv []string) int {
 		Runners:              runner.Processes{LogDir: cfg.LogDir},
 		Stages:               stages.Files{GlobalDir: cfg.StagesDir},
 		WorktreesDir:         cfg.WorktreesDir,
+		RepositoriesDir:      cfg.RepositoriesDir,
 		ReviewRounds:         cfg.ReviewRounds,
+		ImplementerBudgetUSD: cfg.Budgets.ImplementerUSD,
+		ReviewerBudgetUSD:    cfg.Budgets.ReviewerUSD,
+		Notifier:             notification(cfg.Notifications.Enabled),
 		CleanOnDone:          cfg.Cleanup.OnDone,
 		DeleteMergedBranches: cfg.Cleanup.DeleteMergedBranch,
+		IgnoredRepositories:  cfg.IgnoredRepos,
 		Now:                  func() time.Time { return time.Now().Truncate(time.Second) },
 	}
 
 	switch cmd.Name {
 	case cli.Inbox:
+		if cmd.NonInteractive {
+			if _, err := os.Stat(cfg.TasksDir); err != nil {
+				return fail(fmt.Errorf("tasks directory %s is not ready; run interactive foreman inbox first: %w", cfg.TasksDir, err))
+			}
+		} else {
+			ready, err := config.EnsureTasksDir(os.Stdin, os.Stdout, cfg.TasksDir)
+			if err != nil {
+				return fail(err)
+			}
+			if !ready {
+				return 0
+			}
+		}
 		report, err := a.Inbox(ctx)
 		if err != nil {
 			return fail(err)
 		}
-		render.Inbox(os.Stdout, report)
+		if cmd.NonInteractive {
+			render.Inbox(os.Stdout, report)
+			break
+		}
+		selection, err := app.ChooseInbox(os.Stdin, os.Stdout, report)
+		if err != nil {
+			return fail(err)
+		}
+		if selection == nil {
+			break
+		}
+		contextFile := selection.ContextFile
+		if contextFile != "" {
+			if contextFile, err = filepath.Abs(contextFile); err != nil {
+				return fail(err)
+			}
+		}
+		rec, err := a.Start(ctx, app.StartRequest{Repo: selection.Key.Repo, Issue: selection.Key.Number, Agent: selection.Agent, ContextFile: contextFile})
+		if err != nil {
+			return fail(err)
+		}
+		render.Started(os.Stdout, rec)
 	case cli.Status:
 		recs, err := a.Status(ctx)
 		if err != nil {
@@ -88,6 +131,17 @@ func run(argv []string) int {
 			return fail(err)
 		}
 		render.Show(os.Stdout, rec)
+	case cli.Logs:
+		rec, err := a.Find(ctx, cmd.Repo, cmd.Issue)
+		if err != nil {
+			return fail(err)
+		}
+		if rec.Delegation == nil || rec.Delegation.RunnerLog == "" {
+			return fail(errors.New("task has no runner log"))
+		}
+		if err := showLogs(ctx, rec.Delegation.RunnerLog, cmd.RawLogs, cmd.Follow); err != nil {
+			return fail(err)
+		}
 	case cli.Start:
 		dir, err := os.Getwd()
 		if err != nil {
@@ -121,7 +175,15 @@ func run(argv []string) int {
 	case cli.Respond:
 		return respond(ctx, a, cmd)
 	case cli.Config:
-		return stageConfig(ctx, cfg, cmd.Stage)
+		switch {
+		case cmd.ConfigShow:
+			render.Config(os.Stdout, cfg)
+			return 0
+		case cmd.ConfigEdit:
+			return editConfig(cfg.Path, cfg)
+		default:
+			return stageConfig(ctx, cfg)
+		}
 	case cli.Run:
 		fmt.Printf("foreman: runner %d started %s\n", os.Getpid(), time.Now().Format(time.RFC3339))
 		if err := a.RunTask(ctx, task.Key{Repo: cmd.Repo, Number: cmd.Issue}, os.Getpid(), os.Stdout); err != nil {
@@ -130,6 +192,42 @@ func run(argv []string) int {
 		fmt.Printf("foreman: runner %d finished %s\n", os.Getpid(), time.Now().Format(time.RFC3339))
 	}
 	return 0
+}
+
+func notification(enabled bool) app.Notifier {
+	if enabled {
+		return notifications.Native{}
+	}
+	return nil
+}
+
+func showLogs(ctx context.Context, path string, raw, follow bool) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := logs.Clean(os.Stdout, f, raw); err != nil {
+		return err
+	}
+	if !follow {
+		return nil
+	}
+	for {
+		timer := time.NewTimer(500 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil
+		case <-timer.C:
+		}
+		if _, err := f.Seek(0, io.SeekCurrent); err != nil {
+			return err
+		}
+		if err := logs.Clean(os.Stdout, f, raw); err != nil {
+			return err
+		}
+	}
 }
 
 func respond(ctx context.Context, a app.App, cmd cli.Command) int {
@@ -141,7 +239,7 @@ func respond(ctx context.Context, a app.App, cmd cli.Command) int {
 	if rec.State != task.NeedsDecision || pending == nil {
 		return fail(fmt.Errorf("%s#%d is %s, not waiting for a decision", rec.Repo, rec.Number, rec.State))
 	}
-	fmt.Printf("#%d %s\n\n", rec.Number, rec.Title)
+	fmt.Printf("%s#%d %s\n\n", rec.Repo, rec.Number, rec.Title)
 	render.Blocked(os.Stdout, pending.Question)
 	prompt := "\nDecision:\n> "
 	if o, ok := pending.Question.Recommended(); ok {
@@ -167,7 +265,7 @@ func respond(ctx context.Context, a app.App, cmd cli.Command) int {
 
 // stageConfig shows the stage instructions in effect for the repository at the
 // current directory. An empty stage lists every stage's sources.
-func stageConfig(ctx context.Context, cfg config.Config, only task.Stage) int {
+func stageConfig(ctx context.Context, cfg config.Config) int {
 	dir, err := os.Getwd()
 	if err != nil {
 		return fail(err)
@@ -180,9 +278,6 @@ func stageConfig(ctx context.Context, cfg config.Config, only task.Stage) int {
 	var reports []render.StageReport
 	code := 0
 	for _, st := range task.Stages {
-		if only != "" && st != only {
-			continue
-		}
 		r := render.StageReport{GlobalWhere: filepath.Join(cfg.StagesDir, string(st)+".md")}
 		if root != "" {
 			r.RepoWhere = filepath.Join(root, stages.RepoDir, string(st)+".md")
@@ -193,12 +288,27 @@ func stageConfig(ctx context.Context, cfg config.Config, only task.Stage) int {
 		reports = append(reports, r)
 	}
 	home, _ := os.UserHomeDir()
-	if only != "" {
-		render.StageContent(os.Stdout, reports[0], home, root)
-	} else {
-		render.StageSources(os.Stdout, reports, home, root)
-	}
+	render.StageSources(os.Stdout, reports, home, root)
 	return code
+}
+
+func editConfig(path string, cfg config.Config) int {
+	if err := config.Materialize(path, cfg); err != nil {
+		return fail(fmt.Errorf("prepare config %s: %w", path, err))
+	}
+	editor := os.Getenv("VISUAL")
+	if editor == "" {
+		editor = os.Getenv("EDITOR")
+	}
+	if editor == "" {
+		editor = "vi"
+	}
+	cmd := exec.Command(editor, path)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fail(fmt.Errorf("edit config with %s: %w", editor, err))
+	}
+	return 0
 }
 
 func fail(err error) int {

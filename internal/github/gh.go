@@ -7,7 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +28,22 @@ type Client struct {
 }
 
 func New() Client { return Client{Run: execGH} }
+
+// EnsureCheckout clones a repository into path when needed, then reads its
+// repository metadata. Existing checkouts are reused and refreshed by worktree
+// creation when a new task needs them.
+func (c Client) Ensure(ctx context.Context, repo task.Repo, path string) (app.RepoInfo, error) {
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+		if _, err := c.Run(ctx, "", "repo", "clone", string(repo), path); err != nil {
+			return app.RepoInfo{}, err
+		}
+	} else if err != nil {
+		return app.RepoInfo{}, fmt.Errorf("repository checkout %s: %w", path, err)
+	} else if info, err := os.Stat(path); err != nil || !info.IsDir() {
+		return app.RepoInfo{}, fmt.Errorf("repository checkout %s is not a directory", path)
+	}
+	return c.RepoAt(ctx, filepath.Clean(path))
+}
 
 func execGH(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	var stdout, stderr bytes.Buffer

@@ -90,6 +90,16 @@ type Session struct {
 	ID    string
 }
 
+type Usage struct {
+	ClaudeCostUSD        float64
+	CodexInputTokens     int64
+	CodexCachedTokens    int64
+	CodexOutputTokens    int64
+	CodexReasoningTokens int64
+	ClaudeTurns          int
+	CodexTurns           int
+}
+
 // Delegation exists once the user has run start; tracked-only items have none.
 type Delegation struct {
 	Implementer Session
@@ -224,6 +234,7 @@ type Record struct {
 	LastGitHubSync time.Time
 	Decisions      []Decision
 	LastOutcome    *Outcome
+	Usage          Usage
 	// Validation is what the implementation agent reported with its PR.
 	Validation []Check
 	// Reviews are the competing agent's review rounds, oldest first.

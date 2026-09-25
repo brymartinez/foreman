@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/brymartinez/foreman/internal/app"
+	"github.com/brymartinez/foreman/internal/config"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -58,9 +59,11 @@ func Inbox(w io.Writer, r app.InboxReport) {
 }
 
 func line(w io.Writer, k task.Key, title, detail string) {
-	fmt.Fprintf(w, "  #%d  %s\n", k.Number, title)
+	fmt.Fprintf(w, "  %s  %s\n", issueLabel(k), title)
 	fmt.Fprintf(w, "        %s · %s\n", k.Repo, detail)
 }
+
+func issueLabel(k task.Key) string { return fmt.Sprintf("%s#%d", k.Repo, k.Number) }
 
 func kindLabel(k task.Kind) string {
 	if k == task.PullRequest {
@@ -81,7 +84,7 @@ func pendingQuestion(rec *task.Record) string {
 // ready lists what the gate checked, so the developer knows what is left to review.
 func ready(w io.Writer, rec *task.Record) {
 	d := rec.Delegation
-	fmt.Fprintf(w, "  #%d  %s\n", rec.Number, rec.Title)
+	fmt.Fprintf(w, "  %s  %s\n", issueLabel(rec.Key), rec.Title)
 	fmt.Fprintf(w, "        %s · %s → %s review\n", rec.Repo, agentName(d.Implementer.Agent), agentName(d.Reviewer))
 	pr := fmt.Sprintf("PR #%d", d.PR)
 	if d.PRURL != "" {
@@ -168,7 +171,7 @@ func Status(w io.Writer, recs []*task.Record) {
 			fmt.Fprintln(w)
 		}
 		d := r.Delegation
-		fmt.Fprintf(w, "#%-5d %-7s %s\n", r.Number, agentName(d.Implementer.Agent), r.State)
+		fmt.Fprintf(w, "%-25s %-7s %s\n", issueLabel(r.Key), agentName(d.Implementer.Agent), r.State)
 		fmt.Fprintf(w, "       %s · %s\n", r.Title, r.Repo)
 		if d.PR > 0 {
 			fmt.Fprintf(w, "       PR #%d · reviewer: %s%s%s\n", d.PR, agentName(d.Reviewer), ciBadge(r.CI), reviewBadge(r))
@@ -188,7 +191,7 @@ func reviewBadge(r *task.Record) string {
 }
 
 func Show(w io.Writer, r *task.Record) {
-	fmt.Fprintf(w, "#%d %s\n%s · %s\n\n", r.Number, r.Title, r.Repo, r.URL)
+	fmt.Fprintf(w, "%s %s\n%s · %s\n\n", issueLabel(r.Key), r.Title, r.Repo, r.URL)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	row := func(k, v string) { fmt.Fprintf(tw, "%s\t%s\n", k, orDash(v)) }
 	row("State", string(r.State))
@@ -225,6 +228,9 @@ func Show(w io.Writer, r *task.Record) {
 	}
 	if o := r.LastOutcome; o != nil {
 		row("Last outcome", fmt.Sprintf("%s · %s · %s", o.Status, o.At.Local().Format(time.DateTime), o.Summary))
+	}
+	if r.Usage.ClaudeTurns > 0 || r.Usage.CodexTurns > 0 {
+		row("Usage", fmt.Sprintf("Claude $%.2f (%d turns) · Codex %d tokens (%d turns)", r.Usage.ClaudeCostUSD, r.Usage.ClaudeTurns, r.Usage.CodexInputTokens+r.Usage.CodexOutputTokens+r.Usage.CodexReasoningTokens, r.Usage.CodexTurns))
 	}
 	tw.Flush()
 	if r.CI != nil && len(r.CI.Failing) > 0 {
@@ -290,10 +296,10 @@ func Blocked(w io.Writer, q task.Question) {
 func Started(w io.Writer, r *task.Record) {
 	d := r.Delegation
 	if r.State == task.Failed {
-		fmt.Fprintf(w, "#%d could not start: %s\n", r.Number, r.LastOutcome.Summary)
+		fmt.Fprintf(w, "%s could not start: %s\n", issueLabel(r.Key), r.LastOutcome.Summary)
 		return
 	}
-	fmt.Fprintf(w, "Started #%d %s with %s\n", r.Number, r.Title, agentName(d.Implementer.Agent))
+	fmt.Fprintf(w, "Started %s %s with %s\n", issueLabel(r.Key), r.Title, agentName(d.Implementer.Agent))
 	fmt.Fprintf(w, "  branch    %s\n  worktree  %s\n  log       %s\n", d.Branch, d.Worktree, d.RunnerLog)
 	fmt.Fprintf(w, "Check progress with: foreman status\n")
 }
@@ -312,11 +318,11 @@ func Cleaned(w io.Writer, results []app.CleanResult, dryRun bool) {
 		d := r.Rec.Delegation
 		switch {
 		case r.Err != nil:
-			fmt.Fprintf(w, "  #%d  kept %s\n        %v\n", r.Rec.Number, d.Worktree, r.Err)
+			fmt.Fprintf(w, "  %s  kept %s\n        %v\n", issueLabel(r.Rec.Key), d.Worktree, r.Err)
 		case r.BranchDeleted:
-			fmt.Fprintf(w, "  #%d  %s %s\n        %s %s\n", r.Rec.Number, removed, d.Worktree, branchNote, d.Branch)
+			fmt.Fprintf(w, "  %s  %s %s\n        %s %s\n", issueLabel(r.Rec.Key), removed, d.Worktree, branchNote, d.Branch)
 		default:
-			fmt.Fprintf(w, "  #%d  %s %s\n        branch %s kept\n", r.Rec.Number, removed, d.Worktree, d.Branch)
+			fmt.Fprintf(w, "  %s  %s %s\n        branch %s kept\n", issueLabel(r.Rec.Key), removed, d.Worktree, d.Branch)
 		}
 	}
 }
@@ -340,6 +346,52 @@ func StageSources(w io.Writer, reports []StageReport, home, repoRoot string) {
 		stageHeader(w, r, home, repoRoot)
 	}
 	fmt.Fprintln(w, "\nTasks read .foreman/ from their worktree: the version committed on the base branch.")
+}
+
+// Config prints the resolved, non-secret configuration used by foreman.
+func Config(w io.Writer, c config.Config) {
+	fmt.Fprintf(w, "Config file: %s\n", c.Path)
+	fmt.Fprintf(w, "Tasks directory: %s\n", c.TasksDir)
+	fmt.Fprintf(w, "Worktrees directory: %s\n", c.WorktreesDir)
+	fmt.Fprintf(w, "Repositories directory: %s\n", c.RepositoriesDir)
+	fmt.Fprintf(w, "Log directory: %s\n", c.LogDir)
+	fmt.Fprintf(w, "Stages directory: %s\n", c.StagesDir)
+	fmt.Fprintf(w, "Review rounds: %d\n", effectiveReviewRounds(c.ReviewRounds))
+	fmt.Fprintf(w, "Implementer budget: $%.2f per turn\n", c.Budgets.ImplementerUSD)
+	fmt.Fprintf(w, "Reviewer budget: $%.2f per turn\n", c.Budgets.ReviewerUSD)
+	fmt.Fprintf(w, "Notifications: %t\n", c.Notifications.Enabled)
+	fmt.Fprintf(w, "Ignore repositories: %s\n", repoList(c.IgnoredRepos))
+	fmt.Fprintf(w, "Claude command: %s\n", c.Claude.Command)
+	fmt.Fprintf(w, "Claude model: %s\n", orDefault(c.Claude.Model, "CLI default"))
+	fmt.Fprintf(w, "Codex command: %s\n", c.Codex.Command)
+	fmt.Fprintf(w, "Codex model: %s\n", orDefault(c.Codex.Model, "CLI default"))
+	fmt.Fprintf(w, "Cleanup on done: %t\n", c.Cleanup.OnDone)
+	fmt.Fprintf(w, "Delete merged branch: %t\n", c.Cleanup.DeleteMergedBranch)
+}
+
+func effectiveReviewRounds(rounds int) int {
+	if rounds == 0 {
+		return 3
+	}
+	return rounds
+}
+
+func repoList(repos []task.Repo) string {
+	if len(repos) == 0 {
+		return "none"
+	}
+	values := make([]string, len(repos))
+	for i, repo := range repos {
+		values[i] = string(repo)
+	}
+	return strings.Join(values, ", ")
+}
+
+func orDefault(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 // StageContent prints one stage's sources and the combined text agents receive.

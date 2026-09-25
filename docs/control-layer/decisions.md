@@ -700,3 +700,81 @@ Entry format:
     resolver and doesn't go through `app`, because it reads no task state.
 - **Consequence.** Everything that shapes an agent's stage instructions can be seen
   without running a task.
+
+## D54. Interactive inbox and storage setup
+
+- Date: 2026-09-25. New inbox usability stage. Decided by the user for the
+  interactive flow; the implementation shape follows the approved design.
+- **Context.** Issue numbers are only unique within a repository. The current
+  inbox marks displayed items seen, which makes repeated runs hide work the user
+  may still want to act on. Markdown files already work as an Obsidian vault but
+  first use gives no setup guidance.
+- **Decision.**
+  - `foreman inbox` is interactive by default. It presents a repeatable,
+    repo-qualified picker, asks for an implementation agent and optional context,
+    then delegates through the existing start flow.
+  - An explicit non-interactive mode retains report output for scripts.
+  - Display identity is always `owner/repo#N`; numeric references remain valid
+    only when unambiguous.
+  - Markdown remains the storage backend. First use explains that the configured
+    task directory can be an Obsidian vault folder or a normal directory and can
+    offer to create it. No Obsidian API or second backend is introduced.
+  - Inbox refresh persists the GitHub snapshot but does not make current items
+    permanently disappear from a later interactive run.
+- **Consequence.** The CLI gains prompting and selection seams, while app, store,
+  and GitHub lifecycle boundaries remain intact. Automation must opt into the
+  non-interactive report mode.
+
+## D55. Repository filtering and direct config modes
+
+- Date: 2026-09-25. New configuration stage. Specified by the user; the exact-match
+  shape and version fallback were chosen during implementation.
+- **Decision.**
+  - `ignore_repositories` is a list of exact `owner/name` values. Invalid values
+    fail config loading. The application filters both fresh inbox items and tracked
+    refreshes before reconciliation.
+  - `foreman config` requires exactly one of `--stages`, `--show`, or `--edit`.
+    `--show` prints resolved non-secret settings. `--stages` keeps the existing
+    all-stage inspection. `--edit` opens the resolved config path using `$VISUAL`,
+    `$EDITOR`, or `vi`.
+  - The unstamped local version is `0.1.0-dev`; release builds continue to replace
+    it with the release tag through `-ldflags`.
+- **Consequence.** Config behavior is discoverable from one flag-based command,
+  repository filtering has one exact contract, and local builds no longer report
+  the ambiguous bare `dev` value.
+
+## D56. Inbox delegation is checkout-independent
+
+- Date: 2026-09-25. Bug fix after Stage 8. Specified by the user.
+- **Context.** Interactive inbox can list repositories other than the repository
+  containing the current working directory. Reusing `Start` with that directory
+  caused `this checkout is X, not Y` before worktree creation.
+- **Decision.**
+  - A selected inbox item starts with `Dir` empty and its repo-qualified key.
+  - A `RepositoryManager` ensures a source checkout at
+    `repositories_dir/<owner>-<repo>`, cloning through `gh repo clone` when absent.
+  - `App.Start` uses that managed checkout only when no explicit `Dir` is supplied.
+    The explicit `foreman start` command remains checkout-bound and keeps its
+    mismatch guard.
+- **Consequence.** `foreman inbox` works from any directory and safely maintains
+  separate source and agent worktree paths. The first delegation of a repository
+  may clone it locally.
+
+## D57. Timestamped logs, bounded spend, and terminal-state notifications
+
+- Date: 2026-09-25. Observability and cost-control stage. Specified by the user and
+  approved after design review.
+- **Decision.**
+  - Add `foreman logs owner/repo#N`, with clean output by default, `--follow` for a
+    live detached run, and `--raw` for adapter JSONL.
+  - Timestamp lines at the runner logging boundary and persist per-task usage.
+    Claude's reported `total_cost_usd` is authoritative. Codex exposes token usage
+    but no per-session dollar amount, so Foreman records tokens and does not invent
+    a price.
+  - Pass Claude implementer and reviewer budgets of $3.00 and $1.00 by default,
+    keep the existing three review-round limit, and stop as soon as review is clean.
+  - Notify only on `NEEDS_DECISION`, `FAILED`, and `READY_FOR_HUMAN`. Native desktop
+    notifications are best-effort; task state and inbox remain durable.
+- **Consequence.** A detached run is readable without tailing raw JSON, typical
+  Claude work is bounded, Codex usage is measurable but not falsely priced, and
+  notifications remain actionable rather than noisy.

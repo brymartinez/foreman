@@ -34,7 +34,7 @@ func TestClaudeStart(t *testing.T) {
 	var sessions []task.Session
 	var log bytes.Buffer
 	c := Claude{Bin: "claude", Model: "haiku", AllowedTools: []string{"Bash", "WebFetch"}, Exec: exec, NewSessionID: func() string { return "sid-1" }}
-	turn, err := c.Start(context.Background(), StartInput{Worktree: "/wt", Prompt: "do it", Log: &log}, func(s task.Session) { sessions = append(sessions, s) })
+	turn, err := c.Start(context.Background(), StartInput{Worktree: "/wt", Prompt: "do it", Log: &log, MaxBudgetUSD: 3}, func(s task.Session) { sessions = append(sessions, s) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,11 +46,14 @@ func TestClaudeStart(t *testing.T) {
 	}
 	if got.Dir != "/wt" || argValue(got.Args, "-p") != "do it" || argValue(got.Args, "--session-id") != "sid-1" ||
 		argValue(got.Args, "--permission-mode") != "acceptEdits" || argValue(got.Args, "--model") != "haiku" ||
-		!slices.Contains(got.Args, "--allowedTools=Bash,WebFetch") || argValue(got.Args, "--json-schema") != string(OutcomeSchema) {
+		!slices.Contains(got.Args, "--allowedTools=Bash,WebFetch") || argValue(got.Args, "--json-schema") != string(OutcomeSchema) || argValue(got.Args, "--max-budget-usd") != "3.00" {
 		t.Errorf("argv = %q dir %q", got.Args, got.Dir)
 	}
 	if !strings.Contains(log.String(), "cost=$0.12") {
 		t.Errorf("log = %q", log.String())
+	}
+	if turn.Usage.ClaudeCostUSD != 0.12 || turn.Usage.ClaudeTurns != 1 {
+		t.Errorf("usage = %+v", turn.Usage)
 	}
 }
 

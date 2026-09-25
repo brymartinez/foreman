@@ -120,3 +120,9 @@ func WorkNameOf(branch string) string {
 func WorktreePath(root string, repo Repo, workName string) string {
 	return filepath.Join(root, strings.ReplaceAll(string(repo), "/", "-"), workName)
 }
+
+// RepositoryPath is the managed source checkout used by commands that run outside
+// a user checkout. It is separate from task worktrees.
+func RepositoryPath(root string, repo Repo) string {
+	return filepath.Join(root, strings.ReplaceAll(string(repo), "/", "-"))
+}

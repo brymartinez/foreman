@@ -106,10 +106,24 @@ func TestReconcileTrackedFetchKeepsSearchReasons(t *testing.T) {
 
 func TestReconcileSecondRunIsQuiet(t *testing.T) {
 	items := []InboxItem{item(8, "open", t1, task.ReviewRequested)}
-	_, dirty := Reconcile(items, nil, nil, now)
+	report1, dirty := Reconcile(items, nil, nil, now)
+	if len(report1.Current) != 1 || report1.Current[0].Item.Key != key(8) {
+		t.Fatalf("first current = %+v", report1.Current)
+	}
 	report, dirty2 := Reconcile(items, dirty, nil, now.Add(time.Minute))
 	if len(report.New)+len(report.Changed) != 0 || len(dirty2) != 0 || report.Unchanged != 1 {
 		t.Fatalf("second run not quiet: %+v, dirty %d", report, len(dirty2))
+	}
+	if len(report.Current) != 1 || report.Current[0].Item.Key != key(8) {
+		t.Fatalf("second current = %+v", report.Current)
+	}
+}
+
+func TestFilterInboxItemsIgnoresExactRepositories(t *testing.T) {
+	items := []InboxItem{item(1, "open", t0, task.Assigned), {Key: task.Key{Repo: "acme/widgets", Number: 1}, State: "open"}}
+	got := filterInboxItems(items, []task.Repo{"ridezoomo/armada-backend"})
+	if len(got) != 1 || got[0].Key != items[1].Key {
+		t.Fatalf("filtered items = %+v", got)
 	}
 }
 

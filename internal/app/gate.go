@@ -42,6 +42,9 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 		if err != nil {
 			return nil, err
 		}
+		if updated.State != r.State {
+			a.notifyState(r.Key, updated)
+		}
 		if note != "" {
 			notes[r.Key] = append(notes[r.Key], note)
 		}

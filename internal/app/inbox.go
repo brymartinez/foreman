@@ -18,26 +18,35 @@ type InboxEntry struct {
 // InboxReport lists each item once, in the section with the highest priority:
 // NEEDS DECISION, then READY FOR YOU, then CHANGED, then NEW.
 type InboxReport struct {
-	New           []InboxEntry
-	Changed       []InboxEntry
+	New     []InboxEntry
+	Changed []InboxEntry
+	// Current contains every item in the current refresh, including unchanged items.
+	// It is used by the interactive picker; the report sections retain their diff semantics.
+	Current       []InboxEntry
 	NeedsDecision []*task.Record
 	Ready         []*task.Record
 	Unchanged     int
 }
 
 type App struct {
-	Store        TaskStore
-	GitHub       GitHubClient
-	Worktrees    WorktreeManager
-	Agents       map[task.Agent]AgentAdapter
-	Runners      Runners
-	Stages       StageInstructionResolver
-	WorktreesDir string
-	ReviewRounds int // 0 means DefaultReviewRounds
+	Store                TaskStore
+	GitHub               GitHubClient
+	Repositories         RepositoryManager
+	Worktrees            WorktreeManager
+	Agents               map[task.Agent]AgentAdapter
+	Runners              Runners
+	Stages               StageInstructionResolver
+	WorktreesDir         string
+	RepositoriesDir      string
+	ReviewRounds         int // 0 means DefaultReviewRounds
+	ImplementerBudgetUSD float64
+	ReviewerBudgetUSD    float64
+	Notifier             Notifier
 	// CleanOnDone removes a DONE task's worktree when inbox runs (D42).
 	CleanOnDone bool
 	// DeleteMergedBranches deletes the local branch with the worktree once its PR is merged.
 	DeleteMergedBranches bool
+	IgnoredRepositories  []task.Repo
 	Now                  func() time.Time
 }
 
@@ -59,6 +68,7 @@ func (a App) Inbox(ctx context.Context) (InboxReport, error) {
 	if err != nil {
 		return InboxReport{}, err
 	}
+	items = filterInboxItems(items, a.IgnoredRepositories)
 	tracked, err := a.fetchTracked(ctx, recs, items)
 	if err != nil {
 		return InboxReport{}, err
@@ -97,7 +107,7 @@ func (a App) fetchTracked(ctx context.Context, recs []*task.Record, found []Inbo
 	}
 	var keys []task.Key
 	for _, r := range recs {
-		if r.Delegation != nil && r.State != task.Done && !inSearch[r.Key] {
+		if r.Delegation != nil && r.State != task.Done && !inSearch[r.Key] && !containsRepo(a.IgnoredRepositories, r.Repo) {
 			keys = append(keys, r.Key)
 		}
 	}
@@ -123,6 +133,23 @@ func (a App) fetchTracked(ctx context.Context, recs []*task.Record, found []Inbo
 	return out, nil
 }
 
+func filterInboxItems(items []InboxItem, ignored []task.Repo) []InboxItem {
+	if len(ignored) == 0 {
+		return items
+	}
+	filtered := make([]InboxItem, 0, len(items))
+	for _, item := range items {
+		if !containsRepo(ignored, item.Key.Repo) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+func containsRepo(repos []task.Repo, want task.Repo) bool {
+	return slices.Contains(repos, want)
+}
+
 // Reconcile compares current GitHub items with stored records. notes are the readiness
 // gate's changes, reported with the item. It returns the report and the records that
 // must be saved (new, or with a changed snapshot). It is pure.
@@ -141,12 +168,18 @@ func Reconcile(items []InboxItem, recs []*task.Record, notes map[task.Key][]stri
 			rec = discovered(it, now)
 			byKey[it.Key] = rec
 			dirty = append(dirty, rec)
+			report.Current = append(report.Current, InboxEntry{Item: it, Changes: reasonText(it.Reasons)})
 			if !needsHuman(rec) {
 				report.New = append(report.New, InboxEntry{Item: it, Changes: reasonText(it.Reasons)})
 			}
 			continue
 		}
 		changes := describeChanges(rec.GitHub, it)
+		current := changes
+		if len(current) == 0 {
+			current = []string{"no change"}
+		}
+		report.Current = append(report.Current, InboxEntry{Item: it, Changes: current})
 		if len(changes) > 0 {
 			observe(rec, it, now)
 			dirty = append(dirty, rec)

@@ -20,6 +20,7 @@ type ReviewOutcome struct {
 	Clean    bool
 	Summary  string
 	Findings []task.Finding
+	Usage    task.Usage
 }
 
 func ParseReview(raw []byte) (ReviewOutcome, error) {

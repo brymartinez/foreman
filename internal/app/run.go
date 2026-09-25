@@ -49,8 +49,10 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 		}
 		if rec, err = a.Store.Update(final, key, func(cur *task.Record) (*task.Record, error) {
 			applyTurn(cur, turn, pr, runErr, a.Now())
+			addUsage(&cur.Usage, turn.Usage)
 			return cur, nil
 		}); err != nil || rec.State != task.Reviewing {
+			a.notifyState(key, rec)
 			return err
 		}
 
@@ -64,8 +66,10 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 		review, reviewErr := a.review(ctx, rec, log)
 		if rec, err = a.Store.Update(final, key, func(cur *task.Record) (*task.Record, error) {
 			applyReview(cur, review, reviewErr, a.Now())
+			addUsage(&cur.Usage, review.Usage)
 			return cur, nil
 		}); err != nil || rec.State != task.Working {
+			a.notifyState(key, rec)
 			return err
 		}
 		findings = rec.LatestReview()
@@ -88,7 +92,7 @@ func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Rev
 	if !ok {
 		return agent.Turn{}, fmt.Errorf("agent %s is not configured", d.Implementer.Agent)
 	}
-	in := agent.StartInput{Worktree: d.Worktree, Log: log}
+	in := agent.StartInput{Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD}
 	resume := ""
 	if dec := rec.Undelivered(); dec != nil {
 		resume = agent.ResumeMessage(*dec)
@@ -150,10 +154,39 @@ func (a App) review(ctx context.Context, rec *task.Record, log io.Writer) (agent
 	brief.StageInstructions = instructions.Content()
 	fmt.Fprintf(log, "foreman: %s reviewing PR #%d (round %d)\n", reviewer.Name(), d.PR, len(rec.Reviews)+1)
 	return reviewer.Review(ctx, agent.StartInput{
-		Worktree: d.Worktree,
-		Log:      log,
-		Prompt:   agent.ReviewPrompt(agent.ReviewBrief{TaskBrief: brief, PR: d.PR, Validation: rec.Validation, Previous: rec.Reviews}),
+		Worktree:     d.Worktree,
+		Log:          log,
+		MaxBudgetUSD: a.ReviewerBudgetUSD,
+		Prompt:       agent.ReviewPrompt(agent.ReviewBrief{TaskBrief: brief, PR: d.PR, Validation: rec.Validation, Previous: rec.Reviews}),
 	})
+}
+
+func addUsage(total *task.Usage, turn task.Usage) {
+	total.ClaudeCostUSD += turn.ClaudeCostUSD
+	total.CodexInputTokens += turn.CodexInputTokens
+	total.CodexCachedTokens += turn.CodexCachedTokens
+	total.CodexOutputTokens += turn.CodexOutputTokens
+	total.CodexReasoningTokens += turn.CodexReasoningTokens
+	total.ClaudeTurns += turn.ClaudeTurns
+	total.CodexTurns += turn.CodexTurns
+}
+
+func (a App) notifyState(key task.Key, rec *task.Record) {
+	if a.Notifier == nil || rec == nil {
+		return
+	}
+	var body string
+	switch rec.State {
+	case task.NeedsDecision:
+		body = "Needs your decision"
+	case task.Failed:
+		body = "Run failed"
+	case task.ReadyForHuman:
+		body = "Ready for human review"
+	default:
+		return
+	}
+	_ = a.Notifier.Notify(fmt.Sprintf("Foreman %s#%d", key.Repo, key.Number), body)
 }
 
 // brief gathers the durable task context both prompts are built from.

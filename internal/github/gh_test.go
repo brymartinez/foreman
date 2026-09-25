@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -81,6 +82,25 @@ func TestGetIssueAndRepoAt(t *testing.T) {
 	info, err := c.RepoAt(context.Background(), "/some/checkout")
 	if err != nil || info.Repo != "ridezoomo/armada-backend" || info.DefaultBranch != "main" {
 		t.Fatalf("repo = %+v, %v", info, err)
+	}
+}
+
+func TestEnsureCheckoutClonesMissingRepository(t *testing.T) {
+	var calls []string
+	run := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		calls = append(calls, strings.Join(args, " "))
+		if strings.HasPrefix(strings.Join(args, " "), "repo clone") {
+			return nil, nil
+		}
+		return fixtures(t)(context.Background(), "", args...)
+	}
+	path := filepath.Join(t.TempDir(), "checkout")
+	info, err := (Client{Run: run}).Ensure(context.Background(), "ridezoomo/armada-backend", path)
+	if err != nil || info.Repo != "ridezoomo/armada-backend" {
+		t.Fatalf("info = %+v, err = %v", info, err)
+	}
+	if len(calls) == 0 || calls[0] != "repo clone ridezoomo/armada-backend "+path {
+		t.Fatalf("clone calls = %v", calls)
 	}
 }
 

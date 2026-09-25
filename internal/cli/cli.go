@@ -22,6 +22,7 @@ const (
 	Respond Name = "respond"
 	Clean   Name = "clean"
 	Config  Name = "config"
+	Logs    Name = "logs"
 	Version Name = "version"
 	// Run is the hidden verb the detached runner process executes (see internal/runner).
 	Run Name = "__run"
@@ -35,6 +36,13 @@ type Command struct {
 	ContextFile string
 	BranchType  task.BranchType
 	DryRun      bool
+	// NonInteractive keeps report output for scripts; inbox is interactive by default.
+	NonInteractive bool
+	ConfigStages   bool
+	ConfigShow     bool
+	ConfigEdit     bool
+	Follow         bool
+	RawLogs        bool
 	// Stage is set for `config stage <stage>`; `config stages` leaves it empty.
 	Stage task.Stage
 }
@@ -42,14 +50,16 @@ type Command struct {
 const Usage = `foreman: delegate GitHub issues to Claude Code or Codex
 
 Usage:
-  foreman inbox                                   What changed / needs me?
+  foreman inbox [--non-interactive]               Pick work to delegate (or print a report)
   foreman status                                  Delegated work and its state
   foreman show <issue>                            Durable state for one task
+  foreman logs <issue> [--follow] [--raw]          Read a task's runner log
   foreman start <issue> --agent claude|codex [--context path.md] [--type fix]
   foreman respond <issue>                         Answer a NEEDS_DECISION task
   foreman clean [<issue>] [--dry-run]             Remove worktrees of DONE tasks (or one DONE/FAILED task)
-  foreman config stages                           Where each stage's instructions come from
-  foreman config stage <implement|review|pr>      The combined instructions for one stage
+  foreman config --stages                         Where each stage's instructions come from
+  foreman config --show                           Show the resolved configuration
+  foreman config --edit                           Edit the configuration file
   foreman version
 
 <issue> is 825, #825, or owner/repo#825 when the number exists in several repos.
@@ -75,7 +85,9 @@ func Parse(argv []string) (Command, error) {
 		return parseClean(rest)
 	case "config":
 		return parseConfig(rest)
-	case "inbox", "status":
+	case "inbox":
+		return parseInbox(rest)
+	case "status":
 		if len(rest) > 0 {
 			return Command{}, usagef("%s takes no arguments", name)
 		}
@@ -83,6 +95,8 @@ func Parse(argv []string) (Command, error) {
 	case "show", "respond":
 		repo, n, err := issueArg(name, rest)
 		return Command{Name: Name(name), Repo: repo, Issue: n}, err
+	case "logs":
+		return parseLogs(rest)
 	case "start":
 		return parseStart(rest)
 	case string(Run):
@@ -93,6 +107,43 @@ func Parse(argv []string) (Command, error) {
 		return Command{Name: Run, Repo: repo, Issue: n}, err
 	}
 	return Command{}, usagef("unknown command %q", name)
+}
+
+func parseLogs(rest []string) (Command, error) {
+	cmd := Command{Name: Logs}
+	var positionals []string
+	for _, arg := range rest {
+		switch arg {
+		case "--follow", "-f":
+			cmd.Follow = true
+		case "--raw":
+			cmd.RawLogs = true
+		default:
+			if strings.HasPrefix(arg, "-") {
+				return Command{}, usagef("logs: unknown flag %s", arg)
+			}
+			positionals = append(positionals, arg)
+		}
+	}
+	repo, n, err := issueArg("logs", positionals)
+	cmd.Repo, cmd.Issue = repo, n
+	return cmd, err
+}
+
+func parseInbox(rest []string) (Command, error) {
+	cmd := Command{Name: Inbox}
+	for _, arg := range rest {
+		switch arg {
+		case "--non-interactive":
+			cmd.NonInteractive = true
+		default:
+			if strings.HasPrefix(arg, "-") {
+				return Command{}, usagef("inbox: unknown flag %s", arg)
+			}
+			return Command{}, usagef("inbox takes no arguments")
+		}
+	}
+	return cmd, nil
 }
 
 func parseStart(rest []string) (Command, error) {
@@ -136,17 +187,33 @@ func parseStart(rest []string) (Command, error) {
 }
 
 func parseConfig(rest []string) (Command, error) {
-	switch {
-	case len(rest) == 1 && rest[0] == "stages":
-		return Command{Name: Config}, nil
-	case len(rest) == 2 && rest[0] == "stage":
-		st, err := task.ParseStage(rest[1])
-		if err != nil {
-			return Command{}, usagef("config stage: %v", err)
+	cmd := Command{Name: Config}
+	for _, arg := range rest {
+		switch arg {
+		case "--stages":
+			cmd.ConfigStages = true
+		case "--show":
+			cmd.ConfigShow = true
+		case "--edit":
+			cmd.ConfigEdit = true
+		default:
+			return Command{}, usagef("config: unknown flag %s", arg)
 		}
-		return Command{Name: Config, Stage: st}, nil
 	}
-	return Command{}, usagef("config needs \"stages\" or \"stage <implement|review|pr>\"")
+	if (boolCount(cmd.ConfigStages, cmd.ConfigShow, cmd.ConfigEdit)) != 1 {
+		return Command{}, usagef("config needs exactly one of --stages, --show, or --edit")
+	}
+	return cmd, nil
+}
+
+func boolCount(values ...bool) int {
+	n := 0
+	for _, value := range values {
+		if value {
+			n++
+		}
+	}
+	return n
 }
 
 func parseClean(rest []string) (Command, error) {

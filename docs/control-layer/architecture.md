@@ -6,7 +6,7 @@ internal/cli          argv -> Command; no I/O beyond parsing
 internal/config       tasks directory resolution (Stage 1)
 internal/render       terminal formatting of app results (Stage 1)
 internal/app          orchestration + ports.go (the interfaces below)
-  ├── github          GitHubClient over `gh` (Stage 1)
+  ├── github          GitHubClient and RepositoryManager over `gh` (Stages 1, 9)
   ├── store           TaskStore over Markdown + YAML frontmatter (Stage 1)
   ├── worktree        WorktreeManager over `git worktree` (Stage 2)
   ├── agent           outcome contract, prompt, claude.go / codex.go adapters (Stage 2)
@@ -55,7 +55,7 @@ foreman inbox|status  -> runner pid dead while WORKING/REVIEWING -> FAILED
                              pending              -> record, wait
                              finished             -> READY_FOR_HUMAN, ✓ CI or ✗ CI: <checks>
                            READY_FOR_HUMAN: refresh the CI result
-                         inbox only, cleanup.on_done: DONE task -> git worktree remove
+                        inbox only, cleanup.on_done: DONE task -> git worktree remove
                            (kept if dirty); branch -D only if its PR merged
 foreman clean [<issue>] -> the same cleanup on demand; <issue> may also be FAILED
 ```

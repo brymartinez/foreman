@@ -50,12 +50,15 @@ func (c Claude) run(ctx context.Context, in StartInput, session task.Session, se
 	if len(c.AllowedTools) > 0 {
 		args = append(args, "--allowedTools="+strings.Join(c.AllowedTools, ","))
 	}
-	raw, err := c.exec(ctx, in, args)
+	if in.MaxBudgetUSD > 0 {
+		args = append(args, "--max-budget-usd", fmt.Sprintf("%.2f", in.MaxBudgetUSD))
+	}
+	raw, cost, err := c.exec(ctx, in, args)
 	if err != nil {
 		return Turn{Session: session}, err
 	}
 	outcome, err := ParseOutcome(raw)
-	return Turn{Session: session, Outcome: outcome}, err
+	return Turn{Session: session, Outcome: outcome, Usage: task.Usage{ClaudeCostUSD: cost, ClaudeTurns: 1}}, err
 }
 
 // ReviewTools lets the reviewer read code and git history and nothing else; dontAsk
@@ -72,28 +75,35 @@ func (c Claude) Review(ctx context.Context, in StartInput) (ReviewOutcome, error
 		"--permission-mode", "dontAsk",
 		"--allowedTools=" + strings.Join(ReviewTools, ","),
 	}
-	raw, err := c.exec(ctx, in, args)
+	if in.MaxBudgetUSD > 0 {
+		args = append(args, "--max-budget-usd", fmt.Sprintf("%.2f", in.MaxBudgetUSD))
+	}
+	raw, cost, err := c.exec(ctx, in, args)
 	if err != nil {
 		return ReviewOutcome{}, err
 	}
-	return ParseReview(raw)
+	out, err := ParseReview(raw)
+	out.Usage = task.Usage{ClaudeCostUSD: cost, ClaudeTurns: 1}
+	return out, err
 }
 
 // exec runs claude -p and returns its structured_output.
-func (c Claude) exec(ctx context.Context, in StartInput, args []string) (json.RawMessage, error) {
+func (c Claude) exec(ctx context.Context, in StartInput, args []string) (json.RawMessage, float64, error) {
 	if c.Model != "" {
 		args = append(args, "--model", c.Model)
 	}
 	var stdout bytes.Buffer
 	runErr := c.Exec(ctx, Command{Name: c.Bin, Args: args, Dir: in.Worktree, Stdout: &stdout, Stderr: logOrDiscard(in.Log)})
 	if len(bytes.TrimSpace(stdout.Bytes())) == 0 {
-		return nil, fmt.Errorf("claude printed no result (%v): %w", runErr, ErrNoSession)
+		return nil, 0, fmt.Errorf("claude printed no result (%v): %w", runErr, ErrNoSession)
 	}
 	raw, err := parseClaudeResult(stdout.Bytes(), in.Log)
 	if err != nil && runErr != nil {
-		return nil, fmt.Errorf("claude exited: %w (%v)", runErr, err)
+		return nil, 0, fmt.Errorf("claude exited: %w (%v)", runErr, err)
 	}
-	return raw, err
+	var result claudeResult
+	_ = json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &result)
+	return raw, result.TotalCostUSD, err
 }
 
 type claudeResult struct {

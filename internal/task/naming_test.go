@@ -33,6 +33,12 @@ func TestBranchAndWorktreeShareWorkName(t *testing.T) {
 	}
 }
 
+func TestRepositoryPath(t *testing.T) {
+	if got := RepositoryPath("/repos", "ridezoomo/armada-backend"); got != "/repos/ridezoomo-armada-backend" {
+		t.Errorf("repository = %q", got)
+	}
+}
+
 func TestBranchTypeFor(t *testing.T) {
 	for _, tc := range []struct {
 		title  string

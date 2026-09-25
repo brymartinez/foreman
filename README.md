@@ -53,21 +53,35 @@ Run `start` from any checkout of the repository. Foreman reads the repo and its 
 branch from that checkout.
 
 ```bash
-foreman inbox                                  # what changed, and what needs me?
+foreman inbox                                  # refresh, pick an issue, and delegate it
+foreman inbox --non-interactive                 # print the report without prompting
 foreman start 825 --agent claude               # delegate issue #825
 foreman start 825 --agent codex --context ./context/825.md
 foreman start 825 --agent claude --type fix    # force the branch prefix
 foreman status                                 # delegated work, most urgent first
 foreman show 825                               # everything recorded for one task
+foreman logs 825                               # clean, timestamped runner log
+foreman logs 825 --follow                       # follow a live runner
+foreman logs 825 --raw                          # show raw agent JSONL
 foreman respond 825                            # answer a question from the agent
 foreman clean --dry-run                        # which worktrees would be removed
 foreman clean                                  # remove worktrees of DONE tasks
-foreman config stages                          # which stage instruction files apply here
+foreman config --stages                         # which stage instruction files apply here
+foreman config --show                           # show the resolved configuration
+foreman config --edit                           # edit the config in $VISUAL/$EDITOR
 foreman version
 ```
 
 `<issue>` can be `825`, `#825`, or `owner/repo#825`. Use the last form when the same
 number is tracked in more than one repo.
+
+`foreman inbox` is interactive by default. It shows repo-qualified identities such as
+`acme/widgets#825`, asks which configured agent should implement the issue, and accepts
+an optional context Markdown file. Press `q` to leave without starting work. Use
+`--non-interactive` for scripts and the report-style output. The interactive picker
+shows unchanged current items again on later runs and can be run from any directory.
+When you delegate an item, Foreman clones or reuses its source checkout under
+`repositories_dir`, then creates the agent worktree under `worktrees_dir`.
 
 `--context` is a Markdown file with extra instructions, for example "keep the 5xx-only
 retry behavior". The agent treats it as part of the task.
@@ -122,8 +136,7 @@ never reads or changes those files.
   Otherwise the text is passed through as written.
 
 ```bash
-foreman config stages          # where each stage's instructions come from
-foreman config stage review    # the combined text the reviewer gets
+foreman config --stages         # where each stage's instructions come from
 ```
 
 ## Cleaning up worktrees
@@ -152,7 +165,7 @@ notification.
 
 ```
 NEEDS DECISION
-  #825  Provider retries
+  acme/widgets#825  Provider retries
         acme/widgets · Should retries also apply to 4xx responses?
 ```
 
@@ -213,8 +226,9 @@ Foreman rewrites only the frontmatter keys it owns. Keys you add, such as `tags`
 
 ### Obsidian
 
-The files are ready for Obsidian, but nothing is set up by default. To use them, point
-`tasks_dir` at a folder inside your vault:
+The files are ready for Obsidian. On the first interactive `foreman inbox`, Foreman
+explains the configured task directory and offers to create it. To use a folder inside
+your vault, point `tasks_dir` at it before running inbox:
 
 ```yaml
 tasks_dir: ~/Documents/vault/foreman
@@ -230,8 +244,14 @@ Every key is optional. These are the defaults:
 ```yaml
 tasks_dir: ~/.local/share/foreman/tasks
 worktrees_dir: ~/.local/share/foreman/worktrees
+repositories_dir: ~/.local/share/foreman/repositories # inbox source checkouts
 log_dir: ~/.local/share/foreman/logs
 review_rounds: 3
+budgets:
+  implementer_usd: 3.00              # Claude maximum per implementation turn
+  reviewer_usd: 1.00                 # Claude maximum per review turn
+notifications:
+  enabled: true                      # decision, failure, and readiness alerts
 claude:
   command: claude
   model: ""                       # CLI default
@@ -239,12 +259,16 @@ claude:
 codex:
   command: codex
   model: ""
+ignore_repositories: []              # exact owner/name repositories excluded from inbox
 cleanup:
   on_done: true                   # inbox removes DONE tasks' worktrees
   delete_merged_branch: true      # and the local branch, once the PR is merged
 ```
 
 `FOREMAN_TASKS_DIR` overrides `tasks_dir`.
+
+`ignore_repositories` accepts exact repository names such as `acme/widgets`. Ignored
+repositories are excluded from fresh inbox results and tracked-task refreshes.
 
 ## Permissions
 

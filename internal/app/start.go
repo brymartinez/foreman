@@ -9,25 +9,22 @@ import (
 )
 
 type StartRequest struct {
-	Repo        task.Repo // optional; must match the checkout at Dir when set
+	Repo        task.Repo // optional with Dir; required when starting from a managed checkout
 	Issue       int
 	Agent       task.Agent
 	ContextFile string // absolute path, or ""
 	// BranchType overrides the type inferred from the issue title and labels. It only
 	// applies to a task's first start; a stored branch is always reused.
 	BranchType task.BranchType
-	Dir        string // the checkout foreman start was run from
+	Dir        string // explicit source checkout; empty uses the managed repository checkout
 }
 
 // Start prepares the worktree and task file, then launches the detached runner.
 // Rerunning it for a FAILED task, or one whose runner died, resumes from durable state.
 func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) {
-	info, err := a.GitHub.RepoAt(ctx, req.Dir)
+	info, err := a.sourceRepo(ctx, &req)
 	if err != nil {
-		return nil, fmt.Errorf("run foreman start from a checkout of the issue's repository: %w", err)
-	}
-	if req.Repo != "" && req.Repo != info.Repo {
-		return nil, fmt.Errorf("this checkout is %s, not %s", info.Repo, req.Repo)
+		return nil, err
 	}
 	key := task.Key{Repo: info.Repo, Number: req.Issue}
 	existing, err := a.Store.Get(ctx, key)
@@ -101,6 +98,32 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 	}
 
 	return a.launch(ctx, key)
+}
+
+func (a App) sourceRepo(ctx context.Context, req *StartRequest) (RepoInfo, error) {
+	if req.Dir != "" {
+		info, err := a.GitHub.RepoAt(ctx, req.Dir)
+		if err != nil {
+			return RepoInfo{}, fmt.Errorf("run foreman start from a checkout of the issue's repository: %w", err)
+		}
+		if req.Repo != "" && req.Repo != info.Repo {
+			return RepoInfo{}, fmt.Errorf("this checkout is %s, not %s", info.Repo, req.Repo)
+		}
+		return info, nil
+	}
+	if req.Repo == "" {
+		return RepoInfo{}, fmt.Errorf("repository is required when no checkout directory is provided")
+	}
+	if a.Repositories == nil {
+		return RepoInfo{}, fmt.Errorf("managed repository checkout is not configured")
+	}
+	path := task.RepositoryPath(a.RepositoriesDir, req.Repo)
+	info, err := a.Repositories.Ensure(ctx, req.Repo, path)
+	if err != nil {
+		return RepoInfo{}, fmt.Errorf("prepare checkout for %s: %w", req.Repo, err)
+	}
+	req.Dir = path
+	return info, nil
 }
 
 // launch spawns the runner and records its log, or marks the task FAILED if it can't.

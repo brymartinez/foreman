@@ -10,19 +10,36 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/brymartinez/foreman/internal/task"
 )
 
 type Config struct {
-	TasksDir     string  `yaml:"tasks_dir"`
-	WorktreesDir string  `yaml:"worktrees_dir"`
-	LogDir       string  `yaml:"log_dir"`
-	ReviewRounds int     `yaml:"review_rounds"` // 0 means the default (3)
-	Claude       Claude  `yaml:"claude"`
-	Codex        Codex   `yaml:"codex"`
-	Cleanup      Cleanup `yaml:"cleanup"`
+	TasksDir        string        `yaml:"tasks_dir"`
+	WorktreesDir    string        `yaml:"worktrees_dir"`
+	RepositoriesDir string        `yaml:"repositories_dir"`
+	LogDir          string        `yaml:"log_dir"`
+	ReviewRounds    int           `yaml:"review_rounds"` // 0 means the default (3)
+	Budgets         Budgets       `yaml:"budgets"`
+	Notifications   Notifications `yaml:"notifications"`
+	Claude          Claude        `yaml:"claude"`
+	Codex           Codex         `yaml:"codex"`
+	Cleanup         Cleanup       `yaml:"cleanup"`
+	IgnoredRepos    []task.Repo   `yaml:"ignore_repositories"`
+	// Path is the resolved config file used by config show/edit.
+	Path string `yaml:"-"`
 	// StagesDir holds the global stage instructions: stages/ next to the config file,
 	// so ~/.config/foreman/stages by default. It is a convention, not a setting (D48).
 	StagesDir string `yaml:"-"`
+}
+
+type Budgets struct {
+	ImplementerUSD float64 `yaml:"implementer_usd"`
+	ReviewerUSD    float64 `yaml:"reviewer_usd"`
+}
+
+type Notifications struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 // Cleanup controls what happens to a task's worktree once the task is DONE (D42).
@@ -53,12 +70,15 @@ func Load() (Config, error) {
 	}
 	data := filepath.Join(home, ".local", "share", "foreman")
 	cfg := Config{
-		TasksDir:     filepath.Join(data, "tasks"),
-		WorktreesDir: filepath.Join(data, "worktrees"),
-		LogDir:       filepath.Join(data, "logs"),
-		Claude:       Claude{Command: "claude", AllowedTools: []string{"Bash", "WebFetch", "WebSearch"}},
-		Codex:        Codex{Command: "codex"},
-		Cleanup:      Cleanup{OnDone: true, DeleteMergedBranch: true},
+		TasksDir:        filepath.Join(data, "tasks"),
+		WorktreesDir:    filepath.Join(data, "worktrees"),
+		RepositoriesDir: filepath.Join(data, "repositories"),
+		LogDir:          filepath.Join(data, "logs"),
+		Claude:          Claude{Command: "claude", AllowedTools: []string{"Bash", "WebFetch", "WebSearch"}},
+		Codex:           Codex{Command: "codex"},
+		Cleanup:         Cleanup{OnDone: true, DeleteMergedBranch: true},
+		Budgets:         Budgets{ImplementerUSD: 3, ReviewerUSD: 1},
+		Notifications:   Notifications{Enabled: true},
 	}
 	path := os.Getenv("FOREMAN_CONFIG")
 	if path == "" {
@@ -74,13 +94,42 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg.StagesDir = filepath.Join(filepath.Dir(path), "stages")
+	cfg.Path = path
 	if env := os.Getenv("FOREMAN_TASKS_DIR"); env != "" {
 		cfg.TasksDir = env
 	}
-	for _, p := range []*string{&cfg.TasksDir, &cfg.WorktreesDir, &cfg.LogDir} {
+	for _, p := range []*string{&cfg.TasksDir, &cfg.WorktreesDir, &cfg.RepositoriesDir, &cfg.LogDir} {
 		*p = expandHome(*p, home)
 	}
+	for i, repo := range cfg.IgnoredRepos {
+		parsed, err := task.ParseRepo(string(repo))
+		if err != nil {
+			return Config{}, fmt.Errorf("ignore_repositories[%d]: %w", i, err)
+		}
+		cfg.IgnoredRepos[i] = parsed
+	}
 	return cfg, nil
+}
+
+// Materialize writes the resolved configuration only when the config file is
+// missing or empty. This gives `config --edit` useful defaults without replacing
+// an existing user's file.
+func Materialize(path string, cfg Config) error {
+	info, err := os.Stat(path)
+	if err == nil && info.Size() > 0 {
+		return nil
+	}
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	raw, err := yaml.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, raw, 0o600)
 }
 
 func expandHome(p, home string) string {

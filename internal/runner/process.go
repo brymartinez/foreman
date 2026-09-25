@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/brymartinez/foreman/internal/logs"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -38,7 +39,8 @@ func (p Processes) Spawn(key task.Key) (int, string, error) {
 	}
 	defer log.Close()
 	cmd := exec.Command(exe, RunCommand, fmt.Sprintf("%s#%d", key.Repo, key.Number))
-	cmd.Stdout, cmd.Stderr = log, log
+	stamped := &logs.Writer{W: log}
+	cmd.Stdout, cmd.Stderr = stamped, stamped
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return 0, "", err

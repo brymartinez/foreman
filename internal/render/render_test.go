@@ -28,11 +28,11 @@ func TestInboxSectionsAndHiddenCount(t *testing.T) {
 		Unchanged: 17,
 	})
 	want := `NEEDS DECISION
-  #830  Event pagination
+  ridezoomo/armada-backend#830  Event pagination
         ridezoomo/armada-backend · Should retries apply to 4xx?
 
 READY FOR YOU
-  #790  Provider retries
+  ridezoomo/armada-backend#790  Provider retries
         ridezoomo/armada-backend · Claude → Codex review
         PR #912 · https://github.com/ridezoomo/armada-backend/pull/912
 
@@ -45,11 +45,11 @@ READY FOR YOU
         - Keep retries limited to 5xx.
 
 CHANGED
-  #812  Pagination
+  ridezoomo/armada-backend#812  Pagination
         ridezoomo/armada-backend · closed
 
 NEW
-  #825  Provider retries
+  ridezoomo/armada-backend#825  Provider retries
         ridezoomo/armada-backend · assigned to you
 
 NO CHANGE
@@ -57,6 +57,16 @@ NO CHANGE
 `
 	if buf.String() != want {
 		t.Errorf("got:\n%s\nwant:\n%s", buf.String(), want)
+	}
+}
+
+func TestInboxUsesRepoQualifiedIdentity(t *testing.T) {
+	var buf bytes.Buffer
+	Inbox(&buf, app.InboxReport{New: []app.InboxEntry{{Item: app.InboxItem{
+		Key: task.Key{Repo: "midsoln/foreman", Number: 1}, Title: "Inbox identity",
+	}, Changes: []string{"assigned to you"}}}})
+	if !strings.Contains(buf.String(), "midsoln/foreman#1  Inbox identity") {
+		t.Errorf("repo-qualified identity missing from:\n%s", buf.String())
 	}
 }
 
@@ -74,7 +84,7 @@ func TestStatus(t *testing.T) {
 		Key: task.Key{Repo: "ridezoomo/armada-backend", Number: 831}, Title: "Provider retries", State: task.Reviewing,
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912},
 	}})
-	want := "#831   Claude  REVIEWING\n       Provider retries · ridezoomo/armada-backend\n       PR #912 · reviewer: Codex\n"
+	want := "ridezoomo/armada-backend#831 Claude  REVIEWING\n       Provider retries · ridezoomo/armada-backend\n       PR #912 · reviewer: Codex\n"
 	if buf.String() != want {
 		t.Errorf("got:\n%q\nwant:\n%q", buf.String(), want)
 	}
@@ -84,7 +94,7 @@ func TestStatus(t *testing.T) {
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912},
 		Reviews:    []task.Review{{Round: 1}, {Round: 2, Clean: true}},
 	}})
-	want = "#831   Claude  REVIEWING\n       Provider retries · ridezoomo/armada-backend\n       PR #912 · reviewer: Codex · review ✓\n"
+	want = "ridezoomo/armada-backend#831 Claude  REVIEWING\n       Provider retries · ridezoomo/armada-backend\n       PR #912 · reviewer: Codex · review ✓\n"
 	if buf.String() != want {
 		t.Errorf("got:\n%q\nwant:\n%q", buf.String(), want)
 	}
@@ -125,7 +135,7 @@ func TestShowCI(t *testing.T) {
 func TestShowUndelegated(t *testing.T) {
 	var buf bytes.Buffer
 	Show(&buf, &task.Record{Key: task.Key{Repo: "a/b", Number: 1}, Title: "T", URL: "u", State: task.Discovered})
-	for _, s := range []string{"#1 T\na/b · u", "State  DISCOVERED", "Agent  not delegated"} {
+	for _, s := range []string{"a/b#1 T\na/b · u", "State  DISCOVERED", "Agent  not delegated"} {
 		if !strings.Contains(buf.String(), s) {
 			t.Errorf("missing %q in:\n%s", s, buf.String())
 		}
@@ -216,11 +226,11 @@ func TestCleaned(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	Cleaned(&buf, []app.CleanResult{{Rec: rec(1), BranchDeleted: true}, {Rec: rec(2)}, {Rec: rec(3), Err: errors.New("contains modified or untracked files")}}, false)
-	want := `  #1  removed /wt/1
+	want := `  a/b#1  removed /wt/1
         branch deleted (PR merged) agent/1-x
-  #2  removed /wt/2
+  a/b#2  removed /wt/2
         branch agent/2-x kept
-  #3  kept /wt/3
+  a/b#3  kept /wt/3
         contains modified or untracked files
 `
 	if buf.String() != want {

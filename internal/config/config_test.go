@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -48,7 +49,7 @@ func TestAgentSettingsOverlayDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.WorktreesDir != filepath.Join(home, "wt") || cfg.LogDir != filepath.Join(home, ".local/share/foreman/logs") {
+	if cfg.WorktreesDir != filepath.Join(home, "wt") || cfg.RepositoriesDir != filepath.Join(home, ".local/share/foreman/repositories") || cfg.LogDir != filepath.Join(home, ".local/share/foreman/logs") {
 		t.Errorf("dirs: %+v", cfg)
 	}
 	if cfg.Claude.Model != "haiku" || cfg.Claude.Command != "claude" || len(cfg.Claude.AllowedTools) != 3 {
@@ -62,5 +63,46 @@ func TestAgentSettingsOverlayDefaults(t *testing.T) {
 	}
 	if !cfg.Cleanup.OnDone || cfg.Cleanup.DeleteMergedBranch {
 		t.Errorf("cleanup: an explicit false must override its default, and unset keys keep theirs: %+v", cfg.Cleanup)
+	}
+}
+
+func TestLoadValidatesIgnoredRepositories(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("FOREMAN_CONFIG", "")
+	t.Setenv("FOREMAN_TASKS_DIR", "")
+	os.MkdirAll(filepath.Join(home, ".config/foreman"), 0o755)
+	os.WriteFile(filepath.Join(home, ".config/foreman/config.yaml"), []byte("ignore_repositories: [midsoln/foreman, acme/widgets]\n"), 0o644)
+	cfg, err := Load()
+	if err != nil || len(cfg.IgnoredRepos) != 2 || cfg.IgnoredRepos[1] != "acme/widgets" {
+		t.Fatalf("ignored repos = %+v, err = %v", cfg.IgnoredRepos, err)
+	}
+
+	os.WriteFile(filepath.Join(home, ".config/foreman/config.yaml"), []byte("ignore_repositories: [not-a-repo]\n"), 0o644)
+	if _, err := Load(); err == nil {
+		t.Fatal("invalid ignored repository accepted")
+	}
+}
+
+func TestMaterializeWritesDefaultsOnlyForEmptyFiles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	cfg := Config{TasksDir: "/tasks", Budgets: Budgets{ImplementerUSD: 3, ReviewerUSD: 1}, Notifications: Notifications{Enabled: true}}
+	if err := Materialize(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil || len(raw) == 0 || !strings.Contains(string(raw), "implementer_usd: 3") {
+		t.Fatalf("materialized config = %q, err = %v", raw, err)
+	}
+	if err := os.WriteFile(path, []byte("tasks_dir: /custom\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Materialize(path, Config{TasksDir: "/other"}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "tasks_dir: /custom\n" {
+		t.Fatalf("existing config replaced: %q", got)
 	}
 }

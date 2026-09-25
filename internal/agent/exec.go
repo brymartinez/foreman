@@ -14,7 +14,8 @@ type StartInput struct {
 	Worktree string
 	Prompt   string
 	// Log receives the agent's stderr and progress events; the runner points it at the task log.
-	Log io.Writer
+	Log          io.Writer
+	MaxBudgetUSD float64
 }
 
 // ErrNoSession means the CLI never produced a session: nothing ran. For Resume it
@@ -24,6 +25,7 @@ var ErrNoSession = errors.New("agent produced no session")
 type Turn struct {
 	Session task.Session
 	Outcome Outcome
+	Usage   task.Usage
 }
 
 // Command is one agent CLI invocation. Adapters build it; Exec runs it.

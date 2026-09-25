@@ -39,9 +39,8 @@ func TestParseRejects(t *testing.T) {
 		{"__run", "825"},
 		{"clean", "--force"},
 		{"config"},
-		{"config", "stage"},
-		{"config", "stage", "deploy"},
-		{"config", "stages", "extra"},
+		{"config", "--stage"},
+		{"config", "--stages", "--show"},
 		{"start", "825", "--agent", "claude", "--type", "agent"},
 		{"clean", "1", "2"},
 	} {
@@ -74,11 +73,17 @@ func TestParseSimple(t *testing.T) {
 	if got, err := Parse([]string{"start", "825", "--type", "Fix", "--agent", "codex"}); err != nil || got.BranchType != "fix" {
 		t.Errorf("start --type parsed as %+v, %v", got, err)
 	}
-	if got, _ := Parse([]string{"config", "stages"}); got != (Command{Name: Config}) {
-		t.Errorf("config stages parsed as %+v", got)
+	if got, _ := Parse([]string{"config", "--stages"}); !got.ConfigStages {
+		t.Errorf("config --stages parsed as %+v", got)
 	}
-	if got, _ := Parse([]string{"config", "stage", "Review"}); got != (Command{Name: Config, Stage: task.StageReview}) {
-		t.Errorf("config stage parsed as %+v", got)
+	if got, _ := Parse([]string{"config", "--show"}); !got.ConfigShow {
+		t.Errorf("config --show parsed as %+v", got)
+	}
+	if got, _ := Parse([]string{"config", "--edit"}); !got.ConfigEdit {
+		t.Errorf("config --edit parsed as %+v", got)
+	}
+	if got, err := Parse([]string{"inbox", "--non-interactive"}); err != nil || !got.NonInteractive {
+		t.Errorf("inbox --non-interactive = %+v, %v", got, err)
 	}
 	if got, _ := Parse([]string{"clean", "--dry-run", "a/b#3"}); got != (Command{Name: Clean, Repo: "a/b", Issue: 3, DryRun: true}) {
 		t.Errorf("clean parsed as %+v", got)
@@ -88,5 +93,8 @@ func TestParseSimple(t *testing.T) {
 	}
 	if got, _ := Parse([]string{"show", "ridezoomo/armada-backend#825"}); got != (Command{Name: Show, Repo: "ridezoomo/armada-backend", Issue: 825}) {
 		t.Errorf("qualified show parsed as %+v", got)
+	}
+	if got, err := Parse([]string{"logs", "a/b#3", "--follow", "--raw"}); err != nil || got != (Command{Name: Logs, Repo: "a/b", Issue: 3, Follow: true, RawLogs: true}) {
+		t.Errorf("logs parsed as %+v, %v", got, err)
 	}
 }
