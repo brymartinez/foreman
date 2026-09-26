@@ -130,3 +130,15 @@ func TestRepoRoot(t *testing.T) {
 		t.Errorf("outside a repo: %q, %v", got, err)
 	}
 }
+
+func TestRequireGlobal(t *testing.T) {
+	l := setup(t, map[string]string{"config/stages/implement.md": "x", "config/stages/review.md": "x"})
+	err := Files{GlobalDir: l.global}.RequireGlobal()
+	if err == nil || !strings.Contains(err.Error(), filepath.Join(l.global, "pr.md")) || strings.Contains(err.Error(), "review.md") {
+		t.Fatalf("err = %v, want only pr.md reported", err)
+	}
+	os.WriteFile(filepath.Join(l.global, "pr.md"), nil, 0o644)
+	if err := (Files{GlobalDir: l.global}).RequireGlobal(); err != nil {
+		t.Fatalf("all present: %v", err)
+	}
+}

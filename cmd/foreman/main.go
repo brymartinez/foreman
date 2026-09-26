@@ -56,6 +56,12 @@ func run(argv []string) int {
 	if err != nil {
 		return fail(err)
 	}
+	// config stays usable so a missing stage file can be diagnosed.
+	if cmd.Name != cli.Config {
+		if err := (stages.Files{GlobalDir: cfg.StagesDir}).RequireGlobal(); err != nil {
+			return fail(err)
+		}
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 	a := app.App{

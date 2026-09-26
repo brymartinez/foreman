@@ -46,6 +46,27 @@ func (f Files) Resolve(repoRoot string, stage task.Stage) (task.StageInstruction
 	return out, nil
 }
 
+// RequireGlobal fails unless every stage has a global file. The global files carry the
+// agents' working rules, so foreman does not run without them (D73).
+func (f Files) RequireGlobal() error {
+	var missing []string
+	for _, st := range task.Stages {
+		path := filepath.Join(f.GlobalDir, string(st)+".md")
+		found, _, err := read(path)
+		if err != nil {
+			return err
+		}
+		if found == "" {
+			missing = append(missing, path)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("missing global stage instructions: %s; run `make config` from the foreman repository, or copy defaults/stages/*.md into %s",
+			strings.Join(missing, ", "), f.GlobalDir)
+	}
+	return nil
+}
+
 // read returns the path and content of an existing file, or empty strings when there
 // is no file at path.
 func read(path string) (string, string, error) {

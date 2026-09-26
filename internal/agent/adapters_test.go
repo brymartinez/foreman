@@ -131,7 +131,6 @@ func TestImplementationPromptCarriesDurableContext(t *testing.T) {
 		"git push -u origin agent/825-provider-retries",
 		"gh pr create --base main --head agent/825-provider-retries",
 		"Closes #825",
-		"Open the pull request only when validation passes",
 		"the worktree must be clean",
 		"gh pr view --json number,url",
 		`status "blocked"`,
@@ -243,13 +242,13 @@ func TestReviewPromptIsBuiltFromDurableState(t *testing.T) {
 		Previous: []task.Review{{Round: 1, Summary: "one bug", Findings: []task.Finding{{Severity: "blocking", Summary: "4xx retried"}}}},
 	})
 	for _, want := range []string{"pull request #912", "a/b#825", "Retry failed requests.", "Preserve 5xx-only.", "A: A. 5xx only",
-		"git diff origin/main...HEAD", "go test ./...: passed", "Round 1", "[blocking] 4xx retried", "Do not report style", "read-only"} {
+		"git diff origin/main...HEAD", "go test ./...: passed", "Round 1", "[blocking] 4xx retried", "read-only", `"blocking" or "should_fix"`} {
 		if !strings.Contains(p, want) {
 			t.Errorf("review prompt missing %q", want)
 		}
 	}
 	msg := FindingsMessage(task.Review{Round: 2, PR: 912, Reviewer: task.Codex, Findings: []task.Finding{{Severity: "blocking", File: "retry.go", Line: 40, Summary: "4xx retried", Detail: "guard missing"}}})
-	for _, want := range []string{"Review round 2 of PR #912 by codex", "1. [blocking] 4xx retried", "retry.go:40", "guard missing", "explain why"} {
+	for _, want := range []string{"Review round 2 of PR #912 by codex", "1. [blocking] 4xx retried", "retry.go:40", "guard missing", "under your implementation instructions"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("findings message missing %q", want)
 		}
@@ -271,12 +270,8 @@ func TestReviewPromptStageInstructions(t *testing.T) {
 	brief := ReviewBrief{TaskBrief: TaskBrief{Key: task.Key{Repo: "a/b", Number: 1}, Context: "Keep 5xx-only.", StageInstructions: "Perform three review passes."}, PR: 9}
 	p := ReviewPrompt(brief)
 	stage, ctx := strings.Index(p, "## Developer workflow instructions"), strings.Index(p, "## Implementation context")
-	if stage < 0 || ctx < stage || !strings.Contains(p, "Perform three review passes.") || !strings.Contains(p, "the list below is the default") {
-		t.Errorf("review prompt must carry the instructions before the context and defer to them:\n%s", p)
-	}
-	brief.StageInstructions = ""
-	if p := ReviewPrompt(brief); strings.Contains(p, "## Developer workflow instructions") || strings.Contains(p, "the list below is the default") {
-		t.Errorf("no instructions must leave the default review prompt:\n%s", p)
+	if stage < 0 || ctx < stage || !strings.Contains(p, "Perform three review passes.") {
+		t.Errorf("review prompt must carry the instructions before the context:\n%s", p)
 	}
 }
 
@@ -289,7 +284,7 @@ func TestImplementationPromptPRInstructions(t *testing.T) {
 	}
 	b.PRInstructions = ""
 	p = ImplementationPrompt(b)
-	if strings.Contains(p, "## Pull request description") || !strings.Contains(p, `"Closes #825", a summary of the change`) {
-		t.Errorf("without PR instructions the default body rule applies:\n%s", p)
+	if strings.Contains(p, "## Pull request description") || !strings.Contains(p, `must include "Closes #825".`) {
+		t.Errorf("without PR instructions only Closes #N is required:\n%s", p)
 	}
 }

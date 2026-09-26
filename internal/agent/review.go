@@ -90,13 +90,13 @@ func ReviewPrompt(b ReviewBrief) string {
 		fmt.Fprintf(&s, "## Implementation context\n\nFrom the developer, authoritative:\n\n%s\n\n", ctx)
 	}
 	if answered := answeredDecisions(b.Decisions); len(answered) > 0 {
-		s.WriteString("## Decisions the developer made\n\nThese are settled requirements, not findings.\n\n")
+		s.WriteString("## Decisions the developer made\n\n")
 		for _, d := range answered {
 			fmt.Fprintf(&s, "- Q: %s\n  A: %s\n", d.Question.Issue, d.Answer)
 		}
 		s.WriteString("\n")
 	}
-	fmt.Fprintf(&s, "## The change\n\nYou are in the implementation worktree on branch %s. Read the full change with `git diff origin/%s...HEAD` and `git log origin/%s..HEAD`, and read surrounding code as needed. Follow the repository's AGENTS.md and CLAUDE.md.\n\n", b.Branch, b.BaseBranch, b.BaseBranch)
+	fmt.Fprintf(&s, "## The change\n\nYou are in the implementation worktree on branch %s. Read the full change with `git diff origin/%s...HEAD` and `git log origin/%s..HEAD`, and read surrounding code as needed.\n\n", b.Branch, b.BaseBranch, b.BaseBranch)
 	if len(b.Validation) > 0 {
 		s.WriteString("The implementer reports this validation:\n")
 		for _, c := range b.Validation {
@@ -105,7 +105,7 @@ func ReviewPrompt(b ReviewBrief) string {
 		s.WriteString("\n")
 	}
 	if len(b.Previous) > 0 {
-		s.WriteString("## Earlier review rounds\n\nCheck that these were addressed. Do not repeat a finding the implementer reasonably declined unless it is a real defect.\n\n")
+		s.WriteString("## Earlier review rounds\n\n")
 		for _, r := range b.Previous {
 			fmt.Fprintf(&s, "Round %d (%s):\n", r.Round, orNone(r.Summary, "no summary"))
 			for _, f := range r.Findings {
@@ -114,17 +114,9 @@ func ReviewPrompt(b ReviewBrief) string {
 		}
 		s.WriteString("\n")
 	}
-	s.WriteString("## What to look for\n\n")
-	if strings.TrimSpace(b.StageInstructions) != "" {
-		s.WriteString("Where the developer workflow instructions above define how to review, follow them; the list below is the default. The final response format always applies.\n\n")
-	}
-	s.WriteString(`Substantive problems only: correctness, regressions, unmet acceptance criteria, security, authorization, concurrency, data integrity, API compatibility, architecture, missing tests, and unnecessary complexity. Do not report style, naming, or formatting preferences.
+	s.WriteString(`## Final response
 
-Severity: "blocking" for defects that must be fixed before merge; "should_fix" for real but non-blocking problems.
-
-## Final response
-
-Reply with JSON matching the provided schema. Use verdict "clean" with no findings when nothing substantive remains; otherwise "changes_requested" with one finding per problem (file and line when you can point at them, else null).
+Reply with JSON matching the provided schema. Use verdict "clean" with no findings when nothing substantive remains; otherwise "changes_requested" with one finding per problem. Severity is "blocking" or "should_fix". Set file and line when you can point at them, else null.
 `)
 	return s.String()
 }
@@ -147,7 +139,7 @@ func FindingsMessage(r task.Review) string {
 		}
 	}
 	s.WriteString(`
-Fix every valid finding, rerun validation, commit, and push to the same branch and pull request. If you judge a finding invalid, leave the code as is and explain why in your summary. If a finding needs a product decision from the developer, report "blocked" instead. End with the same JSON outcome: pr_opened (with the same PR), blocked, or failed.
+Address the findings under your implementation instructions, then commit and push to the same branch and pull request. End with the same JSON outcome: pr_opened (with the same PR), blocked, or failed.
 `)
 	return s.String()
 }

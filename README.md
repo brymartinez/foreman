@@ -36,6 +36,8 @@ Download the archive for your platform from
 gh release download --repo brymartinez/foreman --pattern '*darwin_arm64.tar.gz'
 tar -xzf foreman_*_darwin_arm64.tar.gz
 mv foreman_*_darwin_arm64/foreman ~/.local/bin/
+mkdir -p ~/.config/foreman/stages
+cp -n foreman_*_darwin_arm64/stages/*.md ~/.config/foreman/stages/
 ```
 
 The binaries are not notarized. If you downloaded the archive in a browser, macOS may
@@ -144,10 +146,13 @@ retry behavior". The agent treats it as part of the task.
 
 ## Stage instructions
 
-You can give the agents your own standing instructions for each stage of the work. For
-example, a three-pass review, or how PR descriptions should read. They add to the
-agents' own `CLAUDE.md` and `AGENTS.md`, which the agents keep loading as usual. Foreman
-never reads or changes those files.
+Each stage of the work has an instruction file that holds the agents' working rules:
+how to implement, when to ask, what a review counts as a finding, and how a PR
+description reads. Foreman's own prompts keep only what it needs to run the task: the
+worktree and branch, the push and `gh pr` commands, `Closes #N`, the read-only
+reviewer, the question format, and the JSON response. The stage files add to the
+agents' own `CLAUDE.md` and `AGENTS.md`, which the agents keep loading as usual.
+Foreman never reads or changes those files.
 
 | Stage | Given to | Global file | Repo file (committed) |
 |---|---|---|---|
@@ -155,8 +160,10 @@ never reads or changes those files.
 | `review` | the competing reviewer | `~/.config/foreman/stages/review.md` | `.foreman/review.md` |
 | `pr` | the implementer, for the PR description | `~/.config/foreman/stages/pr.md` | `.foreman/pr.md` |
 
-- All the files are optional. `make config` installs the defaults in
-  `defaults/stages/` as your global files.
+- The three global files are required. Every command except `config` fails when one
+  is missing. `make config` installs the defaults from `defaults/stages/`, and the
+  release archives carry them in `stages/`. Edit your copies freely.
+- Repo files are optional.
 - When both files exist, the agent gets both: global first, then the repo's more
   specific rules.
 - The task's `--context` file and your recorded decisions take precedence over stage

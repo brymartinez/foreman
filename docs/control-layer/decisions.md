@@ -1031,3 +1031,38 @@ Entry format:
   - Make is a tooling addition only; the Go build needs nothing new.
 - **Consequence.** `make setup` takes a clone to a working install with default stage
   instructions. Foreman itself still treats the files as optional.
+
+## D73. Agent working rules live in the stage files, which become required
+
+- Date: 2026-09-26. User request. Amends D47, D49, and D72.
+- **Context.** Foreman's prompts held working rules (how to validate, when to ask, what a
+  review reports, the default PR body) that the default stage files (D72) then
+  partly repeated.
+- **Decision.**
+  - The working rules move out of `internal/agent` into `defaults/stages/*.md` as
+    numbered lists. The prompts keep only what carries task values or what foreman
+    parses: the issue, the worktree and branch, the push and `gh pr` commands,
+    `Closes #N`, the read-only reviewer, the question fields, the JSON outcome, and
+    the precedence of the task context and decisions over stage instructions.
+  - The default PR body rule is gone; `pr.md` defines the body.
+  - All three global stage files are required. Every command except `config` fails
+    naming the missing files, so `config --stages` can still diagnose them. The user
+    chose failing over an embedded fallback: `make config` always installs them.
+  - Release archives carry the defaults in `stages/`.
+- **Consequence.** Editing the global files changes all the agents' working rules. A
+  deleted global file stops foreman until it is restored.
+
+## D74. The default PR body follows a problem, fix, test, risk outline
+
+- Date: 2026-09-26. User request. Amends D73.
+- **Decision.** `defaults/stages/pr.md` orders the body as What was wrong (with the root
+  cause folded in), The fix (with decisions), How to test, Risk, then `Closes #N`. Risk
+  is always present; a low-risk change says why in one sentence.
+
+## D75. Agent commits carry no agent attribution
+
+- Date: 2026-09-26. User request. Amends D73.
+- **Decision.** `defaults/stages/implement.md` rule 19 forbids agent `Co-Authored-By`
+  trailers and "Generated with" or "Powered by" lines in commit messages. Commits use
+  the repository's configured git identity. `defaults/stages/pr.md` rule 5 applies the
+  same to PR titles and bodies.

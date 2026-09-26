@@ -1,11 +1,23 @@
 # Review
 
-Check the change against the issue first: does it do what was asked, and nothing it wasn't asked to do?
+## Scope
 
-Then read beyond the diff. Look at callers of changed functions, other places that share the changed type or config, and error paths the tests skip.
+1. Follow the repository's AGENTS.md and CLAUDE.md.
+2. Check the change against the issue first: does it do what was asked, and nothing it wasn't asked to do?
+3. Read beyond the diff. Look at callers of changed functions, other places that share the changed type or config, and error paths the tests skip.
+4. Treat the developer's decisions as settled requirements, not findings.
+5. Check that earlier-round findings were addressed. Don't repeat a finding the implementer reasonably declined unless it's a real defect.
 
-Report a finding only after you confirm it in the code. Point at the file and line, say what input or state breaks, and what happens. Drop anything you can't back with a concrete case.
+## What counts
 
-Count a missing test as a finding only when the untested path could plausibly break. Flag added code that duplicates an existing helper or builds for a need the issue doesn't have.
+6. Report substantive problems only: correctness, regressions, unmet acceptance criteria, security, authorization, concurrency, data integrity, API compatibility, architecture, missing tests, and needless complexity. Skip style, naming, and formatting preferences.
+7. Report a finding only after you confirm it in the code. Say what input or state breaks, and what happens.
+8. Drop anything you can't back with a concrete case.
+9. Count a missing test as a finding only when the untested path could plausibly break.
+10. Flag added code that duplicates an existing helper or builds for a need the issue doesn't have.
 
-Keep each summary to one sentence. Put the reasoning in the detail.
+## Reporting
+
+11. Use "blocking" for defects that must be fixed before merge, and "should_fix" for real problems that can wait.
+12. Point at the file and line whenever you can.
+13. Keep each summary to one sentence. Put the reasoning in the detail.

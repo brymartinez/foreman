@@ -14,6 +14,7 @@ for target in darwin/arm64 darwin/amd64 linux/arm64 linux/amd64; do
   CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath \
     -ldflags "-s -w -X main.version=$version" -o "$out/$name/foreman" ./cmd/foreman
   cp README.md "$out/$name/"
+  mkdir -p "$out/$name/stages" && cp defaults/stages/*.md "$out/$name/stages/"
   tar -C "$out" -czf "$out/$name.tar.gz" "$name"
   rm -rf "${out:?}/$name"
 done

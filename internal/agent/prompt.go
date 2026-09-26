@@ -51,15 +51,15 @@ func ImplementationPrompt(b TaskBrief) string {
 	}
 
 	if answered := answeredDecisions(b.Decisions); len(answered) > 0 {
-		s.WriteString("## Decisions already made\n\nThe developer answered these earlier. Treat them as settled requirements.\n\n")
+		s.WriteString("## Decisions already made\n\nThe developer answered these earlier.\n\n")
 		for _, d := range answered {
 			fmt.Fprintf(&s, "- Q: %s\n  A: %s\n", d.Question.Issue, d.Answer)
 		}
-		s.WriteString("\nWork already committed on the branch may be from an earlier turn; inspect it before continuing.\n\n")
+		s.WriteString("\nWork already committed on the branch may be from an earlier turn.\n\n")
 	}
 
 	if len(b.OpenFindings) > 0 {
-		s.WriteString("## Outstanding review findings\n\nA reviewer requested these changes on your pull request. Fix the valid ones; explain any you decline in your summary.\n\n")
+		s.WriteString("## Outstanding review findings\n\nA reviewer requested these changes on your pull request.\n\n")
 		for _, f := range b.OpenFindings {
 			fmt.Fprintf(&s, "- [%s] %s", f.Severity, f.Summary)
 			if f.File != "" {
@@ -75,21 +75,14 @@ func ImplementationPrompt(b TaskBrief) string {
 You are in a dedicated git worktree at %s on branch %s, created from origin/%s.
 Only change files inside this worktree. Commit your work to %s. Do not switch branches.
 
-## How to work
+## Opening the pull request
 
-- Follow the repository's AGENTS.md, CLAUDE.md, and any relevant skills.
-- Plan internally, inspect the code, then implement. Resolve routine ambiguity yourself: if it can be inferred, tested, or fixed safely, do it.
-- Validate with the checks the repository supports: tests, typecheck, lint, build, and behavioral verification where practical.
-- Review your own diff for correctness, regressions, missing tests, and unnecessary complexity before you finish.
-- Open the pull request only when validation passes. If you cannot make it pass, report "failed" and say why.
 - When the change is review-ready: commit everything (the worktree must be clean), push with `+"`git push -u origin %s`"+`, then open a pull request with `+"`gh pr create --base %s --head %s`"+`. If a pull request for this branch already exists (`+"`gh pr view %s`"+`), push to it instead of opening another. The pull request body must include "Closes #%d"%s.
 - Take prNumber and prUrl from `+"`gh pr view --json number,url`"+` after pushing; do not guess them.
 %s
 ## When you need a decision
 
-Stop and ask only when the choice materially affects product behavior, public API semantics, persistent schema semantics, security or authorization, destructive or irreversible data changes, an important architecture tradeoff, conflicting acceptance criteria, or a requirement that cannot be safely inferred.
-
-To ask, end your turn with status "blocked" and fill "questions", one entry per decision. Ask every decision you already know you need in the same turn; the developer answers them together. Each entry has:
+To ask, end your turn with status "blocked" and fill "questions", one entry per decision. Each entry has:
 - issue: the decision needed, as one question
 - context: what the code does today and what the issue says
 - options: two or more, each with a short label (A, B, ...) and what it means
@@ -130,7 +123,7 @@ func ResumeMessage(ds []task.Decision) string {
 	for _, d := range ds {
 		fmt.Fprintf(&s, "Question: %s\nDecision: %s\n\n", d.Question.Issue, d.Answer)
 	}
-	s.WriteString("Continue the task with these decisions under the same instructions as before. Record them in the pull request description. End with the same JSON outcome: pr_opened, blocked, or failed.\n")
+	s.WriteString("Continue the task with these decisions under the same instructions as before. End with the same JSON outcome: pr_opened, blocked, or failed.\n")
 	return s.String()
 }
 
@@ -140,16 +133,16 @@ func stageSection(s *strings.Builder, text string) {
 	if text = strings.TrimSpace(text); text == "" {
 		return
 	}
-	s.WriteString("## Developer workflow instructions\n\nThe developer's standing instructions for this stage of the work. Follow them alongside your usual repository instructions. Where they conflict with the task context or decisions below, the task context and decisions win.\n\n")
+	s.WriteString("## Developer workflow instructions\n\nThe developer's instructions for this stage of the work. Where they conflict with the task context or decisions below, the task context and decisions win.\n\n")
 	s.WriteString(text + "\n\n")
 }
 
-// prBodyRule completes the PR bullet: the default contents, or a pointer to the
-// developer's PR instructions. "Closes #N" is required either way, so GitHub links the
-// issue and closes it on merge.
+// prBodyRule completes the PR bullet with a pointer to the developer's PR
+// instructions. "Closes #N" is required regardless, so GitHub links the issue and
+// closes it on merge.
 func prBodyRule(pr string) string {
 	if strings.TrimSpace(pr) == "" {
-		return ", a summary of the change, the validation you ran, and any decisions you made"
+		return ""
 	}
 	return `; otherwise write it as the "Pull request description" section below says`
 }

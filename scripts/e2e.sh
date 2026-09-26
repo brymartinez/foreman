@@ -62,7 +62,8 @@ claude:
 codex:
   command: $sandbox/bin/codex
 EOF
-	mkdir -p "$sandbox/tasks"
+	mkdir -p "$sandbox/tasks" "$sandbox/stages"
+	cp "$root"/defaults/stages/*.md "$sandbox/stages/"
 	export FOREMAN_CONFIG="$sandbox/config.yaml" E2E_STATE="$state" E2E_ORIGIN="$sandbox/origin.git"
 	export PATH="$sandbox/bin:$PATH"
 	unset FOREMAN_TASKS_DIR
@@ -115,6 +116,7 @@ if [[ " $* " == *" --resume "* ]]; then
 	printf '%s' "$2" >"$E2E_STATE/resume-prompt.txt"
 else
 	echo "claude implement" >>"$E2E_STATE/agents.log"
+	printf '%s' "$*" >"$E2E_STATE/prompt.txt"
 fi
 if [ -f "$E2E_STATE/block-once" ]; then
 	rm "$E2E_STATE/block-once"
@@ -171,6 +173,10 @@ scenario_runner() {
 	check "log lines are timestamped" grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$log"
 	check "agent stderr reached the log" contains "$log" "claude stderr progress"
 	check "no line is stamped twice" bash -c "! grep -qE '^[^ ]+ [0-9]{4}-[0-9]{2}-[0-9]{2}T' '$log'"
+	check "the prompt carries the implement stage file" contains "$state/prompt.txt" "Make the smallest change that closes the issue."
+	rm "$sandbox/stages/pr.md"
+	check "a missing stage file stops foreman" bash -c "cd '$FOREMAN_CWD' && ! '$work/foreman' status 2>'$sandbox/err.txt' && grep -qF 'stages/pr.md' '$sandbox/err.txt'"
+	check "config still runs without it" foreman config --stages
 }
 
 scenario_notify() {

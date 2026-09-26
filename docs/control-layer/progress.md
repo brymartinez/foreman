@@ -485,7 +485,10 @@ what it replaced. Current summary:
   D69. Local versions identify their embedded Git revision. D70 (amends D68).
   Bounded refreshes and isolated lookup failures. D71 (amends D70). Gone issues stop
   being checked, and status warns instead of failing.
-- D72. Default stage instructions ship in the repo, installed by a Makefile.
+- D72. Default stage instructions ship in the repo, installed by a Makefile. D73
+  (amends D47, D49, D72). Agent working rules live in the required stage files.
+  D74 (amends D73). The default PR body outline. D75 (amends D73). No agent
+  attribution in commits or PRs.
 
 ## Next stage
 
