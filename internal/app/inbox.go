@@ -43,7 +43,8 @@ type App struct {
 	Stages               StageInstructionResolver
 	WorktreesDir         string
 	RepositoriesDir      string
-	ReviewRounds         int // 0 means DefaultReviewRounds
+	ReviewRounds         int // reviewer passes per review; 0 means DefaultReviewRounds
+	FixRounds            int // fix and re-review cycles before asking; 0 means DefaultFixRounds
 	ImplementerBudgetUSD float64
 	ReviewerBudgetUSD    float64
 	Notifier             Notifier

@@ -78,6 +78,7 @@ func run(argv []string) int {
 		WorktreesDir:         cfg.WorktreesDir,
 		RepositoriesDir:      cfg.RepositoriesDir,
 		ReviewRounds:         cfg.ReviewRounds,
+		FixRounds:            cfg.FixRounds,
 		ImplementerBudgetUSD: cfg.Budgets.ImplementerUSD,
 		ReviewerBudgetUSD:    cfg.Budgets.ReviewerUSD,
 		Notifier:             notification(cfg.Notifications.Enabled),

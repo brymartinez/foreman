@@ -488,7 +488,10 @@ what it replaced. Current summary:
 - D72. Default stage instructions ship in the repo, installed by a Makefile. D73
   (amends D47, D49, D72). Agent working rules live in the required stage files.
   D74 (amends D73). The default PR body outline. D75 (amends D73). No agent
-  attribution in commits or PRs.
+  attribution in commits or PRs. D76 (amends D73), superseded by
+  D77 (amends D11, D35): `review_rounds` counts reviewer passes, `fix_rounds` caps
+  the fix loop. D78 (amends D35, D40). Every fix is reviewed before the developer
+  is asked.
 
 ## Next stage
 

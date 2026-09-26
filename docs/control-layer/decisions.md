@@ -1066,3 +1066,50 @@ Entry format:
   trailers and "Generated with" or "Powered by" lines in commit messages. Commits use
   the repository's configured git identity. `defaults/stages/pr.md` rule 5 applies the
   same to PR titles and bodies.
+
+## D76. The reviewer knows its place in the review_rounds budget
+
+- Date: 2026-09-26. User request. Amends D73.
+- **Context.** `review_rounds` capped the loop (D35, D40), but the reviewer never saw
+  the cap, so it couldn't plan its findings around it.
+- **Decision.**
+  - The review prompt gains a "Review round" section: round
+    `ChangeRequestsSinceDecision() + 1` of `review_rounds`, what happens after the last
+    round, and "This is the last round." on the last one.
+  - `defaults/stages/review.md` rules 6 to 8: report every confirmed finding in round
+    1; after that, review what changed and raise new findings on reviewed code only if
+    blocking; on the last round, report only blocking findings.
+- **Consequence.** A raised `review_rounds` gives the reviewer more rounds before it
+  narrows to blocking findings.
+
+## D77. review_rounds counts reviewer passes; fix_rounds caps the fix loop
+
+- Date: 2026-09-26. User correction. Supersedes D76; amends D11 and D35.
+- **Context.** D76 read `review_rounds` as the fix-loop budget and told the reviewer
+  to narrow its findings as the budget ran out. The user means `review_rounds` as the
+  number of passes the reviewer makes over a PR, so it misses nothing.
+- **Decision.**
+  - `review_rounds` (default 3) is the reviewer's passes per review. The review prompt
+    states it and says whether this is a first review or a re-review.
+  - New `fix_rounds` (default 3) takes over the cap from D11, D35, and D40: fix and
+    re-review cycles that request changes before foreman asks the developer.
+  - `defaults/stages/review.md` rules 6 and 7: a first review reads the whole change
+    `review_rounds` times before reporting; a re-review checks the fixes first, then
+    the PR as a whole.
+- **Consequence.** A config that raised `review_rounds` to allow more fix cycles now
+  gets more reviewer passes instead, and needs `fix_rounds` for the old effect.
+
+## D78. Every fix is reviewed before the developer is asked
+
+- Date: 2026-09-26. User correction. Amends D35 and D40.
+- **Context.** The loop checked the cap before reviewing, so the implementer's last fix
+  went unreviewed and the escalation listed findings it may already have fixed.
+- **Decision.**
+  - The cap is checked after a review. Foreman asks the developer only when a review
+    requests changes after `fix_rounds` fixes since the last answer. With the default
+    3: implement, review, then up to 3 fix and review pairs.
+  - The escalation question lists that review's findings as not yet addressed.
+  - The resume after any answer carries the latest review's findings when it
+    requested changes, so the implementer sees them with the decision.
+- **Consequence.** No fix reaches the developer unreviewed. The default loop runs one
+  more review than before.

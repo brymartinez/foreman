@@ -113,7 +113,9 @@ func answeredDecisions(ds []task.Decision) []task.Decision {
 }
 
 // ResumeMessage continues the session that asked the questions, with every answer.
-func ResumeMessage(ds []task.Decision) string {
+// open is the latest review when it requested changes, so the answer can say how to
+// handle findings the implementer may not have seen (D78).
+func ResumeMessage(ds []task.Decision, open *task.Review) string {
 	var s strings.Builder
 	if len(ds) == 1 {
 		s.WriteString("The developer answered your question.\n\n")
@@ -122,6 +124,11 @@ func ResumeMessage(ds []task.Decision) string {
 	}
 	for _, d := range ds {
 		fmt.Fprintf(&s, "Question: %s\nDecision: %s\n\n", d.Question.Issue, d.Answer)
+	}
+	if open != nil {
+		fmt.Fprintf(&s, "Review round %d of PR #%d requested these changes. Handle them as the decisions say.\n\n", open.Round, open.PR)
+		writeFindings(&s, open.Findings)
+		s.WriteString("\n")
 	}
 	s.WriteString("Continue the task with these decisions under the same instructions as before. End with the same JSON outcome: pr_opened, blocked, or failed.\n")
 	return s.String()

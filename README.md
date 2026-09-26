@@ -240,8 +240,10 @@ the same agent session with them. If that session is gone, it starts a fresh tur
 decision so far. The answer also appears in the READY FOR YOU summary and in the PR
 description.
 
-Foreman asks the same way after 3 review rounds that still end with findings: do another
-round, or accept the remaining findings.
+The implementer and reviewer take turns: every fix is reviewed again. If the review
+after the third fix (`fix_rounds`) still has findings, foreman asks the same way: do
+another round, or accept the remaining findings. The implementer gets those findings
+along with your answer.
 
 ## States
 
@@ -286,7 +288,8 @@ tasks_dir: ~/.local/share/foreman/tasks
 worktrees_dir: ~/.local/share/foreman/worktrees
 repositories_dir: ~/.local/share/foreman/repositories # inbox source checkouts
 log_dir: ~/.local/share/foreman/logs
-review_rounds: 3
+review_rounds: 3                     # reviewer passes over the whole PR per review
+fix_rounds: 3                        # fix and re-review cycles before foreman asks you
 budgets:
   implementer_usd: 3.00              # Claude maximum per implementation turn
   reviewer_usd: 1.00                 # Claude maximum per review turn

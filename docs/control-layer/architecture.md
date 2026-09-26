@@ -44,8 +44,8 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
                     clean    -> record review and the head it covered, stay REVIEWING, exit
                     findings -> WORKING; implementer.Resume(session, findings); agent pushes
                                 fixes and reports pr_opened again; re-verify; re-review
-                    review_rounds spent since the last answer -> NEEDS_DECISION (A: another
-                                round, B: accept remaining), exit
+                    findings after fix_rounds reviewed fixes since the last answer ->
+                                NEEDS_DECISION (A: another round, B: accept remaining), exit
 
 foreman respond 825   -> answer each waiting question in order; after the last,
                          state WORKING, spawn runner

@@ -77,6 +77,9 @@ type ReviewBrief struct {
 	Validation []task.Check
 	// Previous rounds, so the reviewer can check fixes and not repeat settled points.
 	Previous []task.Review
+	// Passes is how many times the reviewer reads the whole change (review_rounds,
+	// D77). Zero omits the section.
+	Passes int
 }
 
 // ReviewPrompt is built only from durable state: the issue, context, decisions, and
@@ -114,6 +117,13 @@ func ReviewPrompt(b ReviewBrief) string {
 		}
 		s.WriteString("\n")
 	}
+	if b.Passes > 0 {
+		kind := "the first review of this pull request"
+		if len(b.Previous) > 0 {
+			kind = "a re-review: the implementer has changed the code since the earlier rounds above"
+		}
+		fmt.Fprintf(&s, "## Review passes\n\nThe developer set review_rounds to %d. This is %s.\n\n", b.Passes, kind)
+	}
 	s.WriteString(`## Final response
 
 Reply with JSON matching the provided schema. Use verdict "clean" with no findings when nothing substantive remains; otherwise "changes_requested" with one finding per problem. Severity is "blocking" or "should_fix". Set file and line when you can point at them, else null.
@@ -125,23 +135,27 @@ Reply with JSON matching the provided schema. Use verdict "clean" with no findin
 func FindingsMessage(r task.Review) string {
 	var s strings.Builder
 	fmt.Fprintf(&s, "Review round %d of PR #%d by %s requested changes.\n\n%s\n\n", r.Round, r.PR, r.Reviewer, orNone(r.Summary, ""))
-	for i, f := range r.Findings {
-		fmt.Fprintf(&s, "%d. [%s] %s\n", i+1, f.Severity, f.Summary)
-		if f.File != "" {
-			if f.Line > 0 {
-				fmt.Fprintf(&s, "   %s:%d\n", f.File, f.Line)
-			} else {
-				fmt.Fprintf(&s, "   %s\n", f.File)
-			}
-		}
-		if d := strings.TrimSpace(f.Detail); d != "" {
-			fmt.Fprintf(&s, "   %s\n", d)
-		}
-	}
+	writeFindings(&s, r.Findings)
 	s.WriteString(`
 Address the findings under your implementation instructions, then commit and push to the same branch and pull request. End with the same JSON outcome: pr_opened (with the same PR), blocked, or failed.
 `)
 	return s.String()
+}
+
+func writeFindings(s *strings.Builder, findings []task.Finding) {
+	for i, f := range findings {
+		fmt.Fprintf(s, "%d. [%s] %s\n", i+1, f.Severity, f.Summary)
+		if f.File != "" {
+			if f.Line > 0 {
+				fmt.Fprintf(s, "   %s:%d\n", f.File, f.Line)
+			} else {
+				fmt.Fprintf(s, "   %s\n", f.File)
+			}
+		}
+		if d := strings.TrimSpace(f.Detail); d != "" {
+			fmt.Fprintf(s, "   %s\n", d)
+		}
+	}
 }
 
 func passFail(ok bool) string {

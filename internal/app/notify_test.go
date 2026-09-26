@@ -27,7 +27,7 @@ func TestNotifiesEveryTransitionThatNeedsTheDeveloper(t *testing.T) {
 		{"review round cap escalates", func(t *testing.T, f fixture) {
 			key := started(t, f, startReq(t))
 			f.claude.turn = prTurn("sid-1")
-			f.codex.reviews = []agent.ReviewOutcome{findings("blocking"), findings("blocking"), findings("blocking")}
+			f.codex.reviews = []agent.ReviewOutcome{findings("blocking"), findings("blocking"), findings("blocking"), findings("blocking")}
 			if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
 				t.Fatal(err)
 			}

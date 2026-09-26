@@ -13,7 +13,10 @@ import (
 	"github.com/brymartinez/foreman/internal/task"
 )
 
-// DefaultReviewRounds is the review budget per developer decision (D11).
+// DefaultFixRounds caps the fix and re-review cycles per developer decision (D11, D77).
+const DefaultFixRounds = 3
+
+// DefaultReviewRounds is how many passes the reviewer makes over a PR (D77).
 const DefaultReviewRounds = 3
 
 // RunTask is the body of the detached runner. It drives implement → verify PR →
@@ -71,16 +74,15 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 			}
 		}
 
-		if rec.ChangeRequestsSinceDecision() >= a.reviewRounds() {
-			_, err = a.update(final, key, existing(func(cur *task.Record) {
-				escalateReview(cur, a.reviewRounds(), a.Now())
-			}))
-			return err
-		}
 		review, reviewErr := a.review(ctx, rec, log)
 		if rec, err = a.update(final, key, existing(func(cur *task.Record) {
 			applyReview(cur, review, reviewErr, a.Now())
 			addUsage(&cur.Usage, review.Usage)
+			// Every fix is reviewed; the developer is asked only once fix_rounds fixes
+			// still leave findings (D78).
+			if cur.State == task.Working && cur.ChangeRequestsSinceDecision() > a.fixRounds() {
+				escalateReview(cur, a.fixRounds(), a.Now())
+			}
 		})); err != nil || rec.State != task.Working {
 			return err
 		}
@@ -103,6 +105,13 @@ func existing(change func(cur *task.Record)) func(cur *task.Record) (*task.Recor
 	}
 }
 
+func (a App) fixRounds() int {
+	if a.FixRounds > 0 {
+		return a.FixRounds
+	}
+	return DefaultFixRounds
+}
+
 func (a App) reviewRounds() int {
 	if a.ReviewRounds > 0 {
 		return a.ReviewRounds
@@ -122,7 +131,11 @@ func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Rev
 	in := agent.StartInput{Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD}
 	resume := ""
 	if decs := rec.Undelivered(); len(decs) > 0 {
-		resume = agent.ResumeMessage(decs)
+		var open *task.Review
+		if latest := rec.LatestReview(); latest != nil && !latest.Clean {
+			open = latest
+		}
+		resume = agent.ResumeMessage(decs, open)
 	} else if findings != nil {
 		resume = agent.FindingsMessage(*findings)
 	}
@@ -183,7 +196,8 @@ func (a App) review(ctx context.Context, rec *task.Record, log io.Writer) (agent
 		Worktree:     d.Worktree,
 		Log:          log,
 		MaxBudgetUSD: a.ReviewerBudgetUSD,
-		Prompt:       agent.ReviewPrompt(agent.ReviewBrief{TaskBrief: brief, PR: d.PR, Validation: rec.Validation, Previous: rec.Reviews}),
+		Prompt: agent.ReviewPrompt(agent.ReviewBrief{TaskBrief: brief, PR: d.PR, Validation: rec.Validation, Previous: rec.Reviews,
+			Passes: a.reviewRounds()}),
 	})
 }
 
@@ -373,7 +387,7 @@ func applyReview(rec *task.Record, r agent.ReviewOutcome, reviewErr error, now t
 func escalateReview(rec *task.Record, rounds int, now time.Time) {
 	latest := rec.LatestReview()
 	var ctx strings.Builder
-	fmt.Fprintf(&ctx, "%s reviewed PR #%d in %s without a clean result. Latest findings:", rec.Delegation.Reviewer, rec.Delegation.PR, roundsText(rounds))
+	fmt.Fprintf(&ctx, "%s re-reviewed PR #%d after %s of fixes without a clean result. Latest findings, not yet addressed:", rec.Delegation.Reviewer, rec.Delegation.PR, roundsText(rounds))
 	recommend := "B"
 	for _, f := range latest.Findings {
 		fmt.Fprintf(&ctx, "\n- [%s] %s", f.Severity, f.Summary)
@@ -384,7 +398,7 @@ func escalateReview(rec *task.Record, rounds int, now time.Time) {
 	rec.State = task.NeedsDecision
 	rec.LastOutcome = &task.Outcome{Status: "blocked", Summary: "review not clean after " + roundsText(rounds), At: now}
 	rec.Decisions = append(rec.Decisions, task.Decision{AskedAt: now, Question: task.Question{
-		Issue:   fmt.Sprintf("The reviewer still requests changes after %s. How should %s proceed?", roundsText(rounds), rec.Delegation.Implementer.Agent),
+		Issue:   fmt.Sprintf("The reviewer still requests changes after %s of fixes. How should %s proceed?", roundsText(rounds), rec.Delegation.Implementer.Agent),
 		Context: ctx.String(),
 		Options: []task.Option{
 			{Label: "A", Description: "Address the remaining findings in another round"},

@@ -72,20 +72,27 @@ func TestReviewLoopFixesFindingsThenReReviews(t *testing.T) {
 	if !strings.Contains(f.codex.reviewed[1], "Round 1 (one problem)") {
 		t.Errorf("re-review lacks earlier round:\n%s", f.codex.reviewed[1])
 	}
+	if !strings.Contains(f.codex.reviewed[0], "review_rounds to 3. This is the first review") || !strings.Contains(f.codex.reviewed[1], "This is a re-review") {
+		t.Errorf("reviews must carry review_rounds and say whether they re-review:\n%s", f.codex.reviewed)
+	}
 }
 
 func TestReviewLoopEscalatesAfterRoundCapAndResumesOnAnswer(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	f.claude.turn = prTurn("sid-1")
-	f.codex.reviews = []agent.ReviewOutcome{findings("blocking"), findings("blocking"), findings("should_fix")}
+	f.codex.reviews = []agent.ReviewOutcome{findings("blocking"), findings("blocking"), findings("blocking"), findings("should_fix")}
 	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
 	q := got.Pending()
-	if got.State != task.NeedsDecision || len(got.Reviews) != 3 || q == nil || !strings.Contains(q.Question.Issue, "after 3 rounds") {
+	// Implement, then 3 fixes, each reviewed: 4 reviews, and the 4th's findings are unaddressed.
+	if got.State != task.NeedsDecision || len(got.Reviews) != 4 || q == nil || !strings.Contains(q.Question.Issue, "after 3 rounds of fixes") {
 		t.Fatalf("state %s reviews %d pending %+v", got.State, len(got.Reviews), q)
+	}
+	if len(f.claude.resumed) != 3 {
+		t.Errorf("implementer fix turns = %d, want 3", len(f.claude.resumed))
 	}
 	if q.Question.Recommendation != "B" || !strings.Contains(q.Question.Context, "[should_fix] 4xx retried") {
 		t.Errorf("question = %+v", q.Question)
@@ -102,14 +109,32 @@ func TestReviewLoopEscalatesAfterRoundCapAndResumesOnAnswer(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = f.store.recs[key]
-	if got.State != task.Reviewing || !got.LatestReview().Clean || len(got.Reviews) != 4 {
+	if got.State != task.Reviewing || !got.LatestReview().Clean || len(got.Reviews) != 5 {
 		t.Fatalf("after answer: state %s reviews %d", got.State, len(got.Reviews))
 	}
-	if !strings.Contains(f.claude.resumed[resumedBefore], "Decision: B. Leave the code as is") {
+	if !strings.Contains(f.claude.resumed[resumedBefore], "Decision: B. Leave the code as is") || !strings.Contains(f.claude.resumed[resumedBefore], "Review round 4 of PR #912 requested these changes") {
 		t.Errorf("answer not delivered: %q", f.claude.resumed[resumedBefore:])
 	}
 	if !strings.Contains(f.codex.reviewed[len(f.codex.reviewed)-1], "A: B. Leave the code as is") {
 		t.Error("reviewer not told about the decision")
+	}
+}
+
+func TestFixRoundsCapsTheLoopApartFromReviewRounds(t *testing.T) {
+	f := newFixture()
+	f.app.FixRounds, f.app.ReviewRounds = 1, 5
+	key := started(t, f, startReq(t))
+	f.claude.turn = prTurn("sid-1")
+	f.codex.reviews = []agent.ReviewOutcome{findings("blocking"), findings("blocking")}
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.NeedsDecision || len(got.Reviews) != 2 || len(f.claude.resumed) != 1 || !strings.Contains(got.Pending().Question.Issue, "after 1 round of fixes") {
+		t.Fatalf("state %s reviews %d", got.State, len(got.Reviews))
+	}
+	if !strings.Contains(f.codex.reviewed[0], "review_rounds to 5.") {
+		t.Errorf("review passes must follow review_rounds:\n%s", f.codex.reviewed[0])
 	}
 }
 

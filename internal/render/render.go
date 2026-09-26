@@ -407,7 +407,8 @@ func Config(w io.Writer, c config.Config) {
 	fmt.Fprintf(w, "Repositories directory: %s\n", c.RepositoriesDir)
 	fmt.Fprintf(w, "Log directory: %s\n", c.LogDir)
 	fmt.Fprintf(w, "Stages directory: %s\n", c.StagesDir)
-	fmt.Fprintf(w, "Review rounds: %d\n", effectiveReviewRounds(c.ReviewRounds))
+	fmt.Fprintf(w, "Review rounds: %d passes per review\n", orThree(c.ReviewRounds))
+	fmt.Fprintf(w, "Fix rounds: %d before asking you\n", orThree(c.FixRounds))
 	fmt.Fprintf(w, "Implementer budget: $%.2f per turn\n", c.Budgets.ImplementerUSD)
 	fmt.Fprintf(w, "Reviewer budget: $%.2f per turn\n", c.Budgets.ReviewerUSD)
 	fmt.Fprintf(w, "Notifications: %t\n", c.Notifications.Enabled)
@@ -420,7 +421,7 @@ func Config(w io.Writer, c config.Config) {
 	fmt.Fprintf(w, "Delete merged branch: %t\n", c.Cleanup.DeleteMergedBranch)
 }
 
-func effectiveReviewRounds(rounds int) int {
+func orThree(rounds int) int {
 	if rounds == 0 {
 		return 3
 	}

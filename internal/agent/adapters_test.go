@@ -191,8 +191,13 @@ func TestPromptIncludesAnsweredDecisions(t *testing.T) {
 	if !strings.Contains(p, "- Q: Retry 4xx?\n  A: A. 5xx only") || strings.Contains(p, "Unanswered?") {
 		t.Errorf("decisions section wrong:\n%s", p)
 	}
-	if !strings.Contains(ResumeMessage([]task.Decision{{Question: task.Question{Issue: "Retry 4xx?"}, Answer: "A"}}), "Decision: A") {
-		t.Error("resume message lacks the answer")
+	decs := []task.Decision{{Question: task.Question{Issue: "Retry 4xx?"}, Answer: "A"}}
+	if msg := ResumeMessage(decs, nil); !strings.Contains(msg, "Decision: A") || strings.Contains(msg, "requested these changes") {
+		t.Errorf("resume message = %q", msg)
+	}
+	open := &task.Review{Round: 4, PR: 9, Findings: []task.Finding{{Severity: "blocking", Summary: "4xx retried", File: "retry.go", Line: 40}}}
+	if msg := ResumeMessage(decs, open); !strings.Contains(msg, "Review round 4 of PR #9") || !strings.Contains(msg, "1. [blocking] 4xx retried\n   retry.go:40") {
+		t.Errorf("resume message must carry the unaddressed findings: %q", msg)
 	}
 }
 
@@ -263,6 +268,21 @@ func TestImplementationPromptStageInstructions(t *testing.T) {
 	}
 	if strings.Contains(ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 1}, StageInstructions: " \n"}), "## Developer workflow instructions") {
 		t.Error("blank instructions must add no section")
+	}
+}
+
+func TestReviewPromptPasses(t *testing.T) {
+	brief := ReviewBrief{TaskBrief: TaskBrief{Key: task.Key{Repo: "a/b", Number: 1}}, PR: 9, Passes: 3}
+	if p := ReviewPrompt(brief); !strings.Contains(p, "review_rounds to 3. This is the first review") {
+		t.Errorf("first review:\n%s", p)
+	}
+	brief.Previous = []task.Review{{Round: 1, Findings: []task.Finding{{Severity: "blocking", Summary: "x"}}}}
+	if p := ReviewPrompt(brief); !strings.Contains(p, "This is a re-review") {
+		t.Errorf("re-review:\n%s", p)
+	}
+	brief.Passes = 0
+	if p := ReviewPrompt(brief); strings.Contains(p, "## Review passes") {
+		t.Errorf("no passes must omit the section:\n%s", p)
 	}
 }
 

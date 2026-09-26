@@ -19,7 +19,8 @@ type Config struct {
 	WorktreesDir    string        `yaml:"worktrees_dir"`
 	RepositoriesDir string        `yaml:"repositories_dir"`
 	LogDir          string        `yaml:"log_dir"`
-	ReviewRounds    int           `yaml:"review_rounds"` // 0 means the default (3)
+	ReviewRounds    int           `yaml:"review_rounds"` // reviewer passes per review; 0 means 3
+	FixRounds       int           `yaml:"fix_rounds"`    // fix and re-review cycles before asking; 0 means 3
 	Budgets         Budgets       `yaml:"budgets"`
 	Notifications   Notifications `yaml:"notifications"`
 	Claude          Claude        `yaml:"claude"`
