@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -24,7 +25,7 @@ type InboxSelection struct {
 func ChooseInbox(in *bufio.Reader, out io.Writer, report InboxReport) (*InboxSelection, error) {
 	var choices []InboxEntry
 	for _, entry := range report.Current {
-		if entry.Item.Kind != task.PullRequest {
+		if entry.Item.Kind != task.PullRequest && !slices.Contains(entry.Item.Reasons, task.Tracked) && entry.Item.State != "closed" && entry.Item.State != "merged" {
 			choices = append(choices, entry)
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -27,6 +28,9 @@ func Inbox(w io.Writer, r app.InboxReport) {
 		section("NEEDS DECISION")
 		for _, rec := range r.NeedsDecision {
 			line(w, rec.Key, rec.Title, pendingQuestion(rec))
+			for _, change := range r.WaitingChanges[rec.Key] {
+				fmt.Fprintf(w, "        • %s\n", change)
+			}
 		}
 	}
 	if len(r.Ready) > 0 {
@@ -36,6 +40,9 @@ func Inbox(w io.Writer, r app.InboxReport) {
 				fmt.Fprintln(w)
 			}
 			ready(w, rec)
+			for _, change := range r.WaitingChanges[rec.Key] {
+				fmt.Fprintf(w, "        • %s\n", change)
+			}
 		}
 	}
 	if len(r.Changed) > 0 {
@@ -57,6 +64,32 @@ func Inbox(w io.Writer, r app.InboxReport) {
 		fmt.Fprintf(w, "\nNO CHANGE\n  %d tracked %s hidden\n", r.Unchanged, plural(r.Unchanged, "item", "items"))
 	}
 	SearchLimits(w, r.Truncated)
+	InboxWarnings(w, r.Warnings)
+}
+
+// InboxActivity shows updates for items the delegation picker will not display.
+func InboxActivity(w io.Writer, r app.InboxReport) {
+	r.New, r.Current, r.Unchanged = nil, nil, 0
+	var changed []app.InboxEntry
+	for _, entry := range r.Changed {
+		if len(entry.Item.Reasons) == 0 || slices.Contains(entry.Item.Reasons, task.Tracked) || entry.Item.Kind == task.PullRequest {
+			changed = append(changed, entry)
+		}
+	}
+	r.Changed = changed
+	if len(r.NeedsDecision)+len(r.Ready)+len(r.Changed) > 0 {
+		Inbox(w, r)
+		fmt.Fprintln(w)
+		return
+	}
+	SearchLimits(w, r.Truncated)
+	InboxWarnings(w, r.Warnings)
+}
+
+func InboxWarnings(w io.Writer, warnings []error) {
+	for _, warning := range warnings {
+		fmt.Fprintf(w, "\n! %v (stored state kept; retry on next refresh)\n", warning)
+	}
 }
 
 // SearchLimits warns about searches that returned their maximum, so the developer

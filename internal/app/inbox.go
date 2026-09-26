@@ -22,12 +22,14 @@ type InboxReport struct {
 	Changed []InboxEntry
 	// Current contains every item in the current refresh, including unchanged items.
 	// It is used by the interactive picker; the report sections retain their diff semantics.
-	Current       []InboxEntry
-	NeedsDecision []*task.Record
-	Ready         []*task.Record
-	Unchanged     int
+	Current        []InboxEntry
+	NeedsDecision  []*task.Record
+	Ready          []*task.Record
+	WaitingChanges map[task.Key][]string
+	Unchanged      int
 	// Truncated lists searches that hit the result limit.
 	Truncated []string
+	Warnings  []error
 }
 
 type App struct {
@@ -59,7 +61,7 @@ func (a App) Inbox(ctx context.Context) (InboxReport, error) {
 	if err != nil {
 		return InboxReport{}, err
 	}
-	notes, err := a.gate(ctx, recs)
+	notes, warnings, err := a.gate(ctx, recs)
 	if err != nil {
 		return InboxReport{}, err
 	}
@@ -71,12 +73,13 @@ func (a App) Inbox(ctx context.Context) (InboxReport, error) {
 		return InboxReport{}, err
 	}
 	items := filterInboxItems(search.Items, a.IgnoredRepositories)
-	tracked, err := a.fetchTracked(ctx, recs, items)
+	tracked, refreshWarnings, err := a.fetchTracked(ctx, recs, items)
 	if err != nil {
 		return InboxReport{}, err
 	}
 	report, dirty := Reconcile(append(items, tracked...), recs, notes, len(search.Truncated) == 0, a.Now())
 	report.Truncated = search.Truncated
+	report.Warnings = append(warnings, refreshWarnings...)
 	for _, seen := range dirty {
 		if _, err := a.update(ctx, seen.Key, func(cur *task.Record) (*task.Record, error) {
 			return mergeObserved(cur, seen), nil
@@ -101,16 +104,19 @@ func mergeObserved(cur, seen *task.Record) *task.Record {
 	return cur
 }
 
-// fetchTracked re-fetches delegated tasks that no search returned, so a closed issue
-// or merged PR is still noticed after it leaves the "assigned to me" results.
-func (a App) fetchTracked(ctx context.Context, recs []*task.Record, found []InboxItem) ([]InboxItem, error) {
+// fetchTracked refreshes missing delegated work and undelegated items whose last
+// involvement reasons have not yet been cleared by a complete refresh.
+func (a App) fetchTracked(ctx context.Context, recs []*task.Record, found []InboxItem) ([]InboxItem, []error, error) {
 	inSearch := map[task.Key]bool{}
 	for _, it := range found {
 		inSearch[it.Key] = true
 	}
 	var keys []task.Key
 	for _, r := range recs {
-		if r.Delegation != nil && r.State != task.Done && !inSearch[r.Key] && !containsRepo(a.IgnoredRepositories, r.Repo) {
+		if r.Delegation == nil && r.GitHub != nil && len(r.GitHub.Reasons) == 0 {
+			continue
+		}
+		if r.State != task.Done && !inSearch[r.Key] && !containsRepo(a.IgnoredRepositories, r.Repo) {
 			keys = append(keys, r.Key)
 		}
 	}
@@ -128,12 +134,19 @@ func (a App) fetchTracked(ctx context.Context, recs []*task.Record, found []Inbo
 		}()
 	}
 	wg.Wait()
-	for _, err := range errs {
-		if err != nil {
-			return nil, err
-		}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
 	}
-	return out, nil
+	var warnings []error
+	var fetched []InboxItem
+	for i, err := range errs {
+		if err != nil {
+			warnings = append(warnings, fmt.Errorf("refresh %s#%d: %w", keys[i].Repo, keys[i].Number, err))
+			continue
+		}
+		fetched = append(fetched, out[i])
+	}
+	return fetched, warnings, nil
 }
 
 func filterInboxItems(items []InboxItem, ignored []task.Repo) []InboxItem {
@@ -162,7 +175,7 @@ func Reconcile(items []InboxItem, recs []*task.Record, notes map[task.Key][]stri
 	for _, r := range recs {
 		byKey[r.Key] = r
 	}
-	var report InboxReport
+	report := InboxReport{WaitingChanges: map[task.Key][]string{}}
 	var dirty []*task.Record
 	reported := map[task.Key]bool{}
 	for _, it := range items {
@@ -179,18 +192,21 @@ func Reconcile(items []InboxItem, recs []*task.Record, notes map[task.Key][]stri
 			continue
 		}
 		changes := describeChanges(rec.GitHub, it, complete)
-		current := changes
-		if len(current) == 0 {
-			current = []string{"no change"}
-		}
-		report.Current = append(report.Current, InboxEntry{Item: it, Changes: current})
 		if len(changes) > 0 {
 			observe(rec, it, complete, now)
 			dirty = append(dirty, rec)
 		}
 		changes = append(changes, notes[it.Key]...)
+		current := changes
+		if len(current) == 0 {
+			current = []string{"no change"}
+		}
+		report.Current = append(report.Current, InboxEntry{Item: it, Changes: current})
 		switch {
 		case needsHuman(rec):
+			if len(changes) > 0 {
+				report.WaitingChanges[rec.Key] = changes
+			}
 		case len(changes) == 0:
 			report.Unchanged++
 		default:
@@ -198,8 +214,12 @@ func Reconcile(items []InboxItem, recs []*task.Record, notes map[task.Key][]stri
 		}
 	}
 	for _, r := range recs {
-		if n := notes[r.Key]; len(n) > 0 && !reported[r.Key] && !needsHuman(r) {
-			report.Changed = append(report.Changed, InboxEntry{Item: InboxItem{Key: r.Key, Kind: r.Kind, Title: r.Title, URL: r.URL}, Changes: n})
+		if n := notes[r.Key]; len(n) > 0 && !reported[r.Key] {
+			if needsHuman(r) {
+				report.WaitingChanges[r.Key] = n
+			} else {
+				report.Changed = append(report.Changed, InboxEntry{Item: InboxItem{Key: r.Key, Kind: r.Kind, Title: r.Title, URL: r.URL}, Changes: n})
+			}
 		}
 	}
 	for _, r := range recs {

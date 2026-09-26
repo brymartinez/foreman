@@ -15,20 +15,29 @@ import (
 // CI belongs to the repo's owners, so foreman only reads GitHub's check results and
 // hands failures to the developer instead of fixing them (D46). It returns what
 // changed, per task.
-func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]string, error) {
+func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]string, []error, error) {
 	notes := map[task.Key][]string{}
+	var warnings []error
 	for i, r := range recs {
 		if !gated(r) {
 			continue
 		}
 		pr, err := a.GitHub.GetPullRequest(ctx, task.Key{Repo: r.Repo, Number: r.Delegation.PR})
 		if err != nil {
-			return nil, err
+			if ctx.Err() != nil {
+				return nil, nil, ctx.Err()
+			}
+			warnings = append(warnings, fmt.Errorf("refresh %s#%d PR: %w", r.Repo, r.Number, err))
+			continue
 		}
 		var ci task.CIStatus
 		if pr.State == "open" {
 			if ci, err = a.GitHub.CIStatus(ctx, pr.Key); err != nil {
-				return nil, err
+				if ctx.Err() != nil {
+					return nil, nil, ctx.Err()
+				}
+				warnings = append(warnings, fmt.Errorf("refresh %s#%d CI: %w", r.Repo, r.Number, err))
+				continue
 			}
 			ci.CheckedAt = a.Now()
 		}
@@ -40,11 +49,11 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			return cur, nil
 		})
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if updated.State == task.Working && r.State != task.Working {
 			if updated, err = a.launch(ctx, r.Key); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 		if note != "" {
@@ -52,7 +61,7 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 		}
 		recs[i] = updated
 	}
-	return notes, nil
+	return notes, warnings, nil
 }
 
 // gated tasks wait on GitHub alone: the review is clean, or the developer has the PR.

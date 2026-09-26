@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 	"syscall"
 	"time"
@@ -30,7 +31,7 @@ import (
 )
 
 // version is set at release time with -ldflags "-X main.version=v1.2.3".
-var version = "0.1.0-dev"
+var version = developmentVersion
 
 func main() {
 	os.Exit(run(os.Args[1:]))
@@ -47,7 +48,8 @@ func run(argv []string) int {
 		fmt.Print(cli.Usage)
 		return 0
 	case cli.Version:
-		fmt.Println("foreman", version)
+		info, _ := debug.ReadBuildInfo()
+		fmt.Println("foreman", buildVersion(version, info))
 		return 0
 	}
 	cfg, err := config.Load()
@@ -103,7 +105,7 @@ func run(argv []string) int {
 			render.Inbox(os.Stdout, report)
 			break
 		}
-		render.SearchLimits(os.Stdout, report.Truncated)
+		render.InboxActivity(os.Stdout, report)
 		selection, err := app.ChooseInbox(stdin, os.Stdout, report)
 		if err != nil {
 			return fail(err)

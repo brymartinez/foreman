@@ -2,7 +2,7 @@
 
 ## Current stage
 
-Stage 11 (repository review fixes) is complete. All stages in the design are built.
+Stage 12 (inbox change visibility and build identity) is complete.
 
 ## Completed
 
@@ -391,6 +391,21 @@ request. Each fix is its own commit with a decision.
   `scripts/probe-agents.sh` (17 checks on Claude Code 2.1.281 and Codex 0.156.1).
   Each new test was also checked against the code before its fix, where it failed.
 
+### Stage 12 (complete): inbox change visibility and build identity
+
+- Waiting tasks retain their own section and show GitHub changes and CI transition
+  notes beneath it. The interactive entry includes CI transition notes too (D68).
+- Missing undelegated items are refreshed until their involvement reasons clear;
+  delegated work remains tracked. Item/PR/CI lookup failures warn and retry without
+  blocking the inbox. Missing items stay out of the delegation picker. DONE tasks
+  and ignored repositories remain excluded (D70).
+- Local version output includes the embedded commit and dirty flag. Release
+  version stamps are preserved; absent Git metadata is explicit (D69).
+- Validated with lifecycle regressions for failed lookups, recovery, reassignment,
+  truncated searches, delegated gates, and both inbox views; the full Go race
+  tests, vet, every end-to-end scenario, and development/release binary versions.
+  Process-lifecycle end-to-end checks require permission to inspect processes.
+
 ## Known limitations
 
 - The gate runs only when `inbox` or `status` runs, because the design rules out
@@ -463,7 +478,9 @@ what it replaced. Current summary:
   mentions, and lost reasons. D65. A blocked turn can ask several questions.
 - D66. What the repository review left as designed. D67 (amends D63). When picking up
   at the review falls back to implementing.
+- D68 (amends D15 and D64). Waiting-task changes and missing undelegated items.
+  D69. Local versions identify their embedded Git revision.
 
 ## Next stage
 
-None. Stages 0 to 11 are complete. Further work needs a new request.
+None. Stages 0 to 12 are complete. Further work needs a new request.

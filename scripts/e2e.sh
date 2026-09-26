@@ -265,6 +265,28 @@ scenario_inbox() {
 	check "config --edit runs an editor with arguments" bash -c "cd '$sandbox' && EDITOR='editor -w' VISUAL= '$work/foreman' config --edit && grep -qF '$sandbox/config.yaml' '$sandbox/edited'"
 }
 
+scenario_inbox_lifecycle() {
+	echo "inbox lifecycle: departed items, inaccessible issues, and recovery"
+	setup inbox_lifecycle
+	echo "[$(hit acme/widgets 42 'Add retries'),$(hit acme/widgets 43 'Unavailable')]" >"$state/search-issues-assignee.json"
+	check "initial discovery succeeds" foreman inbox --non-interactive
+	echo "[$(hit acme/widgets 44 'Current work')]" >"$state/search-issues-assignee.json"
+	check "inaccessible historic item does not abort refresh" bash -c "'$work/foreman' inbox --non-interactive >'$sandbox/report.txt' 2>&1"
+	check "lost involvement is reported" contains "$sandbox/report.txt" "no longer assigned to you"
+	check "failed item is identified" contains "$sandbox/report.txt" "refresh acme/widgets#43"
+	check "healthy new work survives failure" contains "$sandbox/report.txt" "acme/widgets#44"
+	printf 'q\n' | foreman inbox >"$sandbox/picker.txt" 2>&1
+	check "departed issue is not offered" bash -c "! grep -q 'acme/widgets#42' '$sandbox/picker.txt'"
+	check "interactive warning is visible" contains "$sandbox/picker.txt" "refresh acme/widgets#43"
+	check "departed issue is fetched only once" bash -c "[ \"\$(grep -c 'api repos/acme/widgets/issues/42' '$state/gh.log')\" = 1 ]"
+	issue 43 'Available again'
+	printf 'q\n' | foreman inbox >"$sandbox/recovered.txt" 2>&1
+	check "interactive loss notice survives picker filtering" contains "$sandbox/recovered.txt" "no longer assigned to you"
+	check "recovered item is not selectable" bash -c "! grep -qE '[0-9]+\. acme/widgets#43' '$sandbox/recovered.txt'"
+	check "refresh after recovery succeeds" foreman inbox --non-interactive
+	check "recovered departed issue stops being fetched" bash -c "[ \"\$(grep -c 'api repos/acme/widgets/issues/43' '$state/gh.log')\" = 3 ]"
+}
+
 turns() { grep -cx "$1" "$state/agents.log" || true; }
 
 scenario_rereview() {
@@ -308,7 +330,7 @@ scenario_respond() {
 	check "resume carries the second answer" contains "$state/resume-prompt.txt" "Decision: A. 3 tries"
 }
 
-scenarios=${*:-runner notify logs inbox rereview respond}
+scenarios=${*:-runner notify logs inbox inbox_lifecycle rereview respond}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"

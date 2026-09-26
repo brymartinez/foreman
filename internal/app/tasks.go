@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -24,8 +25,10 @@ func (a App) Status(ctx context.Context) ([]*task.Record, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := a.gate(ctx, recs); err != nil {
+	if _, warnings, err := a.gate(ctx, recs); err != nil {
 		return nil, err
+	} else if len(warnings) > 0 {
+		return nil, errors.Join(warnings...)
 	}
 	var active []*task.Record
 	for _, r := range recs {

@@ -218,7 +218,7 @@ func (f *fakeGitHub) GetItem(_ context.Context, k task.Key) (InboxItem, error) {
 	return item(k.Number, "closed", t1, task.Tracked), nil
 }
 
-func TestInboxFetchesOnlyDelegatedTasksMissingFromSearch(t *testing.T) {
+func TestInboxFetchesDelegatedTasksMissingFromSearch(t *testing.T) {
 	working := seen(7, task.Working, "open", t0, task.Assigned)
 	working.Delegation = &task.Delegation{Implementer: task.Session{Agent: task.Claude}}
 	done := seen(9, task.Done, "closed", t0)

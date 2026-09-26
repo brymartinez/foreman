@@ -109,6 +109,9 @@ func TestGateRefreshesCIOnReadyTasks(t *testing.T) {
 	if got.State != task.ReadyForHuman || got.CI.State != task.CIPassing || len(report.Ready) != 1 {
 		t.Errorf("state %s ci %+v ready %d", got.State, got.CI, len(report.Ready))
 	}
+	if !slices.Contains(report.WaitingChanges[key], "CI now passing") || len(report.Changed) != 0 {
+		t.Fatalf("CI transition missing from ready task: %+v", report)
+	}
 }
 
 func TestGateMergedIsDoneAndClosedIsFailed(t *testing.T) {

@@ -80,6 +80,18 @@ you, and PRs that request your review. It also reports what changed since the la
 including a reason an item lost, such as "no longer assigned to you". Each search
 returns up to 1000 results, and the inbox warns when one hits that limit.
 
+Waiting tasks show changes beneath their NEEDS DECISION or READY FOR YOU entry,
+including CI changes. Missing undelegated items are checked until a successful
+refresh with complete searches clears their involvement reasons, then stop being
+refetched. Delegated work stays tracked. Missing items are not offered for new
+delegation. A failed item lookup warns without aborting the inbox, keeps its stored
+state, and retries next time. DONE tasks and ignored repositories are excluded.
+
+Local builds show the commit in `foreman version`, for example
+`foreman 0.1.0-dev (72a70ce12345-dirty)`. The `dirty` suffix means the build included
+uncommitted changes. Builds without Git metadata show `unknown`; release builds
+show their stamped version.
+
 The inbox is interactive by default. It shows repo-qualified identities such as
 `acme/widgets#825`, offers the issues for delegation, asks which configured agent should
 implement the chosen one, and accepts an optional context Markdown file. Press `q` to leave without starting work. Use

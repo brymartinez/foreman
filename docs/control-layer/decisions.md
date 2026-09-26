@@ -960,3 +960,41 @@ Entry format:
     failing the task. The implementer opens a new PR as usual.
   - A restart keeps the PR only when the implementer agent is the same. Another
     implementer starts over, because its reviewer is the agent that wrote the PR.
+
+## D68. Keep changes visible on waiting tasks and refresh missing items (amended by D70)
+
+- Date: 2026-09-26. Requested after verifying the remaining inbox gaps.
+- **Decision.** Keep each waiting task in its NEEDS DECISION or READY FOR YOU
+  section, with its GitHub changes and readiness-gate notes beneath it. Include
+  gate notes in the interactive entry too. This amends D15 and D64 without
+  duplicating the task in CHANGED.
+- **Decision.** Refresh all stored, unfinished items missing from search results,
+  including undelegated issues. Continue skipping ignored repositories and DONE
+  tasks. Truncated searches still cannot prove that an assignment was lost.
+- **Consequence.** A missing item receives a current snapshot, and changes on a
+  waiting task are shown before the snapshot advances past them.
+
+## D69. Identify local builds by their embedded Git revision
+
+- Date: 2026-09-26. Requested after verifying that local versions look identical.
+- **Decision.** Append the first 12 characters of Go's embedded `vcs.revision` to
+  the default development version, plus `-dirty` when `vcs.modified` is true.
+  Missing metadata prints `unknown`. Explicit release version stamps stay intact.
+- **Consequence.** `foreman version` identifies the source commit used to build the
+  running binary, regardless of the current directory or Git installation.
+
+## D70. Bound missing-item refreshes and isolate lookup failures
+
+- Date: 2026-09-26. Supersedes the missing-item refresh rule in D68.
+- **Decision.** Stop refetching undelegated items after a successful refresh and
+  complete searches clear their involvement reasons. Truncated searches preserve
+  reasons; delegated work remains tracked. Reappearance in search restores tracking.
+- **Decision.** Item, PR, and CI lookup failures warn in either inbox mode without
+  blocking healthy items. Preserve stored state and retry failures next refresh;
+  cancellation, search failures, and storage failures remain fatal. Status retains
+  explicit errors rather than silently displaying stale gate results.
+- **Decision.** Only search-returned, non-closed issues enter the delegation picker.
+  Historic task files remain available through show/status. Store waiting changes
+  only when nonempty and use one development-version constant.
+- **Decision.** Show waiting-task updates and nonselectable-item change notices
+  before the interactive picker, so filtering choices does not discard updates.
