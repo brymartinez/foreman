@@ -491,7 +491,7 @@ what it replaced. Current summary:
   attribution in commits or PRs. D76 (amends D73), superseded by
   D77 (amends D11, D35): `review_rounds` counts reviewer passes, `fix_rounds` caps
   the fix loop. D78 (amends D35, D40). Every fix is reviewed before the developer
-  is asked.
+  is asked. D79 (amends D73). Three implement rules dropped.
 
 ## Next stage
 

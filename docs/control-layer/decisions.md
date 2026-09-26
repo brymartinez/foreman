@@ -1113,3 +1113,10 @@ Entry format:
     requested changes, so the implementer sees them with the decision.
 - **Consequence.** No fix reaches the developer unreviewed. The default loop runs one
   more review than before.
+
+## D79. The implement defaults drop three rules
+
+- Date: 2026-09-26. User edit. Amends D73.
+- **Decision.** `defaults/stages/implement.md` no longer carries "plan, inspect, then
+  implement", "make the smallest change", or "open the pull request only when
+  validation passes". The remaining rules are renumbered 1 to 16.
