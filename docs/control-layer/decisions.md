@@ -1120,3 +1120,9 @@ Entry format:
 - **Decision.** `defaults/stages/implement.md` no longer carries "plan, inspect, then
   implement", "make the smallest change", or "open the pull request only when
   validation passes". The remaining rules are renumbered 1 to 16.
+
+## D80. The validation gate on opening a PR moves to pr.md
+
+- Date: 2026-09-26. User request. Amends D79.
+- **Decision.** `defaults/stages/pr.md` rule 1: open the pull request only when
+  validation passes, else report "failed". D79 had dropped it from `implement.md`.
