@@ -158,5 +158,5 @@ func prSection(text string) string {
 	if text = strings.TrimSpace(text); text == "" {
 		return ""
 	}
-	return "\n## Pull request description\n\nThe developer's instructions for the pull request body. Follow them when you open the pull request and whenever you update its description (`gh pr edit --body`). They apply only to the pull request, not to the code.\n\n" + text + "\n"
+	return "\n## Pull request description\n\nThe developer's instructions for opening the pull request and writing its title and body. Follow them when you open the pull request and whenever you update its description (`gh pr edit --body`). They apply only to the pull request, not to the code.\n\n" + text + "\n"
 }
