@@ -41,11 +41,16 @@ mv foreman_*_darwin_arm64/foreman ~/.local/bin/
 The binaries are not notarized. If you downloaded the archive in a browser, macOS may
 block the binary; run `xattr -d com.apple.quarantine ~/.local/bin/foreman` to allow it.
 
-To build from source instead:
+To build from source instead, clone the repository and run:
 
 ```bash
-go build -o ~/.local/bin/foreman ./cmd/foreman
+make setup
 ```
+
+`make setup` builds foreman, installs it to `~/.local/bin`, and copies the default stage
+instructions from `defaults/stages/` into `~/.config/foreman/stages/`. It never
+overwrites a stage file you already have. `make install` and `make config` run the
+steps separately; set `BIN_DIR` or `CONFIG_DIR` to change where they go.
 
 ## Usage
 
@@ -150,7 +155,8 @@ never reads or changes those files.
 | `review` | the competing reviewer | `~/.config/foreman/stages/review.md` | `.foreman/review.md` |
 | `pr` | the implementer, for the PR description | `~/.config/foreman/stages/pr.md` | `.foreman/pr.md` |
 
-- All the files are optional.
+- All the files are optional. `make config` installs the defaults in
+  `defaults/stages/` as your global files.
 - When both files exist, the agent gets both: global first, then the repo's more
   specific rules.
 - The task's `--context` file and your recorded decisions take precedence over stage

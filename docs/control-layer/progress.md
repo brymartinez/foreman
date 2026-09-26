@@ -485,6 +485,7 @@ what it replaced. Current summary:
   D69. Local versions identify their embedded Git revision. D70 (amends D68).
   Bounded refreshes and isolated lookup failures. D71 (amends D70). Gone issues stop
   being checked, and status warns instead of failing.
+- D72. Default stage instructions ship in the repo, installed by a Makefile.
 
 ## Next stage
 

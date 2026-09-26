@@ -1014,3 +1014,20 @@ Entry format:
     prints them under the list. This replaces D70's rule that status fails.
 - **Consequence.** A deleted repository or issue costs one notice, not a warning per
   run, and `status` is useful while one PR can't be read.
+
+## D72. Default stage instructions ship in the repo, installed by a Makefile
+
+- Date: 2026-09-26. User request.
+- **Context.** Stage files (D47) were optional and had no defaults, so a fresh clone
+  gave the agents no standing instructions.
+- **Decision.**
+  - `defaults/stages/{implement,review,pr}.md` hold default instructions. They add to
+    foreman's built-in prompts and don't repeat them. The implement file sets the
+    writing rules for commits, comments, and summaries.
+  - A `Makefile` adds `setup` (install, then config), `build`, `install` (to
+    `BIN_DIR`, default `~/.local/bin`), `config`, and `test`. `config` copies the
+    defaults into `stages/` next to the config file (D48), honoring `FOREMAN_CONFIG`,
+    and skips any file that already exists.
+  - Make is a tooling addition only; the Go build needs nothing new.
+- **Consequence.** `make setup` takes a clone to a working install with default stage
+  instructions. Foreman itself still treats the files as optional.

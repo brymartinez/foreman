@@ -23,6 +23,7 @@ A local CLI that delegates GitHub issues to Claude Code or Codex. Design and sta
 ```bash
 go vet ./... && go test ./...
 go build -o dist/foreman ./cmd/foreman
+make setup                # build, install to ~/.local/bin, copy default stage files
 scripts/e2e.sh            # built binary against a local origin, stand-in gh, stub agents
 scripts/probe-agents.sh   # re-verify agent CLIs (uses a few cents of model calls)
 ```
