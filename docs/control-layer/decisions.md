@@ -983,7 +983,7 @@ Entry format:
 - **Consequence.** `foreman version` identifies the source commit used to build the
   running binary, regardless of the current directory or Git installation.
 
-## D70. Bound missing-item refreshes and isolate lookup failures
+## D70. Bound missing-item refreshes and isolate lookup failures (amended by D71)
 
 - Date: 2026-09-26. Supersedes the missing-item refresh rule in D68.
 - **Decision.** Stop refetching undelegated items after a successful refresh and
@@ -998,3 +998,19 @@ Entry format:
   only when nonempty and use one development-version constant.
 - **Decision.** Show waiting-task updates and nonselectable-item change notices
   before the interactive picker, so filtering choices does not discard updates.
+
+## D71. Gone issues stop being checked, and status warns instead of failing
+
+- Date: 2026-09-26. Found reviewing D70 before commit; fixed on the user's request.
+- **Context.** Under D70 an issue GitHub no longer has warned on every inbox run
+  forever, and `status` printed no tasks when one PR or CI lookup failed.
+- **Decision.**
+  - The gh adapter maps HTTP 404 (missing, or no access) and 410 (deleted) on an item
+    lookup to `app.ErrGone`. For an undelegated item, the inbox reports it once under
+    CHANGED, clears its stored reasons so it isn't fetched again, and leaves its state
+    alone. Delegated work keeps warning, because the developer owns it.
+  - Other lookup failures stay warnings that retry next run (D70).
+  - `Status` returns its tasks with the gate's lookup warnings, and `foreman status`
+    prints them under the list. This replaces D70's rule that status fails.
+- **Consequence.** A deleted repository or issue costs one notice, not a warning per
+  run, and `status` is useful while one PR can't be read.

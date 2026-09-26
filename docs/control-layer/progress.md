@@ -399,6 +399,9 @@ request. Each fix is its own commit with a decision.
   delegated work remains tracked. Item/PR/CI lookup failures warn and retry without
   blocking the inbox. Missing items stay out of the delegation picker. DONE tasks
   and ignored repositories remain excluded (D70).
+- An undelegated issue GitHub no longer has (404 or 410) is reported once and not
+  checked again. `status` lists its tasks with lookup warnings underneath instead of
+  failing (D71).
 - Local version output includes the embedded commit and dirty flag. Release
   version stamps are preserved; absent Git metadata is explicit (D69).
 - Validated with lifecycle regressions for failed lookups, recovery, reassignment,
@@ -479,7 +482,9 @@ what it replaced. Current summary:
 - D66. What the repository review left as designed. D67 (amends D63). When picking up
   at the review falls back to implementing.
 - D68 (amends D15 and D64). Waiting-task changes and missing undelegated items.
-  D69. Local versions identify their embedded Git revision.
+  D69. Local versions identify their embedded Git revision. D70 (amends D68).
+  Bounded refreshes and isolated lookup failures. D71 (amends D70). Gone issues stop
+  being checked, and status warns instead of failing.
 
 ## Next stage
 

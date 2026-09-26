@@ -64,7 +64,7 @@ func Inbox(w io.Writer, r app.InboxReport) {
 		fmt.Fprintf(w, "\nNO CHANGE\n  %d tracked %s hidden\n", r.Unchanged, plural(r.Unchanged, "item", "items"))
 	}
 	SearchLimits(w, r.Truncated)
-	InboxWarnings(w, r.Warnings)
+	Warnings(w, r.Warnings)
 }
 
 // InboxActivity shows updates for items the delegation picker will not display.
@@ -83,10 +83,11 @@ func InboxActivity(w io.Writer, r app.InboxReport) {
 		return
 	}
 	SearchLimits(w, r.Truncated)
-	InboxWarnings(w, r.Warnings)
+	Warnings(w, r.Warnings)
 }
 
-func InboxWarnings(w io.Writer, warnings []error) {
+// Warnings lists lookups that failed this run; the task files keep their last state.
+func Warnings(w io.Writer, warnings []error) {
 	for _, warning := range warnings {
 		fmt.Fprintf(w, "\n! %v (stored state kept; retry on next refresh)\n", warning)
 	}

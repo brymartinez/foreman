@@ -39,7 +39,7 @@ func TestGateGreenOrNoChecksIsReady(t *testing.T) {
 		f := newFixture()
 		key := reviewed(t, f)
 		setCI(f, task.CIStatus{State: st})
-		recs, err := f.app.Status(context.Background())
+		recs, _, err := f.app.Status(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -54,7 +54,7 @@ func TestGatePendingWaits(t *testing.T) {
 	f := newFixture()
 	key := reviewed(t, f)
 	setCI(f, task.CIStatus{State: task.CIPending})
-	if _, err := f.app.Status(context.Background()); err != nil {
+	if _, _, err := f.app.Status(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.store.recs[key]; got.State != task.Reviewing || got.CI.State != task.CIPending || len(f.runners.spawned) != 1 {
@@ -68,7 +68,7 @@ func TestGateSkipsTasksARunnerIsDriving(t *testing.T) {
 	f.store.recs[key].Delegation.RunnerPID = 77
 	f.runners.alive[77] = true
 	setCI(f, task.CIStatus{State: task.CIPassing})
-	if _, err := f.app.Status(context.Background()); err != nil {
+	if _, _, err := f.app.Status(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.store.recs[key]; got.State != task.Reviewing || got.CI != nil {
@@ -80,7 +80,7 @@ func TestGateHandsFailingCIToTheDeveloper(t *testing.T) {
 	f := newFixture()
 	key := reviewed(t, f)
 	setCI(f, failingCI)
-	if _, err := f.app.Status(context.Background()); err != nil {
+	if _, _, err := f.app.Status(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -123,7 +123,7 @@ func TestGateMergedIsDoneAndClosedIsFailed(t *testing.T) {
 		f := newFixture()
 		key := reviewed(t, f)
 		setCI(f, task.CIStatus{State: task.CIPassing})
-		if _, err := f.app.Status(context.Background()); err != nil {
+		if _, _, err := f.app.Status(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 		setPR(f, tc.pr)

@@ -168,6 +168,10 @@ type restIssue struct {
 func (c Client) GetItem(ctx context.Context, key task.Key) (app.InboxItem, error) {
 	out, err := c.Run(ctx, "", "api", fmt.Sprintf("repos/%s/issues/%d", key.Repo, key.Number))
 	if err != nil {
+		// gh reports "Not Found (HTTP 404)" for a missing or private item and 410 for a deleted issue.
+		if msg := err.Error(); strings.Contains(msg, "(HTTP 404)") || strings.Contains(msg, "(HTTP 410)") {
+			return app.InboxItem{}, fmt.Errorf("%w: %v", app.ErrGone, err)
+		}
 		return app.InboxItem{}, err
 	}
 	var r restIssue

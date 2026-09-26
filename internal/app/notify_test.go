@@ -34,7 +34,7 @@ func TestNotifiesEveryTransitionThatNeedsTheDeveloper(t *testing.T) {
 		}, []string{title + ": Needs your decision"}},
 		{"a dead runner is reaped", func(t *testing.T, f fixture) {
 			started(t, f, startReq(t))
-			if _, err := f.app.Status(context.Background()); err != nil {
+			if _, _, err := f.app.Status(context.Background()); err != nil {
 				t.Fatal(err)
 			}
 		}, []string{title + ": Run failed"}},
@@ -42,7 +42,7 @@ func TestNotifiesEveryTransitionThatNeedsTheDeveloper(t *testing.T) {
 			reviewed(t, f)
 			setCI(f, task.CIStatus{State: task.CIPassing})
 			for range 2 {
-				if _, err := f.app.Status(context.Background()); err != nil {
+				if _, _, err := f.app.Status(context.Background()); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -50,7 +50,7 @@ func TestNotifiesEveryTransitionThatNeedsTheDeveloper(t *testing.T) {
 		{"a clean review and a merge stay quiet", func(t *testing.T, f fixture) {
 			reviewed(t, f)
 			setPR(f, "merged")
-			if _, err := f.app.Status(context.Background()); err != nil {
+			if _, _, err := f.app.Status(context.Background()); err != nil {
 				t.Fatal(err)
 			}
 		}, nil},

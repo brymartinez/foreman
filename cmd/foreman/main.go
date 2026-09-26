@@ -125,11 +125,12 @@ func run(argv []string) int {
 		}
 		render.Started(os.Stdout, rec)
 	case cli.Status:
-		recs, err := a.Status(ctx)
+		recs, warnings, err := a.Status(ctx)
 		if err != nil {
 			return fail(err)
 		}
 		render.Status(os.Stdout, recs)
+		render.Warnings(os.Stdout, warnings)
 	case cli.Show:
 		rec, err := a.Find(ctx, cmd.Repo, cmd.Issue)
 		if err != nil {

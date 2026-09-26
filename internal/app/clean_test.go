@@ -16,7 +16,7 @@ func done(t *testing.T, f fixture, prState string) task.Key {
 	key := reviewed(t, f)
 	setCI(f, task.CIStatus{State: task.CIPassing})
 	setPR(f, prState)
-	if _, err := f.app.Status(context.Background()); err != nil {
+	if _, _, err := f.app.Status(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	return key
@@ -68,7 +68,7 @@ func TestCleanRefusesActiveTasksAndReportsDirtyWorktrees(t *testing.T) {
 	setCI(f, task.CIStatus{State: task.CIPassing})
 	setPR(f, "merged")
 	f.wt.removeErr = ErrWorktreeDirty
-	if _, err := f.app.Status(context.Background()); err != nil {
+	if _, _, err := f.app.Status(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if res, err := f.app.Clean(context.Background(), CleanRequest{}); err != nil || len(res) != 1 || !errors.Is(res[0].Err, ErrWorktreeDirty) {

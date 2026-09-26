@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -73,7 +74,7 @@ func (a App) Inbox(ctx context.Context) (InboxReport, error) {
 		return InboxReport{}, err
 	}
 	items := filterInboxItems(search.Items, a.IgnoredRepositories)
-	tracked, refreshWarnings, err := a.fetchTracked(ctx, recs, items)
+	tracked, gone, refreshWarnings, err := a.fetchTracked(ctx, recs, items)
 	if err != nil {
 		return InboxReport{}, err
 	}
@@ -87,7 +88,34 @@ func (a App) Inbox(ctx context.Context) (InboxReport, error) {
 			return InboxReport{}, err
 		}
 	}
+	for _, key := range gone {
+		rec, err := a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
+			if cur == nil || cur.Delegation != nil {
+				return nil, nil
+			}
+			stopTracking(cur, a.Now())
+			return cur, nil
+		})
+		if err != nil {
+			return InboxReport{}, err
+		}
+		if rec != nil {
+			report.Changed = append(report.Changed, InboxEntry{Item: InboxItem{Key: rec.Key, Kind: rec.Kind, Title: rec.Title, URL: rec.URL}, Changes: []string{goneNote}})
+		}
+	}
 	return report, nil
+}
+
+const goneNote = "no longer on GitHub or no longer accessible; foreman stopped checking it"
+
+// stopTracking clears an undelegated item's reasons, which is what ends its refreshes.
+func stopTracking(rec *task.Record, now time.Time) {
+	snap := task.Snapshot{}
+	if rec.GitHub != nil {
+		snap = *rec.GitHub
+	}
+	snap.Reasons = nil
+	rec.GitHub, rec.LastGitHubSync = &snap, now
 }
 
 // mergeObserved copies only the GitHub-derived fields onto the current file, so a
@@ -105,14 +133,17 @@ func mergeObserved(cur, seen *task.Record) *task.Record {
 }
 
 // fetchTracked refreshes missing delegated work and undelegated items whose last
-// involvement reasons have not yet been cleared by a complete refresh.
-func (a App) fetchTracked(ctx context.Context, recs []*task.Record, found []InboxItem) ([]InboxItem, []error, error) {
+// involvement reasons have not yet been cleared by a complete refresh. gone lists
+// undelegated items GitHub no longer has; any other lookup failure is a warning.
+func (a App) fetchTracked(ctx context.Context, recs []*task.Record, found []InboxItem) (items []InboxItem, gone []task.Key, warnings []error, err error) {
 	inSearch := map[task.Key]bool{}
 	for _, it := range found {
 		inSearch[it.Key] = true
 	}
 	var keys []task.Key
+	delegated := map[task.Key]bool{}
 	for _, r := range recs {
+		delegated[r.Key] = r.Delegation != nil
 		if r.Delegation == nil && r.GitHub != nil && len(r.GitHub.Reasons) == 0 {
 			continue
 		}
@@ -135,18 +166,19 @@ func (a App) fetchTracked(ctx context.Context, recs []*task.Record, found []Inbo
 	}
 	wg.Wait()
 	if err := ctx.Err(); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	var warnings []error
-	var fetched []InboxItem
 	for i, err := range errs {
-		if err != nil {
+		switch {
+		case err == nil:
+			items = append(items, out[i])
+		case errors.Is(err, ErrGone) && !delegated[keys[i]]:
+			gone = append(gone, keys[i])
+		default:
 			warnings = append(warnings, fmt.Errorf("refresh %s#%d: %w", keys[i].Repo, keys[i].Number, err))
-			continue
 		}
-		fetched = append(fetched, out[i])
 	}
-	return fetched, warnings, nil
+	return items, gone, warnings, nil
 }
 
 func filterInboxItems(items []InboxItem, ignored []task.Repo) []InboxItem {

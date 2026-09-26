@@ -85,7 +85,10 @@ including CI changes. Missing undelegated items are checked until a successful
 refresh with complete searches clears their involvement reasons, then stop being
 refetched. Delegated work stays tracked. Missing items are not offered for new
 delegation. A failed item lookup warns without aborting the inbox, keeps its stored
-state, and retries next time. DONE tasks and ignored repositories are excluded.
+state, and retries next time. An issue you never delegated that GitHub no longer has,
+or that you can no longer see, is reported once and then not checked again. DONE tasks
+and ignored repositories are excluded. `foreman status` lists every task it can,
+with any failed PR or CI lookups as warnings underneath.
 
 Local builds show the commit in `foreman version`, for example
 `foreman 0.1.0-dev (72a70ce12345-dirty)`. The `dirty` suffix means the build included

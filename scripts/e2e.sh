@@ -92,6 +92,11 @@ case "$1 $2" in
 	cat "$s/search-$kind-$f.json" ;;
 "api repos/"*)
 	n=${2##*/}
+	if [ -f "$s/gone-$n" ]; then
+		echo '{"message":"Not Found","status":"404"}'
+		echo "gh: Not Found (HTTP 404)" >&2
+		exit 1
+	fi
 	cat "$s/api-$n.json" ;;
 *) echo "stand-in gh: unhandled $*" >&2; exit 2 ;;
 esac
@@ -285,6 +290,18 @@ scenario_inbox_lifecycle() {
 	check "recovered item is not selectable" bash -c "! grep -qE '[0-9]+\. acme/widgets#43' '$sandbox/recovered.txt'"
 	check "refresh after recovery succeeds" foreman inbox --non-interactive
 	check "recovered departed issue stops being fetched" bash -c "[ \"\$(grep -c 'api repos/acme/widgets/issues/43' '$state/gh.log')\" = 3 ]"
+
+	issue 45 'Deleted later'
+	echo "[$(hit acme/widgets 44 'Current work'),$(hit acme/widgets 45 'Deleted later')]" >"$state/search-issues-assignee.json"
+	foreman inbox --non-interactive >/dev/null
+	echo "[$(hit acme/widgets 44 'Current work')]" >"$state/search-issues-assignee.json"
+	touch "$state/gone-45"
+	foreman inbox --non-interactive >"$sandbox/gone.txt" 2>&1
+	check "a deleted issue is reported" contains "$sandbox/gone.txt" "foreman stopped checking it"
+	check "without a warning" bash -c "! grep -q 'refresh acme/widgets#45' '$sandbox/gone.txt'"
+	foreman inbox --non-interactive >"$sandbox/gone2.txt" 2>&1
+	check "and only once" bash -c "! grep -q 'acme/widgets#45' '$sandbox/gone2.txt'"
+	check "and is not looked up again" bash -c "[ \"\$(grep -c 'api repos/acme/widgets/issues/45' '$state/gh.log')\" = 1 ]"
 }
 
 turns() { grep -cx "$1" "$state/agents.log" || true; }

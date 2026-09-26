@@ -340,7 +340,7 @@ func TestStatusReapsDeadRunner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	recs, err := f.app.Status(context.Background())
+	recs, _, err := f.app.Status(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,7 +353,7 @@ func TestStatusReapsDeadRunner(t *testing.T) {
 
 	f.runners.alive[4242] = true
 	f.store.recs[rec.Key].State, f.store.recs[rec.Key].Delegation.RunnerPID = task.Working, 4242
-	if recs, _ = f.app.Status(context.Background()); recs[0].State != task.Working {
+	if recs, _, _ = f.app.Status(context.Background()); recs[0].State != task.Working {
 		t.Errorf("live runner reaped: %s", recs[0].State)
 	}
 }

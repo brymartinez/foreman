@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -20,15 +19,14 @@ var attention = map[task.State]int{
 }
 
 // Status returns delegated work that is not finished, most urgent first.
-func (a App) Status(ctx context.Context) ([]*task.Record, error) {
+func (a App) Status(ctx context.Context) ([]*task.Record, []error, error) {
 	recs, err := a.listReaped(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if _, warnings, err := a.gate(ctx, recs); err != nil {
-		return nil, err
-	} else if len(warnings) > 0 {
-		return nil, errors.Join(warnings...)
+	_, warnings, err := a.gate(ctx, recs)
+	if err != nil {
+		return nil, nil, err
 	}
 	var active []*task.Record
 	for _, r := range recs {
@@ -37,7 +35,7 @@ func (a App) Status(ctx context.Context) ([]*task.Record, error) {
 		}
 	}
 	sort.SliceStable(active, func(i, j int) bool { return attention[active[i].State] < attention[active[j].State] })
-	return active, nil
+	return active, warnings, nil
 }
 
 // Find resolves an issue number to one stored task. repo may be empty; the number

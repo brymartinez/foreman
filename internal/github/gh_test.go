@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/brymartinez/foreman/internal/app"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -183,5 +184,24 @@ func TestCIStatus(t *testing.T) {
 	c := Client{Run: func(context.Context, string, ...string) ([]byte, error) { return nil, errors.New("HTTP 502") }}
 	if _, err := c.CIStatus(context.Background(), key); err == nil {
 		t.Error("a gh failure without output must be an error")
+	}
+}
+
+func TestGetItemReportsMissingItemsAsGone(t *testing.T) {
+	for _, tc := range []struct {
+		stderr string
+		gone   bool
+	}{
+		{"gh: Not Found (HTTP 404)", true},
+		{"gh: This issue was deleted (HTTP 410)", true},
+		{"gh: Server Error (HTTP 500)", false},
+	} {
+		run := func(context.Context, string, ...string) ([]byte, error) {
+			return []byte(`{"message":"x"}`), fmt.Errorf("gh api repos/a/b/issues/5: exit status 1: %s", tc.stderr)
+		}
+		_, err := Client{Run: run}.GetItem(context.Background(), task.Key{Repo: "a/b", Number: 5})
+		if errors.Is(err, app.ErrGone) != tc.gone {
+			t.Errorf("%s: gone = %t, want %t (%v)", tc.stderr, !tc.gone, tc.gone, err)
+		}
 	}
 }

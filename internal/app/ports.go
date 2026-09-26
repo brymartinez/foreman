@@ -64,6 +64,9 @@ type InboxSearch struct {
 	Truncated []string
 }
 
+// ErrGone means GitHub reports an item deleted or out of reach (HTTP 404 or 410).
+var ErrGone = errors.New("not found on GitHub, or no longer accessible")
+
 type GitHubClient interface {
 	InboxItems(ctx context.Context) (InboxSearch, error)
 	// GetItem re-fetches a tracked item by key; it can drop out of search results once unassigned or closed.

@@ -80,7 +80,7 @@ func TestNewCommitsAfterACleanReviewAreReviewedBeforeHandover(t *testing.T) {
 	if f.claude.starts != starts || got.State != task.Reviewing || got.LatestReview().Head != "beef002" {
 		t.Fatalf("implementer starts %d state %s review head %s", f.claude.starts-starts, got.State, got.LatestReview().Head)
 	}
-	if _, err := f.app.Status(context.Background()); err != nil {
+	if _, _, err := f.app.Status(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if got = f.store.recs[key]; got.State != task.ReadyForHuman {
@@ -93,7 +93,7 @@ func TestNewCommitsOnAHandedOverPRAreFlaggedNotTakenBack(t *testing.T) {
 	key := reviewed(t, f)
 	setCI(f, task.CIStatus{State: task.CIPassing})
 	f.gh.items = []InboxItem{item(825, "open", t0, task.Assigned)}
-	if _, err := f.app.Status(context.Background()); err != nil {
+	if _, _, err := f.app.Status(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	setHead(f, "beef002")

@@ -287,7 +287,7 @@ func TestStatusOrdersByAttention(t *testing.T) {
 		key(4): mk(4, task.Done),
 		key(5): seen(5, task.Discovered, "open", t0),
 	}}
-	recs, err := App{Store: store, Runners: &fakeRunners{}}.Status(context.Background())
+	recs, _, err := App{Store: store, Runners: &fakeRunners{}}.Status(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
