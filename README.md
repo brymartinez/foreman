@@ -297,11 +297,10 @@ notifications:
   enabled: true                      # decision, failure, and readiness alerts
 claude:
   command: claude
-  model: ""                       # CLI default
-  allowed_tools: [Bash, WebFetch, WebSearch]
+  model: claude-opus-5               # "" uses the claude CLI's default
 codex:
   command: codex
-  model: ""
+  model: gpt-6-sol                   # "" uses the codex CLI's default
 ignore_repositories: []              # exact owner/name repositories excluded from inbox
 cleanup:
   on_done: true                   # inbox removes DONE tasks' worktrees
@@ -315,8 +314,8 @@ repositories are excluded from fresh inbox results and tracked-task refreshes.
 
 ## Permissions
 
-- **Claude as implementer.** Runs with `--permission-mode acceptEdits`, and only the
-  `allowed_tools` above are enabled.
+- **Claude as implementer.** Runs with `--permission-mode acceptEdits`, with only
+  `Bash`, `WebFetch`, and `WebSearch` pre-approved.
 - **Codex as implementer.** Runs in the `workspace-write` sandbox with network access,
   so it can push and use `gh`.
 - **Reviewers.** Read-only sessions that can't change the worktree.

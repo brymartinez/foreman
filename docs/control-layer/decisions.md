@@ -1126,3 +1126,30 @@ Entry format:
 - Date: 2026-09-26. User request. Amends D79.
 - **Decision.** `defaults/stages/pr.md` rule 1: open the pull request only when
   validation passes, else report "failed". D79 had dropped it from `implement.md`.
+
+## D81. Default models: Claude Opus 5 and GPT-6-Sol
+
+- Date: 2026-09-26. User request. Amends D23.
+- **Decision.** `claude.model` defaults to `claude-opus-5` and `codex.model` to
+  `gpt-6-sol`. Both names were checked against the installed CLIs: a one-line
+  `claude -p` call answered on `claude-opus-5`, and `gpt-6-sol` is in Codex's model
+  cache. An explicit `""` still means the CLI's own default.
+- **Fix.** `make install` removes the old binary before copying. Copying over it in
+  place left a binary macOS killed on launch (exit 137).
+
+## D82. Claude's tool list is fixed, not configured
+
+- Date: 2026-09-26. User correction. Amends D23.
+- **Context.** `claude.allowed_tools` was the only config key specific to one agent
+  CLI's permission model. Removing `Bash` from it broke every task.
+- **Decision.** The key is gone. The implementer always runs with
+  `--allowedTools=Bash,WebFetch,WebSearch` (`agent.ImplementTools`), next to the fixed
+  reviewer list (`agent.ReviewTools`). An old config that still sets the key loads
+  without error; the value is ignored.
+
+## D83. Round settings load with their defaults
+
+- Date: 2026-09-27. Found when the user asked why their config said `review_rounds: 0`.
+- **Decision.** `config.Load` starts `review_rounds` and `fix_rounds` at 3, so the file
+  `config --edit` writes on first use shows the real values instead of 0. An explicit
+  0 still means the default.

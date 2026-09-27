@@ -13,6 +13,8 @@ build:
 
 install: build
 	mkdir -p $(BIN_DIR)
+	@# Replace the file instead of overwriting it; macOS kills a binary rewritten in place.
+	rm -f $(BIN_DIR)/foreman
 	cp dist/foreman $(BIN_DIR)/foreman
 
 # Existing stage files are yours, so config never overwrites them.

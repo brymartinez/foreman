@@ -492,7 +492,10 @@ what it replaced. Current summary:
   D77 (amends D11, D35): `review_rounds` counts reviewer passes, `fix_rounds` caps
   the fix loop. D78 (amends D35, D40). Every fix is reviewed before the developer
   is asked. D79 (amends D73). Three implement rules dropped. D80
-  (amends D79). The PR validation gate moves to pr.md.
+  (amends D79). The PR validation gate moves to pr.md. D81
+  (amends D23). Default models are claude-opus-5 and gpt-6-sol.
+  D82 (amends D23). Claude's tool list is fixed, not configured.
+  D83. Round settings load with their defaults.
 
 ## Next stage
 

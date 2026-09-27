@@ -52,10 +52,13 @@ func TestAgentSettingsOverlayDefaults(t *testing.T) {
 	if cfg.WorktreesDir != filepath.Join(home, "wt") || cfg.RepositoriesDir != filepath.Join(home, ".local/share/foreman/repositories") || cfg.LogDir != filepath.Join(home, ".local/share/foreman/logs") {
 		t.Errorf("dirs: %+v", cfg)
 	}
-	if cfg.Claude.Model != "haiku" || cfg.Claude.Command != "claude" || len(cfg.Claude.AllowedTools) != 3 {
+	if cfg.Claude.Model != "haiku" || cfg.Claude.Command != "claude" {
 		t.Errorf("claude: %+v", cfg.Claude)
 	}
-	if cfg.Codex.Command != "/opt/codex" {
+	if cfg.ReviewRounds != 3 || cfg.FixRounds != 3 {
+		t.Errorf("rounds must load as their defaults so a materialized file shows them: %d %d", cfg.ReviewRounds, cfg.FixRounds)
+	}
+	if cfg.Codex.Command != "/opt/codex" || cfg.Codex.Model != "gpt-6-sol" {
 		t.Errorf("codex: %+v", cfg.Codex)
 	}
 	if cfg.StagesDir != filepath.Join(home, ".config/foreman/stages") {

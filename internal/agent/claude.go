@@ -12,15 +12,18 @@ import (
 	"github.com/brymartinez/foreman/internal/task"
 )
 
-// Claude drives `claude -p`. Headless Claude denies any tool not pre-approved, so
-// AllowedTools must cover what the agent needs to build, test, push, and open a PR (D8).
+// Claude drives `claude -p`.
 type Claude struct {
 	Bin          string
 	Model        string
-	AllowedTools []string
 	Exec         Exec
 	NewSessionID func() string
 }
+
+// ImplementTools are pre-approved for the implementer. Headless Claude denies any tool
+// not pre-approved, so they cover building, testing, pushing, and opening a PR, plus
+// web lookups to match Codex's network access (D8, D82).
+var ImplementTools = []string{"Bash", "WebFetch", "WebSearch"}
 
 func (Claude) Name() task.Agent { return task.Claude }
 
@@ -46,9 +49,7 @@ func (c Claude) run(ctx context.Context, in StartInput, session task.Session, se
 		"--output-format", "json",
 		"--json-schema", string(OutcomeSchema),
 		"--permission-mode", "acceptEdits",
-	}
-	if len(c.AllowedTools) > 0 {
-		args = append(args, "--allowedTools="+strings.Join(c.AllowedTools, ","))
+		"--allowedTools=" + strings.Join(ImplementTools, ","),
 	}
 	if in.MaxBudgetUSD > 0 {
 		args = append(args, "--max-budget-usd", fmt.Sprintf("%.2f", in.MaxBudgetUSD))

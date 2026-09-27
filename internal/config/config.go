@@ -52,9 +52,8 @@ type Cleanup struct {
 }
 
 type Claude struct {
-	Command      string   `yaml:"command"`
-	Model        string   `yaml:"model"`
-	AllowedTools []string `yaml:"allowed_tools"`
+	Command string `yaml:"command"`
+	Model   string `yaml:"model"`
 }
 
 type Codex struct {
@@ -75,8 +74,10 @@ func Load() (Config, error) {
 		WorktreesDir:    filepath.Join(data, "worktrees"),
 		RepositoriesDir: filepath.Join(data, "repositories"),
 		LogDir:          filepath.Join(data, "logs"),
-		Claude:          Claude{Command: "claude", AllowedTools: []string{"Bash", "WebFetch", "WebSearch"}},
-		Codex:           Codex{Command: "codex"},
+		ReviewRounds:    3,
+		FixRounds:       3,
+		Claude:          Claude{Command: "claude", Model: "claude-opus-5"},
+		Codex:           Codex{Command: "codex", Model: "gpt-6-sol"},
 		Cleanup:         Cleanup{OnDone: true, DeleteMergedBranch: true},
 		Budgets:         Budgets{ImplementerUSD: 3, ReviewerUSD: 1},
 		Notifications:   Notifications{Enabled: true},

@@ -70,7 +70,7 @@ func run(argv []string) int {
 		Repositories: github.New(),
 		Worktrees:    worktree.Git{},
 		Agents: map[task.Agent]app.AgentAdapter{
-			task.Claude: agent.Claude{Bin: cfg.Claude.Command, Model: cfg.Claude.Model, AllowedTools: cfg.Claude.AllowedTools, Exec: agent.RunCommand},
+			task.Claude: agent.Claude{Bin: cfg.Claude.Command, Model: cfg.Claude.Model, Exec: agent.RunCommand},
 			task.Codex:  agent.Codex{Bin: cfg.Codex.Command, Model: cfg.Codex.Model, Exec: agent.RunCommand},
 		},
 		Runners:              runner.Processes{LogDir: cfg.LogDir},
