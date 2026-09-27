@@ -51,6 +51,10 @@ foreman respond 825   -> answer each waiting question in order; after the last,
                          state WORKING, spawn runner
                          runner: Resume(session, all answers); on ErrNoSession, a fresh
                          Start whose prompt lists all recorded decisions
+foreman cancel 825    -> SIGTERM the runner, wait up to 30s for it to exit (D89)
+                         runner: context cancelled -> agent process group stopped;
+                         the failed step records FAILED, outcome cancelled, keeping
+                         session, usage, branch, worktree, and PR
 foreman inbox|status  -> runner pid dead while WORKING/REVIEWING -> FAILED
                          readiness gate (gate.go), per idle task with a PR:
                            PR merged -> DONE; PR closed -> FAILED

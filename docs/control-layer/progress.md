@@ -500,6 +500,7 @@ what it replaced. Current summary:
   D81). Per-agent review models. D86. The dollar budgets are labeled Claude-only.
 - D87 (amends D57). Claude's stream-json events go to the runner log. D88.
   `show` and the runner log point to Claude's own session transcript.
+- D89. `foreman cancel` stops a running task.
 
 ## Next stage
 

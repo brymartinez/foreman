@@ -20,6 +20,7 @@ const (
 	Show    Name = "show"
 	Start   Name = "start"
 	Respond Name = "respond"
+	Cancel  Name = "cancel"
 	Clean   Name = "clean"
 	Config  Name = "config"
 	Logs    Name = "logs"
@@ -54,6 +55,7 @@ Usage:
   foreman logs <issue> [--follow] [--raw]          Read a task's runner log
   foreman start <issue> --agent claude|codex [--context path.md] [--type fix]
   foreman respond <issue>                         Answer a NEEDS_DECISION task
+  foreman cancel <issue>                          Stop a task's running agent
   foreman clean [<issue>] [--dry-run]             Remove worktrees of DONE tasks (or one DONE/FAILED task)
   foreman config --stages                         Where each stage's instructions come from
   foreman config --show                           Show the resolved configuration
@@ -90,7 +92,7 @@ func Parse(argv []string) (Command, error) {
 			return Command{}, usagef("%s takes no arguments", name)
 		}
 		return Command{Name: Name(name)}, nil
-	case "show", "respond":
+	case "show", "respond", "cancel":
 		repo, n, err := issueArg(name, rest)
 		return Command{Name: Name(name), Repo: repo, Issue: n}, err
 	case "logs":

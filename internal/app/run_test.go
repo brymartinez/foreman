@@ -297,3 +297,57 @@ func TestRunTaskStopsWhenTheTaskFileIsRemoved(t *testing.T) {
 		t.Error("the runner recreated a removed task")
 	}
 }
+
+func TestRunTaskRecordsACancelledImplementation(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	ctx, cancel := context.WithCancelCause(context.Background())
+	f.claude.turn = agent.Turn{Session: task.Session{Agent: task.Claude, ID: "sid-1"}, Usage: task.Usage{ClaudeCostUSD: 1.25, ClaudeTurns: 1}}
+	f.claude.err = errors.New("claude printed no result (signal: terminated)")
+	f.claude.during = func() { cancel(errors.New("terminated signal received")) }
+	var log strings.Builder
+	if err := f.app.RunTask(ctx, key, 4242, &log); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Failed || got.LastOutcome.Status != Cancelled || got.LastOutcome.Summary != "run cancelled during implementation (terminated signal received)" {
+		t.Fatalf("state %s outcome %+v", got.State, got.LastOutcome)
+	}
+	if got.Delegation.Implementer.ID != "sid-1" || got.Usage.ClaudeCostUSD != 1.25 || got.Delegation.RunnerPID != 0 {
+		t.Errorf("a cancelled turn must keep its session and usage: %+v %+v", got.Delegation, got.Usage)
+	}
+	if !strings.Contains(log.String(), "foreman: stopped during implementation: terminated signal received") {
+		t.Errorf("log = %q", log.String())
+	}
+	if len(f.notes.sent) == 0 || !strings.Contains(f.notes.sent[len(f.notes.sent)-1], "Run cancelled") {
+		t.Errorf("notifications = %q", f.notes.sent)
+	}
+}
+
+func TestRunTaskRecordsACancelledReview(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	ctx, cancel := context.WithCancel(context.Background())
+	f.claude.turn = prTurn("sid-1")
+	f.claude.during = cancel
+	f.codex.reviewErr = errors.New("codex never started a thread")
+	if err := f.app.RunTask(ctx, key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Failed || got.LastOutcome.Status != Cancelled || !strings.HasPrefix(got.LastOutcome.Summary, "run cancelled during review") || got.Delegation.PR != 912 {
+		t.Fatalf("state %s outcome %+v pr %d", got.State, got.LastOutcome, got.Delegation.PR)
+	}
+}
+
+func TestAFailedTurnWithoutACancelIsNotCancelled(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	f.claude.err = errors.New("claude exited: exit status 1")
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.Failed || got.LastOutcome.Status != "failed" {
+		t.Fatalf("state %s outcome %+v", got.State, got.LastOutcome)
+	}
+}

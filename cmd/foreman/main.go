@@ -144,6 +144,15 @@ func run(argv []string) int {
 			return fail(err)
 		}
 		render.Show(os.Stdout, rec)
+	case cli.Cancel:
+		rec, err := a.Find(ctx, cmd.Repo, cmd.Issue)
+		if err != nil {
+			return fail(err)
+		}
+		if rec, err = a.Cancel(ctx, rec); err != nil {
+			return fail(err)
+		}
+		render.Cancelled(os.Stdout, rec)
 	case cli.Logs:
 		rec, err := a.Find(ctx, cmd.Repo, cmd.Issue)
 		if err != nil {

@@ -359,6 +359,17 @@ func Started(w io.Writer, r *task.Record) {
 	fmt.Fprintf(w, "Check progress with: foreman status\n")
 }
 
+// Cancelled reports `foreman cancel`. A run that finished while it was being
+// stopped keeps its own state.
+func Cancelled(w io.Writer, r *task.Record) {
+	if r.State != task.Failed || r.LastOutcome == nil || r.LastOutcome.Status != app.Cancelled {
+		fmt.Fprintf(w, "%s finished before it could be cancelled: %s\n", issueLabel(r.Key), r.State)
+		return
+	}
+	fmt.Fprintf(w, "Cancelled %s: %s\n", issueLabel(r.Key), r.LastOutcome.Summary)
+	fmt.Fprintf(w, "The branch and worktree are kept. To resume, run from a checkout of %s:\n  foreman start %d --agent %s\n", r.Repo, r.Number, r.Delegation.Implementer.Agent)
+}
+
 // Cleaned reports `foreman clean`. A kept worktree is named with git's reason.
 func Cleaned(w io.Writer, results []app.CleanResult, dryRun bool) {
 	if len(results) == 0 {

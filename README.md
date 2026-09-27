@@ -71,6 +71,7 @@ foreman logs 825                               # clean, timestamped runner log
 foreman logs 825 --follow                       # follow a live runner
 foreman logs 825 --raw                          # show raw agent JSONL (Claude and Codex)
 foreman respond 825                            # answer a question from the agent
+foreman cancel 825                             # stop a running agent; foreman start resumes
 foreman clean --dry-run                        # which worktrees would be removed
 foreman clean                                  # remove worktrees of DONE tasks
 foreman config --stages                         # which stage instruction files apply here
@@ -249,12 +250,12 @@ along with your answer.
 
 | State | Meaning | Your move |
 |---|---|---|
-| `WORKING` | The implementer is running | Wait |
+| `WORKING` | The implementer is running | Wait, or `foreman cancel` to stop it |
 | `NEEDS_DECISION` | The agent asked a question | `foreman respond` |
-| `REVIEWING` | PR open; under review, or waiting on CI | Wait |
+| `REVIEWING` | PR open; under review, or waiting on CI | Wait, or `foreman cancel` to stop a running review |
 | `READY_FOR_HUMAN` | Review clean, CI finished (✓ or ✗ shown) | Review and merge the PR |
 | `DONE` | PR merged or issue closed | Nothing |
-| `FAILED` | The agent failed, the runner died, or the PR was closed | `foreman show` to see why, then `foreman start` to retry |
+| `FAILED` | The agent failed, the run was cancelled, the runner died, or the PR was closed | `foreman show` to see why, then `foreman start` to retry |
 
 ## Task files
 

@@ -134,6 +134,9 @@ type StageInstructionResolver interface {
 type Runners interface {
 	Spawn(key task.Key) (pid int, logPath string, err error)
 	Alive(pid int) bool
+	// Stop asks the runner to stop and waits for it to exit; false means it is still
+	// running when the wait ends.
+	Stop(key task.Key, pid int) (bool, error)
 }
 
 type Notifier interface {

@@ -61,6 +61,9 @@ func (f *fakeStages) Resolve(repoRoot string, s task.Stage) (task.StageInstructi
 type fakeRunners struct {
 	spawned []task.Key
 	alive   map[int]bool
+	stopped []int
+	onStop  func(pid int) // plays the runner recording its stop
+	stuck   bool
 }
 
 func (f *fakeRunners) Spawn(k task.Key) (int, string, error) {
@@ -68,6 +71,17 @@ func (f *fakeRunners) Spawn(k task.Key) (int, string, error) {
 	return 4242, "/logs/" + string(k.Repo) + ".log", nil
 }
 func (f *fakeRunners) Alive(pid int) bool { return f.alive[pid] }
+func (f *fakeRunners) Stop(_ task.Key, pid int) (bool, error) {
+	f.stopped = append(f.stopped, pid)
+	if f.stuck {
+		return false, nil
+	}
+	if f.onStop != nil {
+		f.onStop(pid)
+	}
+	delete(f.alive, pid)
+	return true, nil
+}
 
 type fakeAgent struct {
 	name      task.Agent

@@ -22,6 +22,13 @@ func TestParseStart(t *testing.T) {
 	}
 }
 
+func TestParseCancel(t *testing.T) {
+	got, err := Parse([]string{"cancel", "ridezoomo/armada#351"})
+	if want := (Command{Name: Cancel, Repo: "ridezoomo/armada", Issue: 351}); err != nil || got != want {
+		t.Fatalf("Parse = %+v, %v; want %+v", got, err, want)
+	}
+}
+
 func TestParseRejects(t *testing.T) {
 	for _, argv := range [][]string{
 		{"start", "825"},
@@ -34,6 +41,8 @@ func TestParseRejects(t *testing.T) {
 		{"show", "not a repo#1"},
 		{"show", "a/b#"},
 		{"respond"},
+		{"cancel"},
+		{"cancel", "1", "2"},
 		{"inbox", "extra"},
 		{"deploy"},
 		{"__run", "825"},

@@ -1211,3 +1211,31 @@ Entry format:
   Claude tasks. Reviews have no transcript (`--no-session-persistence`), so the
   stream in the runner log is their only record. foreman only computes the path; it
   doesn't copy or read the transcript.
+
+## D89. foreman cancel stops a running task
+
+- Date: 2026-09-27. User request.
+- **Context.** The only way to stop a runaway run, such as the $10 #351 run, was to
+  find and kill the runner by hand. D59 already made a SIGTERM'd runner stop its
+  agent's process group.
+- **Decision.**
+  - `foreman cancel <issue>` works on a WORKING or REVIEWING task that has a runner.
+    It writes `foreman: cancel requested; stopping runner <pid>` to the task log,
+    sends the runner SIGTERM, and waits up to 30 seconds for it to exit
+    (`Runners.Stop`). If the runner is still alive after that, cancel exits 1 and
+    changes nothing; foreman never SIGKILLs the runner, because that would leave the
+    agent running.
+  - When a step fails after the runner's context was cancelled, the runner records
+    FAILED with outcome status `cancelled` and the summary `run cancelled during
+    implementation|review (<cause>)`. The turn's session and usage are still
+    recorded. A step that finished before the stop keeps its result.
+  - A runner that exits without recording anything is marked cancelled by `cancel`
+    itself.
+  - The branch, worktree, and PR are kept. `foreman start` resumes the task the same
+    way it does any FAILED task, picking up at the review if the PR head has none.
+  - A cancelled FAILED task notifies "Run cancelled" instead of "Run failed". Any
+    SIGTERM, SIGINT, or SIGHUP to the runner counts as a cancel. The e2e check for a
+    SIGTERM'd runner now expects that.
+- **Rejected.** A separate CANCELLED state. FAILED already means stopped and
+  restartable, and `clean <issue>` and `start` handle it; a new state would touch
+  every state table for no new behavior.

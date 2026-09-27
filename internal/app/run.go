@@ -68,6 +68,9 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 			}
 			if rec, err = a.update(final, key, existing(func(cur *task.Record) {
 				applyTurn(cur, turn, pr, runErr, a.Now())
+				if runErr != nil {
+					applyStop(ctx, cur, "implementation", log, a.Now())
+				}
 				addUsage(&cur.Usage, turn.Usage)
 			})); err != nil || rec.State != task.Reviewing {
 				return err
@@ -77,6 +80,9 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 		review, reviewErr := a.review(ctx, rec, log)
 		if rec, err = a.update(final, key, existing(func(cur *task.Record) {
 			applyReview(cur, review, reviewErr, a.Now())
+			if reviewErr != nil {
+				applyStop(ctx, cur, "review", log, a.Now())
+			}
 			addUsage(&cur.Usage, review.Usage)
 			// Every fix is reviewed; the developer is asked only once fix_rounds fixes
 			// still leave findings (D78).
@@ -222,21 +228,24 @@ func (a App) update(ctx context.Context, key task.Key, fn func(cur *task.Record)
 		return fn(cur)
 	})
 	if err == nil && rec != nil && rec.State != before {
-		a.notify(key, rec.State)
+		a.notify(key, rec)
 	}
 	return rec, err
 }
 
-func (a App) notify(key task.Key, state task.State) {
+func (a App) notify(key task.Key, rec *task.Record) {
 	if a.Notifier == nil {
 		return
 	}
 	var body string
-	switch state {
+	switch rec.State {
 	case task.NeedsDecision:
 		body = "Needs your decision"
 	case task.Failed:
 		body = "Run failed"
+		if rec.LastOutcome != nil && rec.LastOutcome.Status == Cancelled {
+			body = "Run cancelled"
+		}
 	case task.ReadyForHuman:
 		body = "Ready for human review"
 	default:
@@ -340,6 +349,20 @@ func applyTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error,
 	case agent.FailedRun:
 		rec.State = task.Failed
 	}
+}
+
+// Cancelled is the outcome status of a run stopped by foreman cancel or a signal.
+const Cancelled = "cancelled"
+
+// applyStop marks a step that failed because the runner was told to stop. Its error
+// is only the agent being killed, so the outcome says the run was cancelled instead.
+func applyStop(ctx context.Context, rec *task.Record, step string, log io.Writer, now time.Time) {
+	if ctx.Err() == nil {
+		return
+	}
+	fmt.Fprintf(log, "foreman: stopped during %s: %v\n", step, context.Cause(ctx))
+	rec.State = task.Failed
+	rec.LastOutcome = &task.Outcome{Status: Cancelled, Summary: fmt.Sprintf("run cancelled during %s (%v)", step, context.Cause(ctx)), At: now}
 }
 
 // applyPRHead records the PR head a resumed run is about to review.

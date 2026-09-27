@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
+	"github.com/brymartinez/foreman/internal/logs"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -19,6 +21,12 @@ const RunCommand = "__run"
 
 type Processes struct {
 	LogDir string
+	// StopWait is how long Stop waits for the runner to exit; zero means 30 seconds.
+	StopWait time.Duration
+}
+
+func (p Processes) logPath(key task.Key) string {
+	return filepath.Join(p.LogDir, fmt.Sprintf("%s-%d.log", strings.ReplaceAll(string(key.Repo), "/", "-"), key.Number))
 }
 
 // Spawn starts the runner in its own session so closing the terminal does not kill it.
@@ -31,7 +39,7 @@ func (p Processes) Spawn(key task.Key) (int, string, error) {
 	if err := os.MkdirAll(p.LogDir, 0o755); err != nil {
 		return 0, "", err
 	}
-	logPath := filepath.Join(p.LogDir, fmt.Sprintf("%s-%d.log", strings.ReplaceAll(string(key.Repo), "/", "-"), key.Number))
+	logPath := p.logPath(key)
 	log, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return 0, "", err
@@ -60,4 +68,33 @@ func (Processes) Alive(pid int) bool {
 	}
 	out, err := exec.Command("ps", "-p", fmt.Sprint(pid), "-o", "command=").Output()
 	return err == nil && bytes.Contains(out, []byte(" "+RunCommand+" "))
+}
+
+// Stop sends the runner SIGTERM, which cancels its context and so stops the agent's
+// process group (D59). It notes the request in the task log, then waits for the
+// runner to exit. false means it is still running when the wait ends.
+func (p Processes) Stop(key task.Key, pid int) (bool, error) {
+	if !p.Alive(pid) {
+		return true, nil
+	}
+	if f, err := os.OpenFile(p.logPath(key), os.O_WRONLY|os.O_APPEND, 0); err == nil {
+		fmt.Fprintf(&logs.Writer{W: f}, "foreman: cancel requested; stopping runner %d\n", pid)
+		f.Close()
+	}
+	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+		if err == syscall.ESRCH {
+			return true, nil
+		}
+		return false, err
+	}
+	wait := p.StopWait
+	if wait == 0 {
+		wait = 30 * time.Second
+	}
+	for deadline := time.Now().Add(wait); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		if !p.Alive(pid) {
+			return true, nil
+		}
+	}
+	return !p.Alive(pid), nil
 }

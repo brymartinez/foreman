@@ -1,11 +1,14 @@
 package runner
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -16,6 +19,16 @@ import (
 // and exits at once (as `foreman start` does), and the runner itself.
 func TestMain(m *testing.M) {
 	switch {
+	case len(os.Args) > 1 && os.Args[1] == RunCommand && os.Getenv("FOREMAN_RUNNER_TEST") == "wait":
+		// A runner mid-turn: it stops only when signalled.
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+		defer stop()
+		select {
+		case <-ctx.Done():
+			fmt.Println("runner stopped:", context.Cause(ctx))
+		case <-time.After(10 * time.Second):
+		}
+		os.Exit(0)
 	case len(os.Args) > 1 && os.Args[1] == RunCommand:
 		time.Sleep(300 * time.Millisecond)
 		fmt.Println("written after the launcher exited")
@@ -63,5 +76,38 @@ func TestSpawnedRunnerOutlivesItsLauncher(t *testing.T) {
 		if !strings.Contains(string(log), want) {
 			t.Errorf("log is missing %q:\n%s", want, log)
 		}
+	}
+}
+
+func TestStopSignalsTheRunnerAndWaitsForIt(t *testing.T) {
+	t.Setenv("FOREMAN_RUNNER_TEST", "wait")
+	p := Processes{LogDir: t.TempDir(), StopWait: 5 * time.Second}
+	key := task.Key{Repo: "o/r", Number: 8}
+	pid, logPath, err := p.Spawn(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(5 * time.Second); !p.Alive(pid); time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("runner never came up")
+		}
+	}
+	// Let the runner install its signal handler.
+	time.Sleep(200 * time.Millisecond)
+	stopped, err := p.Stop(key, pid)
+	if err != nil || !stopped {
+		t.Fatalf("Stop = %v, %v", stopped, err)
+	}
+	if p.Alive(pid) {
+		t.Error("runner still alive after Stop")
+	}
+	log, _ := os.ReadFile(logPath)
+	for _, want := range []string{fmt.Sprintf("foreman: cancel requested; stopping runner %d", pid), "runner stopped: terminated signal received"} {
+		if !strings.Contains(string(log), want) {
+			t.Errorf("log missing %q:\n%s", want, log)
+		}
+	}
+	if stopped, err := p.Stop(key, pid); err != nil || !stopped {
+		t.Errorf("stopping an exited runner = %v, %v", stopped, err)
 	}
 }

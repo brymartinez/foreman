@@ -152,6 +152,26 @@ func TestShowClaudeTranscript(t *testing.T) {
 	}
 }
 
+func TestCancelled(t *testing.T) {
+	rec := &task.Record{
+		Key: task.Key{Repo: "a/b", Number: 7}, State: task.Failed,
+		Delegation:  &task.Delegation{Implementer: task.Session{Agent: task.Claude}},
+		LastOutcome: &task.Outcome{Status: app.Cancelled, Summary: "run cancelled during review (terminated signal received)"},
+	}
+	var buf bytes.Buffer
+	Cancelled(&buf, rec)
+	want := "Cancelled a/b#7: run cancelled during review (terminated signal received)\nThe branch and worktree are kept. To resume, run from a checkout of a/b:\n  foreman start 7 --agent claude\n"
+	if buf.String() != want {
+		t.Errorf("got:\n%s\nwant:\n%s", buf.String(), want)
+	}
+	buf.Reset()
+	rec.State, rec.LastOutcome = task.Reviewing, &task.Outcome{Status: "review_clean"}
+	Cancelled(&buf, rec)
+	if buf.String() != "a/b#7 finished before it could be cancelled: REVIEWING\n" {
+		t.Errorf("got %q", buf.String())
+	}
+}
+
 func TestShowUndelegated(t *testing.T) {
 	var buf bytes.Buffer
 	Show(&buf, &task.Record{Key: task.Key{Repo: "a/b", Number: 1}, Title: "T", URL: "u", State: task.Discovered})

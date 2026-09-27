@@ -199,7 +199,7 @@ scenario_notify() {
 	sleep 0.5
 	pkill -TERM -f "$work/foreman __run acme/widgets#43" || true
 	check "a stopped runner records FAILED promptly" wait_status "FAILED" 5
-	check "and notifies" grep -q 'Run failed.*acme/widgets#43' "$state/notifications.log"
+	check "and notifies" grep -q 'Run cancelled.*acme/widgets#43' "$state/notifications.log"
 	check "and leaves no agent behind" bash -c "! pgrep -f 'sleep 30.017' >/dev/null"
 
 	issue 44 "Fix sorting"
@@ -359,7 +359,26 @@ scenario_respond() {
 	check "resume carries the second answer" contains "$state/resume-prompt.txt" "Decision: A. 3 tries"
 }
 
-scenarios=${*:-runner notify logs inbox inbox_lifecycle rereview respond}
+scenario_cancel() {
+	echo "cancel: stopping a run keeps its work and can be resumed"
+	setup cancel
+	E2E_AGENT_SLEEP=30.017 foreman start 42 --agent claude >/dev/null
+	check "the runner is working" wait_status "WORKING" 5
+	sleep 0.5
+	foreman cancel 42 >"$sandbox/cancel.txt" 2>&1
+	check "cancel reports the stop" contains "$sandbox/cancel.txt" "Cancelled acme/widgets#42: run cancelled during implementation (terminated signal received)"
+	check "the task is FAILED" wait_status "FAILED" 1
+	check "no runner or agent is left" bash -c "! pgrep -f 'sleep 30.017' >/dev/null && ! pgrep -f '$work/foreman __run acme/widgets#42' >/dev/null"
+	local log
+	log=$(ls "$sandbox"/logs/*.log)
+	check "the log shows who stopped it" contains "$log" "foreman: cancel requested; stopping runner"
+	check "a second cancel exits nonzero" bash -c "cd '$FOREMAN_CWD' && ! '$work/foreman' cancel 42 >'$sandbox/cancel2.txt' 2>&1"
+	check "and says there is nothing to cancel" contains "$sandbox/cancel2.txt" "nothing to cancel"
+	foreman start 42 --agent claude >/dev/null
+	check "start resumes the cancelled task" wait_status "review ✓"
+}
+
+scenarios=${*:-runner notify logs inbox inbox_lifecycle rereview respond cancel}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"

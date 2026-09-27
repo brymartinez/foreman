@@ -103,3 +103,29 @@ func (a App) listReaped(ctx context.Context) ([]*task.Record, error) {
 
 // running states are the ones a runner drives: implementing, or reviewing and fixing.
 func running(s task.State) bool { return s == task.Working || s == task.Reviewing }
+
+// Cancel stops a running task's runner, which stops its agent. The runner records
+// the stop as FAILED with a cancelled outcome. The branch, worktree, and PR are
+// kept, so start picks the task up again.
+func (a App) Cancel(ctx context.Context, rec *task.Record) (*task.Record, error) {
+	d := rec.Delegation
+	if !running(rec.State) || d == nil || d.RunnerPID == 0 {
+		return nil, fmt.Errorf("%s#%d is %s with no runner; nothing to cancel", rec.Repo, rec.Number, rec.State)
+	}
+	pid := d.RunnerPID
+	stopped, err := a.Runners.Stop(rec.Key, pid)
+	if err != nil {
+		return nil, fmt.Errorf("stop runner %d: %w", pid, err)
+	}
+	if !stopped {
+		return nil, fmt.Errorf("runner %d has not exited yet; check again with foreman status", pid)
+	}
+	// A runner that exited without recording its stop still holds its pid.
+	return a.update(ctx, rec.Key, existing(func(cur *task.Record) {
+		if running(cur.State) && cur.Delegation.RunnerPID == pid {
+			cur.State = task.Failed
+			cur.LastOutcome = &task.Outcome{Status: Cancelled, Summary: fmt.Sprintf("run cancelled; runner %d exited without recording an outcome", pid), At: a.Now()}
+			cur.Delegation.RunnerPID = 0
+		}
+	}))
+}
