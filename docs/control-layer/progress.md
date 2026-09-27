@@ -498,6 +498,8 @@ what it replaced. Current summary:
   D83. Round settings load with their defaults.
 - D84. config --stages reports missing global files as required. D85 (amends
   D81). Per-agent review models. D86. The dollar budgets are labeled Claude-only.
+- D87 (amends D57). Claude's stream-json events go to the runner log. D88.
+  `show` and the runner log point to Claude's own session transcript.
 
 ## Next stage
 

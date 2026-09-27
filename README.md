@@ -69,7 +69,7 @@ foreman status                                 # delegated work, most urgent fir
 foreman show 825                               # everything recorded for one task
 foreman logs 825                               # clean, timestamped runner log
 foreman logs 825 --follow                       # follow a live runner
-foreman logs 825 --raw                          # show raw agent JSONL
+foreman logs 825 --raw                          # show raw agent JSONL (Claude and Codex)
 foreman respond 825                            # answer a question from the agent
 foreman clean --dry-run                        # which worktrees would be removed
 foreman clean                                  # remove worktrees of DONE tasks

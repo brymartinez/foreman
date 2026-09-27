@@ -22,7 +22,17 @@ Headless mode is `claude -p <prompt>`. Every feature below was checked with a re
 - **Structured output.** `--output-format json --json-schema '<schema>'` returns one JSON
   object on stdout. The validated result is in `structured_output`, and `result` holds
   the same data as a string. Other useful fields are `session_id`, `is_error`,
-  `subtype`, `permission_denials`, and `total_cost_usd`.
+  `subtype`, `permission_denials`, `num_turns`, and `total_cost_usd`.
+- **Event stream.** `--output-format stream-json --verbose` prints one JSON event per
+  line (`system`, `assistant`, `user`, `result`, and others). The `result` event carries
+  the same fields as the json output, `structured_output` included, but it isn't always
+  the last line. Resuming a missing session prints a `result` with subtype
+  `error_during_execution` and `num_turns` 0, and "No conversation found" on stderr.
+  The json output printed nothing on stdout in that case.
+- **Transcripts.** Each persisted session's full transcript is at
+  `~/.claude/projects/<cwd with every non-alphanumeric character as "-">/<session>.jsonl`,
+  or under `$CLAUDE_CONFIG_DIR` when set. It records every tool call, its output, and
+  per-turn token usage.
 - **Session IDs.** `--session-id <uuid>` is honored, so foreman can assign the ID before
   launch and record it before the agent starts working.
 - **Resume.** `--resume <uuid> -p <message>` continues the same session and keeps the
@@ -37,8 +47,7 @@ Headless mode is `claude -p <prompt>`. Every feature below was checked with a re
   hook only wrote to stderr, and stdout stayed valid JSON. Keep stdout and stderr in
   separate streams.
 - **Other options.** `--no-session-persistence` gives disposable reviewer sessions.
-  `--max-budget-usd` caps spend. `--output-format stream-json` streams progress events
-  for logs.
+  `--max-budget-usd` caps spend.
 
 ## Codex CLI
 

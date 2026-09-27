@@ -108,7 +108,7 @@ EOF
 #!/usr/bin/env bash
 if [[ " $* " == *" --no-session-persistence "* ]]; then
 	echo "claude review" >>"$E2E_STATE/agents.log"
-	echo '{"session_id":"r1","subtype":"success","total_cost_usd":0.05,"structured_output":{"verdict":"clean","summary":"looks right","findings":[]}}'
+	echo '{"type":"result","session_id":"r1","subtype":"success","total_cost_usd":0.05,"structured_output":{"verdict":"clean","summary":"looks right","findings":[]}}'
 	exit 0
 fi
 if [[ " $* " == *" --resume "* ]]; then
@@ -121,7 +121,7 @@ fi
 if [ -f "$E2E_STATE/block-once" ]; then
 	rm "$E2E_STATE/block-once"
 	q() { printf '{"issue":"%s","context":"c","options":[{"label":"A","description":"%s"},{"label":"B","description":"%s"}],"recommendation":"A","impactIfWrong":"i"}' "$1" "$2" "$3"; }
-	printf '{"session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"blocked","summary":"two decisions","prNumber":null,"prUrl":null,"validation":[],"questions":[%s,%s]}}\n' \
+	printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"blocked","summary":"two decisions","prNumber":null,"prUrl":null,"validation":[],"questions":[%s,%s]}}\n' \
 		"$(q 'Retry 4xx?' '5xx only' '4xx and 5xx')" "$(q 'Cap retries?' '3 tries' 'no cap')"
 	exit 0
 fi
@@ -133,7 +133,9 @@ issue=${branch#*/}
 pr=$((900 + ${issue%%-*}))
 printf '{"number":%s,"url":"https://github.com/acme/widgets/pull/%s","state":"OPEN","headRefName":"%s","headRefOid":"%s","baseRefName":"main","isCrossRepository":false}\n' "$pr" "$pr" "$branch" "$(git rev-parse HEAD)" >"$E2E_STATE/pr-$pr.json"
 echo "claude stderr progress" >&2
-printf '{"session_id":"s1","subtype":"success","total_cost_usd":0.25,"structured_output":{"status":"pr_opened","summary":"added retries","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s","validation":[{"command":"go test ./...","passed":true}],"questions":[]}}\n' "$pr" "$pr"
+echo '{"type":"system","subtype":"init","session_id":"s1"}'
+echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"go test ./...","description":"Run the tests"}}]}}'
+printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.25,"structured_output":{"status":"pr_opened","summary":"added retries","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s","validation":[{"command":"go test ./...","passed":true}],"questions":[]}}\n' "$pr" "$pr"
 EOF
 
 	# Reviewer on the codex JSONL protocol.
@@ -224,6 +226,9 @@ scenario_logs() {
 	foreman logs 42 >"$sandbox/clean.txt"
 	foreman logs 42 --raw >"$sandbox/raw.txt"
 	check "clean shows Claude's result" contains "$sandbox/clean.txt" 'claude: subtype=success cost=$0.25'
+	check "clean shows Claude's tool calls" contains "$sandbox/clean.txt" "claude Bash Run the tests"
+	check "clean shows Claude's transcript" contains "$sandbox/clean.txt" "claude: transcript "
+	check "raw keeps Claude JSON" contains "$sandbox/raw.txt" '"type":"assistant"'
 	check "clean shows Codex usage without a price" contains "$sandbox/clean.txt" "(USD unavailable)"
 	check "clean hides Codex JSON" bash -c "! grep -q '\"type\"' '$sandbox/clean.txt'"
 	check "raw keeps Codex JSON" contains "$sandbox/raw.txt" '"type":"thread.started"'

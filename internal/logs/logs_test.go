@@ -25,6 +25,26 @@ func TestWriterTimestampsLinesAndCleanSummarizesJSON(t *testing.T) {
 	}
 }
 
+func TestCleanSummarizesClaudeEvents(t *testing.T) {
+	log := strings.Join([]string{
+		`T1 {"type":"system","subtype":"init","session_id":"s1"}`,
+		`T2 {"type":"system","subtype":"thinking_tokens"}`,
+		`T3 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"ls","description":"List files"}}]}}`,
+		`T4 {"type":"user","message":{"content":[{"type":"tool_result","content":"a\nb"}]}}`,
+		`T5 {"type":"assistant","message":{"content":[{"type":"text","text":"done"}]}}`,
+		`T6 {"type":"result","subtype":"success"}`,
+		`T7 claude: subtype=success cost=$0.10 permission_denials=0 turns=2`,
+	}, "\n") + "\n"
+	var clean bytes.Buffer
+	if err := Show(context.Background(), &clean, strings.NewReader(log), false, false, 0); err != nil {
+		t.Fatal(err)
+	}
+	want := "T1 claude session started s1\nT3 claude Bash List files\nT5 claude message\nT7 claude: subtype=success cost=$0.10 permission_denials=0 turns=2\n"
+	if clean.String() != want {
+		t.Errorf("clean log =\n%s\nwant\n%s", clean.String(), want)
+	}
+}
+
 func TestWriterFlushKeepsAnUnterminatedLastLine(t *testing.T) {
 	var raw bytes.Buffer
 	w := &Writer{W: &raw}

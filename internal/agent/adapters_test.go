@@ -57,9 +57,58 @@ func TestClaudeStart(t *testing.T) {
 	}
 }
 
+func TestClaudeStreamReachesTheLog(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "/cfg")
+	exec := func(_ context.Context, c Command) error {
+		if !slices.Contains(c.Args, "stream-json") || !slices.Contains(c.Args, "--verbose") {
+			t.Errorf("argv = %q", c.Args)
+		}
+		io.WriteString(c.Stdout, "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"sid-1\"}\n")
+		io.WriteString(c.Stdout, "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Bash\"}]}}\n")
+		fmt.Fprintf(c.Stdout, "{\"type\":\"result\",\"subtype\":\"success\",\"structured_output\":%s,\"total_cost_usd\":1.5,\"num_turns\":7}\n", prOpened)
+		io.WriteString(c.Stdout, "{\"type\":\"system\",\"subtype\":\"task_summary\"}\n")
+		return nil
+	}
+	var log bytes.Buffer
+	c := Claude{Bin: "claude", Exec: exec, NewSessionID: func() string { return "sid-1" }}
+	turn, err := c.Start(context.Background(), StartInput{Worktree: "/home/u/.local/wt/1-fix", Log: &log}, func(task.Session) {})
+	if err != nil || turn.Outcome.Status != PROpened || turn.Usage.ClaudeCostUSD != 1.5 {
+		t.Fatalf("turn = %+v, %v", turn, err)
+	}
+	for _, want := range []string{
+		"claude: transcript /cfg/projects/-home-u--local-wt-1-fix/sid-1.jsonl\n",
+		`"name":"Bash"`,
+		`"subtype":"task_summary"`,
+		"cost=$1.50 permission_denials=0 turns=7",
+	} {
+		if !strings.Contains(log.String(), want) {
+			t.Errorf("log missing %q:\n%s", want, log.String())
+		}
+	}
+}
+
+func TestClaudeStreamWithoutResultHasNoSession(t *testing.T) {
+	exec := func(_ context.Context, c Command) error {
+		io.WriteString(c.Stdout, "{\"type\":\"system\",\"subtype\":\"init\"}\n")
+		return errors.New("signal: terminated")
+	}
+	_, err := Claude{Bin: "claude", Exec: exec}.Resume(context.Background(), task.Session{Agent: task.Claude, ID: "sid-1"}, StartInput{Worktree: "/wt"})
+	if !errors.Is(err, ErrNoSession) {
+		t.Errorf("err = %v", err)
+	}
+	gone := func(_ context.Context, c Command) error {
+		io.WriteString(c.Stdout, `{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":0,"total_cost_usd":0}`)
+		return errors.New("exit status 1")
+	}
+	_, err = Claude{Bin: "claude", Exec: gone}.Resume(context.Background(), task.Session{Agent: task.Claude, ID: "gone"}, StartInput{Worktree: "/wt"})
+	if !errors.Is(err, ErrNoSession) {
+		t.Errorf("missing session err = %v", err)
+	}
+}
+
 func TestClaudeStartWithoutStructuredOutputFails(t *testing.T) {
 	exec := func(_ context.Context, c Command) error {
-		io.WriteString(c.Stdout, `{"subtype":"error_max_turns","is_error":true,"session_id":"sid","result":"ran out of turns"}`)
+		io.WriteString(c.Stdout, `{"type":"result","subtype":"error_max_turns","is_error":true,"session_id":"sid","result":"ran out of turns"}`)
 		return errors.New("exit status 1")
 	}
 	var recorded task.Session
@@ -207,7 +256,7 @@ func TestReviewAdaptersAreReadOnlyAndDisposable(t *testing.T) {
 	var got Command
 	claudeExec := func(_ context.Context, c Command) error {
 		got = c
-		fmt.Fprintf(c.Stdout, `{"subtype":"success","is_error":false,"session_id":"r","structured_output":%s}`, reviewJSON)
+		fmt.Fprintf(c.Stdout, `{"type":"result","subtype":"success","is_error":false,"session_id":"r","structured_output":%s}`, reviewJSON)
 		return nil
 	}
 	r, err := Claude{Bin: "claude", Model: "opus", ReviewModel: "sonnet", Exec: claudeExec}.Review(context.Background(), StartInput{Worktree: "/wt", Prompt: "review"})

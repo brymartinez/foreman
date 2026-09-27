@@ -132,6 +132,26 @@ func TestShowCI(t *testing.T) {
 	}
 }
 
+func TestShowClaudeTranscript(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "/cfg")
+	var buf bytes.Buffer
+	Show(&buf, &task.Record{
+		Key: task.Key{Repo: "a/b", Number: 7}, State: task.Failed,
+		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude, ID: "sid"}, Reviewer: task.Codex, Worktree: "/w/7-x"},
+	})
+	if !strings.Contains(buf.String(), "Transcript    /cfg/projects/-w-7-x/sid.jsonl\n") {
+		t.Errorf("missing transcript in:\n%s", buf.String())
+	}
+	buf.Reset()
+	Show(&buf, &task.Record{
+		Key: task.Key{Repo: "a/b", Number: 7}, State: task.Failed,
+		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex, ID: "th"}, Reviewer: task.Claude, Worktree: "/w/7-x"},
+	})
+	if strings.Contains(buf.String(), "Transcript") {
+		t.Errorf("codex task shows a transcript:\n%s", buf.String())
+	}
+}
+
 func TestShowUndelegated(t *testing.T) {
 	var buf bytes.Buffer
 	Show(&buf, &task.Record{Key: task.Key{Repo: "a/b", Number: 1}, Title: "T", URL: "u", State: task.Discovered})

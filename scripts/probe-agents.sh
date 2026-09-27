@@ -20,15 +20,22 @@ resume_prompt='Decision: A. Report status "failed" with summary "probe complete"
 
 echo "# claude $(claude --version)"
 sid="$(uuidgen | tr 'A-Z' 'a-z')"
-claude -p "$blocked_prompt" --session-id "$sid" --output-format json --json-schema "$(cat "$schema")" \
-  --permission-mode acceptEdits --model haiku </dev/null >c1.json 2>/dev/null
+claude -p "$blocked_prompt" --session-id "$sid" --output-format stream-json --verbose --json-schema "$(cat "$schema")" \
+  --permission-mode acceptEdits --model haiku </dev/null >c1.jsonl 2>/dev/null
+jq -c 'select(.type=="result")' c1.jsonl >c1.json
+check "claude stream-json has one result event" "$(wc -l <c1.json | tr -d ' ')" 1
 check "claude honors --session-id" "$(jq -r .session_id c1.json)" "$sid"
 check "claude structured_output status" "$(jq -r .structured_output.status c1.json)" blocked
 check "claude structured_output has questions" "$(jq -r '.structured_output.questions | length' c1.json)" 1
-claude -p "$resume_prompt" --resume "$sid" --output-format json --json-schema "$(cat "$schema")" \
-  --permission-mode acceptEdits --model haiku </dev/null >c2.json 2>/dev/null
+claude -p "$resume_prompt" --resume "$sid" --output-format stream-json --verbose --json-schema "$(cat "$schema")" \
+  --permission-mode acceptEdits --model haiku </dev/null 2>/dev/null | jq -c 'select(.type=="result")' >c2.json
 check "claude resume keeps session" "$(jq -r .session_id c2.json)" "$sid"
 check "claude resume structured status" "$(jq -r .structured_output.status c2.json)" failed
+check "claude keeps the transcript under the cwd's project dir" \
+  "$(test -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$(pwd -P | sed 's/[^a-zA-Z0-9]/-/g')/$sid.jsonl" && echo yes || echo no)" yes
+claude -p hi --resume "$(uuidgen | tr 'A-Z' 'a-z')" --output-format stream-json --verbose --model haiku </dev/null 2>/dev/null \
+  | jq -c 'select(.type=="result")' >c5.json || true
+check "claude missing session: error_during_execution, no turns" "$(jq -r '"\(.subtype) \(.num_turns)"' c5.json)" "error_during_execution 0"
 claude -p 'Run the shell command: touch allowed.txt. Then reply DONE.' --permission-mode acceptEdits \
   --allowedTools Bash --output-format json --model haiku </dev/null >c3.json 2>/dev/null
 check "claude headless Bash via --allowedTools" "$(test -f allowed.txt && echo yes || echo no)" yes

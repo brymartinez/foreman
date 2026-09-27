@@ -1,12 +1,16 @@
 package agent
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/brymartinez/foreman/internal/task"
@@ -45,10 +49,13 @@ func (c Claude) Resume(ctx context.Context, s task.Session, in StartInput) (Turn
 }
 
 func (c Claude) run(ctx context.Context, in StartInput, session task.Session, sessionFlag string) (Turn, error) {
+	if in.Log != nil {
+		fmt.Fprintf(in.Log, "claude: transcript %s\n", ClaudeTranscript(in.Worktree, session.ID))
+	}
 	args := []string{
 		"-p", in.Prompt,
 		sessionFlag, session.ID,
-		"--output-format", "json",
+		"--output-format", "stream-json", "--verbose",
 		"--json-schema", string(OutcomeSchema),
 		"--permission-mode", "acceptEdits",
 		"--allowedTools=" + strings.Join(ImplementTools, ","),
@@ -76,7 +83,7 @@ func (c Claude) Review(ctx context.Context, in StartInput) (ReviewOutcome, error
 	args := []string{
 		"-p", in.Prompt,
 		"--no-session-persistence",
-		"--output-format", "json",
+		"--output-format", "stream-json", "--verbose",
 		"--json-schema", string(ReviewSchema),
 		"--permission-mode", "dontAsk",
 		"--allowedTools=" + strings.Join(ReviewTools, ","),
@@ -93,23 +100,70 @@ func (c Claude) Review(ctx context.Context, in StartInput) (ReviewOutcome, error
 	return out, err
 }
 
-// exec runs claude -p and returns its structured_output.
+// exec runs claude -p, copies its stream-json events to the log, and returns the
+// result event's structured_output.
 func (c Claude) exec(ctx context.Context, in StartInput, args []string) (json.RawMessage, float64, error) {
 	if c.Model != "" {
 		args = append(args, "--model", c.Model)
 	}
-	var stdout bytes.Buffer
-	runErr := c.Exec(ctx, Command{Name: c.Bin, Args: args, Dir: in.Worktree, Stdout: &stdout, Stderr: logOrDiscard(in.Log)})
-	if len(bytes.TrimSpace(stdout.Bytes())) == 0 {
+	pr, pw := io.Pipe()
+	var result []byte
+	done := make(chan struct{})
+	go func() { result = consumeClaudeStream(pr, logOrDiscard(in.Log)); close(done) }()
+	runErr := c.Exec(ctx, Command{Name: c.Bin, Args: args, Dir: in.Worktree, Stdout: pw, Stderr: logOrDiscard(in.Log)})
+	pw.Close()
+	<-done
+	if result == nil {
 		return nil, 0, fmt.Errorf("claude printed no result (%v): %w", runErr, ErrNoSession)
 	}
-	raw, err := parseClaudeResult(stdout.Bytes(), in.Log)
+	var r claudeResult
+	_ = json.Unmarshal(result, &r)
+	// A resume of a missing session reports error_during_execution without a turn.
+	if r.IsError && r.NumTurns == 0 && r.Subtype == "error_during_execution" {
+		return nil, 0, fmt.Errorf("claude ran no turn (%v): %w", runErr, ErrNoSession)
+	}
+	raw, err := parseClaudeResult(result, in.Log)
 	if err != nil && runErr != nil {
 		return nil, 0, fmt.Errorf("claude exited: %w (%v)", runErr, err)
 	}
-	var result claudeResult
-	_ = json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &result)
-	return raw, result.TotalCostUSD, err
+	return raw, r.TotalCostUSD, err
+}
+
+// consumeClaudeStream copies each event line to the log and returns the last result
+// event. Other events can follow the result, so it reads to the end.
+func consumeClaudeStream(r io.Reader, log io.Writer) []byte {
+	var result []byte
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 64*1024), 16*1024*1024)
+	for sc.Scan() {
+		line := bytes.TrimSpace(sc.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		fmt.Fprintf(log, "%s\n", line)
+		var ev struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(line, &ev) == nil && ev.Type == "result" {
+			result = bytes.Clone(line)
+		}
+	}
+	_, _ = io.Copy(io.Discard, r)
+	return result
+}
+
+var transcriptUnsafe = regexp.MustCompile(`[^a-zA-Z0-9]`)
+
+// ClaudeTranscript is where Claude Code keeps a session's full transcript: the
+// project directory is the cwd with every non-alphanumeric character replaced by "-".
+// It holds every tool call, its output, and per-turn token usage.
+func ClaudeTranscript(worktree, sessionID string) string {
+	root := os.Getenv("CLAUDE_CONFIG_DIR")
+	if root == "" {
+		home, _ := os.UserHomeDir()
+		root = filepath.Join(home, ".claude")
+	}
+	return filepath.Join(root, "projects", transcriptUnsafe.ReplaceAllString(worktree, "-"), sessionID+".jsonl")
 }
 
 type claudeResult struct {
@@ -120,15 +174,16 @@ type claudeResult struct {
 	StructuredOutput  json.RawMessage   `json:"structured_output"`
 	PermissionDenials []json.RawMessage `json:"permission_denials"`
 	TotalCostUSD      float64           `json:"total_cost_usd"`
+	NumTurns          int               `json:"num_turns"`
 }
 
-func parseClaudeResult(stdout []byte, log io.Writer) (json.RawMessage, error) {
+func parseClaudeResult(result []byte, log io.Writer) (json.RawMessage, error) {
 	var r claudeResult
-	if err := json.Unmarshal(bytes.TrimSpace(stdout), &r); err != nil {
+	if err := json.Unmarshal(result, &r); err != nil {
 		return nil, fmt.Errorf("claude output is not a JSON result: %w", err)
 	}
 	if log != nil {
-		fmt.Fprintf(log, "claude: subtype=%s cost=$%.2f permission_denials=%d\n", r.Subtype, r.TotalCostUSD, len(r.PermissionDenials))
+		fmt.Fprintf(log, "claude: subtype=%s cost=$%.2f permission_denials=%d turns=%d\n", r.Subtype, r.TotalCostUSD, len(r.PermissionDenials), r.NumTurns)
 		for _, d := range r.PermissionDenials {
 			fmt.Fprintf(log, "claude: denied %s\n", d)
 		}

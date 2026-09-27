@@ -10,6 +10,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/brymartinez/foreman/internal/agent"
 	"github.com/brymartinez/foreman/internal/app"
 	"github.com/brymartinez/foreman/internal/config"
 	"github.com/brymartinez/foreman/internal/task"
@@ -254,6 +255,9 @@ func Show(w io.Writer, r *task.Record) {
 			row("Worktree", fmt.Sprintf("%s (removed %s)", d.Worktree, d.WorktreeRemovedAt.Local().Format(time.DateTime)))
 		}
 		row("Runner log", d.RunnerLog)
+		if d.Implementer.Agent == task.Claude && d.Implementer.ID != "" {
+			row("Transcript", agent.ClaudeTranscript(d.Worktree, d.Implementer.ID))
+		}
 		switch {
 		case d.PR > 0 && d.PRURL != "":
 			row("PR", fmt.Sprintf("#%d · %s", d.PR, d.PRURL))

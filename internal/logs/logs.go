@@ -98,20 +98,55 @@ func cleanLine(line string) string {
 		return line
 	}
 	var event struct {
-		Type     string `json:"type"`
-		ThreadID string `json:"thread_id"`
+		Type      string `json:"type"`
+		Subtype   string `json:"subtype"`
+		ThreadID  string `json:"thread_id"`
+		SessionID string `json:"session_id"`
+		Message   struct {
+			Content []struct {
+				Type  string `json:"type"`
+				Name  string `json:"name"`
+				Input struct {
+					Description string `json:"description"`
+					FilePath    string `json:"file_path"`
+				} `json:"input"`
+			} `json:"content"`
+		} `json:"message"`
 	}
-	if json.Unmarshal([]byte(parts[1]), &event) == nil && event.Type != "" {
-		switch event.Type {
-		case "thread.started":
-			return parts[0] + " codex  thread started " + event.ThreadID
-		case "turn.completed":
-			return ""
-		case "turn.failed":
-			return parts[0] + " codex  turn failed"
-		default:
-			return parts[0] + " codex  " + strings.TrimPrefix(event.Type, "item.")
+	if json.Unmarshal([]byte(parts[1]), &event) != nil || event.Type == "" {
+		return line
+	}
+	switch event.Type {
+	case "system":
+		if event.Subtype == "init" {
+			return parts[0] + " claude session started " + event.SessionID
 		}
+		return ""
+	case "assistant":
+		var out []string
+		for _, c := range event.Message.Content {
+			switch c.Type {
+			case "tool_use":
+				detail := c.Input.Description
+				if detail == "" {
+					detail = c.Input.FilePath
+				}
+				out = append(out, strings.TrimSpace(parts[0]+" claude "+c.Name+" "+detail))
+			case "text":
+				out = append(out, parts[0]+" claude message")
+			}
+		}
+		return strings.Join(out, "\n")
+	case "user", "result", "rate_limit_event", "stream_event":
+		// Tool results stay in the raw log; the adapter logs the result's summary.
+		return ""
+	case "thread.started":
+		return parts[0] + " codex  thread started " + event.ThreadID
+	case "turn.completed":
+		return ""
+	case "turn.failed":
+		return parts[0] + " codex  turn failed"
+	default:
+		return parts[0] + " codex  " + strings.TrimPrefix(event.Type, "item.")
 	}
-	return line
 }

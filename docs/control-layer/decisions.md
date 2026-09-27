@@ -1176,3 +1176,38 @@ Entry format:
 - **Decision.** `budgets.implementer_usd` and `budgets.reviewer_usd` stay as they are.
   The README and `config --show` say they cap Claude turns only and that Codex has no
   cap. The user chose this over a per-turn time limit for both agents.
+
+## D87. Claude's event stream goes to the runner log
+
+- Date: 2026-09-27. User request, after a $10 Claude run on ridezoomo/armada#351
+  left one summary line in its runner log. Amends D57.
+- **Context.** Claude ran with `--output-format json`, which prints only the final
+  result, so the runner log couldn't show where the time or money went. Codex's JSONL
+  events already reach the log.
+- **Decision.**
+  - Every Claude turn, implementation and review, runs with `--output-format
+    stream-json --verbose`. The adapter copies each event line to the runner log and
+    reads the outcome from the `result` event. It reads to the end of the stream,
+    because events can follow `result`.
+  - The summary line adds `turns=<num_turns>`.
+  - A stream with no `result` event is `ErrNoSession`, like the empty stdout before.
+    Stream mode reports a resume of a missing session as a `result` with
+    `error_during_execution` and `num_turns` 0, so that's `ErrNoSession` too and the
+    fresh-turn fallback (D28) still applies.
+  - `foreman logs` summarizes Claude events as `claude session started`, `claude
+    <tool> <description>`, and `claude message`. It hides tool results, thinking, and
+    the raw `result` event. `--raw` keeps everything.
+- Verified by `scripts/probe-agents.sh` against claude 2.1.283.
+
+## D88. foreman points to Claude's own transcript
+
+- Date: 2026-09-27. User request, alongside D87.
+- **Context.** Claude Code already keeps each session's full transcript, including
+  per-turn token usage, at `~/.claude/projects/<cwd with non-alphanumerics as
+  "-">/<session>.jsonl` (`$CLAUDE_CONFIG_DIR` replaces `~/.claude`). Nothing in
+  foreman led there.
+- **Decision.** `agent.ClaudeTranscript` computes the path. Each implementation turn
+  logs `claude: transcript <path>`, and `foreman show` prints a Transcript row for
+  Claude tasks. Reviews have no transcript (`--no-session-persistence`), so the
+  stream in the runner log is their only record. foreman only computes the path; it
+  doesn't copy or read the transcript.
