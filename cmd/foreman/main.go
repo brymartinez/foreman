@@ -70,8 +70,8 @@ func run(argv []string) int {
 		Repositories: github.New(),
 		Worktrees:    worktree.Git{},
 		Agents: map[task.Agent]app.AgentAdapter{
-			task.Claude: agent.Claude{Bin: cfg.Claude.Command, Model: cfg.Claude.Model, Exec: agent.RunCommand},
-			task.Codex:  agent.Codex{Bin: cfg.Codex.Command, Model: cfg.Codex.Model, Exec: agent.RunCommand},
+			task.Claude: agent.Claude{Bin: cfg.Claude.Command, Model: cfg.Claude.Model, ReviewModel: cfg.Claude.ReviewModel, Exec: agent.RunCommand},
+			task.Codex:  agent.Codex{Bin: cfg.Codex.Command, Model: cfg.Codex.Model, ReviewModel: cfg.Codex.ReviewModel, Exec: agent.RunCommand},
 		},
 		Runners:              runner.Processes{LogDir: cfg.LogDir},
 		Stages:               stages.Files{GlobalDir: cfg.StagesDir},
@@ -300,6 +300,9 @@ func stageConfig(ctx context.Context, cfg config.Config) int {
 		}
 		if r.Instructions, r.Err = files.Resolve(root, st); r.Err != nil {
 			r.Instructions.Stage, code = st, 1
+		}
+		if r.GlobalMissing() {
+			code = 1
 		}
 		reports = append(reports, r)
 	}

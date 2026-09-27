@@ -290,7 +290,7 @@ repositories_dir: ~/.local/share/foreman/repositories # inbox source checkouts
 log_dir: ~/.local/share/foreman/logs
 review_rounds: 3                     # reviewer passes over the whole PR per review
 fix_rounds: 3                        # fix and re-review cycles before foreman asks you
-budgets:
+budgets:                             # Claude only: Codex reports no cost, so it has no cap
   implementer_usd: 3.00              # Claude maximum per implementation turn
   reviewer_usd: 1.00                 # Claude maximum per review turn
 notifications:
@@ -298,9 +298,11 @@ notifications:
 claude:
   command: claude
   model: claude-opus-5               # "" uses the claude CLI's default
+  review_model: ""                   # "" reviews with model
 codex:
   command: codex
   model: gpt-6-sol                   # "" uses the codex CLI's default
+  review_model: ""                   # "" reviews with model
 ignore_repositories: []              # exact owner/name repositories excluded from inbox
 cleanup:
   on_done: true                   # inbox removes DONE tasks' worktrees

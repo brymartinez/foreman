@@ -390,13 +390,25 @@ type StageReport struct {
 // StageSources prints where each stage's instructions come from. home shortens paths
 // to ~ and repoRoot makes repo paths relative.
 func StageSources(w io.Writer, reports []StageReport, home, repoRoot string) {
+	missing := false
 	for i, r := range reports {
 		if i > 0 {
 			fmt.Fprintln(w)
 		}
 		stageHeader(w, r, home, repoRoot)
+		missing = missing || r.GlobalMissing()
 	}
 	fmt.Fprintln(w, "\nTasks read .foreman/ from their worktree: the version committed on the base branch.")
+	if missing {
+		fmt.Fprintln(w, missingGlobalHint)
+	}
+}
+
+const missingGlobalHint = "Foreman won't run until every global stage file exists. Run `make config` in the foreman repository, or copy its defaults/stages/*.md into the stages directory."
+
+// GlobalMissing reports a stage whose required global file isn't there (D73).
+func (r StageReport) GlobalMissing() bool {
+	return r.Err == nil && r.Instructions.GlobalPath == ""
 }
 
 // Config prints the resolved, non-secret configuration used by foreman.
@@ -409,14 +421,16 @@ func Config(w io.Writer, c config.Config) {
 	fmt.Fprintf(w, "Stages directory: %s\n", c.StagesDir)
 	fmt.Fprintf(w, "Review rounds: %d passes per review\n", orThree(c.ReviewRounds))
 	fmt.Fprintf(w, "Fix rounds: %d before asking you\n", orThree(c.FixRounds))
-	fmt.Fprintf(w, "Implementer budget: $%.2f per turn\n", c.Budgets.ImplementerUSD)
-	fmt.Fprintf(w, "Reviewer budget: $%.2f per turn\n", c.Budgets.ReviewerUSD)
+	fmt.Fprintf(w, "Implementer budget: $%.2f per Claude turn (Codex has no cap)\n", c.Budgets.ImplementerUSD)
+	fmt.Fprintf(w, "Reviewer budget: $%.2f per Claude turn (Codex has no cap)\n", c.Budgets.ReviewerUSD)
 	fmt.Fprintf(w, "Notifications: %t\n", c.Notifications.Enabled)
 	fmt.Fprintf(w, "Ignore repositories: %s\n", repoList(c.IgnoredRepos))
 	fmt.Fprintf(w, "Claude command: %s\n", c.Claude.Command)
 	fmt.Fprintf(w, "Claude model: %s\n", orDefault(c.Claude.Model, "CLI default"))
+	fmt.Fprintf(w, "Claude review model: %s\n", orDefault(c.Claude.ReviewModel, "same as model"))
 	fmt.Fprintf(w, "Codex command: %s\n", c.Codex.Command)
 	fmt.Fprintf(w, "Codex model: %s\n", orDefault(c.Codex.Model, "CLI default"))
+	fmt.Fprintf(w, "Codex review model: %s\n", orDefault(c.Codex.ReviewModel, "same as model"))
 	fmt.Fprintf(w, "Cleanup on done: %t\n", c.Cleanup.OnDone)
 	fmt.Fprintf(w, "Delete merged branch: %t\n", c.Cleanup.DeleteMergedBranch)
 }
@@ -452,11 +466,11 @@ func StageContent(w io.Writer, r StageReport, home, repoRoot string) {
 	if r.Err != nil {
 		return
 	}
-	content := r.Instructions.Content()
-	if content == "" {
-		content = "(no instructions; agents get only their own CLAUDE.md or AGENTS.md)"
+	if r.GlobalMissing() {
+		fmt.Fprintf(w, "\n%s\n", missingGlobalHint)
+		return
 	}
-	fmt.Fprintf(w, "\n%s\n", content)
+	fmt.Fprintf(w, "\n%s\n", r.Instructions.Content())
 }
 
 func stageHeader(w io.Writer, r StageReport, home, repoRoot string) {
@@ -465,7 +479,11 @@ func stageHeader(w io.Writer, r StageReport, home, repoRoot string) {
 		fmt.Fprintf(w, "  error:  %v\n", r.Err)
 		return
 	}
-	fmt.Fprintf(w, "  global: %s\n", source(r.Instructions.GlobalPath, r.GlobalWhere, home, ""))
+	if r.GlobalMissing() {
+		fmt.Fprintf(w, "  global: MISSING, required (%s)\n", displayPath(r.GlobalWhere, home, ""))
+	} else {
+		fmt.Fprintf(w, "  global: %s\n", displayPath(r.Instructions.GlobalPath, home, ""))
+	}
 	if r.RepoWhere == "" {
 		fmt.Fprintf(w, "  repo:   not in a git repository\n")
 		return

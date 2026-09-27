@@ -14,8 +14,10 @@ import (
 
 // Claude drives `claude -p`.
 type Claude struct {
-	Bin          string
-	Model        string
+	Bin   string
+	Model string
+	// ReviewModel replaces Model for reviews; "" keeps Model (D85).
+	ReviewModel  string
 	Exec         Exec
 	NewSessionID func() string
 }
@@ -68,6 +70,9 @@ var ReviewTools = []string{"Read", "Grep", "Glob", "Bash(git diff:*)", "Bash(git
 
 // Review runs a disposable, read-only session.
 func (c Claude) Review(ctx context.Context, in StartInput) (ReviewOutcome, error) {
+	if c.ReviewModel != "" {
+		c.Model = c.ReviewModel
+	}
 	args := []string{
 		"-p", in.Prompt,
 		"--no-session-persistence",

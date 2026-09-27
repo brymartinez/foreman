@@ -262,6 +262,7 @@ func TestStageSources(t *testing.T) {
 		{Instructions: task.StageInstructions{Stage: task.StageImplement, GlobalPath: g + "implement.md", RepoPath: r + "implement.md"}, GlobalWhere: g + "implement.md", RepoWhere: r + "implement.md"},
 		{Instructions: task.StageInstructions{Stage: task.StageReview, GlobalPath: g + "review.md"}, GlobalWhere: g + "review.md", RepoWhere: r + "review.md"},
 		{Instructions: task.StageInstructions{Stage: task.StagePR}, Err: errors.New("stage instructions /x/pr.md: permission denied")},
+		{Instructions: task.StageInstructions{Stage: task.StagePR}, GlobalWhere: g + "pr.md", RepoWhere: r + "pr.md"},
 	}, "/home/u", "/src/widgets")
 	want := `IMPLEMENT
   global: ~/.config/foreman/stages/implement.md
@@ -274,8 +275,12 @@ REVIEW
 PR
   error:  stage instructions /x/pr.md: permission denied
 
+PR
+  global: MISSING, required (~/.config/foreman/stages/pr.md)
+  repo:   not configured (.foreman/pr.md)
+
 Tasks read .foreman/ from their worktree: the version committed on the base branch.
-`
+` + missingGlobalHint + "\n"
 	if buf.String() != want {
 		t.Errorf("got:\n%s\nwant:\n%s", buf.String(), want)
 	}
@@ -290,7 +295,7 @@ func TestStageContent(t *testing.T) {
 	}
 	buf.Reset()
 	StageContent(&buf, StageReport{Instructions: task.StageInstructions{Stage: task.StagePR}, GlobalWhere: "/g/pr.md"}, "", "")
-	if want := "PR\n  global: not configured (/g/pr.md)\n  repo:   not in a git repository\n\n(no instructions; agents get only their own CLAUDE.md or AGENTS.md)\n"; buf.String() != want {
+	if want := "PR\n  global: MISSING, required (/g/pr.md)\n  repo:   not in a git repository\n\n" + missingGlobalHint + "\n"; buf.String() != want {
 		t.Errorf("got:\n%s\nwant:\n%s", buf.String(), want)
 	}
 }

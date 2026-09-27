@@ -176,7 +176,8 @@ scenario_runner() {
 	check "the prompt carries the implement stage file" contains "$state/prompt.txt" "Add or update tests when behavior changes."
 	rm "$sandbox/stages/pr.md"
 	check "a missing stage file stops foreman" bash -c "cd '$FOREMAN_CWD' && ! '$work/foreman' status 2>'$sandbox/err.txt' && grep -qF 'stages/pr.md' '$sandbox/err.txt'"
-	check "config still runs without it" foreman config --stages
+	check "config --stages exits nonzero" bash -c "cd '$FOREMAN_CWD' && ! '$work/foreman' config --stages >'$sandbox/stages.txt'"
+	check "config --stages names it as missing" contains "$sandbox/stages.txt" "MISSING, required"
 }
 
 scenario_notify() {

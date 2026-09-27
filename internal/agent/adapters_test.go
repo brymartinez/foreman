@@ -210,9 +210,12 @@ func TestReviewAdaptersAreReadOnlyAndDisposable(t *testing.T) {
 		fmt.Fprintf(c.Stdout, `{"subtype":"success","is_error":false,"session_id":"r","structured_output":%s}`, reviewJSON)
 		return nil
 	}
-	r, err := Claude{Bin: "claude", Exec: claudeExec}.Review(context.Background(), StartInput{Worktree: "/wt", Prompt: "review"})
+	r, err := Claude{Bin: "claude", Model: "opus", ReviewModel: "sonnet", Exec: claudeExec}.Review(context.Background(), StartInput{Worktree: "/wt", Prompt: "review"})
 	if err != nil || r.Clean || len(r.Findings) != 1 || r.Findings[0].Line != 40 {
 		t.Fatalf("claude review: %+v %v", r, err)
+	}
+	if argValue(got.Args, "--model") != "sonnet" {
+		t.Errorf("claude review model = %q, want the review model", argValue(got.Args, "--model"))
 	}
 	if argValue(got.Args, "--permission-mode") != "dontAsk" || !slices.Contains(got.Args, "--no-session-persistence") ||
 		argValue(got.Args, "--json-schema") != string(ReviewSchema) || slices.Contains(got.Args, "--allowedTools=Bash") ||
@@ -229,9 +232,12 @@ func TestReviewAdaptersAreReadOnlyAndDisposable(t *testing.T) {
 		io.WriteString(c.Stdout, "{\"type\":\"thread.started\",\"thread_id\":\"r1\"}\n")
 		return os.WriteFile(argValue(c.Args, "-o"), []byte(reviewJSON), 0o600)
 	}
-	r, err = Codex{Bin: "codex", Exec: codexExec}.Review(context.Background(), StartInput{Worktree: "/wt", Prompt: "review"})
+	r, err = Codex{Bin: "codex", Model: "gpt-6-sol", Exec: codexExec}.Review(context.Background(), StartInput{Worktree: "/wt", Prompt: "review"})
 	if err != nil || len(r.Findings) != 1 {
 		t.Fatalf("codex review: %+v %v", r, err)
+	}
+	if argValue(got.Args, "-m") != "gpt-6-sol" {
+		t.Errorf("codex review without review_model must use model: %q", argValue(got.Args, "-m"))
 	}
 	if argValue(got.Args, "-s") != "read-only" || !slices.Contains(got.Args, "--ephemeral") || slices.Contains(got.Args, "sandbox_workspace_write.network_access=true") {
 		t.Errorf("codex review argv = %q", got.Args)

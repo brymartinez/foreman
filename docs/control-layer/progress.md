@@ -496,6 +496,8 @@ what it replaced. Current summary:
   (amends D23). Default models are claude-opus-5 and gpt-6-sol.
   D82 (amends D23). Claude's tool list is fixed, not configured.
   D83. Round settings load with their defaults.
+- D84. config --stages reports missing global files as required. D85 (amends
+  D81). Per-agent review models. D86. The dollar budgets are labeled Claude-only.
 
 ## Next stage
 

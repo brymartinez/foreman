@@ -52,13 +52,15 @@ type Cleanup struct {
 }
 
 type Claude struct {
-	Command string `yaml:"command"`
-	Model   string `yaml:"model"`
+	Command     string `yaml:"command"`
+	Model       string `yaml:"model"`
+	ReviewModel string `yaml:"review_model"` // "" reviews with Model
 }
 
 type Codex struct {
-	Command string `yaml:"command"`
-	Model   string `yaml:"model"`
+	Command     string `yaml:"command"`
+	Model       string `yaml:"model"`
+	ReviewModel string `yaml:"review_model"` // "" reviews with Model
 }
 
 // Load starts from defaults, overlays the config file ($FOREMAN_CONFIG or

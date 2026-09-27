@@ -18,7 +18,9 @@ import (
 type Codex struct {
 	Bin   string
 	Model string
-	Exec  Exec
+	// ReviewModel replaces Model for reviews; "" keeps Model (D85).
+	ReviewModel string
+	Exec        Exec
 }
 
 func (Codex) Name() task.Agent { return task.Codex }
@@ -52,6 +54,9 @@ func (c Codex) Resume(ctx context.Context, s task.Session, in StartInput) (Turn,
 
 // Review runs a disposable (--ephemeral) session in the read-only sandbox.
 func (c Codex) Review(ctx context.Context, in StartInput) (ReviewOutcome, error) {
+	if c.ReviewModel != "" {
+		c.Model = c.ReviewModel
+	}
 	_, raw, usage, err := c.exec(ctx, in, ReviewSchema, func(schema, last string) []string {
 		return []string{
 			"exec", "--json", "--ephemeral",

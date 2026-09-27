@@ -1153,3 +1153,26 @@ Entry format:
 - **Decision.** `config.Load` starts `review_rounds` and `fix_rounds` at 3, so the file
   `config --edit` writes on first use shows the real values instead of 0. An explicit
   0 still means the default.
+
+## D84. config --stages reports a missing global file as required
+
+- Date: 2026-09-27. Found after D73; fixed on the user's request.
+- **Decision.** A missing global stage file shows as `MISSING, required (<path>)`, the
+  report ends with how to install the defaults, and `config --stages` exits 1. D73 made
+  the files required but left this report calling them optional.
+
+## D85. Each agent can review with its own model
+
+- Date: 2026-09-27. User request. Amends D81.
+- **Decision.** `claude.review_model` and `codex.review_model` set the model for
+  reviews. Empty, the default, reviews with `model`. Implementation turns always use
+  `model`.
+
+## D86. The dollar budgets are labeled Claude-only
+
+- Date: 2026-09-27. User decision.
+- **Context.** Codex reports no cost, and its token counts arrive only when a turn
+  ends, so foreman can't stop a Codex turn at a dollar or token limit.
+- **Decision.** `budgets.implementer_usd` and `budgets.reviewer_usd` stay as they are.
+  The README and `config --show` say they cap Claude turns only and that Codex has no
+  cap. The user chose this over a per-turn time limit for both agents.
