@@ -453,3 +453,26 @@ func TestPlanCommentFitsGitHubsLimit(t *testing.T) {
 		t.Errorf("body is %d characters", n)
 	}
 }
+
+func TestCodexPlansAndClaudeReviewsAgainstThePRD(t *testing.T) {
+	f := newFixture()
+	req := startReq(t)
+	req.Agent = task.Codex
+	key := started(t, f, req)
+	planned := plannedTurn("th-1")
+	planned.Session.Agent = task.Codex
+	f.codex.turns = []agent.Turn{planned, {Session: task.Session{Agent: task.Codex, ID: "th-1"}, Outcome: prTurn("").Outcome}}
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Reviewing || !got.PlanPosted() {
+		t.Fatalf("state %s plan %+v", got.State, got.Plan)
+	}
+	if !strings.Contains(f.codex.prompt, "## Plan first") || len(f.codex.resumed) != 1 || !strings.HasPrefix(f.codex.resumed[0], "th-1: foreman posted your documents") {
+		t.Errorf("codex must plan, then resume its thread to implement: resumed %q", f.codex.resumed)
+	}
+	if len(f.claude.reviewed) != 1 || !strings.Contains(f.claude.reviewed[0], "R1. Retry 5xx.") {
+		t.Errorf("claude's review must carry the PRD: %q", f.claude.reviewed)
+	}
+}
