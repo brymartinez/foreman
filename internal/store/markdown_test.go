@@ -35,6 +35,10 @@ func delegated() *task.Record {
 			PRHead:            "beef002",
 		},
 		Validation: []task.Check{{Command: "go test ./...", Passed: true}, {Command: "golangci-lint run", Passed: false}},
+		Plan: []task.PlanComment{
+			{Doc: task.Analysis, CommentID: 3301, URL: "https://github.com/ridezoomo/armada-backend/issues/825#issuecomment-3301"},
+			{Doc: task.ImplementationPlan, CommentID: 3304, URL: "https://github.com/ridezoomo/armada-backend/issues/825#issuecomment-3304"},
+		},
 		Reviews: []task.Review{
 			{Round: 1, Reviewer: task.Codex, PR: 912, Summary: "one bug", At: time.Date(2026, 9, 24, 18, 0, 0, 0, time.UTC),
 				Findings: []task.Finding{{Severity: "blocking", File: "retry.go", Line: 40, Summary: "4xx retried", Detail: "guard"}}},

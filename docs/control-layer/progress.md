@@ -2,7 +2,7 @@
 
 ## Current stage
 
-Stage 12 (inbox change visibility and build identity) is complete.
+Stage 13 (planning documents on the issue) is complete.
 
 ## Completed
 
@@ -409,6 +409,21 @@ request. Each fix is its own commit with a decision.
   tests, vet, every end-to-end scenario, and development/release binary versions.
   Process-lifecycle end-to-end checks require permission to inspect processes.
 
+### Stage 13 (complete): planning documents on the issue
+
+- The first implementer turn writes an analysis, a PRD, a design, and an
+  implementation plan, following the new required `plan` stage file. It changes no
+  code. The outcome contract gains a `planned` status carrying the documents (D90).
+- The runner posts each document on the issue as its own comment, records the comment
+  ids and URLs in the task file, and resumes the planning session to implement. A
+  re-plan edits the same comments. There is no approval gate: a planning question goes
+  to NEEDS_DECISION, and otherwise the run continues to the PR.
+- The reviewer's prompt carries the posted PRD. `foreman show` links the comments.
+- Validated by unit tests for the contract, prompts, posting and re-posting, partial
+  post failures, planning questions, the gh comment calls, and rendering; every
+  end-to-end scenario with a planning stub; and `scripts/probe-agents.sh`, where
+  Claude and Codex both return a planned outcome under the new schema.
+
 ## Known limitations
 
 - The gate runs only when `inbox` or `status` runs, because the design rules out
@@ -501,7 +516,9 @@ what it replaced. Current summary:
 - D87 (amends D57). Claude's stream-json events go to the runner log. D88.
   `show` and the runner log point to Claude's own session transcript.
 - D89. `foreman cancel` stops a running task.
+- D90 (amends D73). The implementer plans first and the runner posts the plan on the
+  issue.
 
 ## Next stage
 
-None. Stages 0 to 12 are complete. Further work needs a new request.
+None. Stages 0 to 13 are complete. Further work needs a new request.

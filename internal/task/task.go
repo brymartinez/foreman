@@ -253,11 +253,77 @@ type Record struct {
 	Validation []Check
 	// Reviews are the competing agent's review rounds, oldest first.
 	Reviews []Review
+	// Plan holds the planning documents posted on the issue, in PlanDocs order (D90).
+	Plan []PlanComment
 	// CI is the readiness gate's last look at the PR's checks on GitHub. Any implementer
 	// turn clears it.
 	CI *CIStatus
 	// Body is the Markdown below the frontmatter, round-tripped untouched so human edits survive.
 	Body string
+}
+
+// PlanDoc is one planning document the implementer writes before any code (D90).
+type PlanDoc string
+
+const (
+	Analysis           PlanDoc = "analysis"
+	PRD                PlanDoc = "prd"
+	Design             PlanDoc = "design"
+	ImplementationPlan PlanDoc = "plan"
+)
+
+// PlanDocs lists the documents in the order they are written and posted.
+var PlanDocs = []PlanDoc{Analysis, PRD, Design, ImplementationPlan}
+
+// Title is the document's heading in its issue comment.
+func (d PlanDoc) Title() string {
+	switch d {
+	case Analysis:
+		return "Analysis"
+	case PRD:
+		return "PRD"
+	case Design:
+		return "Design"
+	case ImplementationPlan:
+		return "Implementation plan"
+	}
+	return string(d)
+}
+
+// PlanComment is a document foreman posted on the issue as its own comment.
+type PlanComment struct {
+	Doc       PlanDoc `yaml:"doc"`
+	CommentID int64   `yaml:"comment_id"`
+	URL       string  `yaml:"url"`
+}
+
+// PlanComment returns the posted comment for doc, or nil.
+func (r *Record) PlanComment(doc PlanDoc) *PlanComment {
+	for i := range r.Plan {
+		if r.Plan[i].Doc == doc {
+			return &r.Plan[i]
+		}
+	}
+	return nil
+}
+
+// PlanPosted reports whether every planning document is on the issue.
+func (r *Record) PlanPosted() bool {
+	for _, d := range PlanDocs {
+		if c := r.PlanComment(d); c == nil || c.URL == "" {
+			return false
+		}
+	}
+	return true
+}
+
+// SetPlanComment records a posted comment, replacing an earlier one for the same doc.
+func (r *Record) SetPlanComment(c PlanComment) {
+	if cur := r.PlanComment(c.Doc); cur != nil {
+		*cur = c
+		return
+	}
+	r.Plan = append(r.Plan, c)
 }
 
 type Finding struct {

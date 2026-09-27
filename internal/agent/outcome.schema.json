@@ -7,12 +7,14 @@
     "prNumber",
     "prUrl",
     "validation",
-    "questions"
+    "questions",
+    "documents"
   ],
   "properties": {
     "status": {
       "type": "string",
       "enum": [
+        "planned",
         "pr_opened",
         "blocked",
         "failed"
@@ -96,6 +98,33 @@
           "impactIfWrong": {
             "type": "string"
           }
+        }
+      }
+    },
+    "documents": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "analysis",
+        "prd",
+        "design",
+        "plan"
+      ],
+      "properties": {
+        "analysis": {
+          "type": "string"
+        },
+        "prd": {
+          "type": "string"
+        },
+        "design": {
+          "type": "string"
+        },
+        "plan": {
+          "type": "string"
         }
       }
     }

@@ -145,6 +145,19 @@ retry behavior". The agent treats it as part of the task.
    flagged in its checklist but not taken back. A runner that crashes during a review
    picks up at the review when you run `foreman start` again.
 
+## Planning
+
+Before any code, the implementer writes four documents: an analysis, a PRD, a design,
+and an implementation plan. `plan.md` sets what each one covers. The runner posts each
+document on the issue as its own comment, then resumes the same agent session to
+implement the plan. There is no approval step: if planning needs a decision, the task
+goes to `NEEDS_DECISION` like any other question, and otherwise the run goes straight
+from the plan to the PR. The reviewer checks the PR against the posted PRD.
+
+`foreman show` links the four comments. A task that plans again, for example after a
+failed run, edits the same comments instead of adding new ones. A task that already
+has a PR goes on without a plan.
+
 ## Stage instructions
 
 Each stage of the work has an instruction file that holds the agents' working rules:
@@ -157,11 +170,12 @@ Foreman never reads or changes those files.
 
 | Stage | Given to | Global file | Repo file (committed) |
 |---|---|---|---|
+| `plan` | the implementer, for the four planning documents | `~/.config/foreman/stages/plan.md` | `.foreman/plan.md` |
 | `implement` | the implementer | `~/.config/foreman/stages/implement.md` | `.foreman/implement.md` |
 | `review` | the competing reviewer | `~/.config/foreman/stages/review.md` | `.foreman/review.md` |
 | `pr` | the implementer, for the PR description | `~/.config/foreman/stages/pr.md` | `.foreman/pr.md` |
 
-- The three global files are required. Every command except `config` fails when one
+- The four global files are required. Every command except `config` fails when one
   is missing. `make config` installs the defaults from `defaults/stages/`, and the
   release archives carry them in `stages/`. Edit your copies freely.
 - Repo files are optional.

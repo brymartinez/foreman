@@ -168,11 +168,7 @@ type restIssue struct {
 func (c Client) GetItem(ctx context.Context, key task.Key) (app.InboxItem, error) {
 	out, err := c.Run(ctx, "", "api", fmt.Sprintf("repos/%s/issues/%d", key.Repo, key.Number))
 	if err != nil {
-		// gh reports "Not Found (HTTP 404)" for a missing or private item and 410 for a deleted issue.
-		if msg := err.Error(); strings.Contains(msg, "(HTTP 404)") || strings.Contains(msg, "(HTTP 410)") {
-			return app.InboxItem{}, fmt.Errorf("%w: %v", app.ErrGone, err)
-		}
-		return app.InboxItem{}, err
+		return app.InboxItem{}, gone(err)
 	}
 	var r restIssue
 	if err := json.Unmarshal(out, &r); err != nil {
@@ -194,6 +190,50 @@ func (c Client) GetItem(ctx context.Context, key task.Key) (app.InboxItem, error
 		}
 	}
 	return item, nil
+}
+
+// gone marks gh's "Not Found (HTTP 404)" for a missing or private item, and 410 for a
+// deleted issue, as app.ErrGone.
+func gone(err error) error {
+	if msg := err.Error(); strings.Contains(msg, "(HTTP 404)") || strings.Contains(msg, "(HTTP 410)") {
+		return fmt.Errorf("%w: %v", app.ErrGone, err)
+	}
+	return err
+}
+
+type restComment struct {
+	ID      int64  `json:"id"`
+	HTMLURL string `json:"html_url"`
+	Body    string `json:"body"`
+}
+
+func (c Client) PostIssueComment(ctx context.Context, issue task.Key, id int64, body string) (app.IssueComment, error) {
+	method, path := "POST", fmt.Sprintf("repos/%s/issues/%d/comments", issue.Repo, issue.Number)
+	if id > 0 {
+		method, path = "PATCH", fmt.Sprintf("repos/%s/issues/comments/%d", issue.Repo, id)
+	}
+	// -f sends the body as a raw string; -F would read a leading @ as a file name.
+	out, err := c.Run(ctx, "", "api", "--method", method, path, "-f", "body="+body)
+	if err != nil {
+		return app.IssueComment{}, gone(err)
+	}
+	return parseComment(out)
+}
+
+func (c Client) GetIssueComment(ctx context.Context, repo task.Repo, id int64) (app.IssueComment, error) {
+	out, err := c.Run(ctx, "", "api", fmt.Sprintf("repos/%s/issues/comments/%d", repo, id))
+	if err != nil {
+		return app.IssueComment{}, gone(err)
+	}
+	return parseComment(out)
+}
+
+func parseComment(out []byte) (app.IssueComment, error) {
+	var r restComment
+	if err := json.Unmarshal(out, &r); err != nil || r.ID == 0 {
+		return app.IssueComment{}, fmt.Errorf("parse gh comment: %v %s", err, bytes.TrimSpace(out))
+	}
+	return app.IssueComment{ID: r.ID, URL: r.HTMLURL, Body: r.Body}, nil
 }
 
 func (c Client) GetIssue(ctx context.Context, key task.Key) (app.Issue, error) {

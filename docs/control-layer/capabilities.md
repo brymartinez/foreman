@@ -46,6 +46,9 @@ Headless mode is `claude -p <prompt>`. Every feature below was checked with a re
 - **Hooks.** The user's global hooks still run in headless sessions. A broken SessionEnd
   hook only wrote to stderr, and stdout stayed valid JSON. Keep stdout and stderr in
   separate streams.
+- **Nullable objects in the schema.** The outcome schema's `documents` is
+  `"type": ["object", "null"]` with strict-mode properties. Both CLIs accept it and
+  return the object for a "planned" outcome (probe-agents.sh).
 - **Other options.** `--no-session-persistence` gives disposable reviewer sessions.
   `--max-budget-usd` caps spend.
 
@@ -96,6 +99,12 @@ The user is authenticated through the keyring.
   ignores the exit code whenever JSON came back (D36). This was not probed live on a
   real PR.
 - **Creating PRs.** `gh pr create --title --body --head` can run from inside the worktree.
+- **Issue comments.** `gh api --method POST repos/<owner>/<repo>/issues/<n>/comments -f body=<text>`
+  creates a comment, and `--method PATCH repos/<owner>/<repo>/issues/comments/<id>` edits
+  one. Both return the REST comment (`id`, `html_url`, `body`). `-f` sends the value as a
+  raw string; `-F` would read a leading `@` as a file. GitHub caps a comment at 65,536
+  characters. This is from the REST API reference and unit tests against its response
+  shape; it wasn't probed live, because a probe would post on a real issue.
 
 ## git worktree
 

@@ -175,6 +175,38 @@ type fakeGitHub struct {
 	repo      RepoInfo
 	prs       map[int]PullRequest
 	ci        map[int]task.CIStatus
+	comments  map[int64]IssueComment // posted issue comments by id
+	edits     int                    // PostIssueComment calls that edited a comment
+	postErr   error                  // fails the PostIssueComment call after the first postOK
+	postOK    int
+}
+
+func (f *fakeGitHub) PostIssueComment(_ context.Context, k task.Key, id int64, body string) (IssueComment, error) {
+	if f.postErr != nil && len(f.comments) >= f.postOK {
+		return IssueComment{}, f.postErr
+	}
+	if f.comments == nil {
+		f.comments = map[int64]IssueComment{}
+	}
+	if id > 0 {
+		if _, ok := f.comments[id]; !ok {
+			return IssueComment{}, fmt.Errorf("%w: comment %d", ErrGone, id)
+		}
+		f.edits++
+	} else {
+		id = int64(1000 + len(f.comments) + 1)
+	}
+	c := IssueComment{ID: id, URL: fmt.Sprintf("https://github.com/%s/issues/%d#issuecomment-%d", k.Repo, k.Number, id), Body: body}
+	f.comments[id] = c
+	return c, nil
+}
+
+func (f *fakeGitHub) GetIssueComment(_ context.Context, _ task.Repo, id int64) (IssueComment, error) {
+	c, ok := f.comments[id]
+	if !ok {
+		return IssueComment{}, fmt.Errorf("%w: comment %d", ErrGone, id)
+	}
+	return c, nil
 }
 
 func (f *fakeGitHub) CIStatus(_ context.Context, k task.Key) (task.CIStatus, error) {

@@ -38,6 +38,22 @@ func TestParseOutcomePROpened(t *testing.T) {
 	}
 }
 
+func TestParseOutcomePlanned(t *testing.T) {
+	got, err := ParseOutcome([]byte(`{"status":"planned","summary":"s","prNumber":null,"prUrl":null,"validation":[],"questions":[],
+"documents":{"analysis":"a","prd":"p","design":"d","plan":"### Task 1"}}`))
+	if err != nil || got.Status != Planned || got.Documents[task.Analysis] != "a" || got.Documents[task.ImplementationPlan] != "### Task 1" {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+	for wire, want := range map[string]string{
+		`{"status":"planned","summary":"s","documents":null}`:                                               "no documents",
+		`{"status":"planned","summary":"s","documents":{"analysis":"a","prd":" ","design":"d","plan":"p"}}`: "empty PRD",
+	} {
+		if _, err := ParseOutcome([]byte(wire)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("ParseOutcome(%s) err = %v, want %q", wire, err, want)
+		}
+	}
+}
+
 func TestParseOutcomeRejectsSingleOptionQuestion(t *testing.T) {
 	wire := `{"status":"blocked","summary":"s","prNumber":null,"prUrl":null,"validation":[],
 "questions":[{"issue":"q","context":"c","options":[{"label":"A","description":"only"}],"recommendation":"A","impactIfWrong":"i"}]}`

@@ -172,6 +172,18 @@ func TestCancelled(t *testing.T) {
 	}
 }
 
+func TestShowPlanLinks(t *testing.T) {
+	var buf bytes.Buffer
+	Show(&buf, &task.Record{
+		Key: task.Key{Repo: "a/b", Number: 7}, State: task.Working,
+		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex}, Reviewer: task.Claude},
+		Plan:       []task.PlanComment{{Doc: task.Analysis, URL: "https://x/1"}, {Doc: task.PRD, URL: "https://x/2"}},
+	})
+	if !strings.Contains(buf.String(), "Plan          Analysis https://x/1\n              PRD https://x/2\n") {
+		t.Errorf("missing plan links in:\n%s", buf.String())
+	}
+}
+
 func TestShowUndelegated(t *testing.T) {
 	var buf bytes.Buffer
 	Show(&buf, &task.Record{Key: task.Key{Repo: "a/b", Number: 1}, Title: "T", URL: "u", State: task.Discovered})

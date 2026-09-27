@@ -17,6 +17,7 @@ check() { if [ "$2" = "$3" ]; then echo "ok   $1"; pass=$((pass+1)); else echo "
 
 blocked_prompt='You must not change any files. Report status "blocked" with one entry in questions asking whether retries should apply to 4xx responses, two options A and B, recommendation A.'
 resume_prompt='Decision: A. Report status "failed" with summary "probe complete". Do not change files.'
+planned_prompt='You must not change any files. Report status "planned" with summary "probe plan" and documents: analysis "a", prd "p", design "d", plan "t".'
 
 echo "# claude $(claude --version)"
 sid="$(uuidgen | tr 'A-Z' 'a-z')"
@@ -36,6 +37,9 @@ check "claude keeps the transcript under the cwd's project dir" \
 claude -p hi --resume "$(uuidgen | tr 'A-Z' 'a-z')" --output-format stream-json --verbose --model haiku </dev/null 2>/dev/null \
   | jq -c 'select(.type=="result")' >c5.json || true
 check "claude missing session: error_during_execution, no turns" "$(jq -r '"\(.subtype) \(.num_turns)"' c5.json)" "error_during_execution 0"
+claude -p "$planned_prompt" --output-format stream-json --verbose --json-schema "$(cat "$schema")" \
+  --permission-mode acceptEdits --no-session-persistence --model haiku </dev/null 2>/dev/null | jq -c 'select(.type=="result")' >c6.json
+check "claude planned outcome carries documents" "$(jq -r '"\(.structured_output.status) \(.structured_output.documents.prd)"' c6.json)" "planned p"
 claude -p 'Run the shell command: touch allowed.txt. Then reply DONE.' --permission-mode acceptEdits \
   --allowedTools Bash --output-format json --model haiku </dev/null >c3.json 2>/dev/null
 check "claude headless Bash via --allowedTools" "$(test -f allowed.txt && echo yes || echo no)" yes
@@ -50,6 +54,8 @@ tid="$(head -1 x1.jsonl | jq -r 'select(.type=="thread.started").thread_id')"
 check "codex emits thread.started" "$([ -n "$tid" ] && echo yes || echo no)" yes
 check "codex output-schema status" "$(jq -r .status x1.json)" blocked
 check "codex output-schema has questions" "$(jq -r '.questions | length' x1.json)" 1
+codex exec --json --ephemeral -s read-only --output-schema "$schema" -o x7.json "$planned_prompt" </dev/null >/dev/null 2>&1
+check "codex planned outcome carries documents" "$(jq -r '"\(.status) \(.documents.prd)"' x7.json)" "planned p"
 codex exec resume --json --output-schema "$schema" -o x2.json "$tid" "$resume_prompt" </dev/null >x2.jsonl 2>/dev/null
 check "codex resume keeps thread" "$(head -1 x2.jsonl | jq -r .thread_id)" "$tid"
 check "codex resume structured status" "$(jq -r .status x2.json)" failed

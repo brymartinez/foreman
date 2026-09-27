@@ -91,6 +91,13 @@ case "$1 $2" in
 	kind=$2
 	for a in "$@"; do case $a in --assignee=*) f=assignee ;; --mentions=*) f=mentions ;; --review-requested=*) f=review-requested ;; esac; done
 	cat "$s/search-$kind-$f.json" ;;
+"api --method")
+	# Issue comments: POST creates, PATCH edits. The body is stored for later reads.
+	if [ "$3" = PATCH ]; then id=${4##*/}; else id=$(($(cat "$s/comment-seq" 2>/dev/null || echo 3000) + 1)); echo "$id" >"$s/comment-seq"; fi
+	n=$(echo "$4" | sed -n 's#.*/issues/\([0-9]*\)/comments#\1#p')
+	printf '%s' "${6#body=}" >"$s/comment-$id.md"
+	body=$(sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' "$s/comment-$id.md" | awk '{printf "%s\\n", $0}')
+	printf '{"id":%s,"html_url":"https://github.com/acme/widgets/issues/%s#issuecomment-%s","body":"%s"}\n' "$id" "${n:-0}" "$id" "$body" | tee "$s/api-$id.json" ;;
 "api repos/"*)
 	n=${2##*/}
 	if [ -f "$s/gone-$n" ]; then
@@ -111,9 +118,21 @@ if [[ " $* " == *" --no-session-persistence "* ]]; then
 	echo '{"type":"result","session_id":"r1","subtype":"success","total_cost_usd":0.05,"structured_output":{"verdict":"clean","summary":"looks right","findings":[]}}'
 	exit 0
 fi
+# A planning turn starts with "## Plan first", or resumes one with its answers.
+planning=
 if [[ " $* " == *" --resume "* ]]; then
-	echo "claude resume" >>"$E2E_STATE/agents.log"
-	printf '%s' "$2" >"$E2E_STATE/resume-prompt.txt"
+	if [[ "$2" == *"foreman posted your documents"* ]]; then
+		echo "claude implement" >>"$E2E_STATE/agents.log"
+		printf '%s' "$2" >"$E2E_STATE/plan-posted-prompt.txt"
+	else
+		echo "claude resume" >>"$E2E_STATE/agents.log"
+		printf '%s' "$2" >"$E2E_STATE/resume-prompt.txt"
+		[[ "$2" == *"planned, blocked, or failed"* ]] && planning=1
+	fi
+elif [[ "$*" == *"## Plan first"* ]]; then
+	echo "claude plan" >>"$E2E_STATE/agents.log"
+	printf '%s' "$*" >"$E2E_STATE/prompt.txt"
+	planning=1
 else
 	echo "claude implement" >>"$E2E_STATE/agents.log"
 	printf '%s' "$*" >"$E2E_STATE/prompt.txt"
@@ -123,6 +142,10 @@ if [ -f "$E2E_STATE/block-once" ]; then
 	q() { printf '{"issue":"%s","context":"c","options":[{"label":"A","description":"%s"},{"label":"B","description":"%s"}],"recommendation":"A","impactIfWrong":"i"}' "$1" "$2" "$3"; }
 	printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"blocked","summary":"two decisions","prNumber":null,"prUrl":null,"validation":[],"questions":[%s,%s]}}\n' \
 		"$(q 'Retry 4xx?' '5xx only' '4xx and 5xx')" "$(q 'Cap retries?' '3 tries' 'no cap')"
+	exit 0
+fi
+if [ -n "$planning" ]; then
+	echo '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.02,"structured_output":{"status":"planned","summary":"four documents","prNumber":null,"prUrl":null,"validation":[],"questions":[],"documents":{"analysis":"Retries are missing.","prd":"R1. Retry 5xx responses.","design":"Wrap the client.","plan":"### Task 1: retries"}}}'
 	exit 0
 fi
 sleep "${E2E_AGENT_SLEEP:-1}"
@@ -176,6 +199,11 @@ scenario_runner() {
 	check "agent stderr reached the log" contains "$log" "claude stderr progress"
 	check "no line is stamped twice" bash -c "! grep -qE '^[^ ]+ [0-9]{4}-[0-9]{2}-[0-9]{2}T' '$log'"
 	check "the prompt carries the implement stage file" contains "$state/prompt.txt" "Add or update tests when behavior changes."
+	check "the first turn plans" contains "$state/prompt.txt" "## Plan first"
+	check "the four documents are posted on the issue" test "$(grep -c 'api --method POST repos/acme/widgets/issues/42/comments' "$state/gh.log")" = 4
+	check "the PRD comment has its heading" contains "$state/comment-3002.md" "## PRD"
+	check "the planning session implements the plan" contains "$state/plan-posted-prompt.txt" "- Implementation plan: https://github.com/acme/widgets/issues/42#issuecomment-3004"
+	check "show lists the plan" bash -c "cd '$FOREMAN_CWD' && '$work/foreman' show 42 | grep -qF 'Plan          Analysis https://github.com/acme/widgets/issues/42#issuecomment-3001'"
 	rm "$sandbox/stages/pr.md"
 	check "a missing stage file stops foreman" bash -c "cd '$FOREMAN_CWD' && ! '$work/foreman' status 2>'$sandbox/err.txt' && grep -qF 'stages/pr.md' '$sandbox/err.txt'"
 	check "config --stages exits nonzero" bash -c "cd '$FOREMAN_CWD' && ! '$work/foreman' config --stages >'$sandbox/stages.txt'"
@@ -232,7 +260,7 @@ scenario_logs() {
 	check "clean shows Codex usage without a price" contains "$sandbox/clean.txt" "(USD unavailable)"
 	check "clean hides Codex JSON" bash -c "! grep -q '\"type\"' '$sandbox/clean.txt'"
 	check "raw keeps Codex JSON" contains "$sandbox/raw.txt" '"type":"thread.started"'
-	check "show reports usage" bash -c "cd '$FOREMAN_CWD' && '$work/foreman' show 42 | grep -F 'Claude \$0.25 (1 turn) · Codex 125 tokens (1 turn)'"
+	check "show reports usage" bash -c "cd '$FOREMAN_CWD' && '$work/foreman' show 42 | grep -F 'Claude \$0.27 (2 turns) · Codex 125 tokens (1 turn)'"
 }
 
 hit() { # hit <repo> <number> <title>

@@ -1239,3 +1239,44 @@ Entry format:
 - **Rejected.** A separate CANCELLED state. FAILED already means stopped and
   restartable, and `clean <issue>` and `start` handle it; a new state would touch
   every state table for no new behavior.
+
+## D90. The implementer plans first, and the runner posts the plan on the issue
+
+- Date: 2026-09-27. User request: follow the superpowers workflow, with an analysis,
+  a PRD, a design, and an implementation plan, all posted on the issue. Amends D73.
+- **Context.** Superpowers writes a spec (analysis, requirements, and design in one)
+  and a plan of small TDD tasks, and gates each on the user's approval. The user asked
+  for four separate documents and no approval gate: the documents are a record, and
+  foreman keeps running.
+- **Decision.**
+  - A new required stage file, `plan.md`, sets what each document covers. It takes
+    superpowers' rules: two or three approaches with a recommendation, testable
+    numbered requirements, `### Task N` with exact files and test-first steps, no
+    placeholders, and a self-review.
+  - Until all four documents are posted, and while the task has no PR, the
+    implementer's turn is a planning turn. Its prompt is the full implementation
+    prompt plus a "Plan first" section, so the session already holds the
+    implementation instructions when it is resumed.
+  - The outcome schema gains status `planned` and a nullable `documents` object.
+    `ParseOutcome` requires all four documents to be non-empty for `planned`. The
+    adapters don't change.
+  - The runner, not the agent, posts the documents through `gh api`: one comment each,
+    headed Analysis, PRD, Design, and Implementation plan, with a
+    `<!-- foreman:<doc> -->` marker. It records each comment's id and URL as soon as
+    it posts it. This is foreman's first write to GitHub.
+  - A re-plan edits the recorded comments. A comment the developer deleted is posted
+    anew. A text over GitHub's 65,536-character limit is cut with a note.
+  - After posting, the runner resumes the planning session with the comment links to
+    implement. If that session is gone, a fresh turn gets the links under "The plan".
+  - There is no approval gate. A planning question sends the task to NEEDS_DECISION.
+    The answer resumes the planning turn, which still ends in `planned`.
+  - The reviewer can't reach GitHub, so foreman reads the PRD comment and puts it in
+    the review prompt. The implementation plan stays out of it to keep reviews cheap.
+  - Plan steps name the functions, types, and tests they add, not full code listings.
+    Superpowers wants complete code in each step, but the same session implements
+    right after, so the listings would pay for the code twice.
+  - A failed post fails the task. Restarting it plans again and edits what was posted.
+  - A task that already has a PR, from before this stage, goes on without a plan.
+- **Rejected.** The agent posting its own comments (the user chose the runner), one
+  combined comment (the user chose one per document), and a competing-agent review of
+  the documents (the user chose self-review).

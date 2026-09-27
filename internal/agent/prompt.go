@@ -27,6 +27,14 @@ type TaskBrief struct {
 	// OpenFindings are the latest review's findings when a fresh turn replaces a
 	// session that could not be resumed.
 	OpenFindings []task.Finding
+	// Planning makes the turn write the planning documents instead of code (D90).
+	// PlanInstructions is the developer's plan stage for it.
+	Planning         bool
+	PlanInstructions string
+	// Plan is the planning documents already posted on the issue.
+	Plan []task.PlanComment
+	// PRD is the posted PRD's text, for the reviewer, who has no network.
+	PRD string
 }
 
 // ImplementationPrompt is the execution contract handed to the implementation agent.
@@ -44,6 +52,13 @@ func ImplementationPrompt(b TaskBrief) string {
 	fmt.Fprintf(&s, "Read the issue comments before planning: `gh issue view %d --repo %s --comments`.\n\n", b.Key.Number, b.Key.Repo)
 
 	stageSection(&s, b.StageInstructions)
+	if b.Planning {
+		planningSection(&s, b.PlanInstructions)
+	} else if len(b.Plan) > 0 {
+		s.WriteString("## The plan\n\nYour plan for this issue is posted on it. Follow the implementation plan's tasks in order. If you must deviate from the PRD or the plan, say why in the pull request.\n\n")
+		writePlanLinks(&s, b.Plan)
+		s.WriteString("\n")
+	}
 
 	if ctx := strings.TrimSpace(b.Context); ctx != "" {
 		s.WriteString("## Implementation context\n\nThis context comes from the developer and is authoritative. Where it conflicts with the issue text, follow it.\n\n")
@@ -94,11 +109,56 @@ Do not push or open a pull request when you are blocked. Commit work in progress
 ## Final response
 
 Reply with JSON matching the provided schema:
-- "pr_opened" once the pull request exists: set prNumber, prUrl, and validation (each command you ran and whether it passed).
+%s- "pr_opened" once the pull request exists: set prNumber, prUrl, and validation (each command you ran and whether it passed).
 - "blocked" when you need a decision, as described above.
 - "failed" when you cannot complete the task: say why in summary.
-Set fields that do not apply to null, or [] for validation and questions.
-`, b.Worktree, b.Branch, b.BaseBranch, b.Branch, b.Branch, b.BaseBranch, b.Branch, b.Branch, b.Key.Number, prBodyRule(b.PRInstructions), prSection(b.PRInstructions))
+Set fields that do not apply to null, or [] for validation and questions. %s
+`, b.Worktree, b.Branch, b.BaseBranch, b.Branch, b.Branch, b.BaseBranch, b.Branch, b.Branch, b.Key.Number, prBodyRule(b.PRInstructions), prSection(b.PRInstructions), plannedStatus(b.Planning), documentsRule(b.Planning))
+	return s.String()
+}
+
+// planningSection turns the first turn into planning only: foreman posts the
+// documents on the issue, then resumes the session to implement them (D90).
+func planningSection(s *strings.Builder, instructions string) {
+	s.WriteString(`## Plan first
+
+This turn is for planning only. Read the issue, its comments, and the code, then write four Markdown documents: analysis, prd, design, and plan (the implementation plan). foreman posts each one on the issue as its own comment under its own heading, so start each document with its content, not a title. Then foreman resumes this session so you implement the plan. The sections below on the workspace and the pull request apply to that next turn.
+
+Do not change, commit, or push anything in this turn. If writing the documents needs a decision from the developer, report "blocked" with the questions instead.
+
+`)
+	if text := strings.TrimSpace(instructions); text != "" {
+		s.WriteString("The developer's instructions for the documents:\n\n" + text + "\n\n")
+	}
+}
+
+func plannedStatus(planning bool) string {
+	if !planning {
+		return ""
+	}
+	return `- "planned" once the four documents are written: set documents, with prNumber and prUrl null and validation and questions [].
+`
+}
+
+func documentsRule(planning bool) string {
+	if planning {
+		return `documents is null unless the status is "planned".`
+	}
+	return "Set documents to null."
+}
+
+func writePlanLinks(s *strings.Builder, plan []task.PlanComment) {
+	for _, c := range plan {
+		fmt.Fprintf(s, "- %s: %s\n", c.Doc.Title(), c.URL)
+	}
+}
+
+// PlanPostedMessage resumes the planning session once its documents are on the issue.
+func PlanPostedMessage(plan []task.PlanComment) string {
+	var s strings.Builder
+	s.WriteString("foreman posted your documents on the issue:\n\n")
+	writePlanLinks(&s, plan)
+	s.WriteString("\nNow implement the plan under the instructions from the start of this session. Follow the implementation plan's tasks in order, validate, and open the pull request. End with the JSON outcome: pr_opened, blocked, or failed.\n")
 	return s.String()
 }
 
@@ -114,8 +174,9 @@ func answeredDecisions(ds []task.Decision) []task.Decision {
 
 // ResumeMessage continues the session that asked the questions, with every answer.
 // open is the latest review when it requested changes, so the answer can say how to
-// handle findings the implementer may not have seen (D78).
-func ResumeMessage(ds []task.Decision, open *task.Review) string {
+// handle findings the implementer may not have seen (D78). planning is set when the
+// questions came from the planning turn, which still ends with the documents.
+func ResumeMessage(ds []task.Decision, open *task.Review, planning bool) string {
 	var s strings.Builder
 	if len(ds) == 1 {
 		s.WriteString("The developer answered your question.\n\n")
@@ -130,7 +191,11 @@ func ResumeMessage(ds []task.Decision, open *task.Review) string {
 		writeFindings(&s, open.Findings)
 		s.WriteString("\n")
 	}
-	s.WriteString("Continue the task with these decisions under the same instructions as before. End with the same JSON outcome: pr_opened, blocked, or failed.\n")
+	outcomes := "pr_opened, blocked, or failed"
+	if planning {
+		outcomes = "planned, blocked, or failed"
+	}
+	fmt.Fprintf(&s, "Continue the task with these decisions under the same instructions as before. End with the same JSON outcome: %s.\n", outcomes)
 	return s.String()
 }
 

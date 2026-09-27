@@ -205,3 +205,32 @@ func TestGetItemReportsMissingItemsAsGone(t *testing.T) {
 		}
 	}
 }
+
+func TestPostIssueCommentCreatesOrEdits(t *testing.T) {
+	var calls [][]string
+	run := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		calls = append(calls, args)
+		if strings.Contains(strings.Join(args, " "), "comments/77") {
+			return []byte(`{"message":"Not Found"}`), errors.New("gh: Not Found (HTTP 404)")
+		}
+		return []byte(`{"id":3301,"html_url":"https://github.com/a/b/issues/7#issuecomment-3301","body":"@team ## PRD"}`), nil
+	}
+	c := Client{Run: run}
+	key := task.Key{Repo: "a/b", Number: 7}
+	got, err := c.PostIssueComment(context.Background(), key, 0, "@team ## PRD")
+	if err != nil || got.ID != 3301 || got.URL != "https://github.com/a/b/issues/7#issuecomment-3301" {
+		t.Fatalf("create = %+v, %v", got, err)
+	}
+	if want := []string{"api", "--method", "POST", "repos/a/b/issues/7/comments", "-f", "body=@team ## PRD"}; !slices.Equal(calls[0], want) {
+		t.Errorf("create argv = %q, want %q", calls[0], want)
+	}
+	if _, err := c.PostIssueComment(context.Background(), key, 3301, "new"); err != nil || !slices.Equal(calls[1][:4], []string{"api", "--method", "PATCH", "repos/a/b/issues/comments/3301"}) {
+		t.Errorf("edit argv = %q, %v", calls[1], err)
+	}
+	if _, err := c.PostIssueComment(context.Background(), key, 77, "x"); !errors.Is(err, app.ErrGone) {
+		t.Errorf("editing a deleted comment err = %v", err)
+	}
+	if got, err := c.GetIssueComment(context.Background(), "a/b", 3301); err != nil || got.Body != "@team ## PRD" {
+		t.Errorf("get = %+v, %v", got, err)
+	}
+}

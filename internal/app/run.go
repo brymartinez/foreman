@@ -41,6 +41,9 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 	}))
 
 	var findings *task.Review
+	// planPosted is set for the turn right after the plan went up on the issue, which
+	// resumes the planning session to implement it (D90).
+	planPosted := false
 	for reviewNext := rec.ReviewPending(); ; reviewNext = false {
 		if reviewNext {
 			// The PR is verified but its head has no review: pick up at the review. A
@@ -59,7 +62,15 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 			}
 		}
 		if !reviewNext {
-			turn, runErr := a.implement(ctx, rec, findings, log)
+			turn, runErr := a.implement(ctx, rec, findings, planPosted, log)
+			planPosted = false
+			step := "implementation"
+			if a.needsPlan(rec) {
+				step = "planning"
+			}
+			if step == "planning" && runErr == nil && turn.Outcome.Status == agent.PROpened {
+				fmt.Fprintf(log, "foreman: %s opened a PR without posting a plan\n", rec.Delegation.Implementer.Agent)
+			}
 			var pr *PullRequest
 			if runErr == nil && turn.Outcome.Status == agent.PROpened {
 				if pr, runErr = a.verifyPR(ctx, rec, turn.Outcome); runErr == nil {
@@ -69,11 +80,21 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 			if rec, err = a.update(final, key, existing(func(cur *task.Record) {
 				applyTurn(cur, turn, pr, runErr, a.Now())
 				if runErr != nil {
-					applyStop(ctx, cur, "implementation", log, a.Now())
+					applyStop(ctx, cur, step, log, a.Now())
 				}
 				addUsage(&cur.Usage, turn.Usage)
-			})); err != nil || rec.State != task.Reviewing {
+			})); err != nil {
 				return err
+			}
+			if runErr == nil && turn.Outcome.Status == agent.Planned {
+				if rec, err = a.postPlan(ctx, final, rec, turn.Outcome.Documents, log); err != nil || rec.State != task.Working {
+					return err
+				}
+				planPosted = true
+				continue
+			}
+			if rec.State != task.Reviewing {
+				return nil
 			}
 		}
 
@@ -128,20 +149,29 @@ func (a App) reviewRounds() int {
 // implement runs one implementer turn. It resumes the session with an answered
 // decision or a review round when there is one, and otherwise (or when the session
 // is gone) starts a fresh turn whose prompt is rebuilt from the task file.
-func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Review, log io.Writer) (agent.Turn, error) {
+// needsPlan is true until every planning document is on the issue. A task that
+// already has a PR, from before planning existed, goes on without one (D90).
+func (a App) needsPlan(rec *task.Record) bool {
+	return !rec.PlanPosted() && rec.Delegation.PR == 0
+}
+
+func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Review, planPosted bool, log io.Writer) (agent.Turn, error) {
 	d := rec.Delegation
 	adapter, ok := a.Agents[d.Implementer.Agent]
 	if !ok {
 		return agent.Turn{}, fmt.Errorf("agent %s is not configured", d.Implementer.Agent)
 	}
 	in := agent.StartInput{Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD}
+	planning := a.needsPlan(rec)
 	resume := ""
 	if decs := rec.Undelivered(); len(decs) > 0 {
 		var open *task.Review
 		if latest := rec.LatestReview(); latest != nil && !latest.Clean {
 			open = latest
 		}
-		resume = agent.ResumeMessage(decs, open)
+		resume = agent.ResumeMessage(decs, open, planning)
+	} else if planPosted {
+		resume = agent.PlanPostedMessage(rec.Plan)
 	} else if findings != nil {
 		resume = agent.FindingsMessage(*findings)
 	}
@@ -172,8 +202,17 @@ func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Rev
 		return agent.Turn{}, err
 	}
 	brief.PRInstructions = pr.Content()
+	if planning {
+		plan, err := a.Stages.Resolve(d.Worktree, task.StagePlan)
+		if err != nil {
+			return agent.Turn{}, err
+		}
+		brief.Planning, brief.PlanInstructions = true, plan.Content()
+		fmt.Fprintf(log, "foreman: starting %s in %s to write the plan\n", adapter.Name(), d.Worktree)
+	} else {
+		fmt.Fprintf(log, "foreman: starting %s in %s\n", adapter.Name(), d.Worktree)
+	}
 	in.Prompt = agent.ImplementationPrompt(brief)
-	fmt.Fprintf(log, "foreman: starting %s in %s\n", adapter.Name(), d.Worktree)
 	return adapter.Start(ctx, in, func(s task.Session) {
 		_, _ = a.update(ctx, rec.Key, existing(func(cur *task.Record) {
 			cur.Delegation.Implementer = s
@@ -197,6 +236,14 @@ func (a App) review(ctx context.Context, rec *task.Record, log io.Writer) (agent
 		return agent.ReviewOutcome{}, err
 	}
 	brief.StageInstructions = instructions.Content()
+	// The reviewer has no network, so the PRD it checks against comes in the prompt.
+	if c := rec.PlanComment(task.PRD); c != nil {
+		if got, err := a.GitHub.GetIssueComment(ctx, rec.Repo, c.CommentID); err == nil {
+			brief.PRD = got.Body
+		} else {
+			fmt.Fprintf(log, "foreman: reviewing without the PRD: %v\n", err)
+		}
+	}
 	fmt.Fprintf(log, "foreman: %s reviewing PR #%d (round %d)\n", reviewer.Name(), d.PR, len(rec.Reviews)+1)
 	return reviewer.Review(ctx, agent.StartInput{
 		Worktree:     d.Worktree,
@@ -277,6 +324,7 @@ func (a App) brief(ctx context.Context, rec *task.Record) (agent.TaskBrief, erro
 		BaseBranch: strings.TrimPrefix(d.BaseRef, "origin/"),
 		Worktree:   d.Worktree,
 		Decisions:  rec.Decisions,
+		Plan:       rec.Plan,
 	}, nil
 }
 
@@ -363,6 +411,52 @@ func applyStop(ctx context.Context, rec *task.Record, step string, log io.Writer
 	fmt.Fprintf(log, "foreman: stopped during %s: %v\n", step, context.Cause(ctx))
 	rec.State = task.Failed
 	rec.LastOutcome = &task.Outcome{Status: Cancelled, Summary: fmt.Sprintf("run cancelled during %s (%v)", step, context.Cause(ctx)), At: now}
+}
+
+// postPlan puts each planning document on the issue as its own comment, editing the
+// comment from an earlier plan when there is one. Each comment is recorded as soon as
+// it is posted. A failed post fails the task; restarting it plans again (D90).
+func (a App) postPlan(ctx, final context.Context, rec *task.Record, docs map[task.PlanDoc]string, log io.Writer) (*task.Record, error) {
+	for _, doc := range task.PlanDocs {
+		var id int64
+		if c := rec.PlanComment(doc); c != nil {
+			id = c.CommentID
+		}
+		body := planCommentBody(doc, docs[doc])
+		posted, err := a.GitHub.PostIssueComment(ctx, rec.Key, id, body)
+		if errors.Is(err, ErrGone) && id > 0 {
+			posted, err = a.GitHub.PostIssueComment(ctx, rec.Key, 0, body)
+		}
+		var updateErr error
+		if rec, updateErr = a.update(final, rec.Key, existing(func(cur *task.Record) {
+			if err != nil {
+				cur.State = task.Failed
+				cur.LastOutcome = &task.Outcome{Status: "failed", Summary: fmt.Sprintf("posting the %s on the issue failed: %v", doc.Title(), err), At: a.Now()}
+				applyStop(ctx, cur, "planning", log, a.Now())
+				return
+			}
+			cur.SetPlanComment(task.PlanComment{Doc: doc, CommentID: posted.ID, URL: posted.URL})
+		})); updateErr != nil || err != nil {
+			return rec, updateErr
+		}
+		fmt.Fprintf(log, "foreman: posted the %s: %s\n", doc.Title(), posted.URL)
+	}
+	return rec, nil
+}
+
+// maxCommentChars is GitHub's limit on an issue comment's length.
+const maxCommentChars = 65536
+
+// planCommentBody is one document's comment: a marker foreman can recognize, the
+// document's heading, and the agent's text, cut to fit GitHub's limit.
+func planCommentBody(doc task.PlanDoc, text string) string {
+	head := fmt.Sprintf("<!-- foreman:%s -->\n## %s\n\n", doc, doc.Title())
+	const cut = "\n\n_Truncated at GitHub's comment length limit._"
+	text = strings.TrimSpace(text)
+	if r := []rune(text); len([]rune(head))+len(r) > maxCommentChars {
+		text = string(r[:maxCommentChars-len([]rune(head))-len([]rune(cut))]) + cut
+	}
+	return head + text
 }
 
 // applyPRHead records the PR head a resumed run is about to review.

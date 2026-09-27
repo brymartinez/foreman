@@ -232,6 +232,27 @@ func TestResumeArgvAndMissingSession(t *testing.T) {
 	}
 }
 
+func TestPlanningPromptWritesDocumentsOnly(t *testing.T) {
+	p := ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}, Planning: true, PlanInstructions: "Write a PRD with goals.", Branch: "feat/7-x", BaseBranch: "main"})
+	for _, want := range []string{"## Plan first", "Do not change, commit, or push anything in this turn", "Write a PRD with goals.", `"planned" once the four documents are written`, "## Opening the pull request"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("planning prompt missing %q", want)
+		}
+	}
+	plan := []task.PlanComment{{Doc: task.Analysis, URL: "https://x/1"}, {Doc: task.ImplementationPlan, URL: "https://x/4"}}
+	p = ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}, Plan: plan})
+	if strings.Contains(p, "## Plan first") || strings.Contains(p, `"planned"`) || !strings.Contains(p, "## The plan") || !strings.Contains(p, "- Implementation plan: https://x/4") {
+		t.Errorf("a turn after the plan must follow it, not write it:\n%s", p)
+	}
+	if msg := PlanPostedMessage(plan); !strings.Contains(msg, "- Analysis: https://x/1") || !strings.Contains(msg, "pr_opened, blocked, or failed") {
+		t.Errorf("plan posted message = %q", msg)
+	}
+	r := ReviewPrompt(ReviewBrief{TaskBrief: TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}, PRD: "R1. Retry 5xx."}, PR: 9})
+	if !strings.Contains(r, "## PRD") || !strings.Contains(r, "R1. Retry 5xx.") {
+		t.Errorf("review prompt lacks the PRD:\n%s", r)
+	}
+}
+
 func TestPromptIncludesAnsweredDecisions(t *testing.T) {
 	p := ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 1}, Decisions: []task.Decision{
 		{Question: task.Question{Issue: "Retry 4xx?"}, Answer: "A. 5xx only"},
@@ -241,11 +262,14 @@ func TestPromptIncludesAnsweredDecisions(t *testing.T) {
 		t.Errorf("decisions section wrong:\n%s", p)
 	}
 	decs := []task.Decision{{Question: task.Question{Issue: "Retry 4xx?"}, Answer: "A"}}
-	if msg := ResumeMessage(decs, nil); !strings.Contains(msg, "Decision: A") || strings.Contains(msg, "requested these changes") {
+	if msg := ResumeMessage(decs, nil, false); !strings.Contains(msg, "Decision: A") || strings.Contains(msg, "requested these changes") || !strings.Contains(msg, "pr_opened, blocked, or failed") {
 		t.Errorf("resume message = %q", msg)
 	}
 	open := &task.Review{Round: 4, PR: 9, Findings: []task.Finding{{Severity: "blocking", Summary: "4xx retried", File: "retry.go", Line: 40}}}
-	if msg := ResumeMessage(decs, open); !strings.Contains(msg, "Review round 4 of PR #9") || !strings.Contains(msg, "1. [blocking] 4xx retried\n   retry.go:40") {
+	if msg := ResumeMessage(decs, nil, true); !strings.Contains(msg, "planned, blocked, or failed") {
+		t.Errorf("a planning resume must end with the planned outcome: %q", msg)
+	}
+	if msg := ResumeMessage(decs, open, false); !strings.Contains(msg, "Review round 4 of PR #9") || !strings.Contains(msg, "1. [blocking] 4xx retried\n   retry.go:40") {
 		t.Errorf("resume message must carry the unaddressed findings: %q", msg)
 	}
 }

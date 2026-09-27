@@ -99,6 +99,9 @@ func ReviewPrompt(b ReviewBrief) string {
 		}
 		s.WriteString("\n")
 	}
+	if prd := strings.TrimSpace(b.PRD); prd != "" {
+		fmt.Fprintf(&s, "## PRD\n\nThe implementer posted this PRD on the issue before writing code. Check the change against its requirements and acceptance criteria.\n\n%s\n\n", prd)
+	}
 	fmt.Fprintf(&s, "## The change\n\nYou are in the implementation worktree on branch %s. Read the full change with `git diff origin/%s...HEAD` and `git log origin/%s..HEAD`, and read surrounding code as needed.\n\n", b.Branch, b.BaseBranch, b.BaseBranch)
 	if len(b.Validation) > 0 {
 		s.WriteString("The implementer reports this validation:\n")

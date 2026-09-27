@@ -34,6 +34,10 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
   if the verified PR head has no review (crash mid-review, or new commits, D63):
     re-verify the PR, record its head, skip to the review below
   turn = implementer.Start(worktree, prompt)          # later: Resume(session, msg)
+  until every planning document is on the issue (and no PR exists), the turn plans (D90):
+    planned      -> gh: post analysis, PRD, design, and plan as four issue comments
+                    (edit the earlier comments on a re-plan), record their ids and URLs,
+                    then turn = implementer.Resume(session, "plan posted; implement it")
   switch turn.Outcome.Status
     blocked      -> save each of Questions as a decision, state NEEDS_DECISION, exit
     failed       -> state FAILED, exit

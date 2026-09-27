@@ -269,6 +269,13 @@ func Show(w io.Writer, r *task.Record) {
 	} else {
 		row("Agent", "not delegated")
 	}
+	for i, c := range r.Plan {
+		label := ""
+		if i == 0 {
+			label = "Plan"
+		}
+		row(label, c.Doc.Title()+" "+c.URL)
+	}
 	if g := r.GitHub; g != nil {
 		row("GitHub", fmt.Sprintf("%s · updated %s · %s", g.State, g.UpdatedAt.Local().Format(time.DateTime), reasons(g.Reasons)))
 	}

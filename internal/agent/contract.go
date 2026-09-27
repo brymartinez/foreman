@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/brymartinez/foreman/internal/task"
 )
@@ -20,6 +21,7 @@ var OutcomeSchema []byte
 type Status string
 
 const (
+	Planned   Status = "planned"
 	PROpened  Status = "pr_opened"
 	Blocked   Status = "blocked"
 	FailedRun Status = "failed"
@@ -36,6 +38,15 @@ type Outcome struct {
 	PRURL      string
 	Validation []Check
 	Questions  []task.Question
+	// Documents are the planning documents a planned turn wrote, by task.PlanDocs.
+	Documents map[task.PlanDoc]string
+}
+
+type wireDocuments struct {
+	Analysis string `json:"analysis"`
+	PRD      string `json:"prd"`
+	Design   string `json:"design"`
+	Plan     string `json:"plan"`
 }
 
 type wireOutcome struct {
@@ -45,6 +56,7 @@ type wireOutcome struct {
 	PRURL      *string         `json:"prUrl"`
 	Validation []Check         `json:"validation"`
 	Questions  []task.Question `json:"questions"`
+	Documents  *wireDocuments  `json:"documents"`
 }
 
 func ParseOutcome(raw []byte) (Outcome, error) {
@@ -57,6 +69,19 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 	}
 	out := Outcome{Status: w.Status, Summary: w.Summary}
 	switch w.Status {
+	case Planned:
+		if w.Documents == nil {
+			return Outcome{}, errors.New("planned outcome has no documents")
+		}
+		out.Documents = map[task.PlanDoc]string{
+			task.Analysis: w.Documents.Analysis, task.PRD: w.Documents.PRD,
+			task.Design: w.Documents.Design, task.ImplementationPlan: w.Documents.Plan,
+		}
+		for _, d := range task.PlanDocs {
+			if strings.TrimSpace(out.Documents[d]) == "" {
+				return Outcome{}, fmt.Errorf("planned outcome has an empty %s", d.Title())
+			}
+		}
 	case PROpened:
 		if len(w.Validation) == 0 {
 			return Outcome{}, errors.New("pr_opened outcome needs the validation that was run")

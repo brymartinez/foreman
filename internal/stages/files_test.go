@@ -132,7 +132,7 @@ func TestRepoRoot(t *testing.T) {
 }
 
 func TestRequireGlobal(t *testing.T) {
-	l := setup(t, map[string]string{"config/stages/implement.md": "x", "config/stages/review.md": "x"})
+	l := setup(t, map[string]string{"config/stages/plan.md": "x", "config/stages/implement.md": "x", "config/stages/review.md": "x"})
 	err := Files{GlobalDir: l.global}.RequireGlobal()
 	if err == nil || !strings.Contains(err.Error(), filepath.Join(l.global, "pr.md")) || strings.Contains(err.Error(), "review.md") {
 		t.Fatalf("err = %v, want only pr.md reported", err)

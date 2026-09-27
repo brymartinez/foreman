@@ -141,33 +141,34 @@ func (m Markdown) List(_ context.Context) ([]*task.Record, error) {
 }
 
 type frontmatter struct {
-	Repo                string       `yaml:"repo"`
-	Number              int          `yaml:"number"`
-	Kind                task.Kind    `yaml:"kind"`
-	Title               string       `yaml:"title"`
-	URL                 string       `yaml:"url"`
-	State               task.State   `yaml:"state"`
-	ImplementationAgent task.Agent   `yaml:"implementation_agent,omitempty"`
-	SessionID           string       `yaml:"session_id,omitempty"`
-	ReviewAgent         task.Agent   `yaml:"review_agent,omitempty"`
-	Branch              string       `yaml:"branch,omitempty"`
-	BaseRef             string       `yaml:"base_ref,omitempty"`
-	Worktree            string       `yaml:"worktree,omitempty"`
-	WorktreeRemovedAt   *time.Time   `yaml:"worktree_removed_at,omitempty"`
-	ContextFile         string       `yaml:"context_file,omitempty"`
-	RunnerPID           int          `yaml:"runner_pid,omitempty"`
-	RunnerLog           string       `yaml:"runner_log,omitempty"`
-	PR                  int          `yaml:"pr,omitempty"`
-	PRURL               string       `yaml:"pr_url,omitempty"`
-	PRHead              string       `yaml:"pr_head,omitempty"`
-	GitHub              *snapshot    `yaml:"github,omitempty"`
-	LastGitHubSync      *time.Time   `yaml:"last_github_sync,omitempty"`
-	Decisions           []decisionFM `yaml:"decisions,omitempty"`
-	LastOutcome         *outcomeFM   `yaml:"last_outcome,omitempty"`
-	Usage               usageFM      `yaml:"usage,omitempty"`
-	Validation          []task.Check `yaml:"validation,omitempty"`
-	Reviews             []reviewFM   `yaml:"reviews,omitempty"`
-	CI                  *ciFM        `yaml:"ci,omitempty"`
+	Repo                string             `yaml:"repo"`
+	Number              int                `yaml:"number"`
+	Kind                task.Kind          `yaml:"kind"`
+	Title               string             `yaml:"title"`
+	URL                 string             `yaml:"url"`
+	State               task.State         `yaml:"state"`
+	ImplementationAgent task.Agent         `yaml:"implementation_agent,omitempty"`
+	SessionID           string             `yaml:"session_id,omitempty"`
+	ReviewAgent         task.Agent         `yaml:"review_agent,omitempty"`
+	Branch              string             `yaml:"branch,omitempty"`
+	BaseRef             string             `yaml:"base_ref,omitempty"`
+	Worktree            string             `yaml:"worktree,omitempty"`
+	WorktreeRemovedAt   *time.Time         `yaml:"worktree_removed_at,omitempty"`
+	ContextFile         string             `yaml:"context_file,omitempty"`
+	RunnerPID           int                `yaml:"runner_pid,omitempty"`
+	RunnerLog           string             `yaml:"runner_log,omitempty"`
+	PR                  int                `yaml:"pr,omitempty"`
+	PRURL               string             `yaml:"pr_url,omitempty"`
+	PRHead              string             `yaml:"pr_head,omitempty"`
+	GitHub              *snapshot          `yaml:"github,omitempty"`
+	LastGitHubSync      *time.Time         `yaml:"last_github_sync,omitempty"`
+	Decisions           []decisionFM       `yaml:"decisions,omitempty"`
+	LastOutcome         *outcomeFM         `yaml:"last_outcome,omitempty"`
+	Usage               usageFM            `yaml:"usage,omitempty"`
+	Validation          []task.Check       `yaml:"validation,omitempty"`
+	Reviews             []reviewFM         `yaml:"reviews,omitempty"`
+	Plan                []task.PlanComment `yaml:"plan,omitempty"`
+	CI                  *ciFM              `yaml:"ci,omitempty"`
 }
 
 type ciFM struct {
@@ -312,6 +313,7 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 		rec.LastGitHubSync = *fm.LastGitHubSync
 	}
 	rec.Validation = fm.Validation
+	rec.Plan = fm.Plan
 	for _, r := range fm.Reviews {
 		if r.Verdict != "clean" && r.Verdict != "changes_requested" {
 			return nil, fmt.Errorf("review round %d has unknown verdict %q", r.Round, r.Verdict)
@@ -379,6 +381,7 @@ func fromRecord(rec *task.Record) frontmatter {
 		fm.LastGitHubSync = &t
 	}
 	fm.Validation = rec.Validation
+	fm.Plan = rec.Plan
 	for _, r := range rec.Reviews {
 		verdict := "changes_requested"
 		if r.Clean {

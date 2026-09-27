@@ -79,6 +79,18 @@ type GitHubClient interface {
 	OpenPullRequestForBranch(ctx context.Context, repo task.Repo, branch string) (*PullRequest, error)
 	// CIStatus summarizes the checks on the PR's current head. CheckedAt is left zero.
 	CIStatus(ctx context.Context, pr task.Key) (task.CIStatus, error)
+	// PostIssueComment adds a comment to the issue, or edits comment id when id > 0.
+	// Editing a comment that no longer exists returns ErrGone. It is foreman's only
+	// write to GitHub (D90).
+	PostIssueComment(ctx context.Context, issue task.Key, id int64, body string) (IssueComment, error)
+	// GetIssueComment reads one comment. A missing comment returns ErrGone.
+	GetIssueComment(ctx context.Context, repo task.Repo, id int64) (IssueComment, error)
+}
+
+type IssueComment struct {
+	ID   int64
+	URL  string
+	Body string
 }
 
 // RepositoryManager provides a local source checkout for repository-independent

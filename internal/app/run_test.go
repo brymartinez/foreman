@@ -241,8 +241,8 @@ func TestReviewPromptGetsOnlyReviewInstructions(t *testing.T) {
 	if strings.Contains(p, "implement instructions") || strings.Contains(p, "pr instructions") {
 		t.Errorf("review prompt carries another stage's instructions:\n%s", p)
 	}
-	if got := f.stages.calls; len(got) != 3 || got[2] != "/wt/ridezoomo-armada-backend/825-provider-retries review" {
-		t.Errorf("lookups %q; want implement, pr, then review, all at the worktree root", got)
+	if got := f.stages.calls; len(got) != 4 || got[2] != "/wt/ridezoomo-armada-backend/825-provider-retries plan" || got[3] != "/wt/ridezoomo-armada-backend/825-provider-retries review" {
+		t.Errorf("lookups %q; want implement, pr, plan, then review, all at the worktree root", got)
 	}
 }
 
@@ -298,7 +298,7 @@ func TestRunTaskStopsWhenTheTaskFileIsRemoved(t *testing.T) {
 	}
 }
 
-func TestRunTaskRecordsACancelledImplementation(t *testing.T) {
+func TestRunTaskRecordsACancelledTurn(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	ctx, cancel := context.WithCancelCause(context.Background())
@@ -310,13 +310,13 @@ func TestRunTaskRecordsACancelledImplementation(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.Failed || got.LastOutcome.Status != Cancelled || got.LastOutcome.Summary != "run cancelled during implementation (terminated signal received)" {
+	if got.State != task.Failed || got.LastOutcome.Status != Cancelled || got.LastOutcome.Summary != "run cancelled during planning (terminated signal received)" {
 		t.Fatalf("state %s outcome %+v", got.State, got.LastOutcome)
 	}
 	if got.Delegation.Implementer.ID != "sid-1" || got.Usage.ClaudeCostUSD != 1.25 || got.Delegation.RunnerPID != 0 {
 		t.Errorf("a cancelled turn must keep its session and usage: %+v %+v", got.Delegation, got.Usage)
 	}
-	if !strings.Contains(log.String(), "foreman: stopped during implementation: terminated signal received") {
+	if !strings.Contains(log.String(), "foreman: stopped during planning: terminated signal received") {
 		t.Errorf("log = %q", log.String())
 	}
 	if len(f.notes.sent) == 0 || !strings.Contains(f.notes.sent[len(f.notes.sent)-1], "Run cancelled") {
@@ -349,5 +349,107 @@ func TestAFailedTurnWithoutACancelIsNotCancelled(t *testing.T) {
 	}
 	if got := f.store.recs[key]; got.State != task.Failed || got.LastOutcome.Status != "failed" {
 		t.Fatalf("state %s outcome %+v", got.State, got.LastOutcome)
+	}
+}
+
+func plannedTurn(id string) agent.Turn {
+	return agent.Turn{Session: task.Session{Agent: task.Claude, ID: id}, Usage: task.Usage{ClaudeCostUSD: 0.5, ClaudeTurns: 1}, Outcome: agent.Outcome{
+		Status: agent.Planned, Summary: "planned",
+		Documents: map[task.PlanDoc]string{task.Analysis: "Retries 5xx only today.", task.PRD: "R1. Retry 5xx.", task.Design: "Wrap the client.", task.ImplementationPlan: "### Task 1"},
+	}}
+}
+
+func TestPlanIsPostedThenTheSessionImplementsIt(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-1")}
+	var log strings.Builder
+	if err := f.app.RunTask(context.Background(), key, 4242, &log); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Reviewing || !got.PlanPosted() || len(got.Plan) != 4 {
+		t.Fatalf("state %s plan %+v", got.State, got.Plan)
+	}
+	for i, doc := range task.PlanDocs {
+		c := got.Plan[i]
+		body := f.gh.comments[c.CommentID].Body
+		if c.Doc != doc || !strings.HasPrefix(body, "<!-- foreman:"+string(doc)+" -->\n## "+doc.Title()+"\n\n") {
+			t.Errorf("comment %d = %+v body %q", i, c, body)
+		}
+	}
+	if !strings.Contains(f.claude.prompt, "## Plan first") || !strings.Contains(f.claude.prompt, "plan instructions") {
+		t.Errorf("the first turn must plan:\n%s", f.claude.prompt)
+	}
+	if f.claude.starts != 1 || len(f.claude.resumed) != 1 || !strings.Contains(f.claude.resumed[0], "sid-1: foreman posted your documents") || !strings.Contains(f.claude.resumed[0], "- Implementation plan: https://github.com/") {
+		t.Errorf("the planning session must be resumed to implement: starts %d resumed %q", f.claude.starts, f.claude.resumed)
+	}
+	if !strings.Contains(f.codex.reviewed[0], "## PRD") || !strings.Contains(f.codex.reviewed[0], "R1. Retry 5xx.") {
+		t.Errorf("the review must carry the PRD:\n%s", f.codex.reviewed[0])
+	}
+	if got.Usage.ClaudeCostUSD != 0.5 || !strings.Contains(log.String(), "foreman: posted the PRD: https://") {
+		t.Errorf("usage %+v log %q", got.Usage, log.String())
+	}
+}
+
+func TestReplanningEditsTheSameComments(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	f.gh.postErr, f.gh.postOK = errors.New("gh: HTTP 502"), 2
+	f.claude.turns = []agent.Turn{plannedTurn("sid-1")}
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Failed || !strings.Contains(got.LastOutcome.Summary, "posting the Design on the issue failed") || len(got.Plan) != 2 {
+		t.Fatalf("state %s outcome %+v plan %+v", got.State, got.LastOutcome, got.Plan)
+	}
+	// Restarting plans again: it edits the analysis comment, and posts the PRD anew
+	// because the developer deleted its comment.
+	f.gh.postErr = nil
+	delete(f.gh.comments, 1002)
+	started(t, f, startReq(t))
+	f.claude.turns = []agent.Turn{plannedTurn("sid-2"), prTurn("sid-2")}
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got = f.store.recs[key]
+	if !got.PlanPosted() || got.Plan[0].CommentID != 1001 || f.gh.edits != 1 {
+		t.Errorf("plan %+v edits %d; want the analysis comment edited in place", got.Plan, f.gh.edits)
+	}
+}
+
+func TestAnsweredPlanningQuestionResumesThePlanning(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	rec := f.store.recs[key]
+	rec.Delegation.Implementer.ID = "sid-1"
+	rec.Decisions = []task.Decision{{Question: task.Question{Issue: "Retry 4xx?"}, Answer: "A. 5xx only", AnsweredAt: f.app.Now()}}
+	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-1")}
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.claude.resumed) != 2 || !strings.Contains(f.claude.resumed[0], "planned, blocked, or failed") || !strings.Contains(f.claude.resumed[1], "foreman posted your documents") {
+		t.Errorf("resumed %q", f.claude.resumed)
+	}
+}
+
+func TestATaskWithAPRSkipsPlanning(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	f.store.recs[key].Delegation.PR = 912
+	f.claude.turn = prTurn("sid-1")
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(f.claude.prompt, "## Plan first") || len(f.gh.comments) != 0 {
+		t.Errorf("planned a task that already has a PR")
+	}
+}
+
+func TestPlanCommentFitsGitHubsLimit(t *testing.T) {
+	body := planCommentBody(task.ImplementationPlan, strings.Repeat("é", maxCommentChars))
+	if n := len([]rune(body)); n > maxCommentChars || !strings.HasSuffix(body, "_Truncated at GitHub's comment length limit._") {
+		t.Errorf("body is %d characters", n)
 	}
 }
