@@ -1290,3 +1290,25 @@ Entry format:
   doesn't write defaults over it. Once the editor exits, it loads the file again
   and exits 1 with the error if it's still invalid. Every other command still
   refuses an invalid config.
+
+## D92. The prompts' remaining workflow rules move to the stage files
+
+- Date: 2026-09-28. User request. Amends D73 and D90.
+- **Context.** D73 moved the agents' working rules into the stage files, but a few
+  rules stayed in the Go prompts, where the developer couldn't edit them.
+- **Decision.**
+  - Moved to `implement.md`: read the issue comments and the branch's earlier work
+    before changing code; follow the posted plan's tasks in order and say why in the
+    PR when deviating; commit work in progress before reporting "blocked". The
+    writing rules now name the planning documents too.
+  - Moved to `plan.md`: read the issue and every comment first.
+  - Moved to `review.md`: check the change against the PRD's requirements and
+    acceptance criteria; a clean verdict when no substantive problem remains.
+  - Added to `pr.md`: list deviations from the posted plan.
+  - The Go prompts keep protocol and facts only: the role, unattended or read-only,
+    the issue, paths and branch, the push and `gh pr` commands, `Closes #N`, the plan
+    links and the PRD text, the planning turn's no-changes rule, the question format,
+    the JSON outcome, and precedence between the context file, decisions, and stage
+    files.
+- **Consequence.** An installed stage file doesn't get the moved rules until the
+  developer copies them in, because `make config` never overwrites one.

@@ -4,7 +4,7 @@ Write four documents before any code. Each is posted on the issue as its own com
 
 ## Analysis
 
-1. What the issue asks, in your own words, and what the comments add.
+1. Read the issue and every comment (`gh issue view <number> --repo <owner>/<repo> --comments`). Then say what the issue asks, in your own words, and what the comments add.
 2. What the code does today, with `file:line` references.
 3. The root cause for a bug, or the gap for a feature.
 4. Constraints: callers, stored data, config, public API, compatibility.

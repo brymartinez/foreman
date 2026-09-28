@@ -49,13 +49,12 @@ func ImplementationPrompt(b TaskBrief) string {
 		body = "(The issue has no description.)"
 	}
 	s.WriteString(body + "\n\n")
-	fmt.Fprintf(&s, "Read the issue comments before planning: `gh issue view %d --repo %s --comments`.\n\n", b.Key.Number, b.Key.Repo)
 
 	stageSection(&s, b.StageInstructions)
 	if b.Planning {
 		planningSection(&s, b.PlanInstructions)
 	} else if len(b.Plan) > 0 {
-		s.WriteString("## The plan\n\nYour plan for this issue is posted on it. Follow the implementation plan's tasks in order. If you must deviate from the PRD or the plan, say why in the pull request.\n\n")
+		s.WriteString("## The plan\n\nYour plan for this issue is posted on it:\n\n")
 		writePlanLinks(&s, b.Plan)
 		s.WriteString("\n")
 	}
@@ -70,7 +69,7 @@ func ImplementationPrompt(b TaskBrief) string {
 		for _, d := range answered {
 			fmt.Fprintf(&s, "- Q: %s\n  A: %s\n", d.Question.Issue, d.Answer)
 		}
-		s.WriteString("\nWork already committed on the branch may be from an earlier turn.\n\n")
+		s.WriteString("\n")
 	}
 
 	if len(b.OpenFindings) > 0 {
@@ -104,7 +103,7 @@ To ask, end your turn with status "blocked" and fill "questions", one entry per 
 - recommendation: the label of the option you recommend, and nothing else
 - impactIfWrong: what goes wrong if the recommendation is wrong
 
-Do not push or open a pull request when you are blocked. Commit work in progress to the branch first.
+Do not push or open a pull request when you are blocked.
 
 ## Final response
 
@@ -158,7 +157,7 @@ func PlanPostedMessage(plan []task.PlanComment) string {
 	var s strings.Builder
 	s.WriteString("foreman posted your documents on the issue:\n\n")
 	writePlanLinks(&s, plan)
-	s.WriteString("\nNow implement the plan under the instructions from the start of this session. Follow the implementation plan's tasks in order, validate, and open the pull request. End with the JSON outcome: pr_opened, blocked, or failed.\n")
+	s.WriteString("\nNow implement the plan under the instructions from the start of this session. End with the JSON outcome: pr_opened, blocked, or failed.\n")
 	return s.String()
 }
 

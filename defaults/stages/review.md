@@ -3,7 +3,7 @@
 ## Scope
 
 1. Follow the repository's AGENTS.md and CLAUDE.md.
-2. Check the change against the issue first: does it do what was asked, and nothing it wasn't asked to do?
+2. Check the change against the issue and the PRD first: does it meet each requirement and acceptance criterion, and do nothing it wasn't asked to do?
 3. Read beyond the diff. Look at callers of changed functions, other places that share the changed type or config, and error paths the tests skip.
 4. Treat the developer's decisions as settled requirements, not findings.
 5. Don't repeat a finding the implementer reasonably declined unless it's a real defect.
@@ -17,7 +17,7 @@
 
 ## What counts
 
-8. Report substantive problems only: correctness, regressions, unmet acceptance criteria, security, authorization, concurrency, data integrity, API compatibility, architecture, missing tests, and needless complexity. Skip style, naming, and formatting preferences.
+8. Report substantive problems only, and a clean verdict when none remain: correctness, regressions, unmet acceptance criteria, security, authorization, concurrency, data integrity, API compatibility, architecture, missing tests, and needless complexity. Skip style, naming, and formatting preferences.
 9. Report a finding only after you confirm it in the code. Say what input or state breaks, and what happens.
 10. Drop anything you can't back with a concrete case.
 11. Count a missing test as a finding only when the untested path could plausibly break.

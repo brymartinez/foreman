@@ -173,7 +173,6 @@ func TestImplementationPromptCarriesDurableContext(t *testing.T) {
 	for _, want := range []string{
 		"ridezoomo/armada-backend#825",
 		"Retry failed requests.",
-		"gh issue view 825 --repo ridezoomo/armada-backend --comments",
 		"authoritative",
 		"Preserve the existing 5xx-only retry semantics.",
 		"/wt/825-provider-retries on branch agent/825-provider-retries, created from origin/main",
@@ -191,6 +190,12 @@ func TestImplementationPromptCarriesDurableContext(t *testing.T) {
 	}
 	if strings.Contains(ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 1}}), "## Implementation context") {
 		t.Error("context section rendered without context")
+	}
+	// Workflow rules live in the stage files, which the developer can edit (D92).
+	for _, rule := range []string{"gh issue view", "Commit work in progress", "earlier turn"} {
+		if strings.Contains(p, rule) {
+			t.Errorf("prompt hard-codes the stage-file rule %q", rule)
+		}
 	}
 }
 
