@@ -308,6 +308,13 @@ scenario_inbox() {
 	printf '#!/bin/sh\n[ "$1" = -w ] && echo "edited $2" >"%s/edited"\n' "$sandbox" >"$sandbox/bin/editor"
 	chmod +x "$sandbox/bin/editor"
 	check "config --edit runs an editor with arguments" bash -c "cd '$sandbox' && EDITOR='editor -w' VISUAL= '$work/foreman' config --edit && grep -qF '$sandbox/config.yaml' '$sandbox/edited'"
+	cp "$sandbox/config.yaml" "$sandbox/config.good"
+	printf 'ignore_repositories:\n  - "acme/typo\\""\n' >>"$sandbox/config.yaml"
+	check "an invalid config stops other commands" bash -c "cd '$sandbox' && ! '$work/foreman' status 2>/dev/null"
+	printf '#!/bin/sh\ncp "%s/config.good" "$1"\n' "$sandbox" >"$sandbox/bin/fixer"
+	chmod +x "$sandbox/bin/fixer"
+	check "config --edit still opens an invalid config" bash -c "cd '$sandbox' && EDITOR=fixer VISUAL= '$work/foreman' config --edit 2>'$sandbox/edit-err.txt' && grep -qF 'so you can fix it' '$sandbox/edit-err.txt'"
+	check "and the fixed config loads" bash -c "cd '$sandbox' && '$work/foreman' status >/dev/null"
 }
 
 scenario_inbox_lifecycle() {

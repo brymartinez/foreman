@@ -52,6 +52,10 @@ func run(argv []string) int {
 		fmt.Println("foreman", buildVersion(version, info))
 		return 0
 	}
+	// An invalid config must not lock the developer out of the command that fixes it.
+	if cmd.Name == cli.Config && cmd.ConfigEdit {
+		return editConfig()
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		return fail(err)
@@ -201,8 +205,6 @@ func run(argv []string) int {
 		case cmd.ConfigShow:
 			render.Config(os.Stdout, cfg)
 			return 0
-		case cmd.ConfigEdit:
-			return editConfig(cfg.Path, cfg)
 		default:
 			return stageConfig(ctx, cfg)
 		}
@@ -320,8 +322,17 @@ func stageConfig(ctx context.Context, cfg config.Config) int {
 	return code
 }
 
-func editConfig(path string, cfg config.Config) int {
-	if err := config.Materialize(path, cfg); err != nil {
+// editConfig opens the config file in the developer's editor. A file that fails to
+// load is opened as it is, with the error shown first; a missing or empty one is
+// filled with the defaults. The file is checked again once the editor exits.
+func editConfig() int {
+	path, err := config.FilePath()
+	if err != nil {
+		return fail(err)
+	}
+	if cfg, err := config.Load(); err != nil {
+		fmt.Fprintf(os.Stderr, "foreman: %v\nOpening %s so you can fix it.\n", err, path)
+	} else if err := config.Materialize(path, cfg); err != nil {
 		return fail(fmt.Errorf("prepare config %s: %w", path, err))
 	}
 	editor := os.Getenv("VISUAL")
@@ -336,6 +347,9 @@ func editConfig(path string, cfg config.Config) int {
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fail(fmt.Errorf("edit config with %s: %w", editor, err))
+	}
+	if _, err := config.Load(); err != nil {
+		return fail(fmt.Errorf("%v; run foreman config --edit again to fix it", err))
 	}
 	return 0
 }

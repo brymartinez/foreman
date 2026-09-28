@@ -84,9 +84,9 @@ func Load() (Config, error) {
 		Budgets:         Budgets{ImplementerUSD: 3, ReviewerUSD: 1},
 		Notifications:   Notifications{Enabled: true},
 	}
-	path := os.Getenv("FOREMAN_CONFIG")
-	if path == "" {
-		path = filepath.Join(home, ".config", "foreman", "config.yaml")
+	path, err := FilePath()
+	if err != nil {
+		return Config{}, err
 	}
 	raw, err := os.ReadFile(path)
 	switch {
@@ -113,6 +113,19 @@ func Load() (Config, error) {
 		cfg.IgnoredRepos[i] = parsed
 	}
 	return cfg, nil
+}
+
+// FilePath is the config file: $FOREMAN_CONFIG, or ~/.config/foreman/config.yaml.
+// It doesn't read the file, so `config --edit` can open one that fails to load.
+func FilePath() (string, error) {
+	if path := os.Getenv("FOREMAN_CONFIG"); path != "" {
+		return path, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "foreman", "config.yaml"), nil
 }
 
 // Materialize writes the resolved configuration only when the config file is

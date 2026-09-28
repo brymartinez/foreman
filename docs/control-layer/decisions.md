@@ -1280,3 +1280,13 @@ Entry format:
 - **Rejected.** The agent posting its own comments (the user chose the runner), one
   combined comment (the user chose one per document), and a competing-agent review of
   the documents (the user chose self-review).
+
+## D91. config --edit opens a config that fails to load
+
+- Date: 2026-09-28. Bug the user hit: a stray quote in `ignore_repositories` made
+  every command fail, including `config --edit`, the one that fixes it.
+- **Decision.** `config --edit` resolves the file path without loading the config.
+  If the file fails to load, it prints the error, opens the file as it is, and
+  doesn't write defaults over it. Once the editor exits, it loads the file again
+  and exits 1 with the error if it's still invalid. Every other command still
+  refuses an invalid config.
