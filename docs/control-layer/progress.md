@@ -450,8 +450,9 @@ request. Each fix is its own commit with a decision.
 
 ## Known limitations
 
-- The gate runs only when `inbox` or `status` runs, because the design rules out
-  daemons and polling (D5). Notifications come from the runner and from those
+- The gate runs only when `inbox` or `status` runs, or while the dashboard is open
+  (D95), because the design rules out daemons (D5). Nothing runs between commands
+  except a task's own runner. Notifications come from the runner and from those
   commands.
 - `gh pr checks` handling is verified against gh's documented behavior and fixtures,
   not a live PR, because the user declined the live probe (D36).

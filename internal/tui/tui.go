@@ -59,7 +59,9 @@ func Run(ctx context.Context, o Options) (err error) {
 	}()
 	fmt.Fprint(o.Out, enterAlt+hideCursor+clear)
 
-	m := Model{Message: "Reading task files…"}
+	// The message line starts empty and only ever holds a result or an error. The
+	// header carries the loading state, so there is no first message to go stale.
+	var m Model
 	m.Width, m.Height = size(o.Out)
 
 	keys := make(chan Key, 64)
