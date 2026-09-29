@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -115,6 +116,30 @@ func TestStatus(t *testing.T) {
 		if !strings.Contains(buf.String(), "PR #905 · reviewer: Claude"+tc.want+"\n") {
 			t.Errorf("%s: got %q", tc.ci.State, buf.String())
 		}
+	}
+}
+
+func TestTaskRowsCarryStateAndBadges(t *testing.T) {
+	rows := TaskRows(&task.Record{
+		Key: task.Key{Repo: "ridezoomo/armada-backend", Number: 831}, Title: "Provider retries", State: task.Reviewing,
+		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912},
+		CI:         &task.CIStatus{State: task.CIPassing},
+		Reviews:    []task.Review{{Round: 1, Clean: true}},
+	})
+	want := []string{
+		"ridezoomo/armada-backend#831 Claude  REVIEWING",
+		"Provider retries · ridezoomo/armada-backend",
+		"PR #912 · reviewer: Codex · CI ✓ · review ✓",
+	}
+	if !slices.Equal(rows, want) {
+		t.Fatalf("TaskRows = %q\nwant %q", rows, want)
+	}
+	rows = TaskRows(&task.Record{
+		Key: task.Key{Repo: "a/b", Number: 7}, Title: "No PR yet", State: task.Working,
+		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex}, Reviewer: task.Claude},
+	})
+	if len(rows) != 2 {
+		t.Fatalf("TaskRows without a PR = %q; want two rows", rows)
 	}
 }
 

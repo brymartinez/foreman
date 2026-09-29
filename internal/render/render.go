@@ -219,13 +219,27 @@ func Status(w io.Writer, recs []*task.Record) {
 		if i > 0 {
 			fmt.Fprintln(w)
 		}
-		d := r.Delegation
-		fmt.Fprintf(w, "%-25s %-7s %s\n", issueLabel(r.Key), agentName(d.Implementer.Agent), r.State)
-		fmt.Fprintf(w, "       %s · %s\n", r.Title, r.Repo)
-		if d.PR > 0 {
-			fmt.Fprintf(w, "       PR #%d · reviewer: %s%s%s\n", d.PR, agentName(d.Reviewer), ciBadge(r.CI), reviewBadge(r))
+		rows := TaskRows(r)
+		fmt.Fprintln(w, rows[0])
+		for _, row := range rows[1:] {
+			fmt.Fprintf(w, "       %s\n", row)
 		}
 	}
+}
+
+// TaskRows is one delegated task as `status` shows it: the identity with its agent
+// and state, the title with its repo, and the PR with its CI and review badges. The
+// dashboard's pane uses the same rows, so the two views cannot drift.
+func TaskRows(r *task.Record) []string {
+	d := r.Delegation
+	rows := []string{
+		fmt.Sprintf("%-25s %-7s %s", issueLabel(r.Key), agentName(d.Implementer.Agent), r.State),
+		fmt.Sprintf("%s · %s", r.Title, r.Repo),
+	}
+	if d.PR > 0 {
+		rows = append(rows, fmt.Sprintf("PR #%d · reviewer: %s%s%s", d.PR, agentName(d.Reviewer), ciBadge(r.CI), reviewBadge(r)))
+	}
+	return rows
 }
 
 func reviewBadge(r *task.Record) string {
