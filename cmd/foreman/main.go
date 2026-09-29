@@ -27,7 +27,18 @@ import (
 	"github.com/brymartinez/foreman/internal/stages"
 	"github.com/brymartinez/foreman/internal/store"
 	"github.com/brymartinez/foreman/internal/task"
+	"github.com/brymartinez/foreman/internal/tui"
 	"github.com/brymartinez/foreman/internal/worktree"
+
+	"golang.org/x/term"
+)
+
+// The dashboard's two refresh rates. The GitHub one runs the searches, the readiness
+// gate, and the cleanup, so it is as rare as watching allows; the local one only
+// re-reads task files and the selected log (D95).
+const (
+	gitHubRefresh = 60 * time.Second
+	localRefresh  = time.Second
 )
 
 // version is set at release time with -ldflags "-X main.version=v1.2.3".
@@ -93,6 +104,25 @@ func run(argv []string) int {
 	}
 
 	switch cmd.Name {
+	case cli.TUI:
+		// A pipe or a script gets the usage text, the way a bare `foreman` always has.
+		if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
+			fmt.Print(cli.Usage)
+			return 0
+		}
+		ready, err := config.EnsureTasksDir(bufio.NewReader(os.Stdin), os.Stdout, cfg.TasksDir)
+		if err != nil {
+			return fail(err)
+		}
+		if !ready {
+			return 0
+		}
+		if err := tui.Run(ctx, tui.Options{
+			In: os.Stdin, Out: os.Stdout, Source: a,
+			GitHubEvery: gitHubRefresh, LocalEvery: localRefresh,
+		}); err != nil {
+			return fail(err)
+		}
 	case cli.Inbox:
 		stdin := bufio.NewReader(os.Stdin)
 		if cmd.NonInteractive {

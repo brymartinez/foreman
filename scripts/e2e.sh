@@ -413,7 +413,20 @@ scenario_cancel() {
 	check "start resumes the cancelled task" wait_status "review ✓"
 }
 
-scenarios=${*:-runner notify logs inbox inbox_lifecycle rereview respond cancel}
+scenario_tui() {
+	echo "tui: the dashboard needs a terminal, so a pipe still gets usage"
+	setup tui
+	for argv in "" "tui"; do
+		foreman $argv </dev/null >"$sandbox/usage.txt" 2>&1
+		check "foreman ${argv:-(no arguments)} exits 0 on a pipe" test $? -eq 0
+		check "foreman ${argv:-(no arguments)} prints usage" contains "$sandbox/usage.txt" "foreman inbox [--non-interactive]"
+	done
+	check "the dashboard is in the usage text" contains "$sandbox/usage.txt" "Dashboard: inbox, delegated work, and logs"
+	foreman status >"$sandbox/status.txt" 2>&1
+	check "status is unchanged" contains "$sandbox/status.txt" "No delegated work."
+}
+
+scenarios=${*:-runner notify logs inbox inbox_lifecycle rereview respond cancel tui}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"
