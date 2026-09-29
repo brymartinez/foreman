@@ -71,6 +71,7 @@ type Model struct {
 
 	pending      app.StartRequest // the delegation being collected
 	cancelTarget task.Key         // the task named when cancellation was requested
+	manualTask   bool             // cursor movement stops following the latest delegation
 }
 
 // Selected is the task the log pane follows, or nil when nothing is delegated.
@@ -88,20 +89,34 @@ func (m *Model) selectedEntry() *app.InboxEntry {
 	return &m.Inbox[m.InboxCursor]
 }
 
-// SetTasks replaces the task list and keeps the cursor on the same task. The list is
-// sorted by what needs attention, so a state change reorders it under the cursor.
+// SetTasks follows the latest start by default and preserves a manually picked task
+// across refreshes. The list is sorted by attention, so state changes can reorder it.
 func (m *Model) SetTasks(recs []*task.Record) {
 	var selected task.Key
 	if cur := m.Selected(); cur != nil {
 		selected = cur.Key
 	}
 	m.Tasks = recs
-	m.TaskCursor = clamp(indexOfTask(recs, selected, m.TaskCursor), len(recs))
+	if !m.manualTask {
+		m.TaskCursor = newestTask(recs)
+	} else {
+		m.TaskCursor = clamp(indexOfTask(recs, selected, m.TaskCursor), len(recs))
+	}
 	if cur := m.Selected(); cur == nil || cur.Key != selected {
 		// The task the cursor was on is gone, so the pane is about to show another
 		// task's log. Follow its tail rather than keep the old task's scroll offset.
 		m.LogOffset = 0
 	}
+}
+
+func newestTask(recs []*task.Record) int {
+	newest := 0
+	for i := 1; i < len(recs); i++ {
+		if recs[i].Delegation.StartedAt.After(recs[newest].Delegation.StartedAt) {
+			newest = i
+		}
+	}
+	return newest
 }
 
 // SetInbox replaces the inbox list and keeps the cursor on the same issue.
@@ -198,6 +213,7 @@ func (m *Model) move(by int) {
 	before := m.TaskCursor
 	m.TaskCursor = clamp(m.TaskCursor+by, len(m.Tasks))
 	if m.TaskCursor != before {
+		m.manualTask = true
 		// A new task brings a new log, so show its tail rather than keep the old offset.
 		m.LogOffset = 0
 	}
@@ -249,8 +265,6 @@ func (m *Model) enter() Action {
 func (m *Model) startCancel() Action {
 	rec := m.Selected()
 	switch {
-	case m.Focus != TaskPane:
-		return Action{}
 	case rec == nil:
 		m.Message = "No delegated work to cancel."
 	case rec.Delegation == nil || rec.Delegation.RunnerPID == 0:
@@ -288,6 +302,7 @@ func (m *Model) typeContext(k Key) Action {
 		req := m.pending
 		req.ContextFile = strings.TrimSpace(m.Input)
 		m.Mode, m.Input = Browsing, ""
+		m.manualTask = false
 		m.Message = fmt.Sprintf("Starting %s#%d with %s…", req.Repo, req.Issue, req.Agent)
 		return Action{Kind: ActionStart, Start: req}
 	}

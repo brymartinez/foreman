@@ -103,6 +103,7 @@ type Usage struct {
 // Delegation exists once the user has run start; tracked-only items have none.
 type Delegation struct {
 	Implementer Session
+	StartedAt   time.Time
 	Reviewer    Agent
 	Branch      string
 	BaseRef     string

@@ -224,7 +224,7 @@ func TestStartDispatches(t *testing.T) {
 	d := rec.Delegation
 	if rec.State != task.Working || d.Implementer.Agent != task.Claude || d.Reviewer != task.Codex ||
 		d.Branch != wantWT.Branch || d.Worktree != wantWT.Path || d.ContextFile != req.ContextFile ||
-		d.RunnerPID != 4242 || d.RunnerLog == "" || rec.Title != "Provider retries" {
+		d.RunnerPID != 4242 || d.RunnerLog == "" || d.StartedAt.IsZero() || rec.Title != "Provider retries" {
 		t.Errorf("record = %+v / %+v", rec, d)
 	}
 	if len(f.runners.spawned) != 1 || !strings.HasPrefix(rec.Body, "# #825 Provider retries") {

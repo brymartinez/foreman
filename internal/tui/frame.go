@@ -16,6 +16,10 @@ const focusMark = "▸ "
 const (
 	reverseOn  = "\x1b[7m"
 	dim        = "\x1b[2m"
+	cyan       = "\x1b[36m"
+	green      = "\x1b[32m"
+	yellow     = "\x1b[33m"
+	red        = "\x1b[31m"
 	attrsReset = "\x1b[0m"
 )
 
@@ -28,19 +32,25 @@ func Frame(m Model) []string {
 		return tooSmall(m.Width, m.Height)
 	}
 	lines := make([]string, 0, m.Height)
-	lines = append(lines, dimmed(pad(header(m), m.Width)))
+	lines = append(lines, colored(pad(header(m), m.Width), cyan))
 
 	right := m.Width - lay.leftWidth - 1
 	left := paneLines(inboxPane(m), lay.leftWidth, lay.topHeight, m.Focus == InboxPane, m.InboxCursor)
 	// The pane spends its first row on its heading, so a task has the rest to fill.
 	rightLines := paneLines(taskPane(m, right, lay.topHeight-1), right, lay.topHeight, m.Focus == TaskPane, m.TaskCursor)
 	for i := range lay.topHeight {
-		lines = append(lines, left[i]+" "+rightLines[i])
+		lines = append(lines, left[i]+dimmed("│")+rightLines[i])
 	}
 
 	lines = append(lines, dimmed(strings.Repeat("─", m.Width)))
 	lines = append(lines, logPane(m, lay.logHeight)...)
-	lines = append(lines, pad(truncate(m.Message, m.Width), m.Width))
+	message := pad(truncate(m.Message, m.Width), m.Width)
+	if strings.HasPrefix(m.Message, "!") {
+		message = colored(message, red)
+	} else if m.Message != "" {
+		message = colored(message, green)
+	}
+	lines = append(lines, message)
 	lines = append(lines, dimmed(pad(truncate(footer(m), m.Width), m.Width)))
 	return lines
 }
@@ -67,7 +77,10 @@ func header(m Model) string {
 }
 
 // row is one list entry: its lines, drawn together and selectable as a unit.
-type row struct{ lines []string }
+type row struct {
+	lines []string
+	color string
+}
 
 // pane is a titled list of rows, with the text shown when it has none.
 type pane struct {
@@ -128,7 +141,7 @@ func taskPane(m Model, width, body int) pane {
 		if q != "" {
 			lines = append(lines, "  "+q)
 		}
-		p.rows = append(p.rows, row{lines: lines})
+		p.rows = append(p.rows, row{lines: lines, color: taskColor(rec.State)})
 	}
 	return p
 }
@@ -205,7 +218,7 @@ func paneLines(p pane, width, height int, focused bool, cursor int) []string {
 	if focused {
 		title = focusMark + title
 	}
-	out := []string{dimmed(pad(truncate(title, width), width))}
+	out := []string{colored(pad(truncate(title, width), width), cyan)}
 	body := height - 1
 
 	var lines []string
@@ -219,7 +232,11 @@ func paneLines(p pane, width, height int, focused bool, cursor int) []string {
 			if j == 0 && i == cursor {
 				marker = "> "
 			}
-			lines = append(lines, pad(truncate(marker+l, width), width))
+			line := pad(truncate(marker+l, width), width)
+			if r.color != "" {
+				line = colored(line, r.color)
+			}
+			lines = append(lines, line)
 		}
 		if i == cursor {
 			selectedTo = len(lines)
@@ -271,7 +288,7 @@ func logPane(m Model, height int) []string {
 	if m.LogOffset > 0 {
 		title += fmt.Sprintf(" · scrolled back %d (End to follow)", m.LogOffset)
 	}
-	out := []string{dimmed(pad(truncate(title, m.Width), m.Width))}
+	out := []string{colored(pad(truncate(title, m.Width), m.Width), cyan)}
 	visible := height - 1
 	if len(body) == 0 {
 		end := max(len(m.Log)-m.LogOffset, 0)
@@ -358,6 +375,20 @@ func pad(s string, width int) string {
 }
 
 func dimmed(s string) string { return dim + s + attrsReset }
+
+func colored(s, color string) string { return color + s + attrsReset }
+
+func taskColor(state task.State) string {
+	switch state {
+	case task.NeedsDecision, task.ReadyForHuman:
+		return yellow
+	case task.Failed:
+		return red
+	case task.Working, task.Reviewing:
+		return green
+	}
+	return ""
+}
 
 func plural(n int, one, many string) string {
 	if n == 1 {

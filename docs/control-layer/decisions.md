@@ -1503,3 +1503,19 @@ Entry format:
 - **Consequence.** At 60 by 12 a waiting task shows `PR #912 · CI ✗ · review ✗ 3`, and
   at 60 by 24 the same task shows the row `status` prints. The reviewer and the check
   names are what a narrow pane loses, not whether CI or the review passed.
+
+## D104. The log follows the latest delegation by default
+
+- Date: 2026-09-29. PR #2 author comment. Requested by the user.
+- **Context.** The task list is ordered by attention, so its first row can be older
+  than the most recently delegated issue. The log followed that first row at startup.
+  Cancellation also required focus on the task list.
+- **Decision.** Store the time of each `Start` in the task file. Until the user moves
+  the task cursor, select the newest start on each local refresh. A new delegation
+  resumes this default. `c` confirms cancellation of the task shown in the log from
+  either list pane. Color the status rows and messages, and draw a vertical divider
+  between the lists. Existing task files without a start time remain readable.
+- **Consequence.** The newest delegated issue's log appears by default, while a manual
+  selection stays on its task through refreshes. A restart of a failed task becomes the
+  latest start. Older task files with no start time retain their attention order among
+  themselves until they are started again.

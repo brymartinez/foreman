@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/brymartinez/foreman/internal/app"
 	"github.com/brymartinez/foreman/internal/task"
@@ -24,6 +25,38 @@ func model() Model {
 	m.SetInbox([]app.InboxEntry{entry("a/b", 1, "First"), entry("a/b", 2, "Second")})
 	m.SetTasks([]*task.Record{record(10, task.Working), record(11, task.Reviewing), record(12, task.Failed)})
 	return m
+}
+
+func TestLogFollowsMostRecentDelegationUntilTaskIsPicked(t *testing.T) {
+	older := record(10, task.NeedsDecision)
+	newer := record(11, task.Working)
+	older.Delegation.StartedAt = time.Date(2026, 9, 29, 9, 0, 0, 0, time.UTC)
+	newer.Delegation.StartedAt = older.Delegation.StartedAt.Add(time.Hour)
+	m := Model{Width: 100, Height: 30}
+	m.SetTasks([]*task.Record{older, newer}) // attention order puts the older task first
+	if m.Selected().Key != newer.Key {
+		t.Fatalf("log follows %v; want the newest delegation %v", m.Selected().Key, newer.Key)
+	}
+	// A new delegation takes over while the user has not picked a task.
+	latest := record(12, task.Working)
+	latest.Delegation.StartedAt = newer.Delegation.StartedAt.Add(time.Hour)
+	m.SetTasks([]*task.Record{older, newer, latest})
+	if m.Selected().Key != latest.Key {
+		t.Fatalf("log did not follow the new delegation: %v", m.Selected().Key)
+	}
+	m.Focus = TaskPane
+	m.Key(Key{Kind: KeyUp})
+	m.SetTasks([]*task.Record{latest, older, newer})
+	if m.Selected().Key != newer.Key {
+		t.Fatalf("manual task selection was lost: %v", m.Selected().Key)
+	}
+}
+
+func TestCancelTargetsTheLogTaskFromTheInbox(t *testing.T) {
+	m := model() // inbox starts focused
+	if got := press(&m, rune_('c'), rune_('y')); got.Kind != ActionCancel || got.Cancel.Key != m.Selected().Key {
+		t.Fatalf("cancel targeted %+v; want the task shown in the log", got)
+	}
 }
 
 func press(m *Model, keys ...Key) Action {

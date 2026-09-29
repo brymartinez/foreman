@@ -467,6 +467,11 @@ request. Each fix is its own commit with a decision.
   60 by 12 was truncated past the PR number, hiding the CI and review badges R3 asks
   for. The row now drops the reviewer and then the failing checks' names, and it grows
   back to the row `status` prints where the pane is tall enough.
+- The PR author's follow-up asked for color and dividers, and for the log to follow the
+  most recently delegated issue with cancellation from that view (D104). `Start` now
+  records the delegation time, the default cursor follows the newest start until a task
+  is selected manually, and `c` targets the task shown in the log from either pane.
+  The frame colors status rows and messages and draws a vertical divider.
 
 ## Known limitations
 
@@ -571,7 +576,8 @@ what it replaced. Current summary:
   keeps its original task. D98. Dynamic text loses terminal controls. D99. The minimum
   layout shows PR status. D100. A scrolled-back log holds its lines. D101. The frame
   counts terminal columns. D102 (amends D99). The wrapped PR row is bounded. D103
-  (amends D99, D102). The PR row drops detail instead of being truncated.
+  (amends D99, D102). The PR row drops detail instead of being truncated. D104. The
+  dashboard follows the newest delegation and colors and divides its panes.
 
 ## Next stage
 

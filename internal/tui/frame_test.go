@@ -50,6 +50,18 @@ func TestFrameShowsThreePanes(t *testing.T) {
 	}
 }
 
+func TestFrameColorsAndDividesThePanes(t *testing.T) {
+	m := model()
+	lines := Frame(m)
+	if !strings.Contains(lines[0], cyan) || !strings.Contains(lines[1], "│") || !strings.Contains(lines[2], green) {
+		t.Fatalf("frame lacks color or a pane divider:\n%s", strings.Join(lines[:3], "\n"))
+	}
+	m.Message = "! GitHub failed"
+	if !strings.Contains(Frame(m)[m.Height-2], red) {
+		t.Fatal("an error message has no error color")
+	}
+}
+
 func TestFrameMarksTheFocusedPane(t *testing.T) {
 	m := model()
 	inboxFocused := Frame(m)

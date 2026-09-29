@@ -90,12 +90,12 @@ Run `foreman` with no arguments and it opens a live view instead of printing usa
 
 ```
 foreman · 2 delegated · 3 in the inbox · refreshed 10:01:22
-▸ INBOX                             DELEGATED WORK
-> midsoln/foreman#1  Be interactive   ridezoomo/armada#340   Codex   READY_FOR_HUMAN
-    assigned to you                     Cache fleet lookups · ridezoomo/armada
-                                        PR #912 · reviewer: Claude · CI ✓ · review ✓
-  ridezoomo/armada#351  Retry 5xx
-    mentions you                      > midsoln/foreman#2      Claude  WORKING
+▸ INBOX                           │ DELEGATED WORK
+> midsoln/foreman#1  Be interactive │ ridezoomo/armada#340   Codex   READY_FOR_HUMAN
+    assigned to you                │   Cache fleet lookups · ridezoomo/armada
+                                   │   PR #912 · reviewer: Claude · CI ✓ · review ✓
+  ridezoomo/armada#351  Retry 5xx  │
+    mentions you                   │ > midsoln/foreman#2      Claude  WORKING
 ────────────────────────────────────────────────────────────────────────────────
 LOG · midsoln/foreman#2 · ~/.local/share/foreman/logs/2.log
 2026-09-29T10:01:04Z claude Bash go test ./internal/tui
@@ -103,7 +103,10 @@ LOG · midsoln/foreman#2 · ~/.local/share/foreman/logs/2.log
 ```
 
 The left pane holds the issues you can delegate, the right pane holds delegated work,
-and the bottom pane tails the runner log of whichever task the right-hand cursor is on.
+and the bottom pane tails the most recently delegated issue's runner log. Move the
+right-hand cursor to follow another task. Press `c` from either pane to cancel the task
+shown in the log, after confirmation. Colors mark running, waiting, and failed tasks;
+dividers separate the panes.
 
 | Key | What it does |
 |---|---|
@@ -111,7 +114,7 @@ and the bottom pane tails the runner log of whichever task the right-hand cursor
 | `↑` `↓`, `k` `j` | move the cursor in the focused pane |
 | `enter` on an issue | delegate it: pick `1` for Claude or `2` for Codex, then type an optional context file |
 | `enter` on a task | show its log path, or how to answer a waiting question |
-| `c` | cancel the selected running task, after a `y`/`n` confirm |
+| `c` | cancel the running task shown in the log, after a `y`/`n` confirm |
 | `r` | refresh from GitHub now |
 | `pgup` `pgdn` | scroll the log; `end` follows the tail again |
 | `esc` | abandon the delegate or cancel prompt |
