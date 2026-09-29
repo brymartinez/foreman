@@ -11,7 +11,8 @@ type layout struct {
 	topHeight int
 	logHeight int
 	// leftWidth is the inbox pane's column count; the task pane gets the rest, less
-	// the one column between them.
+	// the one column between them. The split is uneven because a task row carries a
+	// padded identity, an agent, a state, and its badges.
 	leftWidth int
 }
 
@@ -21,5 +22,5 @@ func layoutFor(width, height int) (layout, bool) {
 	}
 	body := height - 4
 	top := max(body*2/5, 4)
-	return layout{topHeight: top, logHeight: body - top, leftWidth: width / 2}, true
+	return layout{topHeight: top, logHeight: body - top, leftWidth: width * 9 / 20}, true
 }
