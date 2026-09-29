@@ -97,6 +97,11 @@ func (m *Model) SetTasks(recs []*task.Record) {
 	}
 	m.Tasks = recs
 	m.TaskCursor = clamp(indexOfTask(recs, selected, m.TaskCursor), len(recs))
+	if cur := m.Selected(); cur == nil || cur.Key != selected {
+		// The task the cursor was on is gone, so the pane is about to show another
+		// task's log. Follow its tail rather than keep the old task's scroll offset.
+		m.LogOffset = 0
+	}
 }
 
 // SetInbox replaces the inbox list and keeps the cursor on the same issue.

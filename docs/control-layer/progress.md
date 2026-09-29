@@ -458,6 +458,11 @@ request. Each fix is its own commit with a decision.
   minimum layout. Focused regressions cover each case. Validated with `go vet ./...`,
   `go test ./...`, race tests for `internal/tui`, `internal/app`, and `internal/render`,
   a binary build, and the full `scripts/e2e.sh` run.
+- Review round 2 closed the two remaining findings and a gap the round's own PR wrap
+  opened (D100 to D102): a log paged back with PgUp holds its lines as the agent
+  writes, `truncate`, `pad`, and `wrap` count terminal columns so a CJK title stays
+  inside its pane, and the wrapped PR row is bounded by `taskRowLines` so a waiting
+  question still fits the minimum layout.
 
 ## Known limitations
 
@@ -560,7 +565,8 @@ what it replaced. Current summary:
   frame over `golang.org/x/term`. D95 (amends D5). The dashboard polls in the
   foreground, at two rates. D96. The dashboard's review corrections. D97. Cancellation
   keeps its original task. D98. Dynamic text loses terminal controls. D99. The minimum
-  layout shows PR status.
+  layout shows PR status. D100. A scrolled-back log holds its lines. D101. The frame
+  counts terminal columns. D102 (amends D99). The wrapped PR row is bounded.
 
 ## Next stage
 

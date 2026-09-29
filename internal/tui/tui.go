@@ -220,17 +220,26 @@ func readLocal(ctx context.Context, s Source, m *Model) {
 // readLog re-tails the selected task's runner log. Moving the cursor calls it too, so
 // the pane never shows one task's lines under another task's heading.
 func readLog(m *Model) {
+	before := len(m.Log)
 	m.Log, m.LogErr = nil, ""
 	rec := m.Selected()
 	if rec == nil || rec.Delegation == nil || rec.Delegation.RunnerLog == "" {
+		m.LogOffset = 0
 		return
 	}
 	lines, err := tailFile(rec.Delegation.RunnerLog)
 	if err != nil {
-		m.LogErr = err.Error()
+		m.LogErr, m.LogOffset = err.Error(), 0
 		return
 	}
 	m.Log = lines
+	if m.LogOffset > 0 {
+		// The offset counts back from the tail, so a running agent's new lines would
+		// slide the view forward while the reader is scrolled back. Move the offset by
+		// the growth to hold the same lines on screen until End follows again. Past
+		// logLines the oldest lines are dropped and the view moves with them.
+		m.scrollLog(len(lines) - before)
+	}
 }
 
 func tailFile(path string) ([]string, error) {

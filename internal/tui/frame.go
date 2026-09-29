@@ -90,6 +90,11 @@ func inboxPane(m Model) pane {
 // markerWidth is the "> " or "  " every pane line carries before its text.
 const markerWidth = 2
 
+// taskRowLines is the most lines one task may take in the pane. layoutFor sizes the
+// pane's body to it (D99), so a task that drew more would put its own last line out of
+// reach: the pane scrolls by rows, not within one.
+const taskRowLines = 5
+
 func taskPane(m Model, width int) pane {
 	p := pane{title: "DELEGATED WORK", empty: "No delegated work yet."}
 	for _, rec := range m.Tasks {
@@ -98,20 +103,25 @@ func taskPane(m Model, width int) pane {
 		// status pads the identity to a fixed column so its rows line up. That padding
 		// does not fit a narrow pane, and truncating it would drop the state, so wrap
 		// the agent and the state onto their own line instead.
-		if len([]rune(rows[0]))+markerWidth > width {
+		if textWidth(rows[0])+markerWidth > width {
 			identity, agent, state := render.TaskHead(rec)
 			lines = []string{identity, "  " + agent + " · " + state}
 		}
-		for i, r := range rows[1:] {
-			if i == 1 { // the PR row can be wider than the task pane
-				for _, part := range wrap(r, width-markerWidth-2) {
-					lines = append(lines, "  "+part)
-				}
-			} else {
-				lines = append(lines, "  "+r)
+		lines = append(lines, "  "+rows[1]) // the title
+		q := pendingQuestion(rec)
+		if len(rows) > 2 {
+			// The PR row can be wider than the task pane, so it wraps into whatever
+			// taskRowLines has left once the question line is counted. Its last line
+			// is truncated rather than wrapped further.
+			budget := taskRowLines - len(lines)
+			if q != "" {
+				budget--
+			}
+			for _, part := range wrap(rows[2], width-markerWidth-2, max(budget, 1)) {
+				lines = append(lines, "  "+part)
 			}
 		}
-		if q := pendingQuestion(rec); q != "" {
+		if q != "" {
 			lines = append(lines, "  "+q)
 		}
 		p.rows = append(p.rows, row{lines: lines})
@@ -119,22 +129,38 @@ func taskPane(m Model, width int) pane {
 	return p
 }
 
-// wrap keeps every part of a PR's status row visible in the narrow task pane.
-func wrap(s string, width int) []string {
-	remaining := []rune(printable(s))
+// wrap keeps every part of a PR's status row visible in the narrow task pane. It
+// returns at most n lines, leaving the rest on the last one for truncate to cut.
+func wrap(s string, width, n int) []string {
+	remaining := printable(s)
 	var lines []string
-	for len(remaining) > width {
-		cut := width
-		for cut > 0 && remaining[cut] != ' ' {
-			cut--
-		}
-		if cut == 0 {
-			cut = width
-		}
-		lines = append(lines, string(remaining[:cut]))
-		remaining = []rune(strings.TrimLeft(string(remaining[cut:]), " "))
+	for textWidth(remaining) > width && len(lines) < n-1 {
+		cut := breakAt(remaining, width)
+		lines = append(lines, remaining[:cut])
+		remaining = strings.TrimLeft(remaining[cut:], " ")
 	}
-	return append(lines, string(remaining))
+	return append(lines, remaining)
+}
+
+// breakAt is where to cut s so the line before the cut is at most width columns. It
+// prefers the last space that fits, and cuts mid-word when none does.
+func breakAt(s string, width int) int {
+	n, lastSpace, limit := 0, 0, len(s)
+	for i, r := range s {
+		w := runeWidth(r)
+		if n+w > width {
+			limit = i
+			break
+		}
+		if r == ' ' {
+			lastSpace = i
+		}
+		n += w
+	}
+	if lastSpace > 0 {
+		return lastSpace
+	}
+	return limit
 }
 
 func pendingQuestion(rec *task.Record) string {
@@ -251,7 +277,7 @@ func footer(m Model) string {
 		}
 		return fmt.Sprintf("Cancel %s#%d and stop its agent? [y/n]", m.cancelTarget.Repo, m.cancelTarget.Number)
 	}
-	if len([]rune(hintsLong)) > m.Width {
+	if textWidth(hintsLong) > m.Width {
 		return hintsShort
 	}
 	return hintsLong
@@ -262,18 +288,31 @@ const (
 	hintsShort = "↑↓ tab enter · c cancel · r refresh · q quit"
 )
 
+// truncate cuts s to at most width columns, ending in an ellipsis when it cut. A wide
+// rune that would straddle the last column is dropped, so the line never spills into
+// the pane beside it.
 func truncate(s string, width int) string {
 	if width <= 0 {
 		return ""
 	}
-	r := []rune(printable(s))
-	if len(r) <= width {
-		return string(r)
+	s = printable(s)
+	if textWidth(s) <= width {
+		return s
 	}
 	if width == 1 {
 		return "…"
 	}
-	return string(r[:width-1]) + "…"
+	var b strings.Builder
+	n := 0
+	for _, r := range s {
+		w := runeWidth(r)
+		if n+w > width-1 { // one column is kept for the ellipsis
+			break
+		}
+		b.WriteRune(r)
+		n += w
+	}
+	return b.String() + "…"
 }
 
 // printable removes terminal controls from task, issue, and runner text before it
@@ -288,7 +327,7 @@ func printable(s string) string {
 }
 
 func pad(s string, width int) string {
-	if n := width - len([]rune(s)); n > 0 {
+	if n := width - textWidth(s); n > 0 {
 		return s + strings.Repeat(" ", n)
 	}
 	return s

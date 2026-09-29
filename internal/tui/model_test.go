@@ -188,6 +188,30 @@ func TestCancelConfirmationKeepsItsOriginalTask(t *testing.T) {
 	}
 }
 
+func TestCancelStopsTheTaskItAskedAboutAfterAReorder(t *testing.T) {
+	m := model()
+	m.Focus = TaskPane
+	press(&m, Key{Kind: KeyDown}) // a/b#11
+	press(&m, rune_('c'))
+	// The gate reordered the list while the prompt was up.
+	m.SetTasks([]*task.Record{record(12, task.Failed), record(11, task.Working), record(10, task.Working)})
+	got := press(&m, rune_('y'))
+	if got.Kind != ActionCancel || got.Cancel == nil || got.Cancel.Number != 11 {
+		t.Fatalf("action = %+v; want the task the prompt named", got)
+	}
+}
+
+func TestARefreshThatMovesTheCursorFollowsTheNewTail(t *testing.T) {
+	m := model()
+	m.Focus = TaskPane
+	m.Log = make([]string, 200)
+	press(&m, Key{Kind: KeyPageUp})
+	m.SetTasks([]*task.Record{record(11, task.Reviewing), record(12, task.Failed)})
+	if m.LogOffset != 0 {
+		t.Errorf("offset = %d; the task the cursor was on is gone", m.LogOffset)
+	}
+}
+
 func TestSelectionFollowsTheTaskAcrossARefresh(t *testing.T) {
 	m := model()
 	m.Focus = TaskPane

@@ -1439,3 +1439,47 @@ Entry format:
   minimum height.
 - **Consequence.** The selected task's PR, reviewer, CI, and review status are visible
   at the stated minimum terminal size without changing `foreman status` output.
+
+## D100. A scrolled-back log holds its lines as the log grows
+
+- Date: 2026-09-29. Issue midsoln/foreman#1, PR #2 follow-up review. Decided by the
+  agent after the user's request to fix the findings.
+- **Context.** `LogOffset` counts lines back from the tail, and the local tick re-tails
+  the file every second. A running agent's new lines moved the tail, so the view slid
+  forward under a developer who had paged back to read older output.
+- **Decision.** `readLog` moves `LogOffset` by the log's growth while the reader is
+  scrolled back, and `SetTasks` drops the offset when the cursor lands on another
+  task, as moving the cursor already did. End still follows the tail.
+- **Consequence.** Paging back holds still. Past `logLines` (500) the oldest lines are
+  dropped and the view moves with them, because `logs.Tail` reads only the tail.
+
+## D101. The frame counts terminal columns, not runes
+
+- Date: 2026-09-29. Issue midsoln/foreman#1, PR #2 follow-up review. Decided by the
+  agent after the user's request to fix the findings.
+- **Context.** `truncate`, `pad`, and `wrap` measured text in runes. A CJK or emoji
+  title takes two columns per rune, so at 60 columns the inbox pane's text ran over
+  the task pane beside it and the layout's column arithmetic was wrong.
+- **Decision.** `internal/tui/width.go` reports a rune's columns: none for a combining
+  mark, two in the East Asian wide and fullwidth blocks, one otherwise. The table is
+  written out rather than taken from a dependency, and the ambiguous-width runes
+  foreman draws itself, such as · ✓ ▸ and …, stay one column, which is what a terminal
+  outside a CJK locale draws.
+- **Consequence.** A wide rune that would straddle a pane's last column is dropped and
+  the line is padded instead, so no line exceeds its pane.
+
+## D102 (amends D99). The wrapped PR row is bounded by the pane's floor
+
+- Date: 2026-09-29. Issue midsoln/foreman#1, PR #2 follow-up review. Decided by the
+  agent after the user's request to fix the findings.
+- **Context.** D99 wraps the PR status row inside the task pane, and the pane's body
+  floor is five rows. A failing CI list wrapped that row onto two lines, which pushed a
+  NEEDS_DECISION task's question off the pane at 60 by 12. The pane scrolls by whole
+  rows, so the question could not be reached, which is the defect D99 fixed for the PR
+  row itself.
+- **Decision.** `taskRowLines` (5) names the most lines a task may draw, `layoutFor`
+  sizes the pane from it, and the PR row wraps only into what is left once the
+  question is counted. Its last line is truncated instead of wrapping further.
+- **Consequence.** A task with a waiting question shows one line of PR status and its
+  question; a task without one shows two lines of PR status, which fits the reviewer,
+  CI, and the review badge at 60 columns.

@@ -3,9 +3,11 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -133,6 +135,58 @@ func TestReadLogFollowsTheCursorWithoutWaitingForATick(t *testing.T) {
 	if len(m.Log) != 1 || !strings.Contains(m.Log[0], "second task") {
 		t.Errorf("after moving down, log = %q; want the newly selected task's log", m.Log)
 	}
+}
+
+func TestAScrolledBackLogHoldsItsLinesAsTheLogGrows(t *testing.T) {
+	path := t.TempDir() + "/runner.log"
+	var log strings.Builder
+	for i := range 200 {
+		fmt.Fprintf(&log, "line %d\n", i)
+	}
+	if err := os.WriteFile(path, []byte(log.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec := record(10, task.Working)
+	rec.Delegation.RunnerLog = path
+	m := Model{Width: 100, Height: 30, Focus: TaskPane}
+	s := stubSource{recs: []*task.Record{rec}}
+	readLocal(context.Background(), s, &m)
+
+	m.Key(Key{Kind: KeyPageUp})
+	top := visibleLog(&m)
+	if len(top) == 0 || top[len(top)-1] == m.Log[len(m.Log)-1] {
+		t.Fatalf("page up did not scroll the log: %q", top)
+	}
+	// The runner writes on while the reader is scrolled back.
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 200; i < 240; i++ {
+		fmt.Fprintf(f, "line %d\n", i)
+	}
+	f.Close()
+	readLocal(context.Background(), s, &m)
+	if got := visibleLog(&m); !slices.Equal(got, top) {
+		t.Errorf("the view moved under the reader:\ngot  %q\nwant %q", got, top)
+	}
+
+	m.Key(Key{Kind: KeyEnd})
+	if got := visibleLog(&m); got[len(got)-1] != "line 239" {
+		t.Errorf("end did not follow the new tail: %q", got[len(got)-1])
+	}
+}
+
+// visibleLog is the log lines the pane draws, without their padding.
+func visibleLog(m *Model) []string {
+	lay, _ := layoutFor(m.Width, m.Height)
+	var out []string
+	for _, l := range logPane(*m, lay.logHeight)[1:] {
+		if l = strings.TrimSpace(l); l != "" {
+			out = append(out, l)
+		}
+	}
+	return out
 }
 
 func TestStartMakesTheContextFileAbsolute(t *testing.T) {

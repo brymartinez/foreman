@@ -4,7 +4,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/brymartinez/foreman/internal/app"
 	"github.com/brymartinez/foreman/internal/task"
@@ -23,7 +22,7 @@ func plain(lines []string) []string {
 func screen(m Model) string { return strings.Join(plain(Frame(m)), "\n") }
 
 func TestFrameFillsTheScreen(t *testing.T) {
-	for _, size := range [][2]int{{60, 12}, {100, 30}, {200, 60}} {
+	for _, size := range [][2]int{{minWidth, minHeight}, {100, 30}, {200, 60}} {
 		m := model()
 		m.Width, m.Height = size[0], size[1]
 		m.Log = []string{"a log line"}
@@ -32,7 +31,7 @@ func TestFrameFillsTheScreen(t *testing.T) {
 			t.Errorf("%dx%d: %d lines", m.Width, m.Height, len(lines))
 		}
 		for i, l := range plain(lines) {
-			if n := utf8.RuneCountInString(l); n > m.Width {
+			if n := textWidth(l); n > m.Width {
 				t.Errorf("%dx%d: line %d is %d columns: %q", m.Width, m.Height, i, n, l)
 			}
 		}
@@ -200,8 +199,67 @@ func TestFrameTruncatesLongText(t *testing.T) {
 	m.Tasks[0].Title = strings.Repeat("long ", 40)
 	m.Log = []string{strings.Repeat("x", 500)}
 	for i, l := range plain(Frame(m)) {
-		if n := utf8.RuneCountInString(l); n > 60 {
+		if n := textWidth(l); n > 60 {
 			t.Fatalf("line %d is %d columns", i, n)
+		}
+	}
+}
+
+func TestFrameKeepsWideTextInsideItsPane(t *testing.T) {
+	// Counting runes made a CJK title twice as wide as the pane it was drawn in, so
+	// its tail ran over the pane beside it.
+	m := Model{Width: minWidth, Height: 30}
+	m.SetInbox([]app.InboxEntry{entry("acme/widgets", 7, strings.Repeat("配車の再試行", 8))})
+	m.SetTasks([]*task.Record{record(10, task.Working)})
+	m.Tasks[0].Title = strings.Repeat("プロバイダ", 8)
+	m.Log = []string{strings.Repeat("ログ行", 40)}
+	for i, l := range plain(Frame(m)) {
+		if n := textWidth(l); n > minWidth {
+			t.Fatalf("line %d is %d columns: %q", i, n, l)
+		}
+	}
+	// Every inbox line is exactly the pane's column count, so the task pane beside it
+	// starts where the layout puts it.
+	lay, _ := layoutFor(m.Width, m.Height)
+	for i, l := range plain(paneLines(inboxPane(m), lay.leftWidth, lay.topHeight, true, 0)) {
+		if n := textWidth(l); n != lay.leftWidth {
+			t.Errorf("inbox line %d is %d columns; want %d: %q", i, n, lay.leftWidth, l)
+		}
+	}
+}
+
+func TestFrameShowsAWaitingQuestionWithItsPRAtTheSmallestSupportedSize(t *testing.T) {
+	// The pane floor is what keeps a task's PR, its badges, and its question on
+	// screen, so the wrapped PR row must not push the question out of the pane.
+	rec := record(10, task.NeedsDecision)
+	rec.Delegation.PR = 912
+	rec.CI = &task.CIStatus{State: task.CIFailing, Failing: []task.CheckRun{{Name: "test"}, {Name: "lint"}}}
+	rec.Decisions = []task.Decision{{Question: task.Question{Issue: "Retry 4xx?"}}}
+	m := Model{Width: minWidth, Height: minHeight, Focus: TaskPane}
+	m.SetTasks([]*task.Record{rec})
+	got := screen(m)
+	for _, want := range []string{"a/b#10", "NEEDS_DECISION", "PR #912", "Retry 4xx?"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("a %dx%d frame is missing %q:\n%s", minWidth, minHeight, want, got)
+		}
+	}
+}
+
+func TestTaskPaneRowsFitTheLayoutFloor(t *testing.T) {
+	// layoutFor sizes the pane's body from taskRowLines, and the pane scrolls by
+	// whole rows, so a taller row would put its own last line out of reach.
+	rec := record(10, task.NeedsDecision)
+	rec.Delegation.PR = 912
+	rec.CI = &task.CIStatus{State: task.CIFailing, Failing: []task.CheckRun{{Name: "integration-tests"}, {Name: "lint"}}}
+	rec.Reviews = []task.Review{{Round: 2, Findings: []task.Finding{{}, {}, {}}}}
+	rec.Decisions = []task.Decision{{Question: task.Question{Issue: "Should retries apply to 4xx responses too?"}}}
+	m := Model{Width: minWidth, Height: minHeight}
+	m.SetTasks([]*task.Record{rec, record(11, task.Working)})
+	for _, width := range []int{20, 32, 60, 200} {
+		for i, r := range taskPane(m, width).rows {
+			if len(r.lines) > taskRowLines {
+				t.Errorf("task %d at %d columns draws %d lines; taskRowLines is %d: %q", i, width, len(r.lines), taskRowLines, r.lines)
+			}
 		}
 	}
 }
