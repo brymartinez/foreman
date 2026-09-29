@@ -1402,3 +1402,40 @@ Entry format:
     narrow terminal truncates the explanation rather than the command.
 - **Consequence.** `DecodeKey` and `readKeys` take an extra argument each, and
   `readKeys` now decodes on its own goroutine with a timer beside the byte reader.
+
+## D97. A cancel confirmation names one task for its whole lifetime
+
+- Date: 2026-09-29. Issue midsoln/foreman#1, PR #2 follow-up review. Decided by the
+  agent after the user's request to fix the findings.
+- **Context.** The local tick can remove a task from the list while its cancel prompt
+  is open. The cursor then moves to another task, and confirming used to cancel that
+  new selection.
+- **Decision.** Store the original task key when the prompt opens. The footer keeps
+  naming that key. Confirmation looks up its current record and cancels only if it
+  is still running with a runner; otherwise it reports that nothing was cancelled.
+- **Consequence.** A refresh cannot redirect a confirmed cancellation to another
+  task.
+
+## D98. The dashboard removes terminal controls from dynamic text
+
+- Date: 2026-09-29. Issue midsoln/foreman#1, PR #2 follow-up review. Decided by the
+  agent after the user's request to fix the findings.
+- **Context.** Issue titles, task fields, runner logs, and error messages reach the
+  frame. A control sequence in any of them could move the cursor, clear the screen,
+  or leave the alternate screen.
+- **Decision.** Replace control characters with spaces before truncating or wrapping
+  dynamic text. Keep the frame's own styling sequences outside that text.
+- **Consequence.** Dynamic content cannot issue terminal commands through the frame.
+
+## D99. The minimum dashboard size keeps the selected PR visible
+
+- Date: 2026-09-29. Issue midsoln/foreman#1, PR #2 follow-up review. Decided by the
+  agent after the user's request to fix the findings.
+- **Context.** At 60 by 12, the task pane had three body rows. A wrapped task needed
+  four even before its PR text exceeded the pane width, so the PR and badges were
+  inaccessible.
+- **Decision.** Give the top panes at least five body rows and wrap the shared PR
+  status row inside the task pane. The log keeps a heading and one body row at the
+  minimum height.
+- **Consequence.** The selected task's PR, reviewer, CI, and review status are visible
+  at the stated minimum terminal size without changing `foreman status` output.

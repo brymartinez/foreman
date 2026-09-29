@@ -102,6 +102,35 @@ func TestFrameKeepsTheStateAtTheSmallestSupportedWidth(t *testing.T) {
 	}
 }
 
+func TestFrameShowsPRAtTheSmallestSupportedSize(t *testing.T) {
+	m := model()
+	m.Width, m.Height = minWidth, minHeight
+	m.Focus = TaskPane
+	m.Tasks[0].Delegation.PR = 942
+	m.Tasks[0].CI = &task.CIStatus{State: task.CIPassing}
+	m.Tasks[0].Reviews = []task.Review{{Round: 1, Clean: true}}
+	got := screen(m)
+	for _, want := range []string{"a/b#10", "Claude · WORKING", "Task", "PR #942", "Codex", "CI ✓", "review ✓"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("a %dx%d frame is missing %q:\n%s", m.Width, m.Height, want, got)
+		}
+	}
+}
+
+func TestFrameDoesNotRenderTerminalControlsFromTaskData(t *testing.T) {
+	m := model()
+	m.Inbox[0].Item.Title = "hello\x1b[2Jworld"
+	m.Tasks[0].Title = "task\rreplaced"
+	m.Log = []string{"agent\x1b[?1049l output"}
+	m.Message = "error\x1b]52;c;bad\a"
+	got := strings.Join(Frame(m), "\n")
+	for _, control := range []string{"\x1b[2J", "\r", "\x1b[?1049l", "\x1b]52", "\a"} {
+		if strings.Contains(got, control) {
+			t.Errorf("frame retained terminal control %q", control)
+		}
+	}
+}
+
 func TestFrameTooSmall(t *testing.T) {
 	m := model()
 	m.Width, m.Height = 40, 8

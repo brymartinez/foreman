@@ -452,6 +452,12 @@ request. Each fix is its own commit with a decision.
   for a Start or Cancel in flight, a typed context file is made absolute, the log
   follows the cursor at once, the task pane wraps its head at 60 columns, and the
   NEEDS_DECISION message leads with the command.
+- A follow-up review found three more dashboard defects, fixed in PR #2 (D97 to D99):
+  cancel confirmation keeps its original task across refreshes, dynamic text cannot
+  issue terminal controls, and the selected PR with its badges fits the 60 by 12
+  minimum layout. Focused regressions cover each case. Validated with `go vet ./...`,
+  `go test ./...`, race tests for `internal/tui`, `internal/app`, and `internal/render`,
+  a binary build, and the full `scripts/e2e.sh` run.
 
 ## Known limitations
 
@@ -552,7 +558,9 @@ what it replaced. Current summary:
   prompts' remaining workflow rules moved to the stage files.
 - D93. A bare `foreman` opens the dashboard. D94. The dashboard is a pure model and
   frame over `golang.org/x/term`. D95 (amends D5). The dashboard polls in the
-  foreground, at two rates. D96. The dashboard's review corrections.
+  foreground, at two rates. D96. The dashboard's review corrections. D97. Cancellation
+  keeps its original task. D98. Dynamic text loses terminal controls. D99. The minimum
+  layout shows PR status.
 
 ## Next stage
 

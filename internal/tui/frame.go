@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/brymartinez/foreman/internal/render"
 	"github.com/brymartinez/foreman/internal/task"
@@ -101,8 +102,14 @@ func taskPane(m Model, width int) pane {
 			identity, agent, state := render.TaskHead(rec)
 			lines = []string{identity, "  " + agent + " · " + state}
 		}
-		for _, r := range rows[1:] {
-			lines = append(lines, "  "+r)
+		for i, r := range rows[1:] {
+			if i == 1 { // the PR row can be wider than the task pane
+				for _, part := range wrap(r, width-markerWidth-2) {
+					lines = append(lines, "  "+part)
+				}
+			} else {
+				lines = append(lines, "  "+r)
+			}
 		}
 		if q := pendingQuestion(rec); q != "" {
 			lines = append(lines, "  "+q)
@@ -110,6 +117,24 @@ func taskPane(m Model, width int) pane {
 		p.rows = append(p.rows, row{lines: lines})
 	}
 	return p
+}
+
+// wrap keeps every part of a PR's status row visible in the narrow task pane.
+func wrap(s string, width int) []string {
+	remaining := []rune(printable(s))
+	var lines []string
+	for len(remaining) > width {
+		cut := width
+		for cut > 0 && remaining[cut] != ' ' {
+			cut--
+		}
+		if cut == 0 {
+			cut = width
+		}
+		lines = append(lines, string(remaining[:cut]))
+		remaining = []rune(strings.TrimLeft(string(remaining[cut:]), " "))
+	}
+	return append(lines, string(remaining))
 }
 
 func pendingQuestion(rec *task.Record) string {
@@ -221,11 +246,10 @@ func footer(m Model) string {
 	case TypingContext:
 		return "Context file (enter to skip): " + m.Input + "█"
 	case ConfirmingCancel:
-		rec := m.Selected()
-		if rec == nil {
+		if m.cancelTarget == (task.Key{}) {
 			return "Nothing to cancel. [y/n]"
 		}
-		return fmt.Sprintf("Cancel %s#%d and stop its agent? [y/n]", rec.Repo, rec.Number)
+		return fmt.Sprintf("Cancel %s#%d and stop its agent? [y/n]", m.cancelTarget.Repo, m.cancelTarget.Number)
 	}
 	if len([]rune(hintsLong)) > m.Width {
 		return hintsShort
@@ -242,7 +266,7 @@ func truncate(s string, width int) string {
 	if width <= 0 {
 		return ""
 	}
-	r := []rune(strings.ReplaceAll(s, "\t", "    "))
+	r := []rune(printable(s))
 	if len(r) <= width {
 		return string(r)
 	}
@@ -250,6 +274,17 @@ func truncate(s string, width int) string {
 		return "…"
 	}
 	return string(r[:width-1]) + "…"
+}
+
+// printable removes terminal controls from task, issue, and runner text before it
+// reaches the terminal. The frame adds its own styling only after truncation.
+func printable(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, strings.ReplaceAll(s, "\t", "    "))
 }
 
 func pad(s string, width int) string {

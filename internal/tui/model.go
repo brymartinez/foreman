@@ -69,7 +69,8 @@ type Model struct {
 	RefreshedAt time.Time
 	Warnings    []error
 
-	pending app.StartRequest // the delegation being collected
+	pending      app.StartRequest // the delegation being collected
+	cancelTarget task.Key         // the task named when cancellation was requested
 }
 
 // Selected is the task the log pane follows, or nil when nothing is delegated.
@@ -250,6 +251,7 @@ func (m *Model) startCancel() Action {
 	case rec.Delegation == nil || rec.Delegation.RunnerPID == 0:
 		m.Message = fmt.Sprintf("%s#%d is %s with no runner; nothing to cancel", rec.Repo, rec.Number, rec.State)
 	default:
+		m.cancelTarget = rec.Key
 		m.Mode = ConfirmingCancel
 	}
 	return Action{}
@@ -289,16 +291,25 @@ func (m *Model) typeContext(k Key) Action {
 
 func (m *Model) confirmCancel(k Key) Action {
 	if k.Kind == KeyRune && k.Rune == 'y' {
-		rec := m.Selected()
+		key := m.cancelTarget
 		m.Mode = Browsing
-		if rec == nil {
-			return Action{}
+		m.cancelTarget = task.Key{}
+		for _, rec := range m.Tasks {
+			if rec.Key != key {
+				continue
+			}
+			if (rec.State == task.Working || rec.State == task.Reviewing) && rec.Delegation != nil && rec.Delegation.RunnerPID != 0 {
+				m.Message = fmt.Sprintf("Cancelling %s#%d…", rec.Repo, rec.Number)
+				return Action{Kind: ActionCancel, Cancel: rec}
+			}
+			break
 		}
-		m.Message = fmt.Sprintf("Cancelling %s#%d…", rec.Repo, rec.Number)
-		return Action{Kind: ActionCancel, Cancel: rec}
+		m.Message = fmt.Sprintf("%s#%d is no longer running; nothing to cancel", key.Repo, key.Number)
+		return Action{}
 	}
 	if k.Kind == KeyEscape || k.Kind == KeyRune {
 		m.Mode = Browsing
+		m.cancelTarget = task.Key{}
 	}
 	return Action{}
 }

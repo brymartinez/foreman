@@ -21,6 +21,8 @@ func layoutFor(width, height int) (layout, bool) {
 		return layout{}, false
 	}
 	body := height - 4
-	top := max(body*2/5, 4)
+	// Five body rows let a narrow selected task show its wrapped state, title,
+	// and PR badges. At the minimum height, the log still has a heading and line.
+	top := max(body*2/5, 6)
 	return layout{topHeight: top, logHeight: body - top, leftWidth: width * 9 / 20}, true
 }

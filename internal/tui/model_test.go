@@ -172,6 +172,22 @@ func TestCancelRefusesATaskWithNoRunner(t *testing.T) {
 	}
 }
 
+func TestCancelConfirmationKeepsItsOriginalTask(t *testing.T) {
+	m := model()
+	m.Focus = TaskPane
+	press(&m, rune_('c')) // confirm a/b#10
+	m.SetTasks([]*task.Record{record(11, task.Working)})
+	if got := footer(m); !strings.Contains(got, "a/b#10") || strings.Contains(got, "a/b#11") {
+		t.Fatalf("confirmation changed target after refresh: %q", got)
+	}
+	if got := press(&m, rune_('y')); got.Kind == ActionCancel {
+		t.Fatalf("cancel switched to another task: %+v", got.Cancel.Key)
+	}
+	if !strings.Contains(m.Message, "a/b#10") {
+		t.Errorf("message = %q; want the original task", m.Message)
+	}
+}
+
 func TestSelectionFollowsTheTaskAcrossARefresh(t *testing.T) {
 	m := model()
 	m.Focus = TaskPane
