@@ -32,7 +32,8 @@ func Frame(m Model) []string {
 
 	right := m.Width - lay.leftWidth - 1
 	left := paneLines(inboxPane(m), lay.leftWidth, lay.topHeight, m.Focus == InboxPane, m.InboxCursor)
-	rightLines := paneLines(taskPane(m, right), right, lay.topHeight, m.Focus == TaskPane, m.TaskCursor)
+	// The pane spends its first row on its heading, so a task has the rest to fill.
+	rightLines := paneLines(taskPane(m, right, lay.topHeight-1), right, lay.topHeight, m.Focus == TaskPane, m.TaskCursor)
 	for i := range lay.topHeight {
 		lines = append(lines, left[i]+" "+rightLines[i])
 	}
@@ -90,12 +91,18 @@ func inboxPane(m Model) pane {
 // markerWidth is the "> " or "  " every pane line carries before its text.
 const markerWidth = 2
 
-// taskRowLines is the most lines one task may take in the pane. layoutFor sizes the
-// pane's body to it (D99), so a task that drew more would put its own last line out of
-// reach: the pane scrolls by rows, not within one.
-const taskRowLines = 5
+const (
+	// taskRowLines is the pane body a task needs at its narrowest: the identity, the
+	// agent and state wrapped under it, the title, one line of PR status, and a
+	// pending question. layoutFor keeps the pane at least this tall, so every task
+	// fits the pane it is drawn in; the pane scrolls by whole rows, not within one.
+	taskRowLines = 5
+	// prRowLines caps the PR status, which is the whole row at the narrowest pane.
+	// Without the cap one task could fill a tall pane on its own.
+	prRowLines = 3
+)
 
-func taskPane(m Model, width int) pane {
+func taskPane(m Model, width, body int) pane {
 	p := pane{title: "DELEGATED WORK", empty: "No delegated work yet."}
 	for _, rec := range m.Tasks {
 		rows := render.TaskRows(rec)
@@ -110,14 +117,11 @@ func taskPane(m Model, width int) pane {
 		lines = append(lines, "  "+rows[1]) // the title
 		q := pendingQuestion(rec)
 		if len(rows) > 2 {
-			// The PR row can be wider than the task pane, so it wraps into whatever
-			// taskRowLines has left once the question line is counted. Its last line
-			// is truncated rather than wrapped further.
-			budget := taskRowLines - len(lines)
+			left := body - len(lines)
 			if q != "" {
-				budget--
+				left--
 			}
-			for _, part := range wrap(rows[2], width-markerWidth-2, max(budget, 1)) {
+			for _, part := range prRows(rec, width-markerWidth-2, min(max(left, 1), prRowLines)) {
 				lines = append(lines, "  "+part)
 			}
 		}
@@ -127,6 +131,26 @@ func taskPane(m Model, width int) pane {
 		p.rows = append(p.rows, row{lines: lines})
 	}
 	return p
+}
+
+// prRows is the PR status wrapped into at most n lines. R3 asks for the PR with its CI
+// and review badges, and at 60 columns a task with a waiting question has one line for
+// them, so the reviewer goes first and then the failing checks' names, rather than a
+// truncation cutting the badges off the end.
+func prRows(rec *task.Record, width, n int) []string {
+	s := render.TaskPR(rec)
+	shortest := render.JoinFacts(s.PR, s.CIState, s.ReviewState)
+	for _, row := range []string{
+		render.JoinFacts(s.PR, s.Reviewer, s.CI, s.Review),
+		render.JoinFacts(s.PR, s.CI, s.Review),
+		shortest,
+	} {
+		if parts := wrap(row, width, n+1); len(parts) <= n {
+			return parts
+		}
+	}
+	// Even the states do not fit, so the last line is truncated.
+	return wrap(shortest, width, n)
 }
 
 // wrap keeps every part of a PR's status row visible in the narrow task pane. It

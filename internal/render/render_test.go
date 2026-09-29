@@ -143,6 +143,45 @@ func TestTaskRowsCarryStateAndBadges(t *testing.T) {
 	}
 }
 
+func TestTaskPRKeepsTheStatesInItsShortForms(t *testing.T) {
+	// The dashboard falls back to the short forms when its pane is too narrow for the
+	// whole row. They may drop the failing checks' names and the review round, but
+	// not the result itself.
+	for _, tc := range []struct {
+		ci                        task.CIStatus
+		reviews                   []task.Review
+		ciState, review, reviewIn string
+	}{
+		{task.CIStatus{State: task.CIPassing}, []task.Review{{Round: 1, Clean: true}}, "CI ✓", "review ✓", "review ✓"},
+		{task.CIStatus{State: task.CIPending}, nil, "CI pending", "", ""},
+		{
+			task.CIStatus{State: task.CIFailing, Failing: []task.CheckRun{{Name: "test"}, {Name: "lint"}}},
+			[]task.Review{{Round: 2, Findings: []task.Finding{{}, {}, {}}}},
+			"CI ✗", "review ✗ 3", "review round 2: 3 findings",
+		},
+	} {
+		s := TaskPR(&task.Record{
+			Key: task.Key{Repo: "a/b", Number: 831}, State: task.Reviewing, CI: &tc.ci, Reviews: tc.reviews,
+			Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912},
+		})
+		if s.PR != "PR #912" || s.Reviewer != "reviewer: Codex" {
+			t.Errorf("%s: PR = %q reviewer = %q", tc.ci.State, s.PR, s.Reviewer)
+		}
+		if s.CIState != tc.ciState || !strings.HasPrefix(s.CI, tc.ciState) {
+			t.Errorf("%s: CI = %q short = %q; want the short form to keep the state", tc.ci.State, s.CI, s.CIState)
+		}
+		if s.ReviewState != tc.review || s.Review != tc.reviewIn {
+			t.Errorf("%s: review = %q short = %q; want %q and %q", tc.ci.State, s.Review, s.ReviewState, tc.reviewIn, tc.review)
+		}
+	}
+}
+
+func TestJoinFactsSkipsTheOnesThatAreMissing(t *testing.T) {
+	if got := JoinFacts("PR #912", "", "CI ✓", ""); got != "PR #912 · CI ✓" {
+		t.Errorf("JoinFacts = %q", got)
+	}
+}
+
 func TestShowCI(t *testing.T) {
 	var buf bytes.Buffer
 	Show(&buf, &task.Record{

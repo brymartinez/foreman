@@ -1483,3 +1483,23 @@ Entry format:
 - **Consequence.** A task with a waiting question shows one line of PR status and its
   question; a task without one shows two lines of PR status, which fits the reviewer,
   CI, and the review badge at 60 columns.
+
+## D103 (amends D99, D102). The PR row drops detail instead of being truncated
+
+- Date: 2026-09-29. Issue midsoln/foreman#1, PR #2 review round 3 by Codex. The
+  reviewer found one defect; it was accepted.
+- **Context.** At 60 by 12 the task pane is 32 columns wide and a task with a waiting
+  question has one line left for its PR, because the identity, the agent and state, the
+  title, and the question take the other four. D102 left the rest of that row to
+  truncation, so `PR #912 · reviewer: Codex · CI ✗ test, lint · review round 2: 3
+  findings` showed the PR number and cut both badges, which R3 asks for. No key
+  revealed them.
+- **Decision.** `render.TaskPR` returns the row's facts, each worded as `status` prints
+  it, beside a short form of the two that grow without a bound: `CI ✗` without the
+  failing checks' names and `review ✗ 3` without the round. The pane takes the first
+  that fits: the whole row, then the row without the reviewer, then the states alone.
+  `Frame` passes the pane's body height to `taskPane`, so the row grows to `prRowLines`
+  (3) where there is room and `status` keeps printing the whole row unchanged.
+- **Consequence.** At 60 by 12 a waiting task shows `PR #912 · CI ✗ · review ✗ 3`, and
+  at 60 by 24 the same task shows the row `status` prints. The reviewer and the check
+  names are what a narrow pane loses, not whether CI or the review passed.

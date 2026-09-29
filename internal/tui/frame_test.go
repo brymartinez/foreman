@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/brymartinez/foreman/internal/app"
+	"github.com/brymartinez/foreman/internal/render"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -228,37 +229,62 @@ func TestFrameKeepsWideTextInsideItsPane(t *testing.T) {
 	}
 }
 
-func TestFrameShowsAWaitingQuestionWithItsPRAtTheSmallestSupportedSize(t *testing.T) {
-	// The pane floor is what keeps a task's PR, its badges, and its question on
-	// screen, so the wrapped PR row must not push the question out of the pane.
+// waiting is the task the reviewer's smallest case is about: a question to answer, a
+// PR, failing CI, and a review round with findings.
+func waiting() *task.Record {
 	rec := record(10, task.NeedsDecision)
 	rec.Delegation.PR = 912
 	rec.CI = &task.CIStatus{State: task.CIFailing, Failing: []task.CheckRun{{Name: "test"}, {Name: "lint"}}}
+	rec.Reviews = []task.Review{{Round: 2, Findings: []task.Finding{{}, {}, {}}}}
 	rec.Decisions = []task.Decision{{Question: task.Question{Issue: "Retry 4xx?"}}}
+	return rec
+}
+
+func TestFrameShowsTheCIAndReviewBadgesAtTheSmallestSupportedSize(t *testing.T) {
+	// One pane line is left for the PR once the identity, the agent and state, the
+	// title, and the question have taken theirs, so the row drops the reviewer and
+	// the failing checks' names rather than truncating the badges away.
 	m := Model{Width: minWidth, Height: minHeight, Focus: TaskPane}
-	m.SetTasks([]*task.Record{rec})
+	m.SetTasks([]*task.Record{waiting()})
 	got := screen(m)
-	for _, want := range []string{"a/b#10", "NEEDS_DECISION", "PR #912", "Retry 4xx?"} {
+	for _, want := range []string{"a/b#10", "NEEDS_DECISION", "PR #912", "CI ✗", "review ✗ 3", "Retry 4xx?"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("a %dx%d frame is missing %q:\n%s", minWidth, minHeight, want, got)
 		}
 	}
 }
 
-func TestTaskPaneRowsFitTheLayoutFloor(t *testing.T) {
-	// layoutFor sizes the pane's body from taskRowLines, and the pane scrolls by
-	// whole rows, so a taller row would put its own last line out of reach.
-	rec := record(10, task.NeedsDecision)
-	rec.Delegation.PR = 912
-	rec.CI = &task.CIStatus{State: task.CIFailing, Failing: []task.CheckRun{{Name: "integration-tests"}, {Name: "lint"}}}
-	rec.Reviews = []task.Review{{Round: 2, Findings: []task.Finding{{}, {}, {}}}}
+func TestFrameShowsTheWholePRRowWhenThePaneIsTallEnough(t *testing.T) {
+	// A taller pane has room for the parts the smallest layout drops, and then the
+	// row says exactly what status says. wrap breaks it at spaces, so joining the
+	// lines with a space puts it back together.
+	rec := waiting()
+	m := Model{Width: minWidth, Height: 30}
+	m.SetTasks([]*task.Record{rec})
+	lines := taskPane(m, 32, 7).rows[0].lines
+	got := strings.Join(lines, " ")
+	if want := render.TaskRows(rec)[2]; !strings.Contains(strings.Join(strings.Fields(got), " "), want) {
+		t.Errorf("the tall pane's row is missing %q:\n%q", want, lines)
+	}
+	if !strings.Contains(got, "Retry 4xx?") {
+		t.Errorf("the question is missing:\n%q", lines)
+	}
+}
+
+func TestTaskPaneRowsFitThePaneTheyAreDrawnIn(t *testing.T) {
+	// The pane scrolls by whole rows, so a row taller than the pane would put its own
+	// last line out of reach. layoutFor never gives the pane fewer than taskRowLines.
+	rec := waiting()
+	rec.CI.Failing = []task.CheckRun{{Name: "integration-tests"}, {Name: "lint"}, {Name: "typecheck"}}
 	rec.Decisions = []task.Decision{{Question: task.Question{Issue: "Should retries apply to 4xx responses too?"}}}
 	m := Model{Width: minWidth, Height: minHeight}
 	m.SetTasks([]*task.Record{rec, record(11, task.Working)})
 	for _, width := range []int{20, 32, 60, 200} {
-		for i, r := range taskPane(m, width).rows {
-			if len(r.lines) > taskRowLines {
-				t.Errorf("task %d at %d columns draws %d lines; taskRowLines is %d: %q", i, width, len(r.lines), taskRowLines, r.lines)
+		for _, body := range []int{taskRowLines, 6, 10, 40} {
+			for i, r := range taskPane(m, width, body).rows {
+				if len(r.lines) > body {
+					t.Errorf("task %d at %d columns draws %d lines in a pane of %d: %q", i, width, len(r.lines), body, r.lines)
+				}
 			}
 		}
 	}
