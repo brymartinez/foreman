@@ -128,8 +128,14 @@ func TestEnterOnNeedsDecisionPointsAtRespond(t *testing.T) {
 	if got := press(&m, Key{Kind: KeyEnter}); got.Kind != ActionNone {
 		t.Fatalf("action = %+v", got)
 	}
-	if !strings.Contains(m.Message, "foreman respond a/b#10") {
+	// The command leads, so truncating the message to a narrow terminal cannot eat
+	// the part the developer has to type.
+	if !strings.HasPrefix(m.Message, "foreman respond a/b#10") {
 		t.Errorf("message = %q", m.Message)
+	}
+	m.Width, m.Height = minWidth, 30
+	if !strings.Contains(screen(m), "foreman respond a/b#10") {
+		t.Errorf("a %d-column frame clipped the command:\n%s", minWidth, screen(m))
 	}
 }
 

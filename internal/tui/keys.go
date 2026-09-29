@@ -29,15 +29,20 @@ type Key struct {
 }
 
 // DecodeKey reads the first key in p. It returns the key, the bytes it consumed, and
-// whether p held a whole key: a partial escape sequence consumes nothing, so the
-// caller can read more and try again.
-func DecodeKey(p []byte) (Key, int, bool) {
+// whether p held a whole key: bytes that could still grow into one, a half-read escape
+// sequence or a rune split across reads, consume nothing so the caller can read more
+// and try again. A terminal read does not preserve key boundaries, so that happens.
+//
+// final says no more bytes are coming, either because stdin ended or because the
+// caller waited and none did. It resolves the ambiguity the other way: a lone ESC is
+// then the escape key rather than the start of an arrow key.
+func DecodeKey(p []byte, final bool) (Key, int, bool) {
 	if len(p) == 0 {
 		return Key{}, 0, false
 	}
 	switch p[0] {
 	case 0x1b:
-		return decodeEscape(p)
+		return decodeEscape(p, final)
 	case '\r', '\n':
 		return Key{Kind: KeyEnter}, 1, true
 	case '\t':
@@ -50,18 +55,26 @@ func DecodeKey(p []byte) (Key, int, bool) {
 	if p[0] < 0x20 {
 		return Key{Kind: KeyUnknown}, 1, true
 	}
+	if !final && !utf8.FullRune(p) && len(p) < utf8.UTFMax {
+		// A multi-byte rune split across reads; the rest is still coming.
+		return Key{}, 0, false
+	}
 	r, n := utf8.DecodeRune(p)
 	if r == utf8.RuneError && n <= 1 {
-		// Either an invalid byte or a rune split across reads; drop the byte.
+		// An invalid byte, or a rune whose rest never arrived; drop the byte.
 		return Key{Kind: KeyUnknown}, 1, true
 	}
 	return Key{Kind: KeyRune, Rune: r}, n, true
 }
 
-// decodeEscape handles CSI (ESC [) and SS3 (ESC O) sequences. A lone ESC is the
-// escape key, which is how the dashboard abandons a prompt.
-func decodeEscape(p []byte) (Key, int, bool) {
+// decodeEscape handles CSI (ESC [) and SS3 (ESC O) sequences. A lone ESC is the escape
+// key, which is how the dashboard abandons a prompt, but only once nothing follows it:
+// an arrow key starts with the same byte.
+func decodeEscape(p []byte, final bool) (Key, int, bool) {
 	if len(p) == 1 {
+		if !final {
+			return Key{}, 0, false
+		}
 		return Key{Kind: KeyEscape}, 1, true
 	}
 	if p[1] != '[' && p[1] != 'O' {
@@ -74,7 +87,11 @@ func decodeEscape(p []byte) (Key, int, bool) {
 		}
 		return escapeKey(string(p[2:i]), p[i]), i + 1, true
 	}
-	return Key{}, 0, false
+	if !final {
+		return Key{}, 0, false
+	}
+	// The sequence was cut off. Give up the ESC so the rest decodes as plain runes.
+	return Key{Kind: KeyEscape}, 1, true
 }
 
 func escapeKey(params string, final byte) Key {

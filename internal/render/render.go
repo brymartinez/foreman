@@ -232,14 +232,22 @@ func Status(w io.Writer, recs []*task.Record) {
 // dashboard's pane uses the same rows, so the two views cannot drift.
 func TaskRows(r *task.Record) []string {
 	d := r.Delegation
+	identity, agent, state := TaskHead(r)
 	rows := []string{
-		fmt.Sprintf("%-25s %-7s %s", issueLabel(r.Key), agentName(d.Implementer.Agent), r.State),
+		fmt.Sprintf("%-25s %-7s %s", identity, agent, state),
 		fmt.Sprintf("%s · %s", r.Title, r.Repo),
 	}
 	if d.PR > 0 {
 		rows = append(rows, fmt.Sprintf("PR #%d · reviewer: %s%s%s", d.PR, agentName(d.Reviewer), ciBadge(r.CI), reviewBadge(r)))
 	}
 	return rows
+}
+
+// TaskHead is the three fields TaskRows pads into its first row. The dashboard's
+// pane takes them apart, because the padding is wider than a narrow pane and the
+// state is what a truncation would cut.
+func TaskHead(r *task.Record) (identity, agent, state string) {
+	return issueLabel(r.Key), agentName(r.Delegation.Implementer.Agent), string(r.State)
 }
 
 func reviewBadge(r *task.Record) string {

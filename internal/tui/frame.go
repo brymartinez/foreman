@@ -31,7 +31,7 @@ func Frame(m Model) []string {
 
 	right := m.Width - lay.leftWidth - 1
 	left := paneLines(inboxPane(m), lay.leftWidth, lay.topHeight, m.Focus == InboxPane, m.InboxCursor)
-	rightLines := paneLines(taskPane(m), right, lay.topHeight, m.Focus == TaskPane, m.TaskCursor)
+	rightLines := paneLines(taskPane(m, right), right, lay.topHeight, m.Focus == TaskPane, m.TaskCursor)
 	for i := range lay.topHeight {
 		lines = append(lines, left[i]+" "+rightLines[i])
 	}
@@ -86,11 +86,21 @@ func inboxPane(m Model) pane {
 	return p
 }
 
-func taskPane(m Model) pane {
+// markerWidth is the "> " or "  " every pane line carries before its text.
+const markerWidth = 2
+
+func taskPane(m Model, width int) pane {
 	p := pane{title: "DELEGATED WORK", empty: "No delegated work yet."}
 	for _, rec := range m.Tasks {
 		rows := render.TaskRows(rec)
 		lines := []string{rows[0]}
+		// status pads the identity to a fixed column so its rows line up. That padding
+		// does not fit a narrow pane, and truncating it would drop the state, so wrap
+		// the agent and the state onto their own line instead.
+		if len([]rune(rows[0]))+markerWidth > width {
+			identity, agent, state := render.TaskHead(rec)
+			lines = []string{identity, "  " + agent + " · " + state}
+		}
 		for _, r := range rows[1:] {
 			lines = append(lines, "  "+r)
 		}

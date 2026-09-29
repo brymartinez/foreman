@@ -84,6 +84,24 @@ func TestFrameShowsALogReadError(t *testing.T) {
 	}
 }
 
+func TestFrameKeepsTheStateAtTheSmallestSupportedWidth(t *testing.T) {
+	// status pads the identity to 25 columns, which is wider than the 60-column
+	// layout's task pane. The state must wrap rather than be truncated away.
+	m := model()
+	m.Width, m.Height = minWidth, 30
+	got := screen(m)
+	for _, want := range []string{"a/b#10", "Claude · WORKING"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("a %d-column frame is missing %q:\n%s", minWidth, want, got)
+		}
+	}
+	// A pane wide enough for the padded row keeps status's own layout.
+	m.Width = 200
+	if !strings.Contains(screen(m), "a/b#10                    Claude  WORKING") {
+		t.Errorf("a wide frame lost status's padded row:\n%s", screen(m))
+	}
+}
+
 func TestFrameTooSmall(t *testing.T) {
 	m := model()
 	m.Width, m.Height = 40, 8

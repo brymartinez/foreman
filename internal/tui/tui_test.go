@@ -5,8 +5,10 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/brymartinez/foreman/internal/app"
 	"github.com/brymartinez/foreman/internal/task"
@@ -108,19 +110,121 @@ func TestReadLocalTailsTheSelectedTasksLog(t *testing.T) {
 	}
 }
 
-func TestReadKeysDecodesAcrossReads(t *testing.T) {
-	keys := make(chan Key, 8)
-	// An escape sequence split across two reads must still decode as one key.
-	readKeys(context.Background(), io.MultiReader(strings.NewReader("\x1b["), strings.NewReader("Bq")), keys)
-	close(keys)
-	var got []KeyKind
-	for k := range keys {
-		got = append(got, k.Kind)
+func TestReadLogFollowsTheCursorWithoutWaitingForATick(t *testing.T) {
+	dir := t.TempDir()
+	var recs []*task.Record
+	for i, text := range []string{"first task working", "second task working"} {
+		path := filepath.Join(dir, string(rune('a'+i))+".log")
+		if err := os.WriteFile(path, []byte("2026-09-29T10:00:00Z foreman: "+text+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		rec := record(10+i, task.Working)
+		rec.Delegation.RunnerLog = path
+		recs = append(recs, rec)
 	}
-	if len(got) != 2 || got[0] != KeyDown || got[1] != KeyRune {
-		t.Fatalf("keys = %v", got)
+	m := Model{Width: 100, Height: 30, Focus: TaskPane}
+	readLocal(context.Background(), stubSource{recs: recs}, &m)
+	if len(m.Log) != 1 || !strings.Contains(m.Log[0], "first task") {
+		t.Fatalf("log = %q", m.Log)
+	}
+	// The same step Run takes on a key that moves the cursor.
+	m.Key(Key{Kind: KeyDown})
+	readLog(&m)
+	if len(m.Log) != 1 || !strings.Contains(m.Log[0], "second task") {
+		t.Errorf("after moving down, log = %q; want the newly selected task's log", m.Log)
 	}
 }
+
+func TestStartMakesTheContextFileAbsolute(t *testing.T) {
+	var got app.StartRequest
+	s := recordingSource{rec: &task.Record{Key: task.Key{Repo: "a/b", Number: 1}, State: task.Working,
+		Delegation: &task.Delegation{Branch: "feat/1"}}, seen: &got}
+	start(context.Background(), s, app.StartRequest{Repo: "a/b", Issue: 1, ContextFile: "notes/825.md"})
+	if !filepath.IsAbs(got.ContextFile) || !strings.HasSuffix(got.ContextFile, "notes/825.md") {
+		t.Errorf("context file = %q; want an absolute path", got.ContextFile)
+	}
+	start(context.Background(), s, app.StartRequest{Repo: "a/b", Issue: 1})
+	if got.ContextFile != "" {
+		t.Errorf("an empty context file became %q", got.ContextFile)
+	}
+}
+
+type recordingSource struct {
+	stubSource
+	rec  *task.Record
+	seen *app.StartRequest
+}
+
+func (r recordingSource) Start(_ context.Context, req app.StartRequest) (*task.Record, error) {
+	*r.seen = req
+	return r.rec, nil
+}
+
+func TestFinishWaitsForAStartInFlight(t *testing.T) {
+	// App.Start records WORKING before it spawns the runner, so quitting in that
+	// window must not return until the call comes back.
+	results := make(chan result, 1)
+	m := Model{Width: 100, Height: 30}
+	done := make(chan error, 1)
+	go func() {
+		done <- finish(context.Background(), io.Discard, &m, results, 1)
+	}()
+	select {
+	case <-done:
+		t.Fatal("finish returned while a start was still in flight")
+	case <-time.After(50 * time.Millisecond):
+	}
+	results <- result{message: "Started a/b#1 on feat/1", finished: true}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("finish = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("finish never returned after the start came back")
+	}
+	if !strings.Contains(m.Message, "Started a/b#1") {
+		t.Errorf("message = %q; want the start's result", m.Message)
+	}
+}
+
+func TestReadKeysDecodesAcrossReads(t *testing.T) {
+	// A terminal read can end anywhere in an escape sequence, including right after
+	// the ESC byte, and the key must still arrive whole.
+	for _, split := range [][]string{{"\x1b[", "Bq"}, {"\x1b", "[Bq"}, {"\x1b[B", "q"}} {
+		keys := make(chan Key, 8)
+		readKeys(context.Background(), io.MultiReader(strings.NewReader(split[0]), strings.NewReader(split[1])), keys, time.Minute)
+		close(keys)
+		var got []KeyKind
+		for k := range keys {
+			got = append(got, k.Kind)
+		}
+		if len(got) != 2 || got[0] != KeyDown || got[1] != KeyRune {
+			t.Errorf("%q split gave keys = %v; want down then a rune", split, got)
+		}
+	}
+}
+
+func TestReadKeysTreatsALoneEscapeAsTheEscapeKey(t *testing.T) {
+	// Nothing followed the ESC within the wait, so it was the escape key itself.
+	keys := make(chan Key, 8)
+	stall := make(chan struct{})
+	t.Cleanup(func() { close(stall) })
+	go readKeys(context.Background(), io.MultiReader(strings.NewReader("\x1b"), blockingReader{stall}), keys, time.Millisecond)
+	select {
+	case k := <-keys:
+		if k.Kind != KeyEscape {
+			t.Errorf("key = %+v; want escape", k)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a lone ESC never arrived")
+	}
+}
+
+// blockingReader never returns, standing in for a terminal with nothing more to say.
+type blockingReader struct{ until chan struct{} }
+
+func (b blockingReader) Read([]byte) (int, error) { <-b.until; return 0, io.EOF }
 
 func TestDrawPaintsEveryLineWithoutATrailingNewline(t *testing.T) {
 	var b strings.Builder

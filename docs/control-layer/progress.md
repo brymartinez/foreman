@@ -447,6 +447,11 @@ request. Each fix is its own commit with a decision.
   too-small message, each mode's footer, the log tail, the gate-free task list, and
   the shared status rows; by an e2e scenario for the pipe behavior; and by hand on a
   PTY, where the dashboard drew, quit on q, and restored the terminal.
+- Review round 1 found seven defects, all fixed (D96): the terminal check now runs
+  before the config is read, a split escape sequence waits for its rest, quitting waits
+  for a Start or Cancel in flight, a typed context file is made absolute, the log
+  follows the cursor at once, the task pane wraps its head at 60 columns, and the
+  NEEDS_DECISION message leads with the command.
 
 ## Known limitations
 
@@ -547,7 +552,7 @@ what it replaced. Current summary:
   prompts' remaining workflow rules moved to the stage files.
 - D93. A bare `foreman` opens the dashboard. D94. The dashboard is a pure model and
   frame over `golang.org/x/term`. D95 (amends D5). The dashboard polls in the
-  foreground, at two rates.
+  foreground, at two rates. D96. The dashboard's review corrections.
 
 ## Next stage
 

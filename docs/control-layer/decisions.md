@@ -1371,3 +1371,34 @@ Entry format:
   worktree cleanup once a minute, which is what makes a merged PR turn up as DONE
   without the developer asking. The rates are constants in `cmd/foreman`, not config,
   until someone needs to change them.
+
+## D96. The dashboard's review corrections
+
+- Date: 2026-09-29. Issue midsoln/foreman#1, PR #2 review round 1 by Codex. The
+  reviewer found seven defects against the PRD; all seven were accepted.
+- **Decisions.**
+  - The terminal check moved ahead of `config.Load` and `RequireGlobal`
+    (`cmd/foreman/main.go`). A broken config or a missing stage file used to fail a
+    piped `foreman`, which D93 promised would print usage and exit 0.
+  - A lone ESC, and a rune split across reads, now wait `escapeWait` (40ms) for the
+    rest before they are decoded. A terminal read ends anywhere, so `DecodeKey` gained
+    a `final` argument: without it a split arrow key arrived as an escape plus two
+    letters. 40ms is longer than a terminal takes to write three bytes and shorter
+    than a person takes to press a second key.
+  - Quitting waits for a `Start` or `Cancel` in flight. `App.Start` records WORKING
+    before it spawns the runner, and `listReaped` does not reap a task with no pid, so
+    exiting in that window left work that nothing would ever clear. A refresh is still
+    abandoned, because it writes nothing.
+  - The dashboard makes a typed context file absolute before `App.Start`, as `inbox`
+    and `start` already do. The runner a later `foreman respond` spawns reads the
+    stored path from its own working directory.
+  - Moving the task cursor re-tails the log at once instead of at the next tick, so
+    the pane never shows one task's lines under another's heading.
+  - `render.TaskHead` exposes the three fields `TaskRows` pads into its first row. At
+    60 columns the padded row does not fit the task pane and truncation dropped the
+    state, so the pane wraps the agent and state onto their own line. `status` keeps
+    its padding, and the text still comes from one place.
+  - The NEEDS_DECISION message leads with `foreman respond <owner>/<repo>#<n>`, so a
+    narrow terminal truncates the explanation rather than the command.
+- **Consequence.** `DecodeKey` and `readKeys` take an extra argument each, and
+  `readKeys` now decodes on its own goroutine with a timer beside the byte reader.

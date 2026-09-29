@@ -424,6 +424,14 @@ scenario_tui() {
 	check "the dashboard is in the usage text" contains "$sandbox/usage.txt" "Dashboard: inbox, delegated work, and logs"
 	foreman status >"$sandbox/status.txt" 2>&1
 	check "status is unchanged" contains "$sandbox/status.txt" "No delegated work."
+
+	# The terminal check runs before the config is read, so nothing a piped `foreman`
+	# never needed can make it fail where it used to print usage.
+	mv "$sandbox/stages/implement.md" "$sandbox/implement.md"
+	foreman </dev/null >"$sandbox/broken.txt" 2>&1
+	check "a missing stage file still gets usage on a pipe" test $? -eq 0
+	check "and prints usage, not the error" contains "$sandbox/broken.txt" "foreman inbox [--non-interactive]"
+	mv "$sandbox/implement.md" "$sandbox/stages/implement.md"
 }
 
 scenarios=${*:-runner notify logs inbox inbox_lifecycle rereview respond cancel tui}

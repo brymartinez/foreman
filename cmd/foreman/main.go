@@ -62,6 +62,14 @@ func run(argv []string) int {
 		info, _ := debug.ReadBuildInfo()
 		fmt.Println("foreman", buildVersion(version, info))
 		return 0
+	case cli.TUI:
+		// A pipe or a script gets the usage text, the way a bare `foreman` always has.
+		// This runs before the config is loaded so that a broken config or a missing
+		// stage file cannot fail a piped `foreman` that used to print usage (R12).
+		if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
+			fmt.Print(cli.Usage)
+			return 0
+		}
 	}
 	// An invalid config must not lock the developer out of the command that fixes it.
 	if cmd.Name == cli.Config && cmd.ConfigEdit {
@@ -105,11 +113,6 @@ func run(argv []string) int {
 
 	switch cmd.Name {
 	case cli.TUI:
-		// A pipe or a script gets the usage text, the way a bare `foreman` always has.
-		if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
-			fmt.Print(cli.Usage)
-			return 0
-		}
 		ready, err := config.EnsureTasksDir(bufio.NewReader(os.Stdin), os.Stdout, cfg.TasksDir)
 		if err != nil {
 			return fail(err)

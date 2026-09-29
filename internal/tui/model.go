@@ -231,7 +231,9 @@ func (m *Model) enter() Action {
 	case rec == nil:
 		m.Message = "No delegated work yet. Pick an issue on the left."
 	case rec.State == task.NeedsDecision:
-		m.Message = fmt.Sprintf("%s#%d is waiting for you; answer it with: foreman respond %s#%d", rec.Repo, rec.Number, rec.Repo, rec.Number)
+		// The command comes first, so a narrow terminal truncates the explanation
+		// rather than the part the developer has to type.
+		m.Message = fmt.Sprintf("foreman respond %s#%d · answers the waiting question", rec.Repo, rec.Number)
 	default:
 		m.Message = fmt.Sprintf("%s#%d · %s", rec.Repo, rec.Number, rec.Delegation.RunnerLog)
 	}

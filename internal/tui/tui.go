@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -37,6 +38,9 @@ type result struct {
 	report  *app.InboxReport
 	message string
 	err     error
+	// finished marks a Start or Cancel coming back, which quitting waits for. A
+	// refresh does not write anything, so it is safe to abandon.
+	finished bool
 }
 
 // Run draws the dashboard on o.Out until the user quits or ctx ends. It puts the
@@ -65,8 +69,12 @@ func Run(ctx context.Context, o Options) (err error) {
 	m.Width, m.Height = size(o.Out)
 
 	keys := make(chan Key, 64)
-	go readKeys(ctx, o.In, keys)
+	go readKeys(ctx, o.In, keys, escapeWait)
 	results := make(chan result, 8)
+	// pending counts Start and Cancel calls in flight. Quitting waits for them:
+	// App.Start records WORKING before it spawns the runner, so exiting in that window
+	// would leave a task with no runner that nothing reaps.
+	pending := 0
 
 	resize := make(chan os.Signal, 1)
 	signal.Notify(resize, syscall.SIGWINCH)
@@ -103,23 +111,53 @@ func Run(ctx context.Context, o Options) (err error) {
 		case <-remote.C:
 			refresh()
 		case r := <-results:
+			if r.finished {
+				pending--
+			}
 			apply(&m, r)
 		case k := <-keys:
+			before := m.Selected()
 			switch a := m.Key(k); a.Kind {
 			case ActionQuit:
-				return nil
+				return finish(ctx, o.Out, &m, results, pending)
 			case ActionRefresh:
 				refresh()
 			case ActionStart:
 				req := a.Start
+				pending++
 				go func() { results <- start(ctx, o.Source, req) }()
 			case ActionCancel:
 				rec := a.Cancel
+				pending++
 				go func() { results <- stop(ctx, o.Source, rec) }()
+			}
+			if m.Selected() != before {
+				// The heading names the new task, so the body must not still hold the
+				// old task's lines until the next local tick.
+				readLog(&m)
 			}
 		}
 		draw(o.Out, Frame(m))
 	}
+}
+
+// finish waits for a Start or Cancel to come back before Run returns, so the process
+// never exits between App.Start persisting WORKING and the runner being spawned.
+func finish(ctx context.Context, out io.Writer, m *Model, results <-chan result, pending int) error {
+	for pending > 0 {
+		m.Message = "Finishing the last command…"
+		draw(out, Frame(*m))
+		select {
+		case <-ctx.Done():
+			return nil
+		case r := <-results:
+			if r.finished {
+				pending--
+			}
+			apply(m, r)
+		}
+	}
+	return nil
 }
 
 func apply(m *Model, r result) {
@@ -140,22 +178,31 @@ func apply(m *Model, r result) {
 }
 
 func start(ctx context.Context, s Source, req app.StartRequest) result {
+	if req.ContextFile != "" {
+		// The runner a later `foreman respond` spawns reads this path from its own
+		// working directory, so store it absolute, as `inbox` and `start` do.
+		abs, err := filepath.Abs(req.ContextFile)
+		if err != nil {
+			return result{err: fmt.Errorf("context file %s: %w", req.ContextFile, err), finished: true}
+		}
+		req.ContextFile = abs
+	}
 	rec, err := s.Start(ctx, req)
 	if err != nil {
-		return result{err: fmt.Errorf("start %s#%d: %w", req.Repo, req.Issue, err)}
+		return result{err: fmt.Errorf("start %s#%d: %w", req.Repo, req.Issue, err), finished: true}
 	}
 	if rec.State == task.Failed {
-		return result{message: fmt.Sprintf("! %s#%d could not start: %s", rec.Repo, rec.Number, rec.LastOutcome.Summary)}
+		return result{message: fmt.Sprintf("! %s#%d could not start: %s", rec.Repo, rec.Number, rec.LastOutcome.Summary), finished: true}
 	}
-	return result{message: fmt.Sprintf("Started %s#%d on %s", rec.Repo, rec.Number, rec.Delegation.Branch)}
+	return result{message: fmt.Sprintf("Started %s#%d on %s", rec.Repo, rec.Number, rec.Delegation.Branch), finished: true}
 }
 
 func stop(ctx context.Context, s Source, rec *task.Record) result {
 	updated, err := s.Cancel(ctx, rec)
 	if err != nil {
-		return result{err: fmt.Errorf("cancel %s#%d: %w", rec.Repo, rec.Number, err)}
+		return result{err: fmt.Errorf("cancel %s#%d: %w", rec.Repo, rec.Number, err), finished: true}
 	}
-	return result{message: fmt.Sprintf("Cancelled %s#%d; the branch and worktree are kept", updated.Repo, updated.Number)}
+	return result{message: fmt.Sprintf("Cancelled %s#%d; the branch and worktree are kept", updated.Repo, updated.Number), finished: true}
 }
 
 // readLocal re-reads the task files and the selected task's log. Both are local, so
@@ -167,6 +214,12 @@ func readLocal(ctx context.Context, s Source, m *Model) {
 		return
 	}
 	m.SetTasks(recs)
+	readLog(m)
+}
+
+// readLog re-tails the selected task's runner log. Moving the cursor calls it too, so
+// the pane never shows one task's lines under another task's heading.
+func readLog(m *Model) {
 	m.Log, m.LogErr = nil, ""
 	rec := m.Selected()
 	if rec == nil || rec.Delegation == nil || rec.Delegation.RunnerLog == "" {
@@ -189,27 +242,73 @@ func tailFile(path string) ([]string, error) {
 	return logs.Tail(f, logLines, false)
 }
 
-// readKeys decodes stdin into whole keys until stdin ends. A read in progress when
-// Run returns cannot be interrupted, so the caller must exit soon after.
-func readKeys(ctx context.Context, in io.Reader, out chan<- Key) {
-	buf := make([]byte, 0, 64)
+// escapeWait is how long bytes that could still grow into a key wait for the rest. A
+// terminal writes an arrow key's three bytes at once, so anything slower than this is
+// the escape key itself, or a rune the terminal never finished.
+const escapeWait = 40 * time.Millisecond
+
+// readKeys decodes stdin into whole keys until stdin ends. A read in progress when Run
+// returns cannot be interrupted, so the caller must exit soon after.
+func readKeys(ctx context.Context, in io.Reader, out chan<- Key, wait time.Duration) {
+	raw := make(chan []byte, 8)
+	go readBytes(in, raw)
+
+	var buf []byte
+	// pending ticks only while buf holds bytes that are not yet a whole key.
+	var pending <-chan time.Time
+	// emit sends every whole key in buf and reports whether to keep reading. What it
+	// leaves in buf is a key that is not finished arriving.
+	emit := func(final bool) bool {
+		for len(buf) > 0 {
+			k, used, ok := DecodeKey(buf, final)
+			if !ok {
+				return true
+			}
+			buf = buf[used:]
+			select {
+			case out <- k:
+			case <-ctx.Done():
+				return false
+			}
+		}
+		return true
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case b, ok := <-raw:
+			if !ok {
+				// stdin ended, so nothing more is coming: decode what is left as it is.
+				emit(true)
+				return
+			}
+			buf = append(buf, b...)
+			if !emit(false) {
+				return
+			}
+			pending = nil
+			if len(buf) > 0 {
+				pending = time.After(wait)
+			}
+		case <-pending:
+			pending = nil
+			if !emit(true) {
+				return
+			}
+		}
+	}
+}
+
+// readBytes copies stdin onto ch until it ends. It is its own goroutine because a
+// blocking read cannot be selected on alongside the escape timer.
+func readBytes(in io.Reader, ch chan<- []byte) {
+	defer close(ch)
 	chunk := make([]byte, 64)
 	for {
 		n, err := in.Read(chunk)
 		if n > 0 {
-			buf = append(buf, chunk[:n]...)
-			for {
-				k, used, ok := DecodeKey(buf)
-				if !ok {
-					break
-				}
-				buf = buf[used:]
-				select {
-				case out <- k:
-				case <-ctx.Done():
-					return
-				}
-			}
+			ch <- append([]byte(nil), chunk[:n]...)
 		}
 		if err != nil {
 			return
