@@ -59,20 +59,31 @@ func TestParseRejects(t *testing.T) {
 	}
 }
 
+func TestParseNoArgsOpensTheDashboard(t *testing.T) {
+	for _, argv := range [][]string{nil, {"tui"}} {
+		if got, err := Parse(argv); err != nil || got != (Command{Name: TUI}) {
+			t.Errorf("Parse(%q) = %+v, %v; want the dashboard", argv, got, err)
+		}
+	}
+	for _, argv := range [][]string{{"help"}, {"-h"}, {"--help"}} {
+		if got, err := Parse(argv); err != nil || got != (Command{Name: Help}) {
+			t.Errorf("Parse(%q) = %+v, %v; want help", argv, got, err)
+		}
+	}
+	if _, err := Parse([]string{"tui", "x"}); err == nil {
+		t.Error("Parse(tui x) succeeded; want usage error")
+	}
+}
+
 func TestParseSimple(t *testing.T) {
 	for argv, want := range map[string]Command{
-		"":          {Name: Help},
 		"inbox":     {Name: Inbox},
 		"status":    {Name: Status},
 		"clean":     {Name: Clean},
 		"version":   {Name: Version},
 		"--version": {Name: Version},
 	} {
-		args := []string{}
-		if argv != "" {
-			args = []string{argv}
-		}
-		if got, err := Parse(args); err != nil || got != want {
+		if got, err := Parse([]string{argv}); err != nil || got != want {
 			t.Errorf("Parse(%q) = %+v, %v", argv, got, err)
 		}
 	}
