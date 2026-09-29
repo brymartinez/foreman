@@ -28,6 +28,21 @@ func (a App) Status(ctx context.Context) ([]*task.Record, []error, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	return activeTasks(recs), warnings, nil
+}
+
+// Tasks returns the same work as Status, from the task files alone. It skips the
+// readiness gate, so it makes no GitHub call and the dashboard can re-read it every
+// second (D95).
+func (a App) Tasks(ctx context.Context) ([]*task.Record, error) {
+	recs, err := a.listReaped(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return activeTasks(recs), nil
+}
+
+func activeTasks(recs []*task.Record) []*task.Record {
 	var active []*task.Record
 	for _, r := range recs {
 		if _, ok := attention[r.State]; ok && r.Delegation != nil {
@@ -35,7 +50,7 @@ func (a App) Status(ctx context.Context) ([]*task.Record, []error, error) {
 		}
 	}
 	sort.SliceStable(active, func(i, j int) bool { return attention[active[i].State] < attention[active[j].State] })
-	return active, warnings, nil
+	return active
 }
 
 // Find resolves an issue number to one stored task. repo may be empty; the number

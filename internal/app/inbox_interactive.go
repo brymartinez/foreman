@@ -18,17 +18,24 @@ type InboxSelection struct {
 	ContextFile string
 }
 
-// ChooseInbox prints the issues in the current refresh and collects one delegation
-// choice. Pull requests are left out: only an issue can be delegated. It returns nil
-// when the user quits or reaches EOF. in is shared with any earlier prompt, so no
-// input is buffered away from the next reader.
-func ChooseInbox(in *bufio.Reader, out io.Writer, report InboxReport) (*InboxSelection, error) {
+// Delegable lists the items in the current refresh that can be handed to an agent.
+// Pull requests are left out, because only an issue can be delegated, and so are
+// closed items and ones that only a tracked re-fetch found.
+func Delegable(report InboxReport) []InboxEntry {
 	var choices []InboxEntry
 	for _, entry := range report.Current {
 		if entry.Item.Kind != task.PullRequest && !slices.Contains(entry.Item.Reasons, task.Tracked) && entry.Item.State != "closed" && entry.Item.State != "merged" {
 			choices = append(choices, entry)
 		}
 	}
+	return choices
+}
+
+// ChooseInbox prints the delegable issues in the current refresh and collects one
+// delegation choice. It returns nil when the user quits or reaches EOF. in is shared
+// with any earlier prompt, so no input is buffered away from the next reader.
+func ChooseInbox(in *bufio.Reader, out io.Writer, report InboxReport) (*InboxSelection, error) {
+	choices := Delegable(report)
 	if len(choices) == 0 {
 		fmt.Fprintln(out, "No issues to delegate.")
 		return nil, nil
