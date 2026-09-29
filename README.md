@@ -60,6 +60,7 @@ Run `start` from any checkout of the repository. Foreman reads the repo and its 
 branch from that checkout.
 
 ```bash
+foreman                                        # dashboard: inbox, delegated work, and logs
 foreman inbox                                  # refresh, pick an issue, and delegate it
 foreman inbox --non-interactive                 # print the report without prompting
 foreman start 825 --agent claude               # delegate issue #825
@@ -82,6 +83,51 @@ foreman version
 
 `<issue>` can be `825`, `#825`, or `owner/repo#825`. Use the last form when the same
 number is tracked in more than one repo.
+
+## Dashboard
+
+Run `foreman` with no arguments and it opens a live view instead of printing usage:
+
+```
+foreman · 2 delegated · 3 in the inbox · refreshed 10:01:22
+▸ INBOX                             DELEGATED WORK
+> midsoln/foreman#1  Be interactive   ridezoomo/armada#340   Codex   READY_FOR_HUMAN
+    assigned to you                     Cache fleet lookups · ridezoomo/armada
+                                        PR #912 · reviewer: Claude · CI ✓ · review ✓
+  ridezoomo/armada#351  Retry 5xx
+    mentions you                      > midsoln/foreman#2      Claude  WORKING
+────────────────────────────────────────────────────────────────────────────────
+LOG · midsoln/foreman#2 · ~/.local/share/foreman/logs/2.log
+2026-09-29T10:01:04Z claude Bash go test ./internal/tui
+↑↓ move · tab pane · enter delegate · c cancel · r refresh · pgup/pgdn log · q quit
+```
+
+The left pane holds the issues you can delegate, the right pane holds delegated work,
+and the bottom pane tails the runner log of whichever task the right-hand cursor is on.
+
+| Key | What it does |
+|---|---|
+| `tab` | move focus between the two list panes |
+| `↑` `↓`, `k` `j` | move the cursor in the focused pane |
+| `enter` on an issue | delegate it: pick `1` for Claude or `2` for Codex, then type an optional context file |
+| `enter` on a task | show its log path, or how to answer a waiting question |
+| `c` | cancel the selected running task, after a `y`/`n` confirm |
+| `r` | refresh from GitHub now |
+| `pgup` `pgdn` | scroll the log; `end` follows the tail again |
+| `esc` | abandon the delegate or cancel prompt |
+| `q`, `ctrl+c` | quit |
+
+Delegated work is re-read from the task files every second, so a state change shows up
+on its own. GitHub is refreshed every 60 seconds and when you press `r`: that runs the
+same work as `foreman inbox`, including the readiness gate and the DONE cleanup. The
+dashboard refreshes only while it is open and starts no background process.
+
+`foreman tui` is the same command spelled out. The dashboard needs a terminal at least
+60 by 12; below that it says so. When stdin or stdout is not a terminal, `foreman`
+prints this usage text and exits 0, so pipes and scripts are unaffected.
+
+Answering a question still belongs to `foreman respond <issue>`, which the dashboard
+points you at.
 
 `foreman inbox` lists open issues assigned to you, open issues and PRs that mention
 you, and PRs that request your review. It also reports what changed since the last run,

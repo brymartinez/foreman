@@ -1312,3 +1312,62 @@ Entry format:
     files.
 - **Consequence.** An installed stage file doesn't get the moved rules until the
   developer copies them in, because `make config` never overwrites one.
+
+## D93. A bare `foreman` opens the dashboard
+
+- Date: 2026-09-29. Issue midsoln/foreman#1. Decided by the agent; the user asked for
+  "a mode where we issue `foreman`" and left the presentation to the agent's judgment.
+- **Context.** Daily use meant `foreman inbox`, then `foreman status`, then
+  `foreman logs <issue> --follow`. Each is one shot, so the developer retyped them to
+  see whether anything moved.
+- **Options.** A. A new `foreman dashboard` verb, leaving bare `foreman` as usage.
+  B. Bare `foreman` opens the dashboard. C. Make `foreman inbox` interactive-plus.
+- **Decision.** B, with `foreman tui` as the explicit form for scripts and docs.
+  `foreman help`, `-h`, and `--help` still print usage. When stdin or stdout is not a
+  terminal, bare `foreman` and `foreman tui` print usage and exit 0, exactly as bare
+  `foreman` always has, so a pipe or a script never blocks on a UI it cannot draw.
+- **Consequence.** The single most common invocation is now the live view. No existing
+  command changed. `foreman inbox` stays the scriptable, one-shot picker.
+
+## D94. The dashboard is a pure model and frame over golang.org/x/term
+
+- Date: 2026-09-29. Issue midsoln/foreman#1. Decided by the agent.
+- **Context.** Raw terminal mode and the terminal's size both need a `termios` and a
+  `TIOCGWINSZ` ioctl. The standard library exposes neither, so the dashboard cannot be
+  built under the standard-library-first rule without a decision.
+- **Options.** A. Bubble Tea and Lip Gloss. B. `golang.org/x/term` plus a hand-written
+  model, frame, and event loop. C. Reprint `inbox` and `status` on a timer with no raw
+  mode.
+- **Decision.** B. `golang.org/x/term` is the Go team's own package and brings only
+  `golang.org/x/sys`, against Bubble Tea's ten or so modules in a project that had one
+  dependency. C cannot place panes side by side, read a keystroke without Enter, or
+  select anything.
+- **Consequence.** `internal/tui` splits three ways, matching how `render` and `app`
+  are already split. `Model.Key` is a pure state transition returning an `Action`, and
+  `Frame` is a pure function from the model to exactly the lines on screen. Only `Run`
+  touches the terminal, so almost all of the UI is unit tested. Scrolling, layout, and
+  key decoding are written by hand, about 600 lines.
+- **Reuse.** The panes show no text of their own invention: `render.TaskRows` is shared
+  with `foreman status`, `app.Delegable` with the `foreman inbox` picker, and
+  `logs.Tail` cleans lines the way `foreman logs` does.
+
+## D95. The dashboard polls in the foreground, at two rates
+
+- Date: 2026-09-29. Issue midsoln/foreman#1. Decided by the agent. Amends D5.
+- **Context.** D5 rules out a daemon and background polling: the readiness gate runs
+  only when a command runs. A view that updates on its own is polling by definition.
+- **Decision.** The dashboard refreshes only while it is open, and stops when the
+  developer quits. It starts no background process, which keeps D5's substance: nothing
+  runs between commands except a task's own runner. Watching the dashboard is the same
+  as running `foreman inbox` by hand, on a timer.
+  - Local tick, every second: `App.Tasks` re-reads the task files, reaps dead runners,
+    and the selected task's log is re-tailed. No GitHub call, so this is cheap enough
+    to make the pane move on its own.
+  - GitHub tick, every 60 seconds, and on `r`: `App.Inbox` runs the searches, the
+    readiness gate, and the configured DONE cleanup, one at a time. It runs in a
+    goroutine, so a slow `gh` never blocks a keystroke.
+- **Consequence.** `App.Status` keeps the gate; `App.Tasks` is the new gate-free read,
+  and both share `activeTasks`. Leaving the dashboard open runs the gate and the
+  worktree cleanup once a minute, which is what makes a merged PR turn up as DONE
+  without the developer asking. The rates are constants in `cmd/foreman`, not config,
+  until someone needs to change them.

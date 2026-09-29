@@ -2,7 +2,7 @@
 
 ## Current stage
 
-Stage 13 (planning documents on the issue) is complete.
+Stage 14 (the interactive dashboard) is complete.
 
 ## Completed
 
@@ -424,6 +424,30 @@ request. Each fix is its own commit with a decision.
   end-to-end scenario with a planning stub; and `scripts/probe-agents.sh`, where
   Claude and Codex both return a planned outcome under the new schema.
 
+### Stage 14 (complete): the interactive dashboard
+
+- A bare `foreman` opens a three-pane dashboard: delegable inbox issues on the left,
+  delegated work on the right, and the selected task's runner log along the bottom.
+  `foreman tui` is the explicit form, and a pipe still gets the usage text (D93).
+- `internal/tui` splits into a pure `Model` whose `Key` returns an `Action`, a pure
+  `Frame` that returns exactly the lines on screen, and one `Run` that owns raw mode,
+  the tickers, SIGWINCH, and the redraw. `golang.org/x/term` is the only new
+  dependency (D94).
+- Tab moves focus, arrows and j/k move the cursor, enter delegates an issue after
+  asking for the agent and an optional context file, c cancels a running task after a
+  y/n confirm, r refreshes, PgUp/PgDn scroll the log, End follows it again, and q or
+  ctrl+c quits. Enter on a NEEDS_DECISION task names `foreman respond`.
+- Task files are re-read every second and GitHub every 60 seconds, only while the
+  dashboard is open (D95). `App.Tasks` is the new gate-free read; `App.Status` keeps
+  the gate and both share `activeTasks`.
+- The panes reuse `render.TaskRows` (shared with `status`), `app.Delegable` (shared
+  with the inbox picker), and `logs.Tail` (the cleaning `foreman logs` does).
+- Validated by unit tests for key decoding, every key binding and both prompts,
+  selection surviving a reordering refresh, the frame at three sizes, truncation, the
+  too-small message, each mode's footer, the log tail, the gate-free task list, and
+  the shared status rows; by an e2e scenario for the pipe behavior; and by hand on a
+  PTY, where the dashboard drew, quit on q, and restored the terminal.
+
 ## Known limitations
 
 - The gate runs only when `inbox` or `status` runs, because the design rules out
@@ -518,7 +542,12 @@ what it replaced. Current summary:
 - D89. `foreman cancel` stops a running task.
 - D90 (amends D73). The implementer plans first and the runner posts the plan on the
   issue.
+- D91. `config --edit` opens a config that fails to load. D92 (amends D73, D90). The
+  prompts' remaining workflow rules moved to the stage files.
+- D93. A bare `foreman` opens the dashboard. D94. The dashboard is a pure model and
+  frame over `golang.org/x/term`. D95 (amends D5). The dashboard polls in the
+  foreground, at two rates.
 
 ## Next stage
 
-None. Stages 0 to 13 are complete. Further work needs a new request.
+None. Stages 0 to 14 are complete. Further work needs a new request.

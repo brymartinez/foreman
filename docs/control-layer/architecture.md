@@ -5,6 +5,7 @@ cmd/foreman           wiring: build adapters, call app, render output
 internal/cli          argv -> Command; no I/O beyond parsing
 internal/config       tasks directory resolution (Stage 1)
 internal/render       terminal formatting of app results (Stage 1)
+internal/tui          the dashboard: pure Model and Frame, one terminal loop (D94)
 internal/app          orchestration + ports.go (the interfaces below)
   ├── github          GitHubClient and RepositoryManager over `gh` (Stages 1, 9)
   ├── store           TaskStore over Markdown + YAML frontmatter (Stage 1)
@@ -59,6 +60,13 @@ foreman cancel 825    -> SIGTERM the runner, wait up to 30s for it to exit (D89)
                          runner: context cancelled -> agent process group stopped;
                          the failed step records FAILED, outcome cancelled, keeping
                          session, usage, branch, worktree, and PR
+foreman               -> the dashboard (D93), until q or ctrl+c:
+                         every 1s : app.Tasks re-reads the task files and re-tails
+                                    the selected task's runner log; no GitHub call
+                         every 60s: app.Inbox, the same as `foreman inbox` (D95)
+                         enter on an inbox issue -> agent, context file, app.Start
+                         c on a running task     -> confirm, app.Cancel
+
 foreman inbox|status  -> runner pid dead while WORKING/REVIEWING -> FAILED
                          readiness gate (gate.go), per idle task with a PR:
                            PR merged -> DONE; PR closed -> FAILED
