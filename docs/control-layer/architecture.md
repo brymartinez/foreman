@@ -61,10 +61,12 @@ foreman cancel 825    -> SIGTERM the runner, wait up to 30s for it to exit (D89)
                          the failed step records FAILED, outcome cancelled, keeping
                          session, usage, branch, worktree, and PR
 foreman               -> the dashboard (D93), until q or ctrl+c:
-                         every 1s : app.Tasks re-reads the task files and re-tails
-                                    the selected task's runner log; no GitHub call
+                         every 1s : app.Tasks re-reads the task files and, when open,
+                                    re-tails the selected task's runner log; no GitHub call
                          every 60s: app.Inbox, the same as `foreman inbox` (D95)
                          enter on an inbox issue -> agent, context file, app.Start
+                         enter on delegated work -> open that task's log below the lists
+                         h/l -> focus the inbox/delegated work; esc -> close the log
                          c on a running task     -> confirm, app.Cancel
 
 foreman inbox|status  -> runner pid dead while WORKING/REVIEWING -> FAILED

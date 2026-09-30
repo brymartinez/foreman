@@ -86,7 +86,8 @@ number is tracked in more than one repo.
 
 ## Dashboard
 
-Run `foreman` with no arguments and it opens a live view instead of printing usage:
+Run `foreman` with no arguments to open a live view. This example shows the log after
+pressing Enter on a delegated task:
 
 ```
 foreman · 2 delegated · 3 in the inbox · refreshed 10:01:22
@@ -102,26 +103,26 @@ LOG · midsoln/foreman#2 · ~/.local/share/foreman/logs/2.log
 j/k move · tab pane · enter delegate · c cancel · r refresh · q quit
 ```
 
-The left pane holds the issues you can delegate, the right pane holds delegated work,
-and the bottom pane tails the most recently delegated issue's runner log. Move the
-right-hand cursor to follow another task. Press `Tab` twice to focus the log, then use
-`j`/`k` to scroll it. Press `c` from any pane to cancel the task
-shown in the log, after confirmation. Colors mark running, waiting, and failed tasks;
-dividers separate the panes.
+The left pane holds issues you can delegate, and the right pane holds delegated work.
+Press `h` or `l` to switch between them. In DELEGATED WORK, use `j`/`k` to pick a task
+and Enter to open its log below the lists. Escape closes the log. With the log open,
+`u`/`d` and `g`/`G` scroll it while `j`/`k` still select tasks. Press `c` from either
+list to cancel the highlighted delegated task, after confirmation. Colors mark task
+states and the dividers.
 
 | Key | What it does |
 |---|---|
-| `tab` | cycle through inbox, delegated work, and log |
-| `↑` `↓`, `k` `j` | move the focused list cursor, or scroll the log one line |
+| `tab`, `h` `l` | switch between inbox and delegated work |
+| `↑` `↓`, `k` `j` | move the focused list cursor |
 | `enter` on an issue | delegate it: pick `1` for Claude or `2` for Codex, then type an optional context file |
-| `enter` on a task | show its log path, or how to answer a waiting question |
-| `c` | cancel the running task shown in the log, after a `y`/`n` confirm |
+| `enter` on a task | open its log below; show how to answer a waiting question |
+| `c` | cancel the highlighted delegated task, after a `y`/`n` confirm |
 | `r` | refresh from GitHub now |
-| `u` `d` in the log | scroll up or down one page |
-| `ctrl+u` `ctrl+d` in the log | scroll up or down half a page |
-| `g` `G` in the log | jump to the oldest available line or follow the tail |
+| `u` `d` with a log open | scroll up or down one page |
+| `ctrl+u` `ctrl+d` with a log open | scroll up or down half a page |
+| `g` `G` with a log open | jump to the oldest available line or follow the tail |
 | `pgup` `pgdn`, `end` | optional log scroll keys for keyboards that have them |
-| `esc` | abandon the delegate or cancel prompt |
+| `esc` | close the log or abandon a prompt |
 | `q`, `ctrl+c` | quit |
 
 Delegated work is re-read from the task files every second, so a state change shows up

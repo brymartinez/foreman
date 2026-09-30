@@ -117,6 +117,7 @@ func Run(ctx context.Context, o Options) (err error) {
 			apply(&m, r)
 		case k := <-keys:
 			before := m.Selected()
+			wasOpen := m.LogOpen
 			switch a := m.Key(k); a.Kind {
 			case ActionQuit:
 				return finish(ctx, o.Out, &m, results, pending)
@@ -131,7 +132,7 @@ func Run(ctx context.Context, o Options) (err error) {
 				pending++
 				go func() { results <- stop(ctx, o.Source, rec) }()
 			}
-			if m.Selected() != before {
+			if m.Selected() != before || (!wasOpen && m.LogOpen) {
 				// The heading names the new task, so the body must not still hold the
 				// old task's lines until the next local tick.
 				readLog(&m)
@@ -222,6 +223,10 @@ func readLocal(ctx context.Context, s Source, m *Model) {
 func readLog(m *Model) {
 	before := len(m.Log)
 	m.Log, m.LogErr = nil, ""
+	if !m.LogOpen {
+		m.LogOffset = 0
+		return
+	}
 	rec := m.Selected()
 	if rec == nil || rec.Delegation == nil || rec.Delegation.RunnerLog == "" {
 		m.LogOffset = 0

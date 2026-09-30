@@ -102,38 +102,28 @@ func TestTabMovesFocus(t *testing.T) {
 		t.Errorf("tab left focus at %v", m.Focus)
 	}
 	press(&m, Key{Kind: KeyTab})
-	if m.Focus != LogPane {
-		t.Errorf("tab did not reach the log: %v", m.Focus)
-	}
-	press(&m, Key{Kind: KeyTab})
 	if m.Focus != InboxPane {
 		t.Errorf("tab did not cycle back to the inbox: %v", m.Focus)
 	}
+	press(&m, rune_('l'))
+	if m.Focus != TaskPane {
+		t.Errorf("l did not focus delegated work: %v", m.Focus)
+	}
+	press(&m, rune_('h'))
+	if m.Focus != InboxPane {
+		t.Errorf("h did not focus the inbox: %v", m.Focus)
+	}
 }
 
-func TestVimKeysScrollTheFocusedLog(t *testing.T) {
+func TestEnterOpensSelectedLogAndKeysScrollIt(t *testing.T) {
 	m := model()
 	m.Log = make([]string, 200)
 	for i := range m.Log {
 		m.Log[i] = strconv.Itoa(i)
 	}
-	press(&m, Key{Kind: KeyTab}, Key{Kind: KeyTab})
-	if m.Focus != LogPane {
-		t.Fatalf("focus = %v; want log", m.Focus)
-	}
-	press(&m, rune_('k'))
-	if m.LogOffset != 1 {
-		t.Fatalf("k moved the log by %d lines; want 1", m.LogOffset)
-	}
-	if shown := visibleLog(&m); shown[len(shown)-1] != "198" {
-		t.Fatalf("k left the last visible line at %q; want 198", shown[len(shown)-1])
-	}
-	press(&m, rune_('j'))
-	if m.LogOffset != 0 {
-		t.Fatalf("j did not return to the tail: %d", m.LogOffset)
-	}
-	if shown := visibleLog(&m); shown[len(shown)-1] != "199" {
-		t.Fatalf("j left the last visible line at %q; want 199", shown[len(shown)-1])
+	press(&m, rune_('l'), Key{Kind: KeyEnter})
+	if !m.LogOpen || m.Focus != TaskPane {
+		t.Fatalf("enter did not open the selected task's log: %+v", m)
 	}
 	press(&m, rune_('u'))
 	if m.LogOffset != m.logPage() {
@@ -158,6 +148,11 @@ func TestVimKeysScrollTheFocusedLog(t *testing.T) {
 	if m.TaskCursor != 0 || m.InboxCursor != 0 {
 		t.Fatalf("log navigation moved a list cursor: task=%d inbox=%d", m.TaskCursor, m.InboxCursor)
 	}
+	press(&m, rune_('j'))
+	if m.TaskCursor != 1 || m.LogOpen {
+		t.Fatalf("moving to another task did not close the old log: task=%d open=%t", m.TaskCursor, m.LogOpen)
+	}
+	press(&m, Key{Kind: KeyEscape})
 }
 
 func TestDelegateAsksAgentThenContext(t *testing.T) {
@@ -357,6 +352,7 @@ func TestRefreshKey(t *testing.T) {
 
 func TestPageKeysScrollTheLogAndEndResumesFollowing(t *testing.T) {
 	m := model()
+	m.LogOpen = true
 	m.Log = make([]string, 200)
 	press(&m, Key{Kind: KeyPageUp})
 	if m.LogOffset == 0 {
@@ -376,6 +372,7 @@ func TestPageKeysScrollTheLogAndEndResumesFollowing(t *testing.T) {
 func TestMovingTheTaskCursorFollowsTheNewTail(t *testing.T) {
 	m := model()
 	m.Focus = TaskPane
+	m.LogOpen = true
 	m.Log = make([]string, 200)
 	press(&m, Key{Kind: KeyPageUp})
 	press(&m, Key{Kind: KeyDown})

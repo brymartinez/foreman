@@ -2,7 +2,7 @@
 
 ## Current stage
 
-Stage 14 (the interactive dashboard) is complete.
+Stage 15 (dashboard views for issue #3) is complete.
 
 ## Completed
 
@@ -478,6 +478,21 @@ request. Each fix is its own commit with a decision.
   half page, and g/G jump to the oldest available line or the live tail. The footer
   names the keys for the focused pane.
 
+### Stage 15 (complete): dashboard views for issue #3
+
+- The user's clarification replaces the always-visible log and third Tab stop (D106).
+  The dashboard starts with INBOX and DELEGATED WORK. `h`/`l` switch between them,
+  and Enter on a delegated task opens its log in a smaller area below. Escape closes
+  it; moving to another task closes it until that task is opened. The selected log is
+  read only while open. `u`/`d`, Ctrl+U/Ctrl+D, and `g`/`G` scroll the open log while
+  `j`/`k` keep navigating delegated work.
+- The task list displays its branch when there is room, and colored dividers separate
+  the lists and the optional log. Status color still marks delegated task rows.
+- Verified with `go vet ./...`, `go test ./...` (including the runner test with normal
+  process access), `go build -o dist/foreman ./cmd/foreman`, `scripts/e2e.sh`, and
+  `git diff --check`. Focused TUI tests cover hidden and opened logs, Escape, task
+  changes, navigation, narrow layout, branch display, and color dividers.
+
 ## Known limitations
 
 - The gate runs only when `inbox` or `status` runs, or while the dashboard is open
@@ -583,8 +598,9 @@ what it replaced. Current summary:
   counts terminal columns. D102 (amends D99). The wrapped PR row is bounded. D103
   (amends D99, D102). The PR row drops detail instead of being truncated. D104. The
   dashboard follows the newest delegation and colors and divides its panes. D105. The
-  log is focusable and scrolls with vim keys.
+  log is focusable and scrolls with vim keys. D106 (amends D104 and D105). A delegated
+  task opens its log on demand; `h`/`l` navigate the two list panes.
 
 ## Next stage
 
-None. Stages 0 to 14 are complete. Further work needs a new request.
+None. Stages 0 to 15 are complete. Further work needs a new request.

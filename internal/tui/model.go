@@ -15,7 +15,6 @@ type Pane int
 const (
 	InboxPane Pane = iota
 	TaskPane
-	LogPane
 )
 
 // Mode is what the footer is collecting. Browsing is the normal view.
@@ -54,6 +53,7 @@ type Model struct {
 	Log     []string
 	LogErr  string
 	LogPath string
+	LogOpen bool // Enter on a delegated task reveals its log below the lists.
 
 	Focus       Pane
 	InboxCursor int
@@ -74,7 +74,7 @@ type Model struct {
 	manualTask   bool             // cursor movement stops following the latest delegation
 }
 
-// Selected is the task the log pane follows, or nil when nothing is delegated.
+// Selected is the highlighted delegated task, or nil when nothing is delegated.
 func (m *Model) Selected() *task.Record {
 	if m.TaskCursor < 0 || m.TaskCursor >= len(m.Tasks) {
 		return nil
@@ -106,6 +106,7 @@ func (m *Model) SetTasks(recs []*task.Record) {
 		// The task the cursor was on is gone, so the pane is about to show another
 		// task's log. Follow its tail rather than keep the old task's scroll offset.
 		m.LogOffset = 0
+		m.LogOpen = false
 	}
 }
 
@@ -186,28 +187,34 @@ func (m *Model) browse(k Key) Action {
 	case k.Kind == KeyRune && k.Rune == 'r':
 		return Action{Kind: ActionRefresh}
 	case k.Kind == KeyTab:
-		m.Focus = (m.Focus + 1) % 3
+		m.Focus = (m.Focus + 1) % 2
+	case k.Kind == KeyRune && k.Rune == 'h':
+		m.Focus = InboxPane
+	case k.Kind == KeyRune && k.Rune == 'l':
+		m.Focus = TaskPane
+	case k.Kind == KeyEscape:
+		m.LogOpen = false
 	case k.Kind == KeyUp || (k.Kind == KeyRune && k.Rune == 'k'):
 		m.move(-1)
 	case k.Kind == KeyDown || (k.Kind == KeyRune && k.Rune == 'j'):
 		m.move(1)
-	case m.Focus == LogPane && (k.Kind == KeyRune && k.Rune == 'u'):
+	case m.LogOpen && m.Focus == TaskPane && (k.Kind == KeyRune && k.Rune == 'u'):
 		m.scrollLog(m.logPage())
-	case m.Focus == LogPane && (k.Kind == KeyRune && k.Rune == 'd'):
+	case m.LogOpen && m.Focus == TaskPane && (k.Kind == KeyRune && k.Rune == 'd'):
 		m.scrollLog(-m.logPage())
-	case m.Focus == LogPane && k.Kind == KeyCtrlU:
+	case m.LogOpen && m.Focus == TaskPane && k.Kind == KeyCtrlU:
 		m.scrollLog(max(m.logPage()/2, 1))
-	case m.Focus == LogPane && k.Kind == KeyCtrlD:
+	case m.LogOpen && m.Focus == TaskPane && k.Kind == KeyCtrlD:
 		m.scrollLog(-max(m.logPage()/2, 1))
-	case m.Focus == LogPane && k.Kind == KeyRune && k.Rune == 'g':
+	case m.LogOpen && m.Focus == TaskPane && k.Kind == KeyRune && k.Rune == 'g':
 		m.scrollLog(len(m.Log))
-	case m.Focus == LogPane && k.Kind == KeyRune && k.Rune == 'G':
+	case m.LogOpen && m.Focus == TaskPane && k.Kind == KeyRune && k.Rune == 'G':
 		m.LogOffset = 0
-	case k.Kind == KeyPageUp:
+	case m.LogOpen && k.Kind == KeyPageUp:
 		m.scrollLog(m.logPage())
-	case k.Kind == KeyPageDown:
+	case m.LogOpen && k.Kind == KeyPageDown:
 		m.scrollLog(-m.logPage())
-	case k.Kind == KeyEnd:
+	case m.LogOpen && k.Kind == KeyEnd:
 		m.LogOffset = 0
 	case k.Kind == KeyRune && k.Rune == 'c':
 		return m.startCancel()
@@ -218,10 +225,6 @@ func (m *Model) browse(k Key) Action {
 }
 
 func (m *Model) move(by int) {
-	if m.Focus == LogPane {
-		m.scrollLog(-by)
-		return
-	}
 	if m.Focus == InboxPane {
 		m.InboxCursor = clamp(m.InboxCursor+by, len(m.Inbox))
 		return
@@ -230,6 +233,7 @@ func (m *Model) move(by int) {
 	m.TaskCursor = clamp(m.TaskCursor+by, len(m.Tasks))
 	if m.TaskCursor != before {
 		m.manualTask = true
+		m.LogOpen = false
 		// A new task brings a new log, so show its tail rather than keep the old offset.
 		m.LogOffset = 0
 	}
@@ -246,7 +250,7 @@ func (m *Model) scrollLog(by int) {
 }
 
 func (m *Model) logPage() int {
-	lay, ok := layoutFor(m.Width, m.Height)
+	lay, ok := layoutFor(m.Width, m.Height, true)
 	if !ok {
 		return 1
 	}
@@ -268,12 +272,14 @@ func (m *Model) enter() Action {
 	switch {
 	case rec == nil:
 		m.Message = "No delegated work yet. Pick an issue on the left."
-	case rec.State == task.NeedsDecision:
-		// The command comes first, so a narrow terminal truncates the explanation
-		// rather than the part the developer has to type.
-		m.Message = fmt.Sprintf("foreman respond %s#%d · answers the waiting question", rec.Repo, rec.Number)
 	default:
-		m.Message = fmt.Sprintf("%s#%d · %s", rec.Repo, rec.Number, rec.Delegation.RunnerLog)
+		m.LogOpen = true
+		m.LogOffset = 0
+		if rec.State == task.NeedsDecision {
+			m.Message = fmt.Sprintf("foreman respond %s#%d · answers the waiting question", rec.Repo, rec.Number)
+		} else {
+			m.Message = ""
+		}
 	}
 	return Action{}
 }

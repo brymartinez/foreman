@@ -1531,3 +1531,18 @@ Entry format:
   Show the log keys in the footer while that pane has focus.
 - **Consequence.** The log can be read with standard letter keys, and list navigation
   works as before when a list pane has focus.
+
+## D106 (amends D104 and D105). A delegated task opens its log on demand
+
+- Date: 2026-09-30. Issue midsoln/foreman#3. The user clarified that the log view
+  should be removed and shown only after Enter on a DELEGATED WORK entry.
+- **Decision.** The dashboard starts with two lists and no log. `h` and `l` focus the
+  inbox and delegated work; Tab cycles between those lists. Enter on a delegated task
+  opens a small log area below them. Escape closes it, and moving to another task
+  closes it until Enter selects that task. The log is not a Tab stop. While delegated
+  work is focused and its log is open, `u`/`d`, Ctrl+U/Ctrl+D, and `g`/`G` scroll it;
+  `j`/`k` continue to select tasks. The task list shows the branch when it has room,
+  and colored dividers separate the areas.
+- **Consequence.** A log is never displayed merely because a task is highlighted or
+  because a local refresh chose the newest delegation. The 60 by 12 layout still
+  shows the selected task's PR and state when the log is open.
