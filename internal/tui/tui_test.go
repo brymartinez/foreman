@@ -101,6 +101,9 @@ func TestReadLocalTailsTheSelectedTasksLog(t *testing.T) {
 	rec.Delegation.RunnerLog = path
 	m := Model{Width: 100, Height: 30}
 	readLocal(context.Background(), stubSource{recs: []*task.Record{rec}}, &m)
+	m.Key(Key{Kind: KeyTab})
+	m.Key(Key{Kind: KeyEnter})
+	readLog(&m)
 	if len(m.Log) != 1 || !strings.Contains(m.Log[0], "runner 42 started") {
 		t.Fatalf("log = %q err = %q", m.Log, m.LogErr)
 	}
@@ -112,7 +115,7 @@ func TestReadLocalTailsTheSelectedTasksLog(t *testing.T) {
 	}
 }
 
-func TestReadLogFollowsTheCursorWithoutWaitingForATick(t *testing.T) {
+func TestReadLogOpensOnlyAfterEnter(t *testing.T) {
 	dir := t.TempDir()
 	var recs []*task.Record
 	for i, text := range []string{"first task working", "second task working"} {
@@ -126,14 +129,24 @@ func TestReadLogFollowsTheCursorWithoutWaitingForATick(t *testing.T) {
 	}
 	m := Model{Width: 100, Height: 30, Focus: TaskPane}
 	readLocal(context.Background(), stubSource{recs: recs}, &m)
+	if len(m.Log) != 0 {
+		t.Fatalf("log loaded before enter: %q", m.Log)
+	}
+	m.Key(Key{Kind: KeyEnter})
+	readLog(&m)
 	if len(m.Log) != 1 || !strings.Contains(m.Log[0], "first task") {
 		t.Fatalf("log = %q", m.Log)
 	}
 	// The same step Run takes on a key that moves the cursor.
 	m.Key(Key{Kind: KeyDown})
 	readLog(&m)
+	if m.LogOpen || len(m.Log) != 0 {
+		t.Errorf("moving to another task kept the old log open: %q", m.Log)
+	}
+	m.Key(Key{Kind: KeyEnter})
+	readLog(&m)
 	if len(m.Log) != 1 || !strings.Contains(m.Log[0], "second task") {
-		t.Errorf("after moving down, log = %q; want the newly selected task's log", m.Log)
+		t.Errorf("enter on the second task loaded %q", m.Log)
 	}
 }
 
@@ -151,6 +164,8 @@ func TestAScrolledBackLogHoldsItsLinesAsTheLogGrows(t *testing.T) {
 	m := Model{Width: 100, Height: 30, Focus: TaskPane}
 	s := stubSource{recs: []*task.Record{rec}}
 	readLocal(context.Background(), s, &m)
+	m.Key(Key{Kind: KeyEnter})
+	readLog(&m)
 
 	m.Key(Key{Kind: KeyPageUp})
 	top := visibleLog(&m)
@@ -179,7 +194,7 @@ func TestAScrolledBackLogHoldsItsLinesAsTheLogGrows(t *testing.T) {
 
 // visibleLog is the log lines the pane draws, without their padding.
 func visibleLog(m *Model) []string {
-	lay, _ := layoutFor(m.Width, m.Height)
+	lay, _ := layoutFor(m.Width, m.Height, true)
 	var out []string
 	for _, l := range logPane(*m, lay.logHeight)[1:] {
 		if l = strings.TrimSpace(l); l != "" {

@@ -42,6 +42,8 @@ func TestFrameFillsTheScreen(t *testing.T) {
 func TestFrameShowsThreePanes(t *testing.T) {
 	m := model()
 	m.Log = []string{"2026-09-29T10:00:00Z claude Bash go test"}
+	m.Focus = TaskPane
+	m.Key(Key{Kind: KeyEnter})
 	got := screen(m)
 	for _, want := range []string{"INBOX", "DELEGATED WORK", "LOG", "a/b#1", "First", "a/b#10", "claude Bash go test"} {
 		if !strings.Contains(got, want) {
@@ -50,10 +52,31 @@ func TestFrameShowsThreePanes(t *testing.T) {
 	}
 }
 
+func TestFrameHidesLogUntilTaskEnterAndShowsBranch(t *testing.T) {
+	m := model()
+	m.Tasks[0].Delegation.Branch = "feat/10-task"
+	m.Log = []string{"secret log line"}
+	if got := screen(m); strings.Contains(got, "LOG ·") || strings.Contains(got, "secret log line") {
+		t.Fatalf("log visible before task enter:\n%s", got)
+	}
+	if got := screen(m); !strings.Contains(got, "branch feat/10-task") {
+		t.Fatalf("delegated task has no branch:\n%s", got)
+	}
+	m.Focus = TaskPane
+	m.Key(Key{Kind: KeyEnter})
+	if got := screen(m); !strings.Contains(got, "secret log line") {
+		t.Fatalf("enter did not reveal the selected log:\n%s", got)
+	}
+	m.Key(Key{Kind: KeyEscape})
+	if got := screen(m); strings.Contains(got, "LOG ·") {
+		t.Fatalf("escape did not close the log:\n%s", got)
+	}
+}
+
 func TestFrameColorsAndDividesThePanes(t *testing.T) {
 	m := model()
 	lines := Frame(m)
-	if !strings.Contains(lines[0], cyan) || !strings.Contains(lines[1], "│") || !strings.Contains(lines[2], green) {
+	if !strings.Contains(lines[0], cyan) || !strings.Contains(lines[1], colored("│", cyan)) || !strings.Contains(lines[2], green) {
 		t.Fatalf("frame lacks color or a pane divider:\n%s", strings.Join(lines[:3], "\n"))
 	}
 	m.Message = "! GitHub failed"
@@ -76,15 +99,15 @@ func TestFrameMarksTheFocusedPane(t *testing.T) {
 	if !strings.Contains(taskFocused[1], focusMark) || strings.Count(taskFocused[1], focusMark) != 1 {
 		t.Errorf("want exactly one focused heading: %q", taskFocused[1])
 	}
-	m.Focus = LogPane
+	m.Key(Key{Kind: KeyEnter})
 	logFocused := Frame(m)
-	lay, _ := layoutFor(m.Width, m.Height)
+	lay, _ := layoutFor(m.Width, m.Height, true)
 	logHeading := logFocused[lay.topHeight+2]
-	if !strings.Contains(logHeading, focusMark) || strings.Count(strings.Join(logFocused, ""), focusMark) != 1 {
-		t.Errorf("want only the log heading focused: %q", logHeading)
+	if strings.Contains(logHeading, focusMark) || strings.Count(strings.Join(logFocused, ""), focusMark) != 1 {
+		t.Errorf("log is not a focusable pane: %q", logHeading)
 	}
 	m.Width = minWidth
-	if got := plain(Frame(m))[m.Height-1]; !strings.Contains(got, "j/k line") || !strings.Contains(got, "u/d page") {
+	if got := plain(Frame(m))[m.Height-1]; !strings.Contains(got, "j/k task") || !strings.Contains(got, "u/d log") {
 		t.Errorf("the narrow log footer hides its scroll keys: %q", got)
 	}
 }
@@ -92,7 +115,7 @@ func TestFrameMarksTheFocusedPane(t *testing.T) {
 func TestFrameEmptyPanes(t *testing.T) {
 	m := Model{Width: 100, Height: 30}
 	got := screen(m)
-	for _, want := range []string{"Nothing to delegate", "No delegated work", "no task selected"} {
+	for _, want := range []string{"Nothing to delegate", "No delegated work"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("frame is missing %q:\n%s", want, got)
 		}
@@ -101,6 +124,7 @@ func TestFrameEmptyPanes(t *testing.T) {
 
 func TestFrameShowsALogReadError(t *testing.T) {
 	m := model()
+	m.LogOpen = true
 	m.LogErr = "open /logs/b.log: permission denied"
 	if got := screen(m); !strings.Contains(got, "permission denied") {
 		t.Errorf("frame hides the log error:\n%s", got)
@@ -171,7 +195,7 @@ func TestFrameFooterFollowsTheMode(t *testing.T) {
 		mode Mode
 		want string
 	}{
-		{Browsing, "enter delegate"},
+		{Browsing, "enter select"},
 		{ChoosingAgent, "[1] Claude"},
 		{TypingContext, "Context file"},
 		{ConfirmingCancel, "[y/n]"},
@@ -244,7 +268,7 @@ func TestFrameKeepsWideTextInsideItsPane(t *testing.T) {
 	}
 	// Every inbox line is exactly the pane's column count, so the task pane beside it
 	// starts where the layout puts it.
-	lay, _ := layoutFor(m.Width, m.Height)
+	lay, _ := layoutFor(m.Width, m.Height, true)
 	for i, l := range plain(paneLines(inboxPane(m), lay.leftWidth, lay.topHeight, true, 0)) {
 		if n := textWidth(l); n != lay.leftWidth {
 			t.Errorf("inbox line %d is %d columns; want %d: %q", i, n, lay.leftWidth, l)
@@ -269,6 +293,7 @@ func TestFrameShowsTheCIAndReviewBadgesAtTheSmallestSupportedSize(t *testing.T) 
 	// the failing checks' names rather than truncating the badges away.
 	m := Model{Width: minWidth, Height: minHeight, Focus: TaskPane}
 	m.SetTasks([]*task.Record{waiting()})
+	m.LogOpen = true
 	got := screen(m)
 	for _, want := range []string{"a/b#10", "NEEDS_DECISION", "PR #912", "CI ✗", "review ✗ 3", "Retry 4xx?"} {
 		if !strings.Contains(got, want) {
@@ -315,6 +340,7 @@ func TestTaskPaneRowsFitThePaneTheyAreDrawnIn(t *testing.T) {
 
 func TestFrameScrollsTheLog(t *testing.T) {
 	m := model()
+	m.LogOpen = true
 	for i := range 100 {
 		m.Log = append(m.Log, "line "+string(rune('a'+i%26))+strings.Repeat("", i))
 	}

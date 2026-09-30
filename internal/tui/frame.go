@@ -27,7 +27,7 @@ const (
 // columns. It is pure, so the layout is tested without a terminal. Text is truncated
 // before any escape sequence is added, so the width arithmetic never counts escapes.
 func Frame(m Model) []string {
-	lay, ok := layoutFor(m.Width, m.Height)
+	lay, ok := layoutFor(m.Width, m.Height, m.LogOpen)
 	if !ok {
 		return tooSmall(m.Width, m.Height)
 	}
@@ -39,11 +39,12 @@ func Frame(m Model) []string {
 	// The pane spends its first row on its heading, so a task has the rest to fill.
 	rightLines := paneLines(taskPane(m, right, lay.topHeight-1), right, lay.topHeight, m.Focus == TaskPane, m.TaskCursor)
 	for i := range lay.topHeight {
-		lines = append(lines, left[i]+dimmed("│")+rightLines[i])
+		lines = append(lines, left[i]+colored("│", cyan)+rightLines[i])
 	}
-
-	lines = append(lines, dimmed(strings.Repeat("─", m.Width)))
-	lines = append(lines, logPane(m, lay.logHeight)...)
+	if m.LogOpen {
+		lines = append(lines, colored(strings.Repeat("─", m.Width), cyan))
+		lines = append(lines, logPane(m, lay.logHeight)...)
+	}
 	message := pad(truncate(m.Message, m.Width), m.Width)
 	if strings.HasPrefix(m.Message, "!") {
 		message = colored(message, red)
@@ -128,6 +129,9 @@ func taskPane(m Model, width, body int) pane {
 			lines = []string{identity, "  " + agent + " · " + state}
 		}
 		lines = append(lines, "  "+rows[1]) // the title
+		if body > taskRowLines && rec.Delegation.Branch != "" {
+			lines = append(lines, "  branch "+rec.Delegation.Branch)
+		}
 		q := pendingQuestion(rec)
 		if len(rows) > 2 {
 			left := body - len(lines)
@@ -288,9 +292,6 @@ func logPane(m Model, height int) []string {
 	if m.LogOffset > 0 {
 		title += fmt.Sprintf(" · scrolled back %d (G to follow)", m.LogOffset)
 	}
-	if m.Focus == LogPane {
-		title = focusMark + title
-	}
 	out := []string{colored(pad(truncate(title, m.Width), m.Width), cyan)}
 	visible := height - 1
 	if len(body) == 0 {
@@ -321,7 +322,7 @@ func footer(m Model) string {
 		}
 		return fmt.Sprintf("Cancel %s#%d and stop its agent? [y/n]", m.cancelTarget.Repo, m.cancelTarget.Number)
 	}
-	if m.Focus == LogPane {
+	if m.LogOpen && m.Focus == TaskPane {
 		if textWidth(hintsLogLong) > m.Width {
 			return hintsLogShort
 		}
@@ -334,10 +335,10 @@ func footer(m Model) string {
 }
 
 const (
-	hintsLong     = "j/k move · tab pane · enter delegate · c cancel · r refresh · q quit"
-	hintsShort    = "j/k move · tab pane · enter · c cancel · q quit"
-	hintsLogLong  = "LOG j/k line · u/d page · ctrl-u/d half page · g/G ends · tab pane · c cancel · q quit"
-	hintsLogShort = "LOG j/k line · u/d page · g/G ends · tab · q quit"
+	hintsLong     = "j/k move · h/l pane · enter select · c cancel · r refresh · q quit"
+	hintsShort    = "j/k move · h/l pane · enter · c cancel · q quit"
+	hintsLogLong  = "j/k task · u/d log page · ctrl-u/d half page · g/G ends · esc close · h/l pane"
+	hintsLogShort = "j/k task · u/d log · g/G ends · esc close · h/l pane"
 )
 
 // truncate cuts s to at most width columns, ending in an ellipsis when it cut. A wide
