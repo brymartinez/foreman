@@ -20,6 +20,8 @@ const (
 	KeyBackspace
 	KeyEscape
 	KeyCtrlC
+	KeyCtrlD
+	KeyCtrlU
 )
 
 // Key is one keystroke. Rune is set only for KeyRune.
@@ -51,6 +53,10 @@ func DecodeKey(p []byte, final bool) (Key, int, bool) {
 		return Key{Kind: KeyBackspace}, 1, true
 	case 0x03:
 		return Key{Kind: KeyCtrlC}, 1, true
+	case 0x04:
+		return Key{Kind: KeyCtrlD}, 1, true
+	case 0x15:
+		return Key{Kind: KeyCtrlU}, 1, true
 	}
 	if p[0] < 0x20 {
 		return Key{Kind: KeyUnknown}, 1, true

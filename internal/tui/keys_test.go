@@ -18,6 +18,8 @@ func TestDecodeKey(t *testing.T) {
 		"\x7f":    {Kind: KeyBackspace},
 		"\b":      {Kind: KeyBackspace},
 		"\x03":    {Kind: KeyCtrlC},
+		"\x04":    {Kind: KeyCtrlD},
+		"\x15":    {Kind: KeyCtrlU},
 		"q":       {Kind: KeyRune, Rune: 'q'},
 		"1":       {Kind: KeyRune, Rune: '1'},
 	} {

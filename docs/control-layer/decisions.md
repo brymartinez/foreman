@@ -1519,3 +1519,15 @@ Entry format:
   selection stays on its task through refreshes. A restart of a failed task becomes the
   latest start. Older task files with no start time retain their attention order among
   themselves until they are started again.
+
+## D105. The log is a focusable pane with keyboard scrolling
+
+- Date: 2026-09-30. PR #2 follow-up. Requested by the user.
+- **Context.** Tab cycled only between inbox and tasks. Vim movement keys moved list
+  cursors, while the log required Page Up and Page Down, which the user does not have.
+- **Decision.** Make the log the third Tab stop. With log focus, j/k and arrows move by
+  line, u/d move by page, ctrl-u/d move by half page, and g/G jump to the oldest
+  available line or follow the tail. Keep Page Up, Page Down, and End as optional keys.
+  Show the log keys in the footer while that pane has focus.
+- **Consequence.** The log can be read with standard letter keys, and list navigation
+  works as before when a list pane has focus.

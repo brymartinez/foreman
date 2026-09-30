@@ -99,24 +99,28 @@ foreman · 2 delegated · 3 in the inbox · refreshed 10:01:22
 ────────────────────────────────────────────────────────────────────────────────
 LOG · midsoln/foreman#2 · ~/.local/share/foreman/logs/2.log
 2026-09-29T10:01:04Z claude Bash go test ./internal/tui
-↑↓ move · tab pane · enter delegate · c cancel · r refresh · pgup/pgdn log · q quit
+j/k move · tab pane · enter delegate · c cancel · r refresh · q quit
 ```
 
 The left pane holds the issues you can delegate, the right pane holds delegated work,
 and the bottom pane tails the most recently delegated issue's runner log. Move the
-right-hand cursor to follow another task. Press `c` from either pane to cancel the task
+right-hand cursor to follow another task. Press `Tab` twice to focus the log, then use
+`j`/`k` to scroll it. Press `c` from any pane to cancel the task
 shown in the log, after confirmation. Colors mark running, waiting, and failed tasks;
 dividers separate the panes.
 
 | Key | What it does |
 |---|---|
-| `tab` | move focus between the two list panes |
-| `↑` `↓`, `k` `j` | move the cursor in the focused pane |
+| `tab` | cycle through inbox, delegated work, and log |
+| `↑` `↓`, `k` `j` | move the focused list cursor, or scroll the log one line |
 | `enter` on an issue | delegate it: pick `1` for Claude or `2` for Codex, then type an optional context file |
 | `enter` on a task | show its log path, or how to answer a waiting question |
 | `c` | cancel the running task shown in the log, after a `y`/`n` confirm |
 | `r` | refresh from GitHub now |
-| `pgup` `pgdn` | scroll the log; `end` follows the tail again |
+| `u` `d` in the log | scroll up or down one page |
+| `ctrl+u` `ctrl+d` in the log | scroll up or down half a page |
+| `g` `G` in the log | jump to the oldest available line or follow the tail |
+| `pgup` `pgdn`, `end` | optional log scroll keys for keyboards that have them |
 | `esc` | abandon the delegate or cancel prompt |
 | `q`, `ctrl+c` | quit |
 

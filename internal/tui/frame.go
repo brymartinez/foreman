@@ -286,7 +286,10 @@ func logPane(m Model, height int) []string {
 		}
 	}
 	if m.LogOffset > 0 {
-		title += fmt.Sprintf(" · scrolled back %d (End to follow)", m.LogOffset)
+		title += fmt.Sprintf(" · scrolled back %d (G to follow)", m.LogOffset)
+	}
+	if m.Focus == LogPane {
+		title = focusMark + title
 	}
 	out := []string{colored(pad(truncate(title, m.Width), m.Width), cyan)}
 	visible := height - 1
@@ -318,6 +321,12 @@ func footer(m Model) string {
 		}
 		return fmt.Sprintf("Cancel %s#%d and stop its agent? [y/n]", m.cancelTarget.Repo, m.cancelTarget.Number)
 	}
+	if m.Focus == LogPane {
+		if textWidth(hintsLogLong) > m.Width {
+			return hintsLogShort
+		}
+		return hintsLogLong
+	}
 	if textWidth(hintsLong) > m.Width {
 		return hintsShort
 	}
@@ -325,8 +334,10 @@ func footer(m Model) string {
 }
 
 const (
-	hintsLong  = "↑↓ move · tab pane · enter delegate · c cancel · r refresh · pgup/pgdn log · q quit"
-	hintsShort = "↑↓ tab enter · c cancel · r refresh · q quit"
+	hintsLong     = "j/k move · tab pane · enter delegate · c cancel · r refresh · q quit"
+	hintsShort    = "j/k move · tab pane · enter · c cancel · q quit"
+	hintsLogLong  = "LOG j/k line · u/d page · ctrl-u/d half page · g/G ends · tab pane · c cancel · q quit"
+	hintsLogShort = "LOG j/k line · u/d page · g/G ends · tab · q quit"
 )
 
 // truncate cuts s to at most width columns, ending in an ellipsis when it cut. A wide

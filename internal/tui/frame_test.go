@@ -76,6 +76,17 @@ func TestFrameMarksTheFocusedPane(t *testing.T) {
 	if !strings.Contains(taskFocused[1], focusMark) || strings.Count(taskFocused[1], focusMark) != 1 {
 		t.Errorf("want exactly one focused heading: %q", taskFocused[1])
 	}
+	m.Focus = LogPane
+	logFocused := Frame(m)
+	lay, _ := layoutFor(m.Width, m.Height)
+	logHeading := logFocused[lay.topHeight+2]
+	if !strings.Contains(logHeading, focusMark) || strings.Count(strings.Join(logFocused, ""), focusMark) != 1 {
+		t.Errorf("want only the log heading focused: %q", logHeading)
+	}
+	m.Width = minWidth
+	if got := plain(Frame(m))[m.Height-1]; !strings.Contains(got, "j/k line") || !strings.Contains(got, "u/d page") {
+		t.Errorf("the narrow log footer hides its scroll keys: %q", got)
+	}
 }
 
 func TestFrameEmptyPanes(t *testing.T) {

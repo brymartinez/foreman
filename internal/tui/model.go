@@ -9,13 +9,13 @@ import (
 	"github.com/brymartinez/foreman/internal/task"
 )
 
-// Pane is one of the two selectable lists. The log pane follows the task pane's
-// selection instead of taking focus of its own.
+// Pane is the dashboard pane that receives movement keys.
 type Pane int
 
 const (
 	InboxPane Pane = iota
 	TaskPane
+	LogPane
 )
 
 // Mode is what the footer is collecting. Browsing is the normal view.
@@ -186,11 +186,23 @@ func (m *Model) browse(k Key) Action {
 	case k.Kind == KeyRune && k.Rune == 'r':
 		return Action{Kind: ActionRefresh}
 	case k.Kind == KeyTab:
-		m.Focus = 1 - m.Focus
+		m.Focus = (m.Focus + 1) % 3
 	case k.Kind == KeyUp || (k.Kind == KeyRune && k.Rune == 'k'):
 		m.move(-1)
 	case k.Kind == KeyDown || (k.Kind == KeyRune && k.Rune == 'j'):
 		m.move(1)
+	case m.Focus == LogPane && (k.Kind == KeyRune && k.Rune == 'u'):
+		m.scrollLog(m.logPage())
+	case m.Focus == LogPane && (k.Kind == KeyRune && k.Rune == 'd'):
+		m.scrollLog(-m.logPage())
+	case m.Focus == LogPane && k.Kind == KeyCtrlU:
+		m.scrollLog(max(m.logPage()/2, 1))
+	case m.Focus == LogPane && k.Kind == KeyCtrlD:
+		m.scrollLog(-max(m.logPage()/2, 1))
+	case m.Focus == LogPane && k.Kind == KeyRune && k.Rune == 'g':
+		m.scrollLog(len(m.Log))
+	case m.Focus == LogPane && k.Kind == KeyRune && k.Rune == 'G':
+		m.LogOffset = 0
 	case k.Kind == KeyPageUp:
 		m.scrollLog(m.logPage())
 	case k.Kind == KeyPageDown:
@@ -206,6 +218,10 @@ func (m *Model) browse(k Key) Action {
 }
 
 func (m *Model) move(by int) {
+	if m.Focus == LogPane {
+		m.scrollLog(-by)
+		return
+	}
 	if m.Focus == InboxPane {
 		m.InboxCursor = clamp(m.InboxCursor+by, len(m.Inbox))
 		return

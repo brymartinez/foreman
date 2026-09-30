@@ -433,10 +433,11 @@ request. Each fix is its own commit with a decision.
   `Frame` that returns exactly the lines on screen, and one `Run` that owns raw mode,
   the tickers, SIGWINCH, and the redraw. `golang.org/x/term` is the only new
   dependency (D94).
-- Tab moves focus, arrows and j/k move the cursor, enter delegates an issue after
-  asking for the agent and an optional context file, c cancels a running task after a
-  y/n confirm, r refreshes, PgUp/PgDn scroll the log, End follows it again, and q or
-  ctrl+c quits. Enter on a NEEDS_DECISION task names `foreman respond`.
+- Tab cycles through the inbox, task list, and log. Arrows and j/k move the focused
+  list cursor or scroll the log by line. Enter delegates an issue after asking for the
+  agent and an optional context file; c cancels a running task after a y/n confirm;
+  r refreshes; q or ctrl+c quits. Enter on a NEEDS_DECISION task names
+  `foreman respond`. Log paging keys are described in D105.
 - Task files are re-read every second and GitHub every 60 seconds, only while the
   dashboard is open (D95). `App.Tasks` is the new gate-free read; `App.Status` keeps
   the gate and both share `activeTasks`.
@@ -472,6 +473,10 @@ request. Each fix is its own commit with a decision.
   records the delegation time, the default cursor follows the newest start until a task
   is selected manually, and `c` targets the task shown in the log from either pane.
   The frame colors status rows and messages and draws a vertical divider.
+- The follow-up on log accessibility is complete (D105). Tab reaches the log as a
+  third pane. In that pane, j/k and arrows scroll by line, u/d by page, ctrl-u/d by
+  half page, and g/G jump to the oldest available line or the live tail. The footer
+  names the keys for the focused pane.
 
 ## Known limitations
 
@@ -577,7 +582,8 @@ what it replaced. Current summary:
   layout shows PR status. D100. A scrolled-back log holds its lines. D101. The frame
   counts terminal columns. D102 (amends D99). The wrapped PR row is bounded. D103
   (amends D99, D102). The PR row drops detail instead of being truncated. D104. The
-  dashboard follows the newest delegation and colors and divides its panes.
+  dashboard follows the newest delegation and colors and divides its panes. D105. The
+  log is focusable and scrolls with vim keys.
 
 ## Next stage
 

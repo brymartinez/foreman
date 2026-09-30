@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -101,8 +102,61 @@ func TestTabMovesFocus(t *testing.T) {
 		t.Errorf("tab left focus at %v", m.Focus)
 	}
 	press(&m, Key{Kind: KeyTab})
+	if m.Focus != LogPane {
+		t.Errorf("tab did not reach the log: %v", m.Focus)
+	}
+	press(&m, Key{Kind: KeyTab})
 	if m.Focus != InboxPane {
-		t.Errorf("tab did not cycle back: %v", m.Focus)
+		t.Errorf("tab did not cycle back to the inbox: %v", m.Focus)
+	}
+}
+
+func TestVimKeysScrollTheFocusedLog(t *testing.T) {
+	m := model()
+	m.Log = make([]string, 200)
+	for i := range m.Log {
+		m.Log[i] = strconv.Itoa(i)
+	}
+	press(&m, Key{Kind: KeyTab}, Key{Kind: KeyTab})
+	if m.Focus != LogPane {
+		t.Fatalf("focus = %v; want log", m.Focus)
+	}
+	press(&m, rune_('k'))
+	if m.LogOffset != 1 {
+		t.Fatalf("k moved the log by %d lines; want 1", m.LogOffset)
+	}
+	if shown := visibleLog(&m); shown[len(shown)-1] != "198" {
+		t.Fatalf("k left the last visible line at %q; want 198", shown[len(shown)-1])
+	}
+	press(&m, rune_('j'))
+	if m.LogOffset != 0 {
+		t.Fatalf("j did not return to the tail: %d", m.LogOffset)
+	}
+	if shown := visibleLog(&m); shown[len(shown)-1] != "199" {
+		t.Fatalf("j left the last visible line at %q; want 199", shown[len(shown)-1])
+	}
+	press(&m, rune_('u'))
+	if m.LogOffset != m.logPage() {
+		t.Fatalf("u scrolled %d lines; want one page", m.LogOffset)
+	}
+	press(&m, Key{Kind: KeyCtrlU})
+	if m.LogOffset != m.logPage()+max(m.logPage()/2, 1) {
+		t.Fatalf("ctrl-u did not scroll half a page: %d", m.LogOffset)
+	}
+	press(&m, Key{Kind: KeyCtrlD}, rune_('d'))
+	if m.LogOffset != 0 {
+		t.Fatalf("downward page keys did not reach the tail: %d", m.LogOffset)
+	}
+	press(&m, rune_('g'))
+	if m.LogOffset != len(m.Log)-m.logPage() {
+		t.Fatalf("g did not reach the oldest log line: %d", m.LogOffset)
+	}
+	press(&m, rune_('G'))
+	if m.LogOffset != 0 {
+		t.Fatalf("G did not follow the tail: %d", m.LogOffset)
+	}
+	if m.TaskCursor != 0 || m.InboxCursor != 0 {
+		t.Fatalf("log navigation moved a list cursor: task=%d inbox=%d", m.TaskCursor, m.InboxCursor)
 	}
 }
 
