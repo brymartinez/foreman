@@ -85,6 +85,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		prev := cur.Delegation
 		cur.Delegation = &task.Delegation{
 			Implementer: task.Session{Agent: req.Agent},
+			StartedAt:   now,
 			Reviewer:    req.Agent.Reviewer(),
 			Branch:      wt.Branch,
 			BaseRef:     wt.BaseRef,

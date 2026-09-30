@@ -148,6 +148,7 @@ type frontmatter struct {
 	URL                 string             `yaml:"url"`
 	State               task.State         `yaml:"state"`
 	ImplementationAgent task.Agent         `yaml:"implementation_agent,omitempty"`
+	StartedAt           *time.Time         `yaml:"started_at,omitempty"`
 	SessionID           string             `yaml:"session_id,omitempty"`
 	ReviewAgent         task.Agent         `yaml:"review_agent,omitempty"`
 	Branch              string             `yaml:"branch,omitempty"`
@@ -299,6 +300,9 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 			PRURL:       fm.PRURL,
 			PRHead:      fm.PRHead,
 		}
+		if fm.StartedAt != nil {
+			rec.Delegation.StartedAt = *fm.StartedAt
+		}
 		if fm.WorktreeRemovedAt != nil {
 			rec.Delegation.WorktreeRemovedAt = *fm.WorktreeRemovedAt
 		}
@@ -364,6 +368,10 @@ func fromRecord(rec *task.Record) frontmatter {
 	}
 	if d := rec.Delegation; d != nil {
 		fm.ImplementationAgent = d.Implementer.Agent
+		if !d.StartedAt.IsZero() {
+			t := d.StartedAt
+			fm.StartedAt = &t
+		}
 		fm.SessionID = d.Implementer.ID
 		fm.ReviewAgent = d.Reviewer
 		fm.Branch, fm.BaseRef, fm.Worktree, fm.ContextFile = d.Branch, d.BaseRef, d.Worktree, d.ContextFile

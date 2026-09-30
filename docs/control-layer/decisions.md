@@ -1312,3 +1312,222 @@ Entry format:
     files.
 - **Consequence.** An installed stage file doesn't get the moved rules until the
   developer copies them in, because `make config` never overwrites one.
+
+## D93. A bare `foreman` opens the dashboard
+
+- Date: 2026-09-29. Issue midsoln/foreman#1. Decided by the agent; the user asked for
+  "a mode where we issue `foreman`" and left the presentation to the agent's judgment.
+- **Context.** Daily use meant `foreman inbox`, then `foreman status`, then
+  `foreman logs <issue> --follow`. Each is one shot, so the developer retyped them to
+  see whether anything moved.
+- **Options.** A. A new `foreman dashboard` verb, leaving bare `foreman` as usage.
+  B. Bare `foreman` opens the dashboard. C. Make `foreman inbox` interactive-plus.
+- **Decision.** B, with `foreman tui` as the explicit form for scripts and docs.
+  `foreman help`, `-h`, and `--help` still print usage. When stdin or stdout is not a
+  terminal, bare `foreman` and `foreman tui` print usage and exit 0, exactly as bare
+  `foreman` always has, so a pipe or a script never blocks on a UI it cannot draw.
+- **Consequence.** The single most common invocation is now the live view. No existing
+  command changed. `foreman inbox` stays the scriptable, one-shot picker.
+
+## D94. The dashboard is a pure model and frame over golang.org/x/term
+
+- Date: 2026-09-29. Issue midsoln/foreman#1. Decided by the agent.
+- **Context.** Raw terminal mode and the terminal's size both need a `termios` and a
+  `TIOCGWINSZ` ioctl. The standard library exposes neither, so the dashboard cannot be
+  built under the standard-library-first rule without a decision.
+- **Options.** A. Bubble Tea and Lip Gloss. B. `golang.org/x/term` plus a hand-written
+  model, frame, and event loop. C. Reprint `inbox` and `status` on a timer with no raw
+  mode.
+- **Decision.** B. `golang.org/x/term` is the Go team's own package and brings only
+  `golang.org/x/sys`, against Bubble Tea's ten or so modules in a project that had one
+  dependency. C cannot place panes side by side, read a keystroke without Enter, or
+  select anything.
+- **Consequence.** `internal/tui` splits three ways, matching how `render` and `app`
+  are already split. `Model.Key` is a pure state transition returning an `Action`, and
+  `Frame` is a pure function from the model to exactly the lines on screen. Only `Run`
+  touches the terminal, so almost all of the UI is unit tested. Scrolling, layout, and
+  key decoding are written by hand, about 600 lines.
+- **Reuse.** The panes show no text of their own invention: `render.TaskRows` is shared
+  with `foreman status`, `app.Delegable` with the `foreman inbox` picker, and
+  `logs.Tail` cleans lines the way `foreman logs` does.
+
+## D95. The dashboard polls in the foreground, at two rates
+
+- Date: 2026-09-29. Issue midsoln/foreman#1. Decided by the agent. Amends D5.
+- **Context.** D5 rules out a daemon and background polling: the readiness gate runs
+  only when a command runs. A view that updates on its own is polling by definition.
+- **Decision.** The dashboard refreshes only while it is open, and stops when the
+  developer quits. It starts no background process, which keeps D5's substance: nothing
+  runs between commands except a task's own runner. Watching the dashboard is the same
+  as running `foreman inbox` by hand, on a timer.
+  - Local tick, every second: `App.Tasks` re-reads the task files, reaps dead runners,
+    and the selected task's log is re-tailed. No GitHub call, so this is cheap enough
+    to make the pane move on its own.
+  - GitHub tick, every 60 seconds, and on `r`: `App.Inbox` runs the searches, the
+    readiness gate, and the configured DONE cleanup, one at a time. It runs in a
+    goroutine, so a slow `gh` never blocks a keystroke.
+- **Consequence.** `App.Status` keeps the gate; `App.Tasks` is the new gate-free read,
+  and both share `activeTasks`. Leaving the dashboard open runs the gate and the
+  worktree cleanup once a minute, which is what makes a merged PR turn up as DONE
+  without the developer asking. The rates are constants in `cmd/foreman`, not config,
+  until someone needs to change them.
+
+## D96. The dashboard's review corrections
+
+- Date: 2026-09-29. Issue midsoln/foreman#1, PR #2 review round 1 by Codex. The
+  reviewer found seven defects against the PRD; all seven were accepted.
+- **Decisions.**
+  - The terminal check moved ahead of `config.Load` and `RequireGlobal`
+    (`cmd/foreman/main.go`). A broken config or a missing stage file used to fail a
+    piped `foreman`, which D93 promised would print usage and exit 0.
+  - A lone ESC, and a rune split across reads, now wait `escapeWait` (40ms) for the
+    rest before they are decoded. A terminal read ends anywhere, so `DecodeKey` gained
+    a `final` argument: without it a split arrow key arrived as an escape plus two
+    letters. 40ms is longer than a terminal takes to write three bytes and shorter
+    than a person takes to press a second key.
+  - Quitting waits for a `Start` or `Cancel` in flight. `App.Start` records WORKING
+    before it spawns the runner, and `listReaped` does not reap a task with no pid, so
+    exiting in that window left work that nothing would ever clear. A refresh is still
+    abandoned, because it writes nothing.
+  - The dashboard makes a typed context file absolute before `App.Start`, as `inbox`
+    and `start` already do. The runner a later `foreman respond` spawns reads the
+    stored path from its own working directory.
+  - Moving the task cursor re-tails the log at once instead of at the next tick, so
+    the pane never shows one task's lines under another's heading.
+  - `render.TaskHead` exposes the three fields `TaskRows` pads into its first row. At
+    60 columns the padded row does not fit the task pane and truncation dropped the
+    state, so the pane wraps the agent and state onto their own line. `status` keeps
+    its padding, and the text still comes from one place.
+  - The NEEDS_DECISION message leads with `foreman respond <owner>/<repo>#<n>`, so a
+    narrow terminal truncates the explanation rather than the command.
+- **Consequence.** `DecodeKey` and `readKeys` take an extra argument each, and
+  `readKeys` now decodes on its own goroutine with a timer beside the byte reader.
+
+## D97. A cancel confirmation names one task for its whole lifetime
+
+- Date: 2026-09-29. Issue midsoln/foreman#1, PR #2 follow-up review. Decided by the
+  agent after the user's request to fix the findings.
+- **Context.** The local tick can remove a task from the list while its cancel prompt
+  is open. The cursor then moves to another task, and confirming used to cancel that
+  new selection.
+- **Decision.** Store the original task key when the prompt opens. The footer keeps
+  naming that key. Confirmation looks up its current record and cancels only if it
+  is still running with a runner; otherwise it reports that nothing was cancelled.
+- **Consequence.** A refresh cannot redirect a confirmed cancellation to another
+  task.
+
+## D98. The dashboard removes terminal controls from dynamic text
+
+- Date: 2026-09-29. Issue midsoln/foreman#1, PR #2 follow-up review. Decided by the
+  agent after the user's request to fix the findings.
+- **Context.** Issue titles, task fields, runner logs, and error messages reach the
+  frame. A control sequence in any of them could move the cursor, clear the screen,
+  or leave the alternate screen.
+- **Decision.** Replace control characters with spaces before truncating or wrapping
+  dynamic text. Keep the frame's own styling sequences outside that text.
+- **Consequence.** Dynamic content cannot issue terminal commands through the frame.
+
+## D99. The minimum dashboard size keeps the selected PR visible
+
+- Date: 2026-09-29. Issue midsoln/foreman#1, PR #2 follow-up review. Decided by the
+  agent after the user's request to fix the findings.
+- **Context.** At 60 by 12, the task pane had three body rows. A wrapped task needed
+  four even before its PR text exceeded the pane width, so the PR and badges were
+  inaccessible.
+- **Decision.** Give the top panes at least five body rows and wrap the shared PR
+  status row inside the task pane. The log keeps a heading and one body row at the
+  minimum height.
+- **Consequence.** The selected task's PR, reviewer, CI, and review status are visible
+  at the stated minimum terminal size without changing `foreman status` output.
+
+## D100. A scrolled-back log holds its lines as the log grows
+
+- Date: 2026-09-29. Issue midsoln/foreman#1, PR #2 follow-up review. Decided by the
+  agent after the user's request to fix the findings.
+- **Context.** `LogOffset` counts lines back from the tail, and the local tick re-tails
+  the file every second. A running agent's new lines moved the tail, so the view slid
+  forward under a developer who had paged back to read older output.
+- **Decision.** `readLog` moves `LogOffset` by the log's growth while the reader is
+  scrolled back, and `SetTasks` drops the offset when the cursor lands on another
+  task, as moving the cursor already did. End still follows the tail.
+- **Consequence.** Paging back holds still. Past `logLines` (500) the oldest lines are
+  dropped and the view moves with them, because `logs.Tail` reads only the tail.
+
+## D101. The frame counts terminal columns, not runes
+
+- Date: 2026-09-29. Issue midsoln/foreman#1, PR #2 follow-up review. Decided by the
+  agent after the user's request to fix the findings.
+- **Context.** `truncate`, `pad`, and `wrap` measured text in runes. A CJK or emoji
+  title takes two columns per rune, so at 60 columns the inbox pane's text ran over
+  the task pane beside it and the layout's column arithmetic was wrong.
+- **Decision.** `internal/tui/width.go` reports a rune's columns: none for a combining
+  mark, two in the East Asian wide and fullwidth blocks, one otherwise. The table is
+  written out rather than taken from a dependency, and the ambiguous-width runes
+  foreman draws itself, such as · ✓ ▸ and …, stay one column, which is what a terminal
+  outside a CJK locale draws.
+- **Consequence.** A wide rune that would straddle a pane's last column is dropped and
+  the line is padded instead, so no line exceeds its pane.
+
+## D102 (amends D99). The wrapped PR row is bounded by the pane's floor
+
+- Date: 2026-09-29. Issue midsoln/foreman#1, PR #2 follow-up review. Decided by the
+  agent after the user's request to fix the findings.
+- **Context.** D99 wraps the PR status row inside the task pane, and the pane's body
+  floor is five rows. A failing CI list wrapped that row onto two lines, which pushed a
+  NEEDS_DECISION task's question off the pane at 60 by 12. The pane scrolls by whole
+  rows, so the question could not be reached, which is the defect D99 fixed for the PR
+  row itself.
+- **Decision.** `taskRowLines` (5) names the most lines a task may draw, `layoutFor`
+  sizes the pane from it, and the PR row wraps only into what is left once the
+  question is counted. Its last line is truncated instead of wrapping further.
+- **Consequence.** A task with a waiting question shows one line of PR status and its
+  question; a task without one shows two lines of PR status, which fits the reviewer,
+  CI, and the review badge at 60 columns.
+
+## D103 (amends D99, D102). The PR row drops detail instead of being truncated
+
+- Date: 2026-09-29. Issue midsoln/foreman#1, PR #2 review round 3 by Codex. The
+  reviewer found one defect; it was accepted.
+- **Context.** At 60 by 12 the task pane is 32 columns wide and a task with a waiting
+  question has one line left for its PR, because the identity, the agent and state, the
+  title, and the question take the other four. D102 left the rest of that row to
+  truncation, so `PR #912 · reviewer: Codex · CI ✗ test, lint · review round 2: 3
+  findings` showed the PR number and cut both badges, which R3 asks for. No key
+  revealed them.
+- **Decision.** `render.TaskPR` returns the row's facts, each worded as `status` prints
+  it, beside a short form of the two that grow without a bound: `CI ✗` without the
+  failing checks' names and `review ✗ 3` without the round. The pane takes the first
+  that fits: the whole row, then the row without the reviewer, then the states alone.
+  `Frame` passes the pane's body height to `taskPane`, so the row grows to `prRowLines`
+  (3) where there is room and `status` keeps printing the whole row unchanged.
+- **Consequence.** At 60 by 12 a waiting task shows `PR #912 · CI ✗ · review ✗ 3`, and
+  at 60 by 24 the same task shows the row `status` prints. The reviewer and the check
+  names are what a narrow pane loses, not whether CI or the review passed.
+
+## D104. The log follows the latest delegation by default
+
+- Date: 2026-09-29. PR #2 author comment. Requested by the user.
+- **Context.** The task list is ordered by attention, so its first row can be older
+  than the most recently delegated issue. The log followed that first row at startup.
+  Cancellation also required focus on the task list.
+- **Decision.** Store the time of each `Start` in the task file. Until the user moves
+  the task cursor, select the newest start on each local refresh. A new delegation
+  resumes this default. `c` confirms cancellation of the task shown in the log from
+  either list pane. Color the status rows and messages, and draw a vertical divider
+  between the lists. Existing task files without a start time remain readable.
+- **Consequence.** The newest delegated issue's log appears by default, while a manual
+  selection stays on its task through refreshes. A restart of a failed task becomes the
+  latest start. Older task files with no start time retain their attention order among
+  themselves until they are started again.
+
+## D105. The log is a focusable pane with keyboard scrolling
+
+- Date: 2026-09-30. PR #2 follow-up. Requested by the user.
+- **Context.** Tab cycled only between inbox and tasks. Vim movement keys moved list
+  cursors, while the log required Page Up and Page Down, which the user does not have.
+- **Decision.** Make the log the third Tab stop. With log focus, j/k and arrows move by
+  line, u/d move by page, ctrl-u/d move by half page, and g/G jump to the oldest
+  available line or follow the tail. Keep Page Up, Page Down, and End as optional keys.
+  Show the log keys in the footer while that pane has focus.
+- **Consequence.** The log can be read with standard letter keys, and list navigation
+  works as before when a list pane has focus.

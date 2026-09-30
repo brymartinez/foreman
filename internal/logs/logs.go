@@ -83,6 +83,50 @@ func Show(ctx context.Context, w io.Writer, r io.Reader, raw, follow bool, poll 
 	}
 }
 
+// tailBytes bounds how much of a log Tail reads. A task that runs for hours writes
+// far more than a pane can show, and Tail is called once a second.
+const tailBytes = 128 << 10
+
+// Tail returns the last n display lines of the log at r, cleaned unless raw. It reads
+// only the final tailBytes, and drops the partial line that window starts in.
+func Tail(r io.ReadSeeker, n int, raw bool) ([]string, error) {
+	size, err := r.Seek(0, io.SeekEnd)
+	if err != nil {
+		return nil, err
+	}
+	start := max(size-tailBytes, 0)
+	if _, err := r.Seek(start, io.SeekStart); err != nil {
+		return nil, err
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	text := string(data)
+	if start > 0 {
+		if i := strings.IndexByte(text, '\n'); i >= 0 {
+			text = text[i+1:]
+		} else {
+			text = ""
+		}
+	}
+	var lines []string
+	for _, line := range strings.Split(text, "\n") {
+		if !raw {
+			line = cleanLine(line)
+		}
+		for _, out := range strings.Split(line, "\n") {
+			if out != "" {
+				lines = append(lines, out)
+			}
+		}
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return lines, nil
+}
+
 func printLine(w io.Writer, line string, raw bool) {
 	if !raw {
 		line = cleanLine(line)

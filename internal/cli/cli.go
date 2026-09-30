@@ -25,6 +25,8 @@ const (
 	Config  Name = "config"
 	Logs    Name = "logs"
 	Version Name = "version"
+	// TUI is the dashboard, and the command a bare `foreman` runs.
+	TUI Name = "tui"
 	// Run is the hidden verb the detached runner process executes (see internal/runner).
 	Run Name = "__run"
 )
@@ -49,6 +51,7 @@ type Command struct {
 const Usage = `foreman: delegate GitHub issues to Claude Code or Codex
 
 Usage:
+  foreman                                         Dashboard: inbox, delegated work, and logs
   foreman inbox [--non-interactive]               Pick work to delegate (or print a report)
   foreman status                                  Delegated work and its state
   foreman show <issue>                            Durable state for one task
@@ -73,12 +76,17 @@ func usagef(format string, args ...any) error { return UsageError{fmt.Sprintf(fo
 
 func Parse(argv []string) (Command, error) {
 	if len(argv) == 0 {
-		return Command{Name: Help}, nil
+		return Command{Name: TUI}, nil
 	}
 	name, rest := argv[0], argv[1:]
 	switch name {
 	case "help", "-h", "--help":
 		return Command{Name: Help}, nil
+	case string(TUI):
+		if len(rest) > 0 {
+			return Command{}, usagef("%s takes no arguments", name)
+		}
+		return Command{Name: TUI}, nil
 	case "version", "--version":
 		return Command{Name: Version}, nil
 	case "clean":

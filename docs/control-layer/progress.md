@@ -2,7 +2,7 @@
 
 ## Current stage
 
-Stage 13 (planning documents on the issue) is complete.
+Stage 14 (the interactive dashboard) is complete.
 
 ## Completed
 
@@ -424,10 +424,65 @@ request. Each fix is its own commit with a decision.
   end-to-end scenario with a planning stub; and `scripts/probe-agents.sh`, where
   Claude and Codex both return a planned outcome under the new schema.
 
+### Stage 14 (complete): the interactive dashboard
+
+- A bare `foreman` opens a three-pane dashboard: delegable inbox issues on the left,
+  delegated work on the right, and the selected task's runner log along the bottom.
+  `foreman tui` is the explicit form, and a pipe still gets the usage text (D93).
+- `internal/tui` splits into a pure `Model` whose `Key` returns an `Action`, a pure
+  `Frame` that returns exactly the lines on screen, and one `Run` that owns raw mode,
+  the tickers, SIGWINCH, and the redraw. `golang.org/x/term` is the only new
+  dependency (D94).
+- Tab cycles through the inbox, task list, and log. Arrows and j/k move the focused
+  list cursor or scroll the log by line. Enter delegates an issue after asking for the
+  agent and an optional context file; c cancels a running task after a y/n confirm;
+  r refreshes; q or ctrl+c quits. Enter on a NEEDS_DECISION task names
+  `foreman respond`. Log paging keys are described in D105.
+- Task files are re-read every second and GitHub every 60 seconds, only while the
+  dashboard is open (D95). `App.Tasks` is the new gate-free read; `App.Status` keeps
+  the gate and both share `activeTasks`.
+- The panes reuse `render.TaskRows` (shared with `status`), `app.Delegable` (shared
+  with the inbox picker), and `logs.Tail` (the cleaning `foreman logs` does).
+- Validated by unit tests for key decoding, every key binding and both prompts,
+  selection surviving a reordering refresh, the frame at three sizes, truncation, the
+  too-small message, each mode's footer, the log tail, the gate-free task list, and
+  the shared status rows; by an e2e scenario for the pipe behavior; and by hand on a
+  PTY, where the dashboard drew, quit on q, and restored the terminal.
+- Review round 1 found seven defects, all fixed (D96): the terminal check now runs
+  before the config is read, a split escape sequence waits for its rest, quitting waits
+  for a Start or Cancel in flight, a typed context file is made absolute, the log
+  follows the cursor at once, the task pane wraps its head at 60 columns, and the
+  NEEDS_DECISION message leads with the command.
+- A follow-up review found three more dashboard defects, fixed in PR #2 (D97 to D99):
+  cancel confirmation keeps its original task across refreshes, dynamic text cannot
+  issue terminal controls, and the selected PR with its badges fits the 60 by 12
+  minimum layout. Focused regressions cover each case. Validated with `go vet ./...`,
+  `go test ./...`, race tests for `internal/tui`, `internal/app`, and `internal/render`,
+  a binary build, and the full `scripts/e2e.sh` run.
+- Review round 2 closed the two remaining findings and a gap the round's own PR wrap
+  opened (D100 to D102): a log paged back with PgUp holds its lines as the agent
+  writes, `truncate`, `pad`, and `wrap` count terminal columns so a CJK title stays
+  inside its pane, and the wrapped PR row is bounded by `taskRowLines` so a waiting
+  question still fits the minimum layout.
+- Review round 3 found one defect, fixed (D103): the one PR line a waiting task has at
+  60 by 12 was truncated past the PR number, hiding the CI and review badges R3 asks
+  for. The row now drops the reviewer and then the failing checks' names, and it grows
+  back to the row `status` prints where the pane is tall enough.
+- The PR author's follow-up asked for color and dividers, and for the log to follow the
+  most recently delegated issue with cancellation from that view (D104). `Start` now
+  records the delegation time, the default cursor follows the newest start until a task
+  is selected manually, and `c` targets the task shown in the log from either pane.
+  The frame colors status rows and messages and draws a vertical divider.
+- The follow-up on log accessibility is complete (D105). Tab reaches the log as a
+  third pane. In that pane, j/k and arrows scroll by line, u/d by page, ctrl-u/d by
+  half page, and g/G jump to the oldest available line or the live tail. The footer
+  names the keys for the focused pane.
+
 ## Known limitations
 
-- The gate runs only when `inbox` or `status` runs, because the design rules out
-  daemons and polling (D5). Notifications come from the runner and from those
+- The gate runs only when `inbox` or `status` runs, or while the dashboard is open
+  (D95), because the design rules out daemons (D5). Nothing runs between commands
+  except a task's own runner. Notifications come from the runner and from those
   commands.
 - `gh pr checks` handling is verified against gh's documented behavior and fixtures,
   not a live PR, because the user declined the live probe (D36).
@@ -518,7 +573,18 @@ what it replaced. Current summary:
 - D89. `foreman cancel` stops a running task.
 - D90 (amends D73). The implementer plans first and the runner posts the plan on the
   issue.
+- D91. `config --edit` opens a config that fails to load. D92 (amends D73, D90). The
+  prompts' remaining workflow rules moved to the stage files.
+- D93. A bare `foreman` opens the dashboard. D94. The dashboard is a pure model and
+  frame over `golang.org/x/term`. D95 (amends D5). The dashboard polls in the
+  foreground, at two rates. D96. The dashboard's review corrections. D97. Cancellation
+  keeps its original task. D98. Dynamic text loses terminal controls. D99. The minimum
+  layout shows PR status. D100. A scrolled-back log holds its lines. D101. The frame
+  counts terminal columns. D102 (amends D99). The wrapped PR row is bounded. D103
+  (amends D99, D102). The PR row drops detail instead of being truncated. D104. The
+  dashboard follows the newest delegation and colors and divides its panes. D105. The
+  log is focusable and scrolls with vim keys.
 
 ## Next stage
 
-None. Stages 0 to 13 are complete. Further work needs a new request.
+None. Stages 0 to 14 are complete. Further work needs a new request.

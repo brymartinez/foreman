@@ -25,6 +25,7 @@ func delegated() *task.Record {
 		State: task.Working,
 		Delegation: &task.Delegation{
 			Implementer:       task.Session{Agent: task.Claude, ID: "d46213bb-3c77-45e9-9d7c-52856e03ab18"},
+			StartedAt:         time.Date(2026, 9, 24, 16, 0, 0, 0, time.UTC),
 			Reviewer:          task.Codex,
 			Branch:            "agent/825-provider-retries",
 			Worktree:          "/wt/ridezoomo-armada-backend/825-provider-retries",

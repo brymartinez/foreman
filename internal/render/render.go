@@ -191,15 +191,24 @@ func mark(ok bool) string {
 
 // ciBadge is the gate's last CI result; it is empty until the gate has looked.
 func ciBadge(c *task.CIStatus) string {
+	if c == nil || c.Green() || c.State == task.CIPending {
+		return ciState(c)
+	}
+	return ciState(c) + " " + checkNames(c.Failing)
+}
+
+// ciState is ciBadge without the failing checks' names, for a pane too narrow for
+// them. It is the same fact: whether CI passed, is running, or failed.
+func ciState(c *task.CIStatus) string {
 	switch {
 	case c == nil:
 		return ""
 	case c.Green():
-		return " · CI ✓"
+		return "CI ✓"
 	case c.State == task.CIPending:
-		return " · CI pending"
+		return "CI pending"
 	}
-	return " · CI ✗ " + checkNames(c.Failing)
+	return "CI ✗"
 }
 
 func checkNames(checks []task.CheckRun) string {
@@ -219,13 +228,76 @@ func Status(w io.Writer, recs []*task.Record) {
 		if i > 0 {
 			fmt.Fprintln(w)
 		}
-		d := r.Delegation
-		fmt.Fprintf(w, "%-25s %-7s %s\n", issueLabel(r.Key), agentName(d.Implementer.Agent), r.State)
-		fmt.Fprintf(w, "       %s · %s\n", r.Title, r.Repo)
-		if d.PR > 0 {
-			fmt.Fprintf(w, "       PR #%d · reviewer: %s%s%s\n", d.PR, agentName(d.Reviewer), ciBadge(r.CI), reviewBadge(r))
+		rows := TaskRows(r)
+		fmt.Fprintln(w, rows[0])
+		for _, row := range rows[1:] {
+			fmt.Fprintf(w, "       %s\n", row)
 		}
 	}
+}
+
+// TaskRows is one delegated task as `status` shows it: the identity with its agent
+// and state, the title with its repo, and the PR with its CI and review badges. The
+// dashboard's pane uses the same rows, so the two views cannot drift.
+func TaskRows(r *task.Record) []string {
+	d := r.Delegation
+	identity, agent, state := TaskHead(r)
+	rows := []string{
+		fmt.Sprintf("%-25s %-7s %s", identity, agent, state),
+		fmt.Sprintf("%s · %s", r.Title, r.Repo),
+	}
+	if d.PR > 0 {
+		s := TaskPR(r)
+		rows = append(rows, JoinFacts(s.PR, s.Reviewer, s.CI, s.Review))
+	}
+	return rows
+}
+
+// PRStatus is the PR row's facts, each worded as `status` prints it, beside the
+// shorter form of the two that can grow without a bound. The dashboard drops and
+// shortens them to fit its pane, so neither view invents wording of its own.
+type PRStatus struct {
+	PR       string // PR #912
+	Reviewer string // reviewer: Codex
+	// CI is empty until the gate has looked at the checks. CIState is the same
+	// result without the failing checks' names.
+	CI      string // CI ✗ test, lint
+	CIState string // CI ✗
+	// Review is empty until the first review round. ReviewState is the same result
+	// without the round number.
+	Review      string // review round 2: 3 findings
+	ReviewState string // review ✗ 3
+}
+
+// TaskPR is the facts TaskRows joins into a task's PR row.
+func TaskPR(r *task.Record) PRStatus {
+	d := r.Delegation
+	return PRStatus{
+		PR:          fmt.Sprintf("PR #%d", d.PR),
+		Reviewer:    "reviewer: " + agentName(d.Reviewer),
+		CI:          ciBadge(r.CI),
+		CIState:     ciState(r.CI),
+		Review:      reviewBadge(r),
+		ReviewState: reviewState(r),
+	}
+}
+
+// JoinFacts joins the facts that are there with the separator every foreman row uses.
+func JoinFacts(facts ...string) string {
+	kept := make([]string, 0, len(facts))
+	for _, f := range facts {
+		if f != "" {
+			kept = append(kept, f)
+		}
+	}
+	return strings.Join(kept, " · ")
+}
+
+// TaskHead is the three fields TaskRows pads into its first row. The dashboard's
+// pane takes them apart, because the padding is wider than a narrow pane and the
+// state is what a truncation would cut.
+func TaskHead(r *task.Record) (identity, agent, state string) {
+	return issueLabel(r.Key), agentName(r.Delegation.Implementer.Agent), string(r.State)
 }
 
 func reviewBadge(r *task.Record) string {
@@ -234,9 +306,23 @@ func reviewBadge(r *task.Record) string {
 	case latest == nil:
 		return ""
 	case latest.Clean:
-		return " · review ✓"
+		return "review ✓"
 	}
-	return fmt.Sprintf(" · review round %d: %d %s", latest.Round, len(latest.Findings), plural(len(latest.Findings), "finding", "findings"))
+	return fmt.Sprintf("review round %d: %d %s", latest.Round, len(latest.Findings), plural(len(latest.Findings), "finding", "findings"))
+}
+
+// reviewState is reviewBadge without the round and the word findings, for a pane too
+// narrow for them. It is the same fact: whether the last review was clean, and how
+// many findings it left.
+func reviewState(r *task.Record) string {
+	latest := r.LatestReview()
+	switch {
+	case latest == nil:
+		return ""
+	case latest.Clean:
+		return "review ✓"
+	}
+	return fmt.Sprintf("review ✗ %d", len(latest.Findings))
 }
 
 func Show(w io.Writer, r *task.Record) {
