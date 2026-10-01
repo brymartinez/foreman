@@ -1,6 +1,9 @@
 package tui
 
-import "unicode"
+import (
+	"strings"
+	"unicode"
+)
 
 // textWidth is the columns a string takes on the terminal. Frame's arithmetic counts
 // columns, not runes: a Japanese issue title is twice as wide as its rune count, and
@@ -51,4 +54,28 @@ var wideRunes = &unicode.RangeTable{
 		{Lo: 0x1f900, Hi: 0x1f9ff, Stride: 1}, // supplemental pictographs
 		{Lo: 0x20000, Hi: 0x3fffd, Stride: 1}, // CJK extension B and later
 	},
+}
+
+// wrapLine cuts s into lines of at most width columns, so the show view loses no text
+// to truncation. It cuts at any column rather than at spaces: show rows are paths and
+// URLs with none to cut at. A wide rune that would straddle the edge starts the next
+// line, and a zero-width mark stays on the line of the rune it draws on.
+func wrapLine(s string, width int) []string {
+	if width < 1 {
+		return []string{s}
+	}
+	var out []string
+	var b strings.Builder
+	n := 0
+	for _, r := range s {
+		w := runeWidth(r)
+		if n+w > width && n > 0 {
+			out = append(out, b.String())
+			b.Reset()
+			n = 0
+		}
+		b.WriteRune(r)
+		n += w
+	}
+	return append(out, b.String())
 }
