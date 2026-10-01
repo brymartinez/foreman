@@ -1629,3 +1629,17 @@ Entry format:
   minimum. Local task and log rereads stay at one second, and `r` still refreshes.
 - **Consequence.** The quiet inbox costs nothing in accuracy, and the refresh rate is
   the developer's call within a floor that keeps one refresh from overlapping the next.
+
+## D111 (amends D107 and D108). Check PR state before reaping its runner
+
+- Date: 2026-10-01. Issue midsoln/foreman#5. Review findings.
+- **Context.** A runner can exit before the next GitHub refresh. Reaping it during a
+  local task reread would record FAILED before the gate could see that its PR closed.
+  A runner that resisted a stop could also keep writing after its PR reopened.
+- **Decision.** Local rereads defer reaping tasks with a PR. `status` and `inbox`
+  identify dead runners, check PR state, then reap only tasks the gate left running.
+  Before a `PR_CLOSED` task returns to active work, the gate stops its retained runner
+  or clears its stale pid. A failed stop leaves the task closed for another refresh.
+- **Consequence.** A dead runner with a PR can remain WORKING until the next GitHub
+  refresh. A closed PR records `PR_CLOSED` without a failure notification, and a
+  reopened PR cannot release an old live runner into the active task.

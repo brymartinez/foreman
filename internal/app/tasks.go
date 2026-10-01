@@ -20,12 +20,16 @@ var attention = map[task.State]int{
 
 // Status returns delegated work that is not finished, most urgent first.
 func (a App) Status(ctx context.Context) ([]*task.Record, []error, error) {
-	recs, err := a.listReaped(ctx)
+	recs, err := a.Store.List(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
+	dead := a.deadRunners(recs)
 	_, warnings, err := a.gate(ctx, recs)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err := a.reap(ctx, recs, dead); err != nil {
 		return nil, nil, err
 	}
 	return activeTasks(recs), warnings, nil
@@ -86,21 +90,57 @@ func (a App) Find(ctx context.Context, repo task.Repo, number int) (*task.Record
 	return nil, fmt.Errorf("#%d is ambiguous; use one of: %s", number, strings.Join(refs, ", "))
 }
 
-// listReaped lists tasks and marks running tasks whose runner is gone as FAILED.
-// A runner clears its pid when it records an outcome, so a set pid on a dead
-// process means it crashed or was killed.
+// listReaped lists tasks and reaps the ones it takes no GitHub call to judge: a task
+// with a PR is left to a caller that has read it. It makes no call itself, so the
+// dashboard can call it every second (D95).
 func (a App) listReaped(ctx context.Context) ([]*task.Record, error) {
 	recs, err := a.Store.List(ctx)
 	if err != nil {
 		return nil, err
 	}
-	for i, r := range recs {
-		if !running(r.State) || r.Delegation == nil || r.Delegation.RunnerPID == 0 || a.Runners.Alive(r.Delegation.RunnerPID) {
-			continue
+	var local []deadRunner
+	for _, dr := range a.deadRunners(recs) {
+		if recs[dr.index].Delegation.PR == 0 {
+			local = append(local, dr)
 		}
-		updated, err := a.update(ctx, r.Key, func(cur *task.Record) (*task.Record, error) {
+	}
+	return recs, a.reap(ctx, recs, local)
+}
+
+// deadRunner is a task in a list whose runner is gone, and the pid that was gone. reap
+// keeps the pid so it fails only the run deadRunners judged, not whatever the task
+// holds by the time it writes.
+type deadRunner struct {
+	index int
+	pid   int
+}
+
+// deadRunners finds the tasks in recs that a runner should be driving but no longer
+// is. A runner clears its pid when it records an outcome, so a set pid on a dead
+// process means it crashed or was killed.
+//
+// It is separate from reap because the two happen either side of the readiness gate.
+// The gate reads each task's PR first, so a dead runner on a PR the developer closed
+// ends the task instead of failing it (D107), and a failure notification cannot be
+// taken back once it is sent. Reading the pids first also keeps a runner the gate
+// launches in the same pass out of the set.
+func (a App) deadRunners(recs []*task.Record) []deadRunner {
+	var dead []deadRunner
+	for i, r := range recs {
+		d := r.Delegation
+		if running(r.State) && d != nil && d.RunnerPID != 0 && !a.Runners.Alive(d.RunnerPID) {
+			dead = append(dead, deadRunner{index: i, pid: d.RunnerPID})
+		}
+	}
+	return dead
+}
+
+// reap marks the tasks deadRunners found as FAILED, unless they have moved on since.
+func (a App) reap(ctx context.Context, recs []*task.Record, dead []deadRunner) error {
+	for _, dr := range dead {
+		updated, err := a.update(ctx, recs[dr.index].Key, func(cur *task.Record) (*task.Record, error) {
 			d := cur.Delegation
-			if !running(cur.State) || d == nil || d.RunnerPID != r.Delegation.RunnerPID {
+			if !running(cur.State) || d == nil || d.RunnerPID != dr.pid {
 				return cur, nil
 			}
 			cur.State = task.Failed
@@ -109,11 +149,11 @@ func (a App) listReaped(ctx context.Context) ([]*task.Record, error) {
 			return cur, nil
 		})
 		if err != nil {
-			return nil, err
+			return err
 		}
-		recs[i] = updated
+		recs[dr.index] = updated
 	}
-	return recs, nil
+	return nil
 }
 
 // running states are the ones a runner drives: implementing, or reviewing and fixing.

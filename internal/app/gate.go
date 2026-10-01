@@ -51,6 +51,16 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			// runner's to advance, so only the PR's state was worth a look.
 			continue
 		}
+		if r.State == task.PRClosed && r.Delegation.RunnerPID != 0 {
+			// The task kept its runner because an earlier stop did not take. Finish
+			// that stop before handing the task back: PR_CLOSED is what holds the old
+			// runner off, and reopening lifts it. A stop that fails again leaves the
+			// task closed, and the next refresh comes back here.
+			if err := a.stopRun(ctx, r); err != nil {
+				warnings = append(warnings, fmt.Errorf("stop the runner of %s#%d before PR #%d reopens: %w", r.Repo, r.Number, r.Delegation.PR, err))
+				continue
+			}
+		}
 		var ci task.CIStatus
 		if pr.State == "open" {
 			if ci, err = a.GitHub.CIStatus(ctx, pr.Key); err != nil {

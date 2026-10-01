@@ -243,6 +243,97 @@ func TestGateClosedPRWithALiveRunnerNeverReportsAFailure(t *testing.T) {
 	}
 }
 
+func TestGateClosedPRWithADeadRunnerNeverReportsAFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		pr    string
+		want  task.State
+		notes int
+	}{
+		// The runner died on its own before the refresh. Reaping it first would tell
+		// the developer the run failed, which closing a PR must never do (R8).
+		{"PR closed", "closed", task.PRClosed, 0},
+		{"PR still open", "open", task.Failed, 1},
+	} {
+		f := newFixture()
+		key := reviewed(t, f)
+		f.store.recs[key].State = task.Working
+		f.store.recs[key].Delegation.RunnerPID = 77 // never added to f.runners.alive
+		setCI(f, task.CIStatus{State: task.CIPassing})
+		setPR(f, tc.pr)
+		f.notes.sent = nil
+		if _, err := f.app.Tasks(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if got := f.store.recs[key]; got.State != task.Working {
+			t.Fatalf("%s: local reread changed the state to %s before GitHub refresh", tc.name, got.State)
+		}
+		if _, _, err := f.app.Status(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		got := f.store.recs[key]
+		if got.State != tc.want || got.Delegation.RunnerPID != 0 {
+			t.Errorf("%s: state %s pid %d", tc.name, got.State, got.Delegation.RunnerPID)
+		}
+		if len(f.notes.sent) != tc.notes {
+			t.Errorf("%s: notifications %v", tc.name, f.notes.sent)
+		}
+	}
+}
+
+func TestGateReopenedPRStopsARunnerThatWouldNotStop(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	f.store.recs[key].Delegation.RunnerPID = 77
+	f.runners.alive[77] = true
+	f.runners.stuck = true
+	setPR(f, "closed")
+	setCI(f, task.CIStatus{State: task.CIPassing})
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.PRClosed || got.Delegation.RunnerPID != 77 {
+		t.Fatalf("setup: state %s pid %d", got.State, got.Delegation.RunnerPID)
+	}
+	// The PR reopens while that runner is still going. PR_CLOSED is what keeps it
+	// from writing, so the task must not come back until the stop takes.
+	setPR(f, "open")
+	_, warnings, err := f.app.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.PRClosed || got.Delegation.RunnerPID != 77 {
+		t.Fatalf("the task came back under a live runner: state %s pid %d", got.State, got.Delegation.RunnerPID)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0].Error(), "before PR #912 reopens") {
+		t.Errorf("warnings = %v", warnings)
+	}
+	f.runners.stuck = false
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.ReadyForHuman || got.Delegation.RunnerPID != 0 {
+		t.Errorf("the task did not come back once the runner stopped: state %s pid %d", got.State, got.Delegation.RunnerPID)
+	}
+}
+
+func TestGateReopenedPRClearsAnExitedRunner(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	f.store.recs[key].State = task.PRClosed
+	f.store.recs[key].Delegation.RunnerPID = 77
+	setPR(f, "open")
+	setCI(f, task.CIStatus{State: task.CIPassing})
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.ReadyForHuman || got.Delegation.RunnerPID != 0 {
+		t.Errorf("state %s pid %d", got.State, got.Delegation.RunnerPID)
+	}
+}
+
 func TestGateClosedPRLeavesARestartedRunnerAlone(t *testing.T) {
 	f := newFixture()
 	key := reviewed(t, f)

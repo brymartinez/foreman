@@ -62,12 +62,16 @@ type App struct {
 // Inbox fetches GitHub state, reports what changed since the last run, and records
 // the new state as seen. Only records that changed are rewritten.
 func (a App) Inbox(ctx context.Context) (InboxReport, error) {
-	recs, err := a.listReaped(ctx)
+	recs, err := a.Store.List(ctx)
 	if err != nil {
 		return InboxReport{}, err
 	}
+	dead := a.deadRunners(recs)
 	notes, warnings, err := a.gate(ctx, recs)
 	if err != nil {
+		return InboxReport{}, err
+	}
+	if err := a.reap(ctx, recs, dead); err != nil {
 		return InboxReport{}, err
 	}
 	if a.CleanOnDone {

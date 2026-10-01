@@ -503,13 +503,19 @@ request. Each fix is its own commit with a decision.
 - A PR closed without merging stops its runner, moves the task to the new `PR_CLOSED`
   state, and drops it from DELEGATED WORK without a failure or a notification (D107).
   Reopening the PR brings the task back, as READY_FOR_HUMAN or REVIEWING depending on
-  the review it has and the PR's current CI (D108).
+  the review it has and the PR's current CI (D108). Local rereads defer reaping a dead
+  runner with a PR until the GitHub gate checks it. Reopening waits for a retained
+  runner to stop or clears its stale pid (D111).
 - `mentions` hides items found only because they mention the developer; `refresh` sets
   the dashboard's GitHub interval, 60 seconds by default and 5 at the least (D110).
 - Verified with `go vet ./...`, `go test ./...`, `go build -o dist/foreman
   ./cmd/foreman`, `scripts/e2e.sh`, and `git diff --check`. New tests cover the arrow
   keys, the row and selection colors, the closed and reopened PR paths including a
   running and an unstoppable runner, the mention filter, and the two settings.
+- D111 review fixes passed `go vet ./...`, `go test ./...`, `go test -race` over
+  `internal/app`, `internal/tui`, and `internal/config`, the build, `scripts/e2e.sh`,
+  and `git diff --check`. The closed and reopened PR paths have no end-to-end check;
+  `gate_test.go` covers them, including a dead runner and a stop that will not take.
 
 ## Known limitations
 
@@ -621,7 +627,7 @@ what it replaced. Current summary:
 - D107. A closed PR ends its task in `PR_CLOSED`, not FAILED. D108. A reopened PR
   returns the task to delegated work. D109 (amends D104). Dashboard rows keep the
   terminal's foreground, and the arrows select panes. D110. `mentions` and `refresh`
-  are settings.
+  are settings. D111 (amends D107 and D108). Check PR state before reaping its runner.
 
 ## Next stage
 
