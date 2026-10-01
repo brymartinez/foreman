@@ -490,6 +490,18 @@ func Started(w io.Writer, r *task.Record) {
 	fmt.Fprintf(w, "Check progress with: foreman status\n")
 }
 
+// Resumed reports `foreman resume`: the agent is answering the comments on its PR.
+func Resumed(w io.Writer, r *task.Record) {
+	d := r.Delegation
+	if r.State == task.Failed {
+		fmt.Fprintf(w, "%s could not resume: %s\n", issueLabel(r.Key), r.LastOutcome.Summary)
+		return
+	}
+	fmt.Fprintf(w, "Resumed %s %s with %s\n", issueLabel(r.Key), r.Title, agentName(d.Implementer.Agent))
+	fmt.Fprintf(w, "  PR        #%d\n  worktree  %s\n  log       %s\n", d.PR, d.Worktree, d.RunnerLog)
+	fmt.Fprintf(w, "Check progress with: foreman status\n")
+}
+
 // Cancelled reports `foreman cancel`. A run that finished while it was being
 // stopped keeps its own state.
 func Cancelled(w io.Writer, r *task.Record) {

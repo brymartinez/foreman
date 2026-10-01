@@ -169,6 +169,10 @@ func (a App) startable(rec *task.Record) error {
 		return nil
 	case task.NeedsDecision:
 		return fmt.Errorf("%s is waiting for your decision; use foreman respond %d", ref, rec.Number)
+	case task.Reviewed:
+		// Starting would rebuild the delegation and lose the session that wrote the PR
+		// the comments are on, so the task continues instead (D119).
+		return fmt.Errorf("%s has PR feedback to answer; use foreman resume %d", ref, rec.Number)
 	}
 	return fmt.Errorf("%s is %s", ref, rec.State)
 }

@@ -155,6 +155,14 @@ func run(argv []string) int {
 		if selection == nil {
 			break
 		}
+		if selection.Resume {
+			rec, err := a.Resume(ctx, selection.Key)
+			if err != nil {
+				return fail(err)
+			}
+			render.Resumed(os.Stdout, rec)
+			break
+		}
 		contextFile := selection.ContextFile
 		if contextFile != "" {
 			if contextFile, err = filepath.Abs(contextFile); err != nil {
@@ -228,6 +236,18 @@ func run(argv []string) int {
 			if r.Err != nil {
 				return 1
 			}
+		}
+	case cli.Resume:
+		rec, err := a.Find(ctx, cmd.Repo, cmd.Issue)
+		if err != nil {
+			return fail(err)
+		}
+		if rec, err = a.Resume(ctx, rec.Key); err != nil {
+			return fail(err)
+		}
+		render.Resumed(os.Stdout, rec)
+		if rec.State == task.Failed {
+			return 1
 		}
 	case cli.Respond:
 		return respond(ctx, a, cmd)
