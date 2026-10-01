@@ -86,6 +86,8 @@ func (a App) Inbox(ctx context.Context) (InboxReport, error) {
 	if err != nil {
 		return InboxReport{}, err
 	}
+	// Taken before Reconcile, which calls observe and rewrites these in place.
+	stored := storedReasons(recs)
 	report, dirty := Reconcile(append(items, tracked...), recs, notes, len(search.Truncated) == 0, a.Now())
 	report.Truncated = search.Truncated
 	report.Warnings = append(warnings, refreshWarnings...)
@@ -124,7 +126,7 @@ func (a App) Inbox(ctx context.Context) (InboxReport, error) {
 		report.Changed = append(report.Changed, InboxEntry{Item: InboxItem{Key: rec.Key, Kind: rec.Kind, Title: rec.Title, URL: rec.URL}, Changes: []string{goneNote}})
 	}
 	if a.HideMentionOnly {
-		hideMentionOnly(&report)
+		hideMentionOnly(&report, stored)
 	}
 	return report, nil
 }
@@ -137,17 +139,40 @@ const goneNote = "no longer on GitHub or no longer accessible; foreman stopped c
 // items come back the moment the setting does. Delegated work waiting on the
 // developer is not an inbox find, so it is left alone. The note for an item that left
 // GitHub is filtered where it is built, because it carries no reasons of its own.
-func hideMentionOnly(r *InboxReport) {
+func hideMentionOnly(r *InboxReport, stored map[task.Key][]task.InboxReason) {
 	keep := func(entries []InboxEntry) []InboxEntry {
 		var out []InboxEntry
 		for _, e := range entries {
-			if !mentionOnly(e.Item.Reasons) {
+			if !mentionOnly(involvement(e.Item, stored)) {
 				out = append(out, e)
 			}
 		}
 		return out
 	}
 	r.New, r.Changed, r.Current = keep(r.New), keep(r.Changed), keep(r.Current)
+}
+
+// involvement is why the developer is involved with it. A tracked fetch carries the
+// synthetic `tracked` reason alone, because no search returned the item: a search that
+// hit its result limit can leave a tracked item out. What the task stored is then the
+// only account of the involvement, so the filter judges the item by that.
+func involvement(it InboxItem, stored map[task.Key][]task.InboxReason) []task.InboxReason {
+	if slices.Equal(it.Reasons, []task.InboxReason{task.Tracked}) {
+		return stored[it.Key]
+	}
+	return it.Reasons
+}
+
+// storedReasons indexes why the developer is involved with each item foreman tracks.
+// It must be read before Reconcile, which rewrites the records it reads.
+func storedReasons(recs []*task.Record) map[task.Key][]task.InboxReason {
+	stored := map[task.Key][]task.InboxReason{}
+	for _, r := range recs {
+		if r.GitHub != nil && len(r.GitHub.Reasons) > 0 {
+			stored[r.Key] = slices.Clone(r.GitHub.Reasons)
+		}
+	}
+	return stored
 }
 
 func mentionOnly(reasons []task.InboxReason) bool {

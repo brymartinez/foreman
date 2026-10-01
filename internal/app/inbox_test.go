@@ -317,14 +317,69 @@ func TestInboxHidesMentionOnlyItems(t *testing.T) {
 	}
 }
 
+// trackedGitHub answers a tracked fetch with an open item that has new activity. That
+// is what a search hitting its result limit produces: the item is still the
+// developer's, but no search returned it, so the fetch has only the `tracked` reason.
+type trackedGitHub struct {
+	*fakeGitHub
+}
+
+func (g *trackedGitHub) GetItem(_ context.Context, k task.Key) (InboxItem, error) {
+	return item(k.Number, "open", t1, task.Tracked), nil
+}
+
+func TestInboxHidesAMentionOnlyItemATruncatedSearchMissed(t *testing.T) {
+	report := func(hide bool, kind task.Kind, reasons ...task.InboxReason) InboxReport {
+		rec := seen(1, task.Discovered, "open", t0, reasons...)
+		rec.Kind = kind
+		store := &fakeStore{recs: map[task.Key]*task.Record{rec.Key: rec}}
+		gh := &trackedGitHub{fakeGitHub: &fakeGitHub{truncated: []string{"mentions"}}}
+		a := App{Store: store, GitHub: gh, Runners: &fakeRunners{}, HideMentionOnly: hide,
+			Now: func() time.Time { return now }}
+		got, err := a.Inbox(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got.Truncated) == 0 {
+			t.Fatal("the search must report a truncation for this path to run")
+		}
+		return got
+	}
+	for _, tc := range []struct {
+		name    string
+		hide    bool
+		kind    task.Kind
+		reasons []task.InboxReason
+		want    []int
+	}{
+		{"mention only, mentions off", true, task.Issue, []task.InboxReason{task.Mentioned}, nil},
+		{"mention-only PR, mentions off", true, task.PullRequest, []task.InboxReason{task.Mentioned}, nil},
+		{"mention only, mentions on", false, task.Issue, []task.InboxReason{task.Mentioned}, []int{1}},
+		{"also assigned, mentions off", true, task.Issue, []task.InboxReason{task.Mentioned, task.Assigned}, []int{1}},
+		{"review requested, mentions off", true, task.Issue, []task.InboxReason{task.Mentioned, task.ReviewRequested}, []int{1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := report(tc.hide, tc.kind, tc.reasons...)
+			if n := entryNumbers(got.Changed); !slices.Equal(n, tc.want) {
+				t.Errorf("changed = %v, want %v", n, tc.want)
+			}
+			// The dashboard pane reads Current, so the setting has to reach it too.
+			if n := entryNumbers(got.Current); !slices.Equal(n, tc.want) {
+				t.Errorf("current = %v, want %v", n, tc.want)
+			}
+		})
+	}
+}
+
 func TestHideMentionOnlyKeepsChangedEntries(t *testing.T) {
 	recs := []*task.Record{
 		seen(1, task.Discovered, "open", t0, task.Mentioned),
 		seen(3, task.Discovered, "open", t0, task.Mentioned),
 	}
 	items := []InboxItem{item(1, "open", t1, task.Mentioned), item(3, "open", t1, task.Mentioned, task.Assigned)}
+	stored := storedReasons(recs)
 	report, _ := Reconcile(items, recs, nil, true, now)
-	hideMentionOnly(&report)
+	hideMentionOnly(&report, stored)
 	if got := entryNumbers(report.Changed); !slices.Equal(got, []int{3}) {
 		t.Errorf("changed = %v, want only the assigned item", got)
 	}

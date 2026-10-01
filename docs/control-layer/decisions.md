@@ -1673,3 +1673,18 @@ Entry format:
 - **Consequence.** The setting covers the item's whole life, including its last note.
   The record still stops being checked either way: the setting hides the note, not the
   bookkeeping that ends the refreshes.
+
+## D114 (amends D110 and D113). Resolve a tracked fetch's reasons before filtering
+
+- Date: 2026-10-01. Issue midsoln/foreman#5. Review finding.
+- **Context.** A search that hits its 1000 result limit can leave a tracked item out.
+  `fetchTracked` then retrieves it with the synthetic `tracked` reason alone, and new
+  activity puts it in CHANGED. `mentionOnly` saw no `mentioned` reason, so with
+  `mentions: false` the item still printed.
+- **Decision.** `storedReasons` snapshots each record's involvement before `Reconcile`,
+  which calls `observe` and rewrites those records in place. `involvement` resolves an
+  entry carrying `tracked` alone to that snapshot, and `hideMentionOnly` filters on the
+  result. This covers NEW, CHANGED, and the dashboard's `Current`.
+- **Consequence.** The setting holds when the searches are incomplete, which is when a
+  mention-only item is most likely to arrive as a tracked fetch. An item foreman has
+  never stored has no snapshot, so it keeps the reasons the search gave it.

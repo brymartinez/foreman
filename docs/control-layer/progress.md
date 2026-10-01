@@ -511,18 +511,21 @@ request. Each fix is its own commit with a decision.
 - `mentions` hides items found only because they mention the developer; `refresh` sets
   the dashboard's GitHub interval, 60 seconds by default and 5 at the least (D110).
   The note for an item that left GitHub follows the setting too, judged by the reasons
-  the task stored before they were cleared (D113).
+  the task stored before they were cleared (D113). An item a truncated search missed
+  arrives as a tracked fetch, and is judged by the involvement the task stored before
+  the refresh rewrote it (D114).
 - Verified with `go vet ./...`, `go test ./...`, `go build -o dist/foreman
   ./cmd/foreman`, `scripts/e2e.sh`, and `git diff --check`. New tests cover the arrow
   keys, the row and selection colors, the closed and reopened PR paths including a
   running and an unstoppable runner, the mention filter, and the two settings.
-- D111, D112, and D113 review fixes passed `go vet ./...`, `go test ./...`, `go test
-  -race` over `internal/app`, `internal/tui`, and `internal/config`, the build,
-  `scripts/e2e.sh`, and `git diff --check`. The closed and reopened PR paths have no
-  end-to-end check; `gate_test.go` covers them, including a dead runner, a stop that
-  will not take, and a PR lookup that fails. `inbox_gone_test.go` covers the gone note
-  against the mentions setting. The D112 and D113 tests were confirmed to fail without
-  their fixes.
+- The D111 to D114 review fixes passed `go vet ./...`, `go test ./...`, `go test
+  -race` over `internal/app`, `internal/render`, `internal/tui`, and `internal/config`,
+  the build, `scripts/e2e.sh`, and `git diff --check`. The closed and reopened PR paths
+  have no end-to-end check; `gate_test.go` covers them, including a dead runner, a stop
+  that will not take, and a PR lookup that fails. `inbox_gone_test.go` covers the gone
+  note against the mentions setting, and `inbox_test.go` covers a tracked fetch under a
+  truncated search. The D112, D113, and D114 tests were confirmed to fail without their
+  fixes.
 
 ## Known limitations
 
@@ -636,7 +639,8 @@ what it replaced. Current summary:
   terminal's foreground, and the arrows select panes. D110. `mentions` and `refresh`
   are settings. D111 (amends D107 and D108). Check PR state before reaping its runner.
   D112 (amends D111). Reap a dead runner only once its PR has been read. D113 (amends
-  D110). Judge the gone note by the reasons the task stored.
+  D110). Judge the gone note by the reasons the task stored. D114 (amends D110 and
+  D113). Resolve a tracked fetch's reasons before filtering.
 
 ## Next stage
 
