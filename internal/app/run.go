@@ -41,9 +41,6 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 	}))
 
 	var findings *task.Review
-	// planPosted is set for the turn right after the plan went up on the issue, which
-	// resumes the planning session to implement it (D90).
-	planPosted := false
 	for reviewNext := rec.ReviewPending(); ; reviewNext = false {
 		if reviewNext {
 			// The PR is verified but its head has no review: pick up at the review. A
@@ -62,8 +59,7 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 			}
 		}
 		if !reviewNext {
-			turn, runErr := a.implement(ctx, rec, findings, planPosted, log)
-			planPosted = false
+			turn, runErr := a.implement(ctx, rec, findings, log)
 			step := "implementation"
 			if a.needsPlan(rec) {
 				step = "planning"
@@ -90,7 +86,6 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 				if rec, err = a.postPlan(ctx, final, rec, turn.Outcome.Documents, log); err != nil || rec.State != task.Working {
 					return err
 				}
-				planPosted = true
 				continue
 			}
 			if rec.State != task.Reviewing {
@@ -165,7 +160,7 @@ func (a App) needsPlan(rec *task.Record) bool {
 	return !rec.PlanPosted() && rec.Delegation.PR == 0
 }
 
-func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Review, planPosted bool, log io.Writer) (agent.Turn, error) {
+func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Review, log io.Writer) (agent.Turn, error) {
 	d := rec.Delegation
 	adapter, ok := a.Agents[d.Implementer.Agent]
 	if !ok {
@@ -180,8 +175,6 @@ func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Rev
 			open = latest
 		}
 		resume = agent.ResumeMessage(decs, open, planning)
-	} else if planPosted {
-		resume = agent.PlanPostedMessage(rec.Plan)
 	} else if findings != nil {
 		resume = agent.FindingsMessage(*findings)
 	}

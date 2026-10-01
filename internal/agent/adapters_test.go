@@ -295,9 +295,6 @@ func TestPlanningPromptWritesDocumentsOnly(t *testing.T) {
 	if strings.Contains(p, "## Plan first") || strings.Contains(p, `"planned"`) || !strings.Contains(p, "## The plan") || !strings.Contains(p, "- Implementation plan: https://x/4") {
 		t.Errorf("a turn after the plan must follow it, not write it:\n%s", p)
 	}
-	if msg := PlanPostedMessage(plan); !strings.Contains(msg, "- Analysis: https://x/1") || !strings.Contains(msg, "pr_opened, blocked, or failed") {
-		t.Errorf("plan posted message = %q", msg)
-	}
 	r := ReviewPrompt(ReviewBrief{TaskBrief: TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}, PRD: "R1. Retry 5xx."}, PR: 9})
 	if !strings.Contains(r, "## PRD") || !strings.Contains(r, "R1. Retry 5xx.") {
 		t.Errorf("review prompt lacks the PRD:\n%s", r)

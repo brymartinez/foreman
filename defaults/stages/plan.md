@@ -26,8 +26,8 @@ Write four documents before any code. Each is posted on the issue as its own com
 ## Implementation plan
 
 13. Start with the goal in one sentence and the files you will create or modify, with each file's job.
-14. Split the work into tasks: `### Task N: <component>`, then its files as `Create: path`, `Modify: path:lines`, or `Test: path`.
-15. Give each task checkbox steps, one action each: write the failing test, run it and see it fail (the command and the expected failure), make the smallest change that passes, run it again, commit.
+14. Group the work into a few cohesive tasks: `### Task N: <component>`, then its files as `Create: path`, `Modify: path:lines`, or `Test: path`. Do not make a task for each file or test.
+15. For each task, name the behavior, the focused check that verifies it, and a commit boundary. Add or update tests for changed behavior. Save full repository validation for the completed implementation unless an earlier full check is needed to diagnose a failure.
 16. Name the functions, types, and test cases each task adds. Skip full code listings; you implement the plan in the next turn.
 17. Use exact paths and exact commands. No placeholders: no "TBD", no "add error handling", no "similar to Task 2".
 

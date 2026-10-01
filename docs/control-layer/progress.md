@@ -2,8 +2,8 @@
 
 ## Current stage
 
-Stage 16 (dashboard navigation, visibility, and refresh settings for issue #5) is
-complete.
+Stage 17 (lower implementer token use) is complete. The Sonnet and budget trial
+needs completed runs before its effect can be measured.
 
 ## Completed
 
@@ -416,7 +416,7 @@ request. Each fix is its own commit with a decision.
   implementation plan, following the new required `plan` stage file. It changes no
   code. The outcome contract gains a `planned` status carrying the documents (D90).
 - The runner posts each document on the issue as its own comment, records the comment
-  ids and URLs in the task file, and resumes the planning session to implement. A
+  ids and URLs in the task file, and starts a fresh session to implement (D117). A
   re-plan edits the same comments. There is no approval gate: a planning question goes
   to NEEDS_DECISION, and otherwise the run continues to the PR.
 - The reviewer's prompt carries the posted PRD. `foreman show` links the comments.
@@ -662,6 +662,17 @@ what it replaced. Current summary:
   D114). Resolve a tracked fetch's reasons before filtering. D116. Keep both sets of
   decisions and their references after the merge.
 
+### Stage 17 (complete): lower implementer token use
+
+- The plan-to-implementation handoff starts a fresh session with the posted plan
+  links and the current task context. Planning decisions still resume the planning
+  session, while later findings resume the new implementation session (D117).
+- The plan and implement stage defaults use cohesive milestones and focused checks
+  during editing. The local config uses Sonnet and a $25 implementer cap for a trial.
+- `go vet ./...`, `go test ./...`, the binary build, and every `scripts/e2e.sh`
+  scenario passed. `foreman config --show` confirmed the live model and budget.
+
 ## Next stage
 
-None. Stages 0 to 16 are complete. Further work needs a new request.
+Compare completed task usage and outcomes before changing the model or budget
+again.

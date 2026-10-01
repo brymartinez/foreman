@@ -89,6 +89,7 @@ type fakeAgent struct {
 	turns     []agent.Turn // consumed before turn, one per Start/Resume
 	err       error
 	prompt    string
+	prompts   []string
 	starts    int
 	resumed   []string
 	resumeErr error
@@ -135,6 +136,7 @@ func (f *fakeAgent) Start(_ context.Context, in agent.StartInput, onSession func
 		f.during()
 	}
 	f.prompt = in.Prompt
+	f.prompts = append(f.prompts, in.Prompt)
 	t, err := f.next()
 	onSession(t.Session)
 	return t, err
