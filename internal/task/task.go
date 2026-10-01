@@ -40,8 +40,11 @@ const (
 	NeedsDecision State = "NEEDS_DECISION"
 	Reviewing     State = "REVIEWING"
 	ReadyForHuman State = "READY_FOR_HUMAN"
-	Done          State = "DONE"
-	Failed        State = "FAILED"
+	// Reviewed means the developer commented on the task's pull request and the agent
+	// has not answered yet. Resuming the task hands it those comments.
+	Reviewed State = "REVIEWED"
+	Done     State = "DONE"
+	Failed   State = "FAILED"
 	// PRClosed means the task's PR was closed without merging. The agent did not
 	// fail, so the task keeps its file, worktree, and branch.
 	PRClosed State = "PR_CLOSED"
@@ -259,6 +262,9 @@ type Record struct {
 	Reviews []Review
 	// Plan holds the planning documents posted on the issue, in PlanDocs order (D90).
 	Plan []PlanComment
+	// Feedback is every comment on the task's PR foreman has read, and whether the
+	// agent has answered it (D117).
+	Feedback []Feedback
 	// CI is the readiness gate's last look at the PR's checks on GitHub. Any implementer
 	// turn clears it.
 	CI *CIStatus

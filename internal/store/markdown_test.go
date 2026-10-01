@@ -45,6 +45,12 @@ func delegated() *task.Record {
 				Findings: []task.Finding{{Severity: "blocking", File: "retry.go", Line: 40, Summary: "4xx retried", Detail: "guard"}}},
 			{Round: 2, Reviewer: task.Codex, PR: 912, Clean: true, Summary: "ok", At: time.Date(2026, 9, 24, 19, 0, 0, 0, time.UTC), Head: "c0ffee1"},
 		},
+		Feedback: []task.Feedback{
+			{Kind: task.IssueComment, ID: 4401, Author: "brymartinez", URL: "https://github.com/ridezoomo/armada-backend/pull/912#issuecomment-4401",
+				At: time.Date(2026, 9, 25, 9, 0, 0, 0, time.UTC), Digest: task.Digest("ship it?"), HandledAt: time.Date(2026, 9, 25, 9, 30, 0, 0, time.UTC)},
+			{Kind: task.ReviewComment, ID: 4402, Author: "dependabot[bot]", URL: "https://github.com/ridezoomo/armada-backend/pull/912#discussion_r4402",
+				At: time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC), Digest: task.Digest("this retries forever")},
+		},
 		CI: &task.CIStatus{State: task.CIFailing, CheckedAt: time.Date(2026, 9, 24, 19, 30, 0, 0, time.UTC),
 			Failing: []task.CheckRun{{Name: "test", Link: "https://github.com/ridezoomo/armada-backend/actions/runs/1"}}},
 		GitHub: &task.Snapshot{
@@ -103,6 +109,22 @@ func TestMarkdownRoundTripsPRClosed(t *testing.T) {
 	}
 	if got.State != task.PRClosed || got.Delegation.Branch != want.Delegation.Branch {
 		t.Fatalf("state %s branch %q", got.State, got.Delegation.Branch)
+	}
+}
+
+func TestMarkdownRoundTripsReviewed(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	want := delegated()
+	want.State = task.Reviewed
+	if err := s.Save(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, want.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != task.Reviewed || len(got.UnhandledFeedback()) != 1 || got.UnhandledFeedback()[0].ID != 4402 {
+		t.Fatalf("state %s unanswered %+v", got.State, got.UnhandledFeedback())
 	}
 }
 
