@@ -532,6 +532,8 @@ func Config(w io.Writer, c config.Config) {
 	fmt.Fprintf(w, "Implementer budget: $%.2f per Claude turn (Codex has no cap)\n", c.Budgets.ImplementerUSD)
 	fmt.Fprintf(w, "Reviewer budget: $%.2f per Claude turn (Codex has no cap)\n", c.Budgets.ReviewerUSD)
 	fmt.Fprintf(w, "Notifications: %t\n", c.Notifications.Enabled)
+	fmt.Fprintf(w, "Mentions: %t\n", c.Mentions)
+	fmt.Fprintf(w, "GitHub refresh: every %d seconds\n", c.Refresh)
 	fmt.Fprintf(w, "Ignore repositories: %s\n", repoList(c.IgnoredRepos))
 	fmt.Fprintf(w, "Claude command: %s\n", c.Claude.Command)
 	fmt.Fprintf(w, "Claude model: %s\n", orDefault(c.Claude.Model, "CLI default"))

@@ -67,6 +67,33 @@ func TestAgentSettingsOverlayDefaults(t *testing.T) {
 	if !cfg.Cleanup.OnDone || cfg.Cleanup.DeleteMergedBranch {
 		t.Errorf("cleanup: an explicit false must override its default, and unset keys keep theirs: %+v", cfg.Cleanup)
 	}
+	if !cfg.Mentions || cfg.Refresh != DefaultRefresh {
+		t.Errorf("unset mentions and refresh must keep today's behavior: %t %d", cfg.Mentions, cfg.Refresh)
+	}
+}
+
+func TestLoadMentionsAndRefresh(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("FOREMAN_CONFIG", "")
+	t.Setenv("FOREMAN_TASKS_DIR", "")
+	os.MkdirAll(filepath.Join(home, ".config/foreman"), 0o755)
+	write := func(body string) {
+		if err := os.WriteFile(filepath.Join(home, ".config/foreman/config.yaml"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write("mentions: false\nrefresh: 30\n")
+	cfg, err := Load()
+	if err != nil || cfg.Mentions || cfg.Refresh != 30 {
+		t.Fatalf("mentions %t refresh %d err %v", cfg.Mentions, cfg.Refresh, err)
+	}
+
+	write("refresh: 2\n")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "the minimum is 5") {
+		t.Fatalf("a refresh below the floor was accepted: %v", err)
+	}
 }
 
 func TestLoadValidatesIgnoredRepositories(t *testing.T) {

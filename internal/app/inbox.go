@@ -53,7 +53,10 @@ type App struct {
 	// DeleteMergedBranches deletes the local branch with the worktree once its PR is merged.
 	DeleteMergedBranches bool
 	IgnoredRepositories  []task.Repo
-	Now                  func() time.Time
+	// HideMentionOnly drops items the searches found only because they mention the
+	// developer. False shows every item, which is the default.
+	HideMentionOnly bool
+	Now             func() time.Time
 }
 
 // Inbox fetches GitHub state, reports what changed since the last run, and records
@@ -104,7 +107,34 @@ func (a App) Inbox(ctx context.Context) (InboxReport, error) {
 			report.Changed = append(report.Changed, InboxEntry{Item: InboxItem{Key: rec.Key, Kind: rec.Kind, Title: rec.Title, URL: rec.URL}, Changes: []string{goneNote}})
 		}
 	}
+	if a.HideMentionOnly {
+		hideMentionOnly(&report)
+	}
 	return report, nil
+}
+
+// hideMentionOnly drops the items a search returned only because they mention the
+// developer, for issues and pull requests alike. The searches still run and the
+// snapshots still record every reason, so a lost reason is still reported and the
+// items come back the moment the setting does. Delegated work waiting on the
+// developer is not an inbox find, so it is left alone.
+func hideMentionOnly(r *InboxReport) {
+	keep := func(entries []InboxEntry) []InboxEntry {
+		var out []InboxEntry
+		for _, e := range entries {
+			if !mentionOnly(e.Item.Reasons) {
+				out = append(out, e)
+			}
+		}
+		return out
+	}
+	r.New, r.Changed, r.Current = keep(r.New), keep(r.Changed), keep(r.Current)
+}
+
+func mentionOnly(reasons []task.InboxReason) bool {
+	return slices.Contains(reasons, task.Mentioned) &&
+		!slices.Contains(reasons, task.Assigned) &&
+		!slices.Contains(reasons, task.ReviewRequested)
 }
 
 const goneNote = "no longer on GitHub or no longer accessible; foreman stopped checking it"

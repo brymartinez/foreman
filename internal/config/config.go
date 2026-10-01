@@ -15,24 +15,36 @@ import (
 )
 
 type Config struct {
-	TasksDir        string        `yaml:"tasks_dir"`
-	WorktreesDir    string        `yaml:"worktrees_dir"`
-	RepositoriesDir string        `yaml:"repositories_dir"`
-	LogDir          string        `yaml:"log_dir"`
-	ReviewRounds    int           `yaml:"review_rounds"` // reviewer passes per review; 0 means 3
-	FixRounds       int           `yaml:"fix_rounds"`    // fix and re-review cycles before asking; 0 means 3
-	Budgets         Budgets       `yaml:"budgets"`
-	Notifications   Notifications `yaml:"notifications"`
-	Claude          Claude        `yaml:"claude"`
-	Codex           Codex         `yaml:"codex"`
-	Cleanup         Cleanup       `yaml:"cleanup"`
-	IgnoredRepos    []task.Repo   `yaml:"ignore_repositories"`
+	TasksDir        string `yaml:"tasks_dir"`
+	WorktreesDir    string `yaml:"worktrees_dir"`
+	RepositoriesDir string `yaml:"repositories_dir"`
+	LogDir          string `yaml:"log_dir"`
+	ReviewRounds    int    `yaml:"review_rounds"` // reviewer passes per review; 0 means 3
+	FixRounds       int    `yaml:"fix_rounds"`    // fix and re-review cycles before asking; 0 means 3
+	// Mentions shows items the searches found only because they mention you.
+	Mentions bool `yaml:"mentions"`
+	// Refresh is how often the dashboard reads GitHub, in seconds.
+	Refresh       int           `yaml:"refresh"`
+	Budgets       Budgets       `yaml:"budgets"`
+	Notifications Notifications `yaml:"notifications"`
+	Claude        Claude        `yaml:"claude"`
+	Codex         Codex         `yaml:"codex"`
+	Cleanup       Cleanup       `yaml:"cleanup"`
+	IgnoredRepos  []task.Repo   `yaml:"ignore_repositories"`
 	// Path is the resolved config file used by config show/edit.
 	Path string `yaml:"-"`
 	// StagesDir holds the global stage instructions: stages/ next to the config file,
 	// so ~/.config/foreman/stages by default. It is a convention, not a setting (D48).
 	StagesDir string `yaml:"-"`
 }
+
+// DefaultRefresh and MinRefresh bound the dashboard's GitHub refresh, in seconds.
+// The floor keeps a run of searches, the readiness gate, and the cleanup from
+// overlapping each other and from spending the developer's gh rate limit.
+const (
+	DefaultRefresh = 60
+	MinRefresh     = 5
+)
 
 type Budgets struct {
 	ImplementerUSD float64 `yaml:"implementer_usd"`
@@ -78,6 +90,8 @@ func Load() (Config, error) {
 		LogDir:          filepath.Join(data, "logs"),
 		ReviewRounds:    3,
 		FixRounds:       3,
+		Mentions:        true,
+		Refresh:         DefaultRefresh,
 		Claude:          Claude{Command: "claude", Model: "claude-opus-5"},
 		Codex:           Codex{Command: "codex", Model: "gpt-6-sol"},
 		Cleanup:         Cleanup{OnDone: true, DeleteMergedBranch: true},
@@ -104,6 +118,9 @@ func Load() (Config, error) {
 	}
 	for _, p := range []*string{&cfg.TasksDir, &cfg.WorktreesDir, &cfg.RepositoriesDir, &cfg.LogDir} {
 		*p = expandHome(*p, home)
+	}
+	if cfg.Refresh < MinRefresh {
+		return Config{}, fmt.Errorf("%s: refresh is %d seconds; the minimum is %d", path, cfg.Refresh, MinRefresh)
 	}
 	for i, repo := range cfg.IgnoredRepos {
 		parsed, err := task.ParseRepo(string(repo))

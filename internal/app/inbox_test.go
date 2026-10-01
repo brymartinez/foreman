@@ -273,6 +273,49 @@ func TestInboxFetchesDelegatedTasksMissingFromSearch(t *testing.T) {
 	}
 }
 
+func TestInboxHidesMentionOnlyItems(t *testing.T) {
+	mentionedPR := item(2, "open", t0, task.Mentioned)
+	mentionedPR.Kind = task.PullRequest
+	items := []InboxItem{
+		item(1, "open", t0, task.Mentioned), // mention-only issue: hidden
+		mentionedPR,                         // mention-only PR: hidden
+		item(3, "open", t0, task.Mentioned, task.Assigned), // also assigned: kept
+		item(4, "open", t0, task.ReviewRequested),          // review requested: kept
+	}
+	shown := func(hide bool) []int {
+		store := &fakeStore{recs: map[task.Key]*task.Record{}}
+		a := App{Store: store, GitHub: &fakeGitHub{items: items}, Runners: &fakeRunners{},
+			HideMentionOnly: hide, Now: func() time.Time { return now }}
+		report, err := a.Inbox(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := entryNumbers(report.New); !slices.Equal(got, entryNumbers(report.Current)) {
+			t.Fatalf("hide=%v: new %v and current %v disagree", hide, got, entryNumbers(report.Current))
+		}
+		return entryNumbers(report.Current)
+	}
+	if got := shown(false); !slices.Equal(got, []int{1, 2, 3, 4}) {
+		t.Errorf("mentions shown = %v, want every item", got)
+	}
+	if got := shown(true); !slices.Equal(got, []int{3, 4}) {
+		t.Errorf("mentions hidden = %v, want only the assigned and review-requested items", got)
+	}
+}
+
+func TestHideMentionOnlyKeepsChangedEntries(t *testing.T) {
+	recs := []*task.Record{
+		seen(1, task.Discovered, "open", t0, task.Mentioned),
+		seen(3, task.Discovered, "open", t0, task.Mentioned),
+	}
+	items := []InboxItem{item(1, "open", t1, task.Mentioned), item(3, "open", t1, task.Mentioned, task.Assigned)}
+	report, _ := Reconcile(items, recs, nil, true, now)
+	hideMentionOnly(&report)
+	if got := entryNumbers(report.Changed); !slices.Equal(got, []int{3}) {
+		t.Errorf("changed = %v, want only the assigned item", got)
+	}
+}
+
 func TestMergeObservedKeepsRunnerState(t *testing.T) {
 	cur := seen(7, task.Reviewing, "open", t0, task.Assigned)
 	cur.Delegation = &task.Delegation{PR: 912}
