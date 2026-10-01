@@ -48,6 +48,12 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
     failed       -> state FAILED, exit
     pr_opened    -> (the agent pushed and ran gh pr create) gh: confirm PR exists
                     record PR and its head commit, state REVIEWING
+                    before every review (D129): git fetch base and branch, then
+                      git merge-tree origin/<branch> origin/<base>
+                      clean    -> review; the branch is left as is
+                      conflict -> implementer.Resume(session, merge the base, never
+                                  rebase or force-push, push); recheck; after two
+                                  turns still conflicting -> NEEDS_DECISION, exit
                     review = reviewer.Review(disposable read-only session,
                                              issue + context + decisions + git diff + earlier rounds)
                     clean    -> record review and the head it covered; read the PR's comments,

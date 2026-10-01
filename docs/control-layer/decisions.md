@@ -1921,3 +1921,31 @@ Entry format:
   both branches' decision histories.
 - **Consequence.** Planning history does not burden implementation or feedback turns,
   and issue #7's comments remain actionable after the merge.
+
+## D129 (amends D63 and D78). Resolve PR merge conflicts before each review
+
+- Date: 2026-10-01. Issue midsoln/foreman#12.
+- **Context.** The runner started a review whenever a PR head had none, without checking
+  the PR against its base branch. A conflicting PR got a clean review, and the
+  conflict resolution it still needed was never reviewed.
+- **Decision.** `RunTask` calls `resolveConflicts` right before every review pass: the
+  first, one after a fix, one after answered PR feedback, one after a decision, and one
+  in a resumed run. It verifies the PR, takes the base GitHub reports for it, and calls
+  `WorktreeManager.MergeConflicts`. `worktree.Git` fetches the base and the branch,
+  then runs `git merge-tree --write-tree --name-only` on `origin/<branch>` and
+  `origin/<base>`. That merge runs in memory, so a clean base update writes no commit
+  and changes neither the branch nor the worktree. GitHub's `mergeable` field was
+  rejected: it reads `UNKNOWN` for a while after a push and names no files. On a
+  conflict, the implementer gets one turn (`agent.MergeMessage`, or a `## Merge
+  conflicts` section in a fresh prompt) to merge `origin/<base>` into the branch,
+  never rebase or force-push, run the checks, commit, push, and report `pr_opened`.
+  That turn records no review, so it uses no fix round, and the review that follows
+  uses the normal settings. If the agent cannot resolve a file safely it leaves the
+  merge in progress and reports `blocked` with the files. After two merge turns that
+  still leave conflicts, foreman asks the developer itself (A: I resolved the files in
+  the worktree; B: try again). A failed check fails the task. The gate is unchanged: it
+  compares only PR heads (D63), so a base-only change after a clean review starts no
+  run.
+- **Consequence.** Every review covers a PR that merges into its latest base. Each
+  pass costs one `git fetch` and needs git 2.38 or newer. The stand-in agent in
+  `scripts/e2e.sh` now pushes its branch, because the check reads `origin/<branch>`.

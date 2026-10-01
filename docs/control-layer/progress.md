@@ -2,8 +2,7 @@
 
 ## Current stage
 
-Stage 19 (PR feedback, the INBOX filter, and readable Codex logs for issue #7) is
-complete. Completed runs are needed to measure the effect of the model and budget choices.
+Stage 20 (merge conflict check before each review for issue #12) is complete. Completed runs are needed to measure the effect of the model and budget choices.
 
 ## Completed
 
@@ -601,6 +600,19 @@ request. Each fix is its own commit with a decision.
 - Verified the combined tree with `go test ./...`, `go vet ./...`, a binary build,
   and all `scripts/e2e.sh` scenarios with normal process access.
 
+### Stage 20 (complete): merge conflicts before each review for issue #12
+
+- Before every review pass the runner checks the PR against its latest base with
+  `git merge-tree` (D129). A clean merge, even after the base moved, changes nothing.
+- A conflict gets one implementer turn that merges the base into the task branch and
+  pushes. The new head is reviewed. The turn uses no fix round.
+- A blocked merge turn, or two turns that still leave conflicts, ends in
+  NEEDS_DECISION with the files. `foreman respond` resumes the implementer, which
+  finishes the merge, and the run checks again before its review.
+- Verified with `go vet ./...`, `go test ./...`, `go build -o dist/foreman
+  ./cmd/foreman`, and `scripts/e2e.sh` (a new `conflicts` scenario covers a
+  conflicting base and a clean base update).
+
 ## Known limitations
 
 - The gate runs only when `inbox` or `status` runs, or while the dashboard is open
@@ -730,6 +742,7 @@ what it replaced. Current summary:
 
 - D117. Fresh implementation session after planning. D118. Models and reasoning
   effort are selected per stage. D128. Merge fresh sessions with the PR feedback loop.
+- D129. Resolve PR merge conflicts with an implementer turn before each review.
 
 ## Next stage
 
