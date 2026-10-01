@@ -117,11 +117,11 @@ Set fields that do not apply to null, or [] for validation and questions. %s
 }
 
 // planningSection turns the first turn into planning only: foreman posts the
-// documents on the issue, then resumes the session to implement them (D90).
+// documents on the issue, then starts a fresh session to implement them.
 func planningSection(s *strings.Builder, instructions string) {
 	s.WriteString(`## Plan first
 
-This turn is for planning only. Read the issue, its comments, and the code, then write four Markdown documents: analysis, prd, design, and plan (the implementation plan). foreman posts each one on the issue as its own comment under its own heading, so start each document with its content, not a title. Then foreman resumes this session so you implement the plan. The sections below on the workspace and the pull request apply to that next turn.
+This turn is for planning only. Read the issue, its comments, and the code, then write four Markdown documents: analysis, prd, design, and plan (the implementation plan). foreman posts each one on the issue as its own comment under its own heading, so start each document with its content, not a title. Then foreman starts a fresh session to implement the plan. The sections below on the workspace and the pull request apply to that next turn.
 
 Do not change, commit, or push anything in this turn. If writing the documents needs a decision from the developer, report "blocked" with the questions instead.
 
@@ -150,15 +150,6 @@ func writePlanLinks(s *strings.Builder, plan []task.PlanComment) {
 	for _, c := range plan {
 		fmt.Fprintf(s, "- %s: %s\n", c.Doc.Title(), c.URL)
 	}
-}
-
-// PlanPostedMessage resumes the planning session once its documents are on the issue.
-func PlanPostedMessage(plan []task.PlanComment) string {
-	var s strings.Builder
-	s.WriteString("foreman posted your documents on the issue:\n\n")
-	writePlanLinks(&s, plan)
-	s.WriteString("\nNow implement the plan under the instructions from the start of this session. End with the JSON outcome: pr_opened, blocked, or failed.\n")
-	return s.String()
 }
 
 func answeredDecisions(ds []task.Decision) []task.Decision {

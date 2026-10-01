@@ -1718,3 +1718,20 @@ Entry format:
   branch's later review decisions D113 to D115. Preserve both sets of changes.
 - **Consequence.** Code comments and progress references identify the intended
   decision after PR #6 merges.
+
+## D117 (amends D90). Start implementation with a fresh agent session
+
+- Date: 2026-10-01. Foreman token usage investigation.
+- **Context.** Planning and implementation shared one Claude session. On issue #7,
+  the implementation inherited about 214,000 tokens of planning context and the
+  session grew to about 386,000 tokens. Each later turn read that history again.
+- **Decision.** After the runner posts the four plan comments, it starts a new
+  implementer session from the task record and comment links. Planning questions
+  still resume the planning session; later decisions and review findings resume
+  the implementation session. The plan and implement stage files ask for a few
+  cohesive milestones and focused checks during editing, with full validation
+  after the code is complete.
+- **Consequence.** Implementation no longer carries planning tool output in its
+  context. The task file records the new session ID for later resumes. The local
+  configuration trials Sonnet for Claude work and lowers the implementer budget
+  from $100 to $25 per invocation.

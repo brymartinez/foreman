@@ -121,21 +121,16 @@ fi
 # A planning turn starts with "## Plan first", or resumes one with its answers.
 planning=
 if [[ " $* " == *" --resume "* ]]; then
-	if [[ "$2" == *"foreman posted your documents"* ]]; then
-		echo "claude implement" >>"$E2E_STATE/agents.log"
-		printf '%s' "$2" >"$E2E_STATE/plan-posted-prompt.txt"
-	else
-		echo "claude resume" >>"$E2E_STATE/agents.log"
-		printf '%s' "$2" >"$E2E_STATE/resume-prompt.txt"
-		[[ "$2" == *"planned, blocked, or failed"* ]] && planning=1
-	fi
+	echo "claude resume" >>"$E2E_STATE/agents.log"
+	printf '%s' "$2" >"$E2E_STATE/resume-prompt.txt"
+	[[ "$2" == *"planned, blocked, or failed"* ]] && planning=1
 elif [[ "$*" == *"## Plan first"* ]]; then
 	echo "claude plan" >>"$E2E_STATE/agents.log"
 	printf '%s' "$*" >"$E2E_STATE/prompt.txt"
 	planning=1
 else
 	echo "claude implement" >>"$E2E_STATE/agents.log"
-	printf '%s' "$*" >"$E2E_STATE/prompt.txt"
+	printf '%s' "$*" >"$E2E_STATE/plan-posted-prompt.txt"
 fi
 if [ -f "$E2E_STATE/block-once" ]; then
 	rm "$E2E_STATE/block-once"
@@ -202,7 +197,7 @@ scenario_runner() {
 	check "the first turn plans" contains "$state/prompt.txt" "## Plan first"
 	check "the four documents are posted on the issue" test "$(grep -c 'api --method POST repos/acme/widgets/issues/42/comments' "$state/gh.log")" = 4
 	check "the PRD comment has its heading" contains "$state/comment-3002.md" "## PRD"
-	check "the planning session implements the plan" contains "$state/plan-posted-prompt.txt" "- Implementation plan: https://github.com/acme/widgets/issues/42#issuecomment-3004"
+	check "a fresh session implements the posted plan" contains "$state/plan-posted-prompt.txt" "- Implementation plan: https://github.com/acme/widgets/issues/42#issuecomment-3004"
 	check "show lists the plan" bash -c "cd '$FOREMAN_CWD' && '$work/foreman' show 42 | grep -qF 'Plan          Analysis https://github.com/acme/widgets/issues/42#issuecomment-3001'"
 	rm "$sandbox/stages/pr.md"
 	check "a missing stage file stops foreman" bash -c "cd '$FOREMAN_CWD' && ! '$work/foreman' status 2>'$sandbox/err.txt' && grep -qF 'stages/pr.md' '$sandbox/err.txt'"
