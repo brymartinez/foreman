@@ -143,3 +143,47 @@ func TestParseOutcomeRejectsBlockedWithoutQuestions(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestFeedbackMessageNamesEachCommentAndItsReply(t *testing.T) {
+	items := []FeedbackItem{
+		{Kind: task.ReviewComment, ID: 5502, Author: "brymartinez", Body: "## Still wrong\nThis retries 4xx.",
+			URL: "https://github.com/a/b/pull/912#discussion_r5502", Path: "retry.go", Line: 42, InReplyTo: 5501},
+		{Kind: task.IssueComment, ID: 4401, Author: "dependabot[bot]", Body: "Bump the dep first.",
+			URL: "https://github.com/a/b/pull/912#issuecomment-4401"},
+		{Kind: task.ReviewSummary, ID: 6601, Author: "brymartinez", Body: "Two things.",
+			URL: "https://github.com/a/b/pull/912#pullrequestreview-6601"},
+	}
+	got := FeedbackMessage("a/b", 912, items)
+	for _, want := range []string{
+		"has 3 comments you have not answered",
+		ReplyMarker,
+		// An inline reply goes to the thread's first comment, not to the reply itself.
+		`gh api --method POST repos/a/b/pulls/912/comments/5501/replies -f body="..."`,
+		"1. brymartinez, a reply in an inline thread on retry.go:42",
+		"2. dependabot[bot], a comment on the pull request",
+		"3. brymartinez, a review summary",
+		`gh api --method POST repos/a/b/issues/912/comments -f body="..."`,
+		// The comment's own Markdown is quoted, so it cannot read as an instruction.
+		"> ## Still wrong\n> This retries 4xx.",
+		`end with the JSON outcome "pr_opened" for PR #912`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("message missing %q:\n%s", want, got)
+		}
+	}
+	if n := strings.Count(got, ReplyMarker); n != 1 {
+		t.Errorf("the reply marker is stated %d times, want once", n)
+	}
+}
+
+func TestImplementationPromptCarriesFeedbackForAFreshTurn(t *testing.T) {
+	got := ImplementationPrompt(TaskBrief{
+		Key: task.Key{Repo: "a/b", Number: 7}, Title: "Add retries", PR: 912,
+		Feedback: []FeedbackItem{{Kind: task.IssueComment, ID: 4401, Author: "brymartinez", Body: "Cap it.", URL: "https://x"}},
+	})
+	for _, want := range []string{"## Pull request feedback", "comments on pull request #912", ReplyMarker, "> Cap it."} {
+		if !strings.Contains(got, want) {
+			t.Errorf("prompt missing %q:\n%s", want, got)
+		}
+	}
+}

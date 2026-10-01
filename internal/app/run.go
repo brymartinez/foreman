@@ -44,8 +44,37 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 	// planPosted is set for the turn right after the plan went up on the issue, which
 	// resumes the planning session to implement it (D90).
 	planPosted := false
-	for reviewNext := rec.ReviewPending(); ; reviewNext = false {
-		if reviewNext {
+	// feedback is the comments on the PR this run has to answer, and rounds is how many
+	// times it has answered. A resumed task starts here (D120).
+	feedback, rec := a.unanswered(ctx, rec, log)
+	rounds := 0
+	for reviewNext := len(feedback) == 0 && rec.ReviewPending(); ; reviewNext = false {
+		// answered is set once a feedback turn has pushed a change, which goes to the
+		// reviewer like any other change rather than through another implementer turn.
+		answered := false
+		if len(feedback) > 0 {
+			rounds++
+			answering := feedback
+			feedback = nil
+			if rec, err = a.answerFeedback(ctx, final, rec, answering, log); err != nil {
+				return err
+			}
+			if rec.State != task.Reviewing && rec.State != task.ReadyForHuman {
+				// Blocked, failed, or stopped. The comments stay unanswered, so the next
+				// run asks for them again (D120).
+				return nil
+			}
+			// A turn that pushed nothing leaves the code its review already covers, so
+			// there is nothing to review and the task goes back to the developer.
+			if !rec.ReviewPending() {
+				if feedback, rec, err = a.beforeHandover(ctx, final, rec, rounds, log); err != nil || len(feedback) == 0 {
+					return err
+				}
+				continue
+			}
+			answered = true
+		}
+		if !answered && reviewNext {
 			// The PR is verified but its head has no review: pick up at the review. A
 			// PR that is no longer open can't be reviewed, so the implementer takes over.
 			pr, verifyErr := a.verifyPR(ctx, rec, agent.Outcome{PRNumber: rec.Delegation.PR})
@@ -61,8 +90,8 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 				fmt.Fprintf(log, "foreman: PR #%d head %s has no review yet; reviewing\n", pr.Key.Number, short(pr.HeadSHA))
 			}
 		}
-		if !reviewNext {
-			turn, runErr := a.implement(ctx, rec, findings, planPosted, log)
+		if !answered && !reviewNext {
+			turn, runErr := a.implement(ctx, rec, findings, planPosted, nil, log)
 			planPosted = false
 			step := "implementation"
 			if a.needsPlan(rec) {
@@ -110,8 +139,19 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 			if cur.State == task.Working && cur.ChangeRequestsSinceDecision() > a.fixRounds() {
 				escalateReview(cur, a.fixRounds(), a.Now())
 			}
-		})); err != nil || rec.State != task.Working {
+		})); err != nil {
 			return err
+		}
+		if rec.State != task.Working {
+			// A clean review hands the task to the gate, so this is the run's last
+			// chance to answer comments that arrived while it worked (D121).
+			if reviewErr == nil && review.Clean && rec.State == task.Reviewing {
+				if feedback, rec, err = a.beforeHandover(ctx, final, rec, rounds, log); err != nil || len(feedback) == 0 {
+					return err
+				}
+				continue
+			}
+			return nil
 		}
 		findings = rec.LatestReview()
 	}
@@ -165,7 +205,7 @@ func (a App) needsPlan(rec *task.Record) bool {
 	return !rec.PlanPosted() && rec.Delegation.PR == 0
 }
 
-func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Review, planPosted bool, log io.Writer) (agent.Turn, error) {
+func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Review, planPosted bool, feedback []PRComment, log io.Writer) (agent.Turn, error) {
 	d := rec.Delegation
 	adapter, ok := a.Agents[d.Implementer.Agent]
 	if !ok {
@@ -182,6 +222,8 @@ func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Rev
 		resume = agent.ResumeMessage(decs, open, planning)
 	} else if planPosted {
 		resume = agent.PlanPostedMessage(rec.Plan)
+	} else if len(feedback) > 0 {
+		resume = agent.FeedbackMessage(rec.Repo, d.PR, feedbackItems(feedback))
 	} else if findings != nil {
 		resume = agent.FindingsMessage(*findings)
 	}
@@ -201,6 +243,7 @@ func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Rev
 	if latest := rec.LatestReview(); latest != nil && !latest.Clean {
 		brief.OpenFindings = latest.Findings
 	}
+	brief.PR, brief.Feedback = d.PR, feedbackItems(feedback)
 	// The repo layer comes from the worktree: the committed .foreman/ on the base (D48).
 	implement, err := a.Stages.Resolve(d.Worktree, task.StageImplement)
 	if err != nil {
@@ -228,6 +271,57 @@ func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Rev
 			cur.Delegation.Implementer = s
 		}))
 	})
+}
+
+// answerFeedback runs one turn that answers the comments it is given. The PR head
+// before the turn is what tells a reply-only turn from one that changed code (D120).
+func (a App) answerFeedback(ctx, final context.Context, rec *task.Record, comments []PRComment, log io.Writer) (*task.Record, error) {
+	d := rec.Delegation
+	headBefore := d.PRHead
+	fmt.Fprintf(log, "foreman: %s\n", feedbackNote(len(comments), d.PR))
+	turn, runErr := a.implement(ctx, rec, nil, false, comments, log)
+	var pr *PullRequest
+	if runErr == nil && turn.Outcome.Status == agent.PROpened {
+		if pr, runErr = a.verifyPR(ctx, rec, turn.Outcome); runErr == nil {
+			fmt.Fprintf(log, "foreman: verified PR #%d %s at %s\n", pr.Key.Number, pr.URL, short(pr.HeadSHA))
+		}
+	}
+	return a.update(final, rec.Key, existing(func(cur *task.Record) {
+		applyFeedbackTurn(cur, turn, pr, runErr, comments, headBefore, a.Now())
+		if runErr != nil {
+			applyStop(ctx, cur, "answering PR feedback", log, a.Now())
+		}
+		addUsage(&cur.Usage, turn.Usage)
+	}))
+}
+
+// applyFeedbackTurn records a turn that answered comments on the pull request. The
+// comments it was given count as answered only once the turn finished, so a run that
+// failed or asked a question leaves them for the next one. A turn that pushed nothing
+// leaves the code its review already covers, so the task goes straight back to the
+// developer with its CI result; a turn that pushed goes through the review and CI flow
+// like any other change (D120).
+func applyFeedbackTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error, comments []PRComment, headBefore string, now time.Time) {
+	ci := rec.CI
+	applyTurn(rec, turn, pr, runErr, now)
+	if runErr != nil || turn.Outcome.Status != agent.PROpened {
+		return
+	}
+	rec.MarkFeedbackHandled(answered(comments), now)
+	if pr.HeadSHA != headBefore {
+		return
+	}
+	rec.CI = ci
+	d := rec.Delegation
+	latest := rec.LatestReview()
+	covered := latest != nil && latest.Clean && latest.PR == d.PR && latest.Head != "" && latest.Head == pr.HeadSHA
+	// The same bar the gate applies: a clean review of this head and CI that finished.
+	// Without both, the task stays under review and the gate hands it over (D120).
+	if covered && ci != nil && ci.State != task.CIPending {
+		rec.State = task.ReadyForHuman
+		rec.LastOutcome = &task.Outcome{Status: "feedback_answered",
+			Summary: fmt.Sprintf("answered %d %s on PR #%d; no change was needed", len(comments), plural(len(comments), "comment", "comments"), d.PR), At: now}
+	}
 }
 
 // review runs the competing agent in a fresh, read-only session.

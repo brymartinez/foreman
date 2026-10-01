@@ -96,6 +96,7 @@ type fakeAgent struct {
 	reviewErr error
 	reviewed  []string
 	during    func() // runs inside Start, while the turn is in progress
+	onResume  func() // the same, inside Resume
 }
 
 func (f *fakeAgent) next() (agent.Turn, error) {
@@ -123,6 +124,9 @@ func (f *fakeAgent) Review(_ context.Context, in agent.StartInput) (agent.Review
 func (f *fakeAgent) Name() task.Agent { return f.name }
 func (f *fakeAgent) Resume(_ context.Context, s task.Session, in agent.StartInput) (agent.Turn, error) {
 	f.resumed = append(f.resumed, s.ID+": "+in.Prompt)
+	if f.onResume != nil {
+		f.onResume()
+	}
 	if f.resumeErr != nil {
 		return agent.Turn{}, f.resumeErr
 	}
