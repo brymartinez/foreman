@@ -118,3 +118,19 @@ func TestParseSimple(t *testing.T) {
 		t.Errorf("logs parsed as %+v, %v", got, err)
 	}
 }
+
+func TestParseResume(t *testing.T) {
+	for _, argv := range [][]string{{"resume", "825"}, {"resume", "#825"}} {
+		got, err := Parse(argv)
+		if err != nil || got.Name != Resume || got.Issue != 825 || got.Repo != "" {
+			t.Errorf("Parse(%q) = %+v, %v", argv, got, err)
+		}
+	}
+	got, err := Parse([]string{"resume", "midsoln/foreman#7"})
+	if err != nil || got.Repo != "midsoln/foreman" || got.Issue != 7 {
+		t.Errorf("qualified resume = %+v, %v", got, err)
+	}
+	if _, err := Parse([]string{"resume"}); err == nil {
+		t.Error("resume without an issue must fail")
+	}
+}

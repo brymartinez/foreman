@@ -31,6 +31,9 @@ func (s stubSource) Start(context.Context, app.StartRequest) (*task.Record, erro
 func (s stubSource) Cancel(context.Context, *task.Record) (*task.Record, error) {
 	return s.rec, s.err
 }
+func (s stubSource) Resume(context.Context, task.Key) (*task.Record, error) {
+	return s.rec, s.err
+}
 
 func TestApplyFillsTheInboxFromARefresh(t *testing.T) {
 	report := app.InboxReport{Current: []app.InboxEntry{

@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/brymartinez/foreman/internal/app"
 	"github.com/brymartinez/foreman/internal/task"
@@ -232,5 +234,68 @@ func TestPostIssueCommentCreatesOrEdits(t *testing.T) {
 	}
 	if got, err := c.GetIssueComment(context.Background(), "a/b", 3301); err != nil || got.Body != "@team ## PRD" {
 		t.Errorf("get = %+v, %v", got, err)
+	}
+}
+
+func TestPullRequestCommentsReadsEveryThread(t *testing.T) {
+	var mu sync.Mutex
+	var calls [][]string
+	run := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		mu.Lock()
+		calls = append(calls, args)
+		mu.Unlock()
+		switch path := args[1]; {
+		case strings.HasSuffix(path, "/issues/912/comments"):
+			return os.ReadFile("testdata/pr_issue_comments.json")
+		case strings.HasSuffix(path, "/pulls/912/comments"):
+			return os.ReadFile("testdata/pr_review_comments.json")
+		case strings.HasSuffix(path, "/pulls/912/reviews"):
+			return os.ReadFile("testdata/pr_reviews.json")
+		}
+		return nil, fmt.Errorf("unexpected gh call: %q", args)
+	}
+	got, err := Client{Run: run}.PullRequestComments(context.Background(), task.Key{Repo: "ridezoomo/armada-backend", Number: 912})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range calls {
+		if !slices.Contains(args, "--paginate") || !slices.Contains(args, "--slurp") {
+			t.Errorf("argv %q reads one page only", args)
+		}
+	}
+	// The approval with no body is dropped; it has nothing to answer.
+	if len(got) != 5 {
+		t.Fatalf("got %d comments, want 5: %+v", len(got), got)
+	}
+	want := []app.PRComment{
+		{Kind: task.IssueComment, ID: 4401, Author: "brymartinez", Body: "Looks good, ship it.",
+			URL: "https://github.com/ridezoomo/armada-backend/pull/912#issuecomment-4401", UpdatedAt: time.Date(2026, 9, 25, 9, 0, 0, 0, time.UTC)},
+		{Kind: task.IssueComment, ID: 4402, Author: "brymartinez", Body: "<!-- foreman:reply -->\nAnswered: the retry is capped.",
+			URL: "https://github.com/ridezoomo/armada-backend/pull/912#issuecomment-4402", UpdatedAt: time.Date(2026, 9, 25, 9, 10, 0, 0, time.UTC)},
+		{Kind: task.ReviewComment, ID: 5501, Author: "brymartinez", Body: "This retries 4xx too.",
+			URL: "https://github.com/ridezoomo/armada-backend/pull/912#discussion_r5501", UpdatedAt: time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC),
+			Path: "internal/retry/retry.go", Line: 42},
+		{Kind: task.ReviewComment, ID: 5502, Author: "dependabot[bot]", Body: "Same here.",
+			URL: "https://github.com/ridezoomo/armada-backend/pull/912#discussion_r5502", UpdatedAt: time.Date(2026, 9, 25, 10, 5, 0, 0, time.UTC),
+			Path: "internal/retry/retry.go", Line: 50, InReplyTo: 5501},
+		{Kind: task.ReviewSummary, ID: 6601, Author: "brymartinez", Body: "Two things to fix before this goes in.",
+			URL: "https://github.com/ridezoomo/armada-backend/pull/912#pullrequestreview-6601", UpdatedAt: time.Date(2026, 9, 25, 10, 10, 0, 0, time.UTC)},
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("comment %d =\n %+v\nwant %+v", i, got[i], w)
+		}
+	}
+}
+
+func TestPullRequestCommentsReportsAFailedThread(t *testing.T) {
+	run := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if strings.HasSuffix(args[1], "/reviews") {
+			return nil, errors.New("gh: Server Error (HTTP 500)")
+		}
+		return []byte("[[]]"), nil
+	}
+	if _, err := (Client{Run: run}).PullRequestComments(context.Background(), task.Key{Repo: "a/b", Number: 1}); err == nil {
+		t.Fatal("a failed thread must not look like an empty conversation")
 	}
 }

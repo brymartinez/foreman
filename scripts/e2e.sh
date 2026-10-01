@@ -106,8 +106,28 @@ case "$1 $2" in
 	n=$(echo "$4" | sed -n 's#.*/issues/\([0-9]*\)/comments#\1#p')
 	printf '%s' "${6#body=}" >"$s/comment-$id.md"
 	body=$(sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' "$s/comment-$id.md" | awk '{printf "%s\\n", $0}')
+	# A reply in an inline thread answers that thread and nothing else.
+	case "$4" in
+	*/replies)
+		printf '{"id":%s,"html_url":"https://github.com/acme/widgets/pull/0#discussion_r%s","body":"%s"}\n' "$id" "$id" "$body"
+		exit 0 ;;
+	esac
+	# A comment on a pull request joins its conversation, so the next read sees it.
+	conv="$s/conv-repos-acme-widgets-issues-$n-comments.json"
+	if [ -f "$conv" ]; then
+		entry=$(printf '{"id":%s,"html_url":"https://github.com/acme/widgets/pull/%s#issuecomment-%s","body":"%s","updated_at":"2026-10-01T10:00:00Z","user":{"login":"brymartinez"}}' "$id" "$n" "$id" "$body")
+		cur=$(cat "$conv")
+		if [ "$cur" = "[[]]" ]; then printf '[[%s]]\n' "$entry" >"$conv"; else printf '%s,%s]]\n' "${cur%]]}" "$entry" >"$conv"; fi
+	fi
 	printf '{"id":%s,"html_url":"https://github.com/acme/widgets/issues/%s#issuecomment-%s","body":"%s"}\n' "$id" "${n:-0}" "$id" "$body" | tee "$s/api-$id.json" ;;
 "api repos/"*)
+	# A pull request's conversation: the comments, the inline comments, and the reviews.
+	case "$2" in
+	*/issues/*/comments | */pulls/*/comments | */pulls/*/reviews)
+		f="$s/conv-$(echo "$2" | tr '/' '-').json"
+		if [ -f "$f" ]; then cat "$f"; else echo '[[]]'; fi
+		exit 0 ;;
+	esac
 	n=${2##*/}
 	if [ -f "$s/gone-$n" ]; then
 		echo '{"message":"Not Found","status":"404"}'
@@ -131,9 +151,24 @@ fi
 # A planning turn starts with "## Plan first", or resumes one with its answers.
 planning=
 if [[ " $* " == *" --resume "* ]]; then
-	echo "claude resume" >>"$E2E_STATE/agents.log"
-	printf '%s' "$2" >"$E2E_STATE/resume-prompt.txt"
-	[[ "$2" == *"planned, blocked, or failed"* ]] && planning=1
+	if [[ "$2" == *"foreman posted your documents"* ]]; then
+		echo "claude implement" >>"$E2E_STATE/agents.log"
+		printf '%s' "$2" >"$E2E_STATE/plan-posted-prompt.txt"
+	else
+		echo "claude resume" >>"$E2E_STATE/agents.log"
+		printf '%s' "$2" >"$E2E_STATE/resume-prompt.txt"
+		[[ "$2" == *"planned, blocked, or failed"* ]] && planning=1
+		# Answering PR feedback: reply where the comment is and change no code.
+		if [[ "$2" == *"you have not answered"* ]]; then
+			echo "claude feedback" >>"$E2E_STATE/agents.log"
+			printf '%s' "$2" >>"$E2E_STATE/feedback-prompt.txt"
+			b=$(git branch --show-current); i=${b#*/}; pr=$((900 + ${i%%-*}))
+			gh api --method POST "repos/acme/widgets/issues/$pr/comments" -f body="<!-- foreman:reply --> Capped at three." >/dev/null
+			printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"pr_opened","summary":"answered the comment","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s","validation":[{"command":"go test ./...","passed":true}],"questions":[]}}\n' "$pr" "$pr"
+			exit 0
+		fi
+	fi
+
 elif [[ "$*" == *"## Plan first"* ]]; then
 	echo "claude plan" >>"$E2E_STATE/agents.log"
 	printf '%s' "$*" >"$E2E_STATE/prompt.txt"
@@ -446,7 +481,39 @@ scenario_tui() {
 	mv "$sandbox/implement.md" "$sandbox/stages/implement.md"
 }
 
-scenarios=${*:-runner notify logs inbox inbox_lifecycle rereview respond cancel tui}
+scenario_feedback() {
+	echo "feedback: a comment on the PR comes back to the agent"
+	setup feedback
+	echo '[{"name":"test","bucket":"pass","link":"https://ci/1"}]' >"$state/checks.json"
+	foreman start 42 --agent claude >/dev/null
+	check "the run reaches the developer" wait_status "READY_FOR_HUMAN"
+
+	# The developer comments on the pull request.
+	conv="$state/conv-repos-acme-widgets-issues-942-comments.json"
+	printf '[[{"id":4401,"html_url":"https://github.com/acme/widgets/pull/942#issuecomment-4401","body":"Cap the retries.","updated_at":"2026-10-01T09:00:00Z","user":{"login":"brymartinez"}}]]\n' >"$conv"
+	foreman status >/dev/null
+	check "a new comment makes the task REVIEWED" wait_status "REVIEWED" 5
+	foreman inbox --non-interactive >"$sandbox/inbox.txt"
+	check "inbox lists it under REVIEWED" contains "$sandbox/inbox.txt" "REVIEWED"
+	check "inbox counts the comment and names who left it" contains "$sandbox/inbox.txt" "PR #942 · 1 comment from brymartinez"
+
+	foreman resume 42 >"$sandbox/resume.txt"
+	check "resume reports the same PR" contains "$sandbox/resume.txt" "Resumed acme/widgets#42"
+	check "the task comes back once the comment is answered" wait_status "READY_FOR_HUMAN" 15
+	check "the agent saw the comment" contains "$state/feedback-prompt.txt" "Cap the retries."
+	check "and was told where to reply" contains "$state/feedback-prompt.txt" "repos/acme/widgets/issues/942/comments"
+	check "the agent kept its session" test "$(turns 'claude feedback')" = 1
+	check "answering needed no new review" test "$(turns 'codex review')" = 1
+
+	# The agent's own reply carries the marker, so it is not read back as feedback.
+	foreman status >"$sandbox/status.txt"
+	check "the reply did not start another round" contains "$sandbox/status.txt" "READY_FOR_HUMAN"
+	check "and the agent was not asked again" test "$(turns 'claude feedback')" = 1
+	foreman show 42 >"$sandbox/show.txt"
+	check "show lists the answered comment" contains "$sandbox/show.txt" "answered"
+}
+
+scenarios=${*:-runner notify logs inbox inbox_lifecycle rereview respond cancel feedback tui}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"

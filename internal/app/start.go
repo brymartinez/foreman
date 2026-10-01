@@ -96,8 +96,11 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		// The same branch has the same PR, so a restart can pick up at its review (D63).
 		// Another implementer starts over: its reviewer wrote the existing PR. A
 		// PR_CLOSED task's PR cannot be picked up, and keeping its number would have
-		// the readiness gate end this run on its next refresh (D107).
-		if was != task.PRClosed && prev != nil && prev.Branch == wt.Branch && prev.Implementer.Agent == req.Agent {
+		// the readiness gate end this run on its next refresh (D107). Comments still
+		// waiting on the PR keep it for any agent, because the run reads them through
+		// that number and the new agent has to answer them first (D126).
+		sameAgent := prev != nil && prev.Implementer.Agent == req.Agent
+		if was != task.PRClosed && prev != nil && prev.Branch == wt.Branch && (sameAgent || len(cur.UnhandledFeedback()) > 0) {
 			cur.Delegation.PR, cur.Delegation.PRURL, cur.Delegation.PRHead = prev.PR, prev.PRURL, prev.PRHead
 		}
 		cur.LastOutcome = &task.Outcome{Status: "started", Summary: fmt.Sprintf("dispatched to %s", req.Agent), At: now}
@@ -169,6 +172,10 @@ func (a App) startable(rec *task.Record) error {
 		return nil
 	case task.NeedsDecision:
 		return fmt.Errorf("%s is waiting for your decision; use foreman respond %d", ref, rec.Number)
+	case task.Reviewed:
+		// Starting would rebuild the delegation and lose the session that wrote the PR
+		// the comments are on, so the task continues instead (D121).
+		return fmt.Errorf("%s has PR feedback to answer; use foreman resume %d", ref, rec.Number)
 	}
 	return fmt.Errorf("%s is %s", ref, rec.State)
 }

@@ -11,24 +11,42 @@ import (
 	"github.com/brymartinez/foreman/internal/task"
 )
 
-// InboxSelection is the user's choice from the current inbox refresh.
+// InboxSelection is the user's choice from the current inbox refresh. Resume means
+// the task already has a run waiting on PR feedback, so it continues instead of
+// starting (D121).
 type InboxSelection struct {
 	Key         task.Key
 	Agent       task.Agent
 	ContextFile string
+	Resume      bool
 }
 
-// Delegable lists the items in the current refresh that can be handed to an agent.
-// Pull requests are left out, because only an issue can be delegated, and so are
-// closed items and ones that only a tracked re-fetch found.
+// Delegable lists the items in the current refresh that the developer can hand over.
+// Pull requests are left out, because only an issue can be delegated, and so are closed
+// items. An item foreman has never delegated is offered unless only a tracked re-fetch
+// found it. One it has delegated is offered only when the run has stopped and is the
+// developer's to move: FAILED, which starts again, and REVIEWED, which resumes. Work an
+// agent still holds stays in DELEGATED WORK (D124).
 func Delegable(report InboxReport) []InboxEntry {
 	var choices []InboxEntry
 	for _, entry := range report.Current {
-		if entry.Item.Kind != task.PullRequest && !slices.Contains(entry.Item.Reasons, task.Tracked) && entry.Item.State != "closed" && entry.Item.State != "merged" {
+		if CanDelegate(entry) {
 			choices = append(choices, entry)
 		}
 	}
 	return choices
+}
+
+// CanDelegate reports one entry against those rules. It is exported so the renderer
+// can report activity for exactly the items the picker leaves out.
+func CanDelegate(entry InboxEntry) bool {
+	if entry.Item.Kind == task.PullRequest || entry.Item.State == "closed" || entry.Item.State == "merged" {
+		return false
+	}
+	if entry.Delegated {
+		return entry.State == task.Failed || entry.State == task.Reviewed
+	}
+	return !slices.Contains(entry.Item.Reasons, task.Tracked)
 }
 
 // ChooseInbox prints the delegable issues in the current refresh and collects one
@@ -44,7 +62,11 @@ func ChooseInbox(in *bufio.Reader, out io.Writer, report InboxReport) (*InboxSel
 	fmt.Fprintln(out, "INBOX")
 	for i, entry := range choices {
 		key := entry.Item.Key
-		fmt.Fprintf(out, "  %d. %s#%d  %s · %s\n", i+1, key.Repo, key.Number, entry.Item.Title, strings.Join(entry.Changes, ", "))
+		detail := strings.Join(entry.Changes, ", ")
+		if entry.Delegated {
+			detail = string(entry.State) + " · " + detail
+		}
+		fmt.Fprintf(out, "  %d. %s#%d  %s · %s\n", i+1, key.Repo, key.Number, entry.Item.Title, detail)
 	}
 	fmt.Fprintln(out, "  q. Quit")
 
@@ -58,6 +80,12 @@ func ChooseInbox(in *bufio.Reader, out io.Writer, report InboxReport) (*InboxSel
 		if err != nil || n < 1 || n > len(choices) {
 			fmt.Fprintf(out, "Please choose a number from 1 to %d, or q to quit.\n", len(choices))
 			continue
+		}
+
+		// A task with feedback waiting keeps its agent, worktree, and session, so there
+		// is nothing left to ask.
+		if choice := choices[n-1]; choice.State == task.Reviewed {
+			return &InboxSelection{Key: choice.Item.Key, Resume: true}, nil
 		}
 
 		agent, ok := chooseAgent(in, out)

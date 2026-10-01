@@ -1,0 +1,20 @@
+[
+  [
+    {
+      "id": 4401,
+      "html_url": "https://github.com/ridezoomo/armada-backend/pull/912#issuecomment-4401",
+      "body": "Looks good, ship it.",
+      "updated_at": "2026-09-25T09:00:00Z",
+      "user": { "login": "brymartinez" }
+    }
+  ],
+  [
+    {
+      "id": 4402,
+      "html_url": "https://github.com/ridezoomo/armada-backend/pull/912#issuecomment-4402",
+      "body": "<!-- foreman:reply -->\nAnswered: the retry is capped.",
+      "updated_at": "2026-09-25T09:10:00Z",
+      "user": { "login": "brymartinez" }
+    }
+  ]
+]

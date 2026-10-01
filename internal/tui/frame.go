@@ -108,10 +108,16 @@ func inboxPane(m Model) pane {
 	p := pane{title: "INBOX", empty: "Nothing to delegate. Press r to refresh."}
 	for _, e := range m.Inbox {
 		k := e.Item.Key
-		p.rows = append(p.rows, row{lines: []string{
-			fmt.Sprintf("%s#%d  %s", k.Repo, k.Number, e.Item.Title),
-			"  " + strings.Join(e.Changes, ", "),
-		}})
+		detail := strings.Join(e.Changes, ", ")
+		r := row{lines: []string{fmt.Sprintf("%s#%d  %s", k.Repo, k.Number, e.Item.Title)}}
+		if e.Delegated {
+			// INBOX only ever offers delegated work the developer can move, so its state
+			// says which key is waiting: start again, or answer the PR (D124).
+			detail = render.JoinFacts(string(e.State), detail)
+			r.accent, r.accentLine, r.color = string(e.State), 1, taskColor(e.State)
+		}
+		r.lines = append(r.lines, "  "+detail)
+		p.rows = append(p.rows, r)
 	}
 	return p
 }
@@ -429,7 +435,7 @@ func highlight(line, word, color string) string {
 
 func taskColor(state task.State) string {
 	switch state {
-	case task.NeedsDecision, task.ReadyForHuman:
+	case task.NeedsDecision, task.ReadyForHuman, task.Reviewed:
 		return yellow
 	case task.Failed:
 		return red

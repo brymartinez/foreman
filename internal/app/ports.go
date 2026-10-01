@@ -51,6 +51,20 @@ type PullRequest struct {
 	IsCrossRepository bool
 }
 
+// PRComment is one comment on a pull request. Path, Line, and InReplyTo are set for
+// an inline review comment, and are what tell the agent where to reply (D119).
+type PRComment struct {
+	Kind      task.CommentKind
+	ID        int64
+	Author    string
+	Body      string
+	URL       string
+	UpdatedAt time.Time
+	Path      string
+	Line      int
+	InReplyTo int64
+}
+
 type RepoInfo struct {
 	Repo          task.Repo
 	DefaultBranch string
@@ -85,6 +99,10 @@ type GitHubClient interface {
 	PostIssueComment(ctx context.Context, issue task.Key, id int64, body string) (IssueComment, error)
 	// GetIssueComment reads one comment. A missing comment returns ErrGone.
 	GetIssueComment(ctx context.Context, repo task.Repo, id int64) (IssueComment, error)
+	// PullRequestComments reads every comment on a pull request: the conversation
+	// comments, the inline review comments and their replies, and the body of each
+	// submitted review. A review with no body is left out (D119).
+	PullRequestComments(ctx context.Context, pr task.Key) ([]PRComment, error)
 }
 
 type IssueComment struct {

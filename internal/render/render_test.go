@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/brymartinez/foreman/internal/app"
 	"github.com/brymartinez/foreman/internal/task"
@@ -190,6 +191,23 @@ func TestShowCI(t *testing.T) {
 		CI:         &task.CIStatus{State: task.CIFailing, Failing: []task.CheckRun{{Name: "test", Link: "https://ci/1"}}},
 	})
 	for _, want := range []string{"CI            failing · checked ", "Failing checks\n  ✗ test https://ci/1\n"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("missing %q in:\n%s", want, buf.String())
+		}
+	}
+}
+
+func TestShowFeedback(t *testing.T) {
+	var buf bytes.Buffer
+	Show(&buf, &task.Record{
+		Key: task.Key{Repo: "a/b", Number: 825}, State: task.Reviewed,
+		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912},
+		Feedback: []task.Feedback{
+			{Kind: task.IssueComment, ID: 1, Author: "dev", URL: "https://x/1", HandledAt: time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)},
+			{Kind: task.ReviewComment, ID: 2, Author: "bot", URL: "https://x/2"},
+		},
+	})
+	for _, want := range []string{"Pull request comments\n", "dev · answered ", "https://x/1\n", "bot · waiting · https://x/2\n"} {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("missing %q in:\n%s", want, buf.String())
 		}
@@ -442,5 +460,29 @@ func TestInboxCountsWaitingQuestions(t *testing.T) {
 		Decisions: []task.Decision{{Question: q}, {Question: task.Question{Issue: "Cap retries?"}}}}}})
 	if want := "a/b · Retry 4xx? (+1 more)"; !strings.Contains(buf.String(), want) {
 		t.Errorf("missing %q in:\n%s", want, buf.String())
+	}
+}
+
+func TestInboxReviewedSection(t *testing.T) {
+	k := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+	var buf bytes.Buffer
+	Inbox(&buf, app.InboxReport{
+		Reviewed: []*task.Record{{Key: k, Title: "Provider retries",
+			Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912,
+				PRURL: "https://github.com/ridezoomo/armada-backend/pull/912"},
+			Feedback: []task.Feedback{
+				{Kind: task.ReviewComment, ID: 1, Author: "brymartinez"},
+				{Kind: task.IssueComment, ID: 2, Author: "dependabot[bot]", HandledAt: time.Now()},
+			}}},
+		WaitingChanges: map[task.Key][]string{k: {"1 comment to answer on PR #912"}},
+	})
+	want := `REVIEWED
+  ridezoomo/armada-backend#825  Provider retries
+        ridezoomo/armada-backend · PR #912 · 1 comment from brymartinez
+        https://github.com/ridezoomo/armada-backend/pull/912
+        • 1 comment to answer on PR #912
+`
+	if buf.String() != want {
+		t.Errorf("got:\n%s\nwant:\n%s", buf.String(), want)
 	}
 }

@@ -14,17 +14,23 @@ import (
 type InboxEntry struct {
 	Item    InboxItem
 	Changes []string
+	// Delegated says foreman has a run for this item, and State is that run's state.
+	// Together they are what keeps work already in hand out of INBOX (D124).
+	Delegated bool
+	State     task.State
 }
 
 // InboxReport lists each item once, in the section with the highest priority:
-// NEEDS DECISION, then READY FOR YOU, then CHANGED, then NEW.
+// NEEDS DECISION, then REVIEWED, then READY FOR YOU, then CHANGED, then NEW.
 type InboxReport struct {
 	New     []InboxEntry
 	Changed []InboxEntry
 	// Current contains every item in the current refresh, including unchanged items.
 	// It is used by the interactive picker; the report sections retain their diff semantics.
-	Current        []InboxEntry
-	NeedsDecision  []*task.Record
+	Current       []InboxEntry
+	NeedsDecision []*task.Record
+	// Reviewed holds the tasks whose PR has comments the agent has not answered (D119).
+	Reviewed       []*task.Record
 	Ready          []*task.Record
 	WaitingChanges map[task.Key][]string
 	Unchanged      int
@@ -137,13 +143,14 @@ const goneNote = "no longer on GitHub or no longer accessible; foreman stopped c
 // developer, for issues and pull requests alike. The searches still run and the
 // snapshots still record every reason, so a lost reason is still reported and the
 // items come back the moment the setting does. Delegated work waiting on the
-// developer is not an inbox find, so it is left alone. The note for an item that left
+// developer is not an inbox find, so it is left alone, and a delegated FAILED or
+// REVIEWED task is how the developer restarts or resumes it (D126). The note for an item that left
 // GitHub is filtered where it is built, because it carries no reasons of its own.
 func hideMentionOnly(r *InboxReport, stored map[task.Key][]task.InboxReason) {
 	keep := func(entries []InboxEntry) []InboxEntry {
 		var out []InboxEntry
 		for _, e := range entries {
-			if !mentionOnly(involvement(e.Item, stored)) {
+			if (e.Delegated && CanDelegate(e)) || !mentionOnly(involvement(e.Item, stored)) {
 				out = append(out, e)
 			}
 		}
@@ -297,7 +304,7 @@ func Reconcile(items []InboxItem, recs []*task.Record, notes map[task.Key][]stri
 			rec = discovered(it, now)
 			byKey[it.Key] = rec
 			dirty = append(dirty, rec)
-			report.Current = append(report.Current, InboxEntry{Item: it, Changes: reasonText(it.Reasons)})
+			report.Current = append(report.Current, entryFor(rec, it, reasonText(it.Reasons)))
 			if !needsHuman(rec) {
 				report.New = append(report.New, InboxEntry{Item: it, Changes: reasonText(it.Reasons)})
 			}
@@ -313,7 +320,7 @@ func Reconcile(items []InboxItem, recs []*task.Record, notes map[task.Key][]stri
 		if len(current) == 0 {
 			current = []string{"no change"}
 		}
-		report.Current = append(report.Current, InboxEntry{Item: it, Changes: current})
+		report.Current = append(report.Current, entryFor(rec, it, current))
 		switch {
 		case needsHuman(rec):
 			if len(changes) > 0 {
@@ -338,6 +345,8 @@ func Reconcile(items []InboxItem, recs []*task.Record, notes map[task.Key][]stri
 		switch r.State {
 		case task.NeedsDecision:
 			report.NeedsDecision = append(report.NeedsDecision, r)
+		case task.Reviewed:
+			report.Reviewed = append(report.Reviewed, r)
 		case task.ReadyForHuman:
 			report.Ready = append(report.Ready, r)
 		}
@@ -345,8 +354,14 @@ func Reconcile(items []InboxItem, recs []*task.Record, notes map[task.Key][]stri
 	return report, dirty
 }
 
+// entryFor is one item in the current refresh, carrying the state of the run foreman
+// has for it. INBOX reads that state to leave work already in hand alone (D124).
+func entryFor(rec *task.Record, it InboxItem, changes []string) InboxEntry {
+	return InboxEntry{Item: it, Changes: changes, Delegated: rec.Delegation != nil, State: rec.State}
+}
+
 func needsHuman(r *task.Record) bool {
-	return r.State == task.NeedsDecision || r.State == task.ReadyForHuman
+	return r.State == task.NeedsDecision || r.State == task.ReadyForHuman || r.State == task.Reviewed
 }
 
 func discovered(it InboxItem, now time.Time) *task.Record {

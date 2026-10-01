@@ -17,6 +17,8 @@ type Source interface {
 	Tasks(ctx context.Context) ([]*task.Record, error)
 	Start(ctx context.Context, req app.StartRequest) (*task.Record, error)
 	Cancel(ctx context.Context, rec *task.Record) (*task.Record, error)
+	// Resume continues a REVIEWED task so its agent answers the comments on its PR.
+	Resume(ctx context.Context, key task.Key) (*task.Record, error)
 }
 
 var _ Source = app.App{}

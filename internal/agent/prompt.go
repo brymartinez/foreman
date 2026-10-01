@@ -7,6 +7,12 @@ import (
 	"github.com/brymartinez/foreman/internal/task"
 )
 
+// ReplyMarker opens every reply the agent posts on a pull request. The agent answers
+// through the developer's own gh login, so the author cannot tell its replies from the
+// developer's comments, and a comment the developer writes has to count. Markdown
+// hides the marker, and foreman drops any comment that carries it (D120).
+const ReplyMarker = "<!-- foreman:reply -->"
+
 type TaskBrief struct {
 	Key       task.Key
 	Title     string
@@ -35,6 +41,10 @@ type TaskBrief struct {
 	Plan []task.PlanComment
 	// PRD is the posted PRD's text, for the reviewer, who has no network.
 	PRD string
+	// PR is the task's pull request, and Feedback the comments on it still waiting for
+	// an answer when a fresh turn replaces a session that could not be resumed (D120).
+	PR       int
+	Feedback []FeedbackItem
 }
 
 // ImplementationPrompt is the execution contract handed to the implementation agent.
@@ -70,6 +80,12 @@ func ImplementationPrompt(b TaskBrief) string {
 			fmt.Fprintf(&s, "- Q: %s\n  A: %s\n", d.Question.Issue, d.Answer)
 		}
 		s.WriteString("\n")
+	}
+
+	if len(b.Feedback) > 0 {
+		fmt.Fprintf(&s, "## Pull request feedback\n\nThese comments on pull request #%d are waiting for an answer.\n\n", b.PR)
+		feedbackRules(&s, b.Key.Repo, b.PR)
+		writeFeedback(&s, b.Key.Repo, b.PR, b.Feedback)
 	}
 
 	if len(b.OpenFindings) > 0 {

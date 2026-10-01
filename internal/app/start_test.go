@@ -98,6 +98,7 @@ type fakeAgent struct {
 	reviewErr error
 	reviewed  []string
 	during    func() // runs inside Start, while the turn is in progress
+	onResume  func() // the same, inside Resume
 }
 
 func (f *fakeAgent) next() (agent.Turn, error) {
@@ -126,6 +127,9 @@ func (f *fakeAgent) Name() task.Agent { return f.name }
 func (f *fakeAgent) Resume(_ context.Context, s task.Session, in agent.StartInput) (agent.Turn, error) {
 	f.resumed = append(f.resumed, s.ID+": "+in.Prompt)
 	f.stages = append(f.stages, in.Stage)
+	if f.onResume != nil {
+		f.onResume()
+	}
 	if f.resumeErr != nil {
 		return agent.Turn{}, f.resumeErr
 	}
@@ -296,6 +300,39 @@ func TestStartAcceptsPRClosed(t *testing.T) {
 	// refresh, and a closed PR cannot be picked up at its review anyway.
 	if rec.Delegation.PR != 0 || rec.Delegation.Branch != "feat/825-provider-retries" {
 		t.Errorf("the restart carried the closed PR: pr %d branch %s", rec.Delegation.PR, rec.Delegation.Branch)
+	}
+}
+
+func TestRestartWithAnotherAgentKeepsThePRWithCommentsWaiting(t *testing.T) {
+	f := newFixture()
+	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.Failed,
+		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex, ID: "old"}, Branch: "feat/825-provider-retries", PR: 912, PRHead: "abc"},
+		Feedback:   []task.Feedback{{Kind: task.IssueComment, ID: 1, Digest: "d"}}}
+	rec, err := f.app.Start(context.Background(), startReq(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := rec.Delegation
+	if d.Implementer.Agent != task.Claude || d.Implementer.ID != "" {
+		t.Errorf("implementer = %+v, want a fresh claude session", d.Implementer)
+	}
+	if d.PR != 912 || d.PRHead != "abc" || len(rec.UnhandledFeedback()) != 1 {
+		t.Errorf("pr %d head %q unanswered %d; the comments lost their PR", d.PR, d.PRHead, len(rec.UnhandledFeedback()))
+	}
+}
+
+func TestRestartWithAnotherAgentStartsOverWithNoCommentsWaiting(t *testing.T) {
+	f := newFixture()
+	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.Failed,
+		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex}, Branch: "feat/825-provider-retries", PR: 912}}
+	rec, err := f.app.Start(context.Background(), startReq(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Delegation.PR != 0 {
+		t.Errorf("pr = %d; another implementer starts over (D63)", rec.Delegation.PR)
 	}
 }
 

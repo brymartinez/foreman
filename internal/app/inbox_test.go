@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -175,18 +176,42 @@ func (f *fakeStore) List(context.Context) ([]*task.Record, error) {
 }
 
 type fakeGitHub struct {
-	items     []InboxItem
-	truncated []string
-	fetched   []task.Key
-	issue     Issue
-	repo      RepoInfo
-	prs       map[int]PullRequest
-	onPR      func() // runs once, inside the next GetPullRequest
-	ci        map[int]task.CIStatus
-	comments  map[int64]IssueComment // posted issue comments by id
-	edits     int                    // PostIssueComment calls that edited a comment
-	postErr   error                  // fails the PostIssueComment call after the first postOK
-	postOK    int
+	items          []InboxItem
+	truncated      []string
+	fetched        []task.Key
+	issue          Issue
+	repo           RepoInfo
+	prs            map[int]PullRequest
+	onPR           func() // runs once, inside the next GetPullRequest
+	ci             map[int]task.CIStatus
+	comments       map[int64]IssueComment // posted issue comments by id
+	edits          int                    // PostIssueComment calls that edited a comment
+	postErr        error                  // fails the PostIssueComment call after the first postOK
+	postOK         int
+	prComments     map[int][]PRComment // the PR conversation, by PR number
+	prCommentErr   error
+	prCommentReads int
+	mu             sync.Mutex
+}
+
+func (f *fakeGitHub) PullRequestComments(_ context.Context, pr task.Key) ([]PRComment, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.prCommentReads++
+	if f.prCommentErr != nil {
+		return nil, f.prCommentErr
+	}
+	return slices.Clone(f.prComments[pr.Number]), nil
+}
+
+// addPRComment plays a comment arriving on a PR, from any goroutine.
+func (f *fakeGitHub) addPRComment(pr int, c PRComment) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.prComments == nil {
+		f.prComments = map[int][]PRComment{}
+	}
+	f.prComments[pr] = append(f.prComments[pr], c)
 }
 
 func (f *fakeGitHub) PostIssueComment(_ context.Context, k task.Key, id int64, body string) (IssueComment, error) {
@@ -382,6 +407,26 @@ func TestHideMentionOnlyKeepsChangedEntries(t *testing.T) {
 	hideMentionOnly(&report, stored)
 	if got := entryNumbers(report.Changed); !slices.Equal(got, []int{3}) {
 		t.Errorf("changed = %v, want only the assigned item", got)
+	}
+}
+
+func TestHideMentionOnlyKeepsDelegatedWorkToResume(t *testing.T) {
+	recs := []*task.Record{
+		seen(1, task.Reviewed, "open", t0, task.Mentioned),
+		seen(2, task.Failed, "open", t0, task.Mentioned),
+		seen(3, task.ReadyForHuman, "open", t0, task.Mentioned),
+		seen(4, task.Discovered, "open", t0, task.Mentioned),
+	}
+	for _, r := range recs[:3] {
+		r.Delegation = &task.Delegation{PR: 900 + r.Number}
+	}
+	items := []InboxItem{item(1, "open", t0, task.Mentioned), item(2, "open", t0, task.Mentioned),
+		item(3, "open", t0, task.Mentioned), item(4, "open", t0, task.Mentioned)}
+	stored := storedReasons(recs)
+	report, _ := Reconcile(items, recs, nil, true, now)
+	hideMentionOnly(&report, stored)
+	if got := entryNumbers(Delegable(report)); !slices.Equal(got, []int{1, 2}) {
+		t.Errorf("delegable = %v, want the REVIEWED and FAILED tasks", got)
 	}
 }
 

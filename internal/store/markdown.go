@@ -169,7 +169,18 @@ type frontmatter struct {
 	Validation          []task.Check       `yaml:"validation,omitempty"`
 	Reviews             []reviewFM         `yaml:"reviews,omitempty"`
 	Plan                []task.PlanComment `yaml:"plan,omitempty"`
+	Feedback            []feedbackFM       `yaml:"feedback,omitempty"`
 	CI                  *ciFM              `yaml:"ci,omitempty"`
+}
+
+type feedbackFM struct {
+	Kind      task.CommentKind `yaml:"kind"`
+	ID        int64            `yaml:"id"`
+	Author    string           `yaml:"author,omitempty"`
+	URL       string           `yaml:"url,omitempty"`
+	At        time.Time        `yaml:"at"`
+	Digest    string           `yaml:"digest"`
+	HandledAt *time.Time       `yaml:"handled_at,omitempty"`
 }
 
 type ciFM struct {
@@ -318,6 +329,18 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 	}
 	rec.Validation = fm.Validation
 	rec.Plan = fm.Plan
+	for _, f := range fm.Feedback {
+		switch f.Kind {
+		case task.IssueComment, task.ReviewComment, task.ReviewSummary:
+		default:
+			return nil, fmt.Errorf("feedback %d has unknown kind %q", f.ID, f.Kind)
+		}
+		item := task.Feedback{Kind: f.Kind, ID: f.ID, Author: f.Author, URL: f.URL, At: f.At, Digest: f.Digest}
+		if f.HandledAt != nil {
+			item.HandledAt = *f.HandledAt
+		}
+		rec.Feedback = append(rec.Feedback, item)
+	}
 	for _, r := range fm.Reviews {
 		if r.Verdict != "clean" && r.Verdict != "changes_requested" {
 			return nil, fmt.Errorf("review round %d has unknown verdict %q", r.Round, r.Verdict)
@@ -351,7 +374,7 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 
 func validState(s task.State) bool {
 	switch s {
-	case task.Discovered, task.Working, task.NeedsDecision, task.Reviewing, task.ReadyForHuman, task.Done, task.Failed, task.PRClosed:
+	case task.Discovered, task.Working, task.NeedsDecision, task.Reviewing, task.ReadyForHuman, task.Reviewed, task.Done, task.Failed, task.PRClosed:
 		return true
 	}
 	return false
@@ -390,6 +413,14 @@ func fromRecord(rec *task.Record) frontmatter {
 	}
 	fm.Validation = rec.Validation
 	fm.Plan = rec.Plan
+	for _, f := range rec.Feedback {
+		item := feedbackFM{Kind: f.Kind, ID: f.ID, Author: f.Author, URL: f.URL, At: f.At, Digest: f.Digest}
+		if !f.HandledAt.IsZero() {
+			t := f.HandledAt
+			item.HandledAt = &t
+		}
+		fm.Feedback = append(fm.Feedback, item)
+	}
 	for _, r := range rec.Reviews {
 		verdict := "changes_requested"
 		if r.Clean {

@@ -35,6 +35,7 @@ const (
 	ActionRefresh
 	ActionStart
 	ActionCancel
+	ActionResume
 )
 
 // Action is what a keystroke asks the driver to do. The model itself does no I/O.
@@ -42,6 +43,8 @@ type Action struct {
 	Kind   ActionKind
 	Start  app.StartRequest
 	Cancel *task.Record
+	// Resume is the REVIEWED task whose PR feedback the agent should answer.
+	Resume task.Key
 }
 
 // Model is everything the dashboard draws and everything a keystroke changes.
@@ -263,6 +266,13 @@ func (m *Model) enter() Action {
 		if e == nil {
 			m.Message = "Nothing to delegate."
 			return Action{}
+		}
+		if e.State == task.Reviewed {
+			// The task keeps its agent, worktree, and session, so there is nothing to
+			// ask: it goes straight back to work on the comments (D121).
+			m.manualTask = false
+			m.Message = fmt.Sprintf("Resuming %s#%d to answer its PR feedback…", e.Item.Key.Repo, e.Item.Key.Number)
+			return Action{Kind: ActionResume, Resume: e.Item.Key}
 		}
 		m.pending = app.StartRequest{Repo: e.Item.Key.Repo, Issue: e.Item.Key.Number}
 		m.Mode, m.Input = ChoosingAgent, ""

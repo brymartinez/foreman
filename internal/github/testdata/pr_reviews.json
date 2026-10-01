@@ -1,0 +1,20 @@
+[
+  [
+    {
+      "id": 6601,
+      "html_url": "https://github.com/ridezoomo/armada-backend/pull/912#pullrequestreview-6601",
+      "body": "Two things to fix before this goes in.",
+      "submitted_at": "2026-09-25T10:10:00Z",
+      "user": { "login": "brymartinez" },
+      "state": "CHANGES_REQUESTED"
+    },
+    {
+      "id": 6602,
+      "html_url": "https://github.com/ridezoomo/armada-backend/pull/912#pullrequestreview-6602",
+      "body": "",
+      "submitted_at": "2026-09-25T10:20:00Z",
+      "user": { "login": "brymartinez" },
+      "state": "APPROVED"
+    }
+  ]
+]

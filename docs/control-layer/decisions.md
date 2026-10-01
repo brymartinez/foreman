@@ -1756,3 +1756,168 @@ Entry format:
   `xhigh` for planning, then `opus` and `gpt-6-sol` at `medium` for implementation
   and review. PR creation uses the implementation model. Existing configs still
   work because empty new fields use the prior model or CLI effort.
+
+## D119. A REVIEWED state, and how a pull request comment is identified
+
+- Date: 2026-10-01. Issue midsoln/foreman#7.
+- **Context.** A task that reached READY_FOR_HUMAN stopped listening. Nothing read the
+  pull request's conversation, so a comment the developer left reached no agent.
+- **Decision.** Add the state REVIEWED. Foreman reads a pull request's three comment
+  threads (the conversation, the inline comments and their replies, and each submitted
+  review with a body) and records each comment in the task file as its kind, id,
+  author, url, time, and a digest of its text. A comment with no record is unanswered,
+  and one whose digest changed is unanswered again, which is what makes an edit of the
+  text count and a reaction not. The kind is part of the identity because a review id
+  and a comment id come from different sequences and can be the same number. The text
+  itself is not stored: it is read from GitHub whenever a turn needs it.
+- **Consequence.** The task file stays small and survives a comment being deleted,
+  which drops it and releases the task. A task that was already READY_FOR_HUMAN when
+  this shipped has its first fetch record what is there, so comments the developer has
+  already read count once, and then never again.
+
+## D120. The agent's replies carry a marker
+
+- Date: 2026-10-01. Issue midsoln/foreman#7.
+- **Context.** The agent answers comments through the developer's own `gh` login, so a
+  reply it posts has the same author as a comment the developer writes. The issue
+  requires that the developer's own comments count and that the agent's replies do not.
+- **Decision.** The agent starts every reply with `<!-- foreman:reply -->`, and foreman
+  drops any comment whose body carries it. Markdown hides it. This follows the marker
+  `planCommentBody` already puts on the planning comments. The alternatives were
+  rejected: filtering by author cannot separate the two, and having the agent report the
+  ids it answered would add a field to the outcome schema for every turn of every task
+  and would trust the agent's report over GitHub's record.
+- **Consequence.** An agent that forgets the marker reads its own reply as new feedback.
+  D123 bounds what that costs, and the developer can see the rounds in the log.
+
+## D121. Feedback is read where the gate already reads GitHub, and resuming is its own command
+
+- Date: 2026-10-01. Issue midsoln/foreman#7.
+- **Context.** Nothing runs between commands except a task's own runner (D5), so a
+  comment can only be found when foreman already talks to GitHub.
+- **Decision.** The readiness gate reads the conversation of each task whose pull
+  request is open and which is READY_FOR_HUMAN or REVIEWED, with no live runner. It
+  reads on every refresh rather than only when the pull request's `updatedAt` moved,
+  because an edit to an inline comment is not reliably reflected there and a missed edit
+  would fail the issue's acceptance criteria. `foreman resume <issue>` and the picker's
+  selection call `App.Resume`, which keeps the branch, worktree, pull request, and
+  session and only sets WORKING; `Start` rebuilds the delegation, so it would lose the
+  session that wrote the pull request and now points a REVIEWED task at `resume`.
+- **Consequence.** Three REST calls per handed-over task per refresh, for the few tasks
+  that are waiting on the developer. A comment is noticed within one refresh interval,
+  60 seconds by default. The runner's pid is judged by whether the process is alive, so
+  a pid a killed runner left behind cannot hide a comment for good.
+
+## D122. A feedback turn is judged by whether the pull request head moved
+
+- Date: 2026-10-01. Issue midsoln/foreman#7.
+- **Context.** Feedback that needs no code change must come back to the developer
+  without another review; feedback that needs one must go through the normal flow. The
+  agent cannot be trusted to say which it was, and the outcome schema has no status for
+  it.
+- **Decision.** Foreman records the pull request head before the turn and compares it
+  with the head it verifies afterwards. An unchanged head means the agent only replied,
+  so the CI result is restored and the task returns to READY_FOR_HUMAN when the same bar
+  the gate applies is met: a clean review of that head and CI that has finished.
+  Anything else leaves the task under review, and the gate hands it over. The comments a
+  turn was given count as answered only once that turn ends with `pr_opened`, so a run
+  that failed, was cancelled, or ended `blocked` leaves them for the next one. An
+  answered decision still comes first, so a run carrying one delivers it and picks the
+  comments up on its way out.
+- **Consequence.** No new outcome status and nothing for the agent to misreport. A
+  reply-only turn costs one agent turn and no reviewer turn.
+
+## D123. A run answers comments before it hands the task back, at most three times
+
+- Date: 2026-10-01. Issue midsoln/foreman#7.
+- **Context.** A comment that arrives while an agent is working must not interrupt it,
+  and must not be left unread when the task goes back to the developer.
+- **Decision.** The runner reads the conversation again before it hands over, after a
+  clean review and after a feedback turn that pushed nothing, and answers anything new
+  in the same run. One run answers at most `maxFeedbackRounds` (3) times; past that it
+  records the rest as REVIEWED for the developer to resume.
+- **Consequence.** A comment written during a run is answered by that run. The cap is
+  what stops an agent that forgot the reply marker (D120) from answering itself without
+  end, and it needs no configuration to do it.
+
+## D124. INBOX offers only work the developer can move
+
+- Date: 2026-10-01. Issue midsoln/foreman#7.
+- **Context.** INBOX listed every issue a search returned, including ones an agent was
+  already working on, which invited a second delegation of the same issue.
+- **Decision.** `InboxEntry` carries the state of the run foreman has for the item.
+  INBOX keeps an item it has never delegated, under the rules it already had, and a
+  delegated one only in FAILED, which starts again, or REVIEWED, which resumes. The
+  dashboard's row shows that state as its accent word. `render.InboxActivity` now reports
+  exactly the changes the picker does not show, by asking `app.CanDelegate`, so the two
+  views cannot drift.
+- **Consequence.** Work in hand stays in DELEGATED WORK alone, and INBOX is a list of
+  things to start. A delegated task in WORKING with new activity now reports that
+  activity in the interactive view instead of being silently dropped.
+
+## D125. The cleaned log renders Codex items, and the adapter stops printing its own
+
+- Date: 2026-10-01. Issue midsoln/foreman#7.
+- **Context.** `cleanLine` printed every Codex event as its bare type, so a run showed a
+  column of the word `completed`. The substance of a run is in the event's `item`
+  object, which nothing parsed.
+- **Decision.** Render each item by its own type: an assistant message, a command as it
+  starts and again with its exit code and the first line of its output, file changes,
+  web searches, MCP calls, and item errors, plus turn failures with their message and
+  each turn's token totals. Reasoning, the todo list, and `item.updated` stay in the raw
+  log, which `--raw` still prints unchanged. Each detail is cut to 160 characters. The
+  Codex adapter no longer writes its own `turn completed` line, because the cleaned log
+  now renders that event, and two sources for one fact would drift.
+- **Consequence.** A Codex run is readable in the dashboard. The event shape was checked
+  against a real `codex exec --json` run on 0.156.1: the discriminator inside `item` is
+  `type`, not `item_type` as the posted design assumed.
+
+## D126 (amends D63, D110, and D124). Waiting PR feedback stays reachable
+
+- Date: 2026-10-01. Issue midsoln/foreman#7, review round 1 of PR #10.
+- **Context.** Two paths lost comments that were still waiting. With `mentions` off,
+  `hideMentionOnly` dropped a delegated REVIEWED or FAILED task whose only involvement
+  was a mention, so the picker and the dashboard could not offer it. A FAILED feedback
+  run restarted with the other agent lost its PR number under D63, and the runner reads
+  comments through that number, so the new agent never saw them.
+- **Decision.** The mention filter keeps every delegated entry `CanDelegate` accepts.
+  `Start` keeps the PR number, URL, and head for another agent on the same branch when
+  the task has comments waiting. The new agent's first turn answers them in a fresh
+  session. With no comments waiting, another agent still starts over as D63 says.
+- **Consequence.** A task that needs the developer stays selectable under any setting,
+  and switching agents does not drop feedback. A restart with another agent that keeps
+  the PR can, if the comment read fails, pick up at the review of a head the new
+  reviewer wrote. The next refresh reads the comments again.
+
+## D127 (amends D122). A resume with no comments to answer runs no turn
+
+- Date: 2026-10-01. Issue midsoln/foreman#7, review round 2 of PR #10.
+- **Context.** A resumed REVIEWED task whose comment was deleted before the runner read
+  it, or whose comments could not be read, had no feedback for its first turn. Its
+  clean review left nothing pending, so `RunTask` ran an implementation turn that
+  could redo the issue and start another review.
+- **Decision.** When the task's clean review covers its PR head, `unanswered` ends the
+  run itself. If the read worked and nothing is waiting, the task goes back to
+  READY_FOR_HUMAN, or to REVIEWING when CI has not finished, so the gate hands it over.
+  If the read failed, the task stays REVIEWED with its comments waiting, for the
+  developer to resume again. A task with open findings or an unreviewed head keeps its
+  normal flow, because the run has that work to do anyway and reads the comments
+  again before it hands over (D123).
+- **Consequence.** No agent turn runs without comments to answer when the code is
+  already reviewed. A GitHub outage during a resume costs the developer one more
+  resume.
+
+
+## D128 (amends D90, D119, and D122). Merge PR feedback with fresh implementation sessions
+
+- Date: 2026-10-01. Merge resolution for PR #10 against main.
+- **Context.** Main now starts implementation in a fresh session after planning (D117),
+  while issue #7's branch resumed the planning session after posting the plan. Both
+  branches also used D117 and D118 for unrelated decisions.
+- **Decision.** Keep the fresh implementation session and stage-specific model from
+  main. Keep issue #7's feedback loop: a REVIEWED task resumes its current
+  implementation session with the comments, or starts from durable task context if
+  that session is gone. Renumber issue #7's decisions D119 through D127 and keep
+  both branches' decision histories.
+- **Consequence.** Planning history does not burden implementation or feedback turns,
+  and issue #7's comments remain actionable after the merge.
