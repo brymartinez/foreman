@@ -1850,3 +1850,21 @@ Entry format:
   and switching agents does not drop feedback. A restart with another agent that keeps
   the PR can, if the comment read fails, pick up at the review of a head the new
   reviewer wrote. The next refresh reads the comments again.
+
+## D125 (amends D120). A resume with no comments to answer runs no turn
+
+- Date: 2026-10-01. Issue midsoln/foreman#7, review round 2 of PR #10.
+- **Context.** A resumed REVIEWED task whose comment was deleted before the runner read
+  it, or whose comments could not be read, had no feedback for its first turn. Its
+  clean review left nothing pending, so `RunTask` ran an implementation turn that
+  could redo the issue and start another review.
+- **Decision.** When the task's clean review covers its PR head, `unanswered` ends the
+  run itself. If the read worked and nothing is waiting, the task goes back to
+  READY_FOR_HUMAN, or to REVIEWING when CI has not finished, so the gate hands it over.
+  If the read failed, the task stays REVIEWED with its comments waiting, for the
+  developer to resume again. A task with open findings or an unreviewed head keeps its
+  normal flow, because the run has that work to do anyway and reads the comments
+  again before it hands over (D121).
+- **Consequence.** No agent turn runs without comments to answer when the code is
+  already reviewed. A GitHub outage during a resume costs the developer one more
+  resume.

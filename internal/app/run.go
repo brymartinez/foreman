@@ -46,7 +46,10 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 	planPosted := false
 	// feedback is the comments on the PR this run has to answer, and rounds is how many
 	// times it has answered. A resumed task starts here (D120).
-	feedback, rec := a.unanswered(ctx, rec, log)
+	feedback, rec, done, err := a.unanswered(ctx, final, rec, log)
+	if err != nil || done {
+		return err
+	}
 	rounds := 0
 	for reviewNext := len(feedback) == 0 && rec.ReviewPending(); ; reviewNext = false {
 		// answered is set once a feedback turn has pushed a change, which goes to the
@@ -313,11 +316,9 @@ func applyFeedbackTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runEr
 	}
 	rec.CI = ci
 	d := rec.Delegation
-	latest := rec.LatestReview()
-	covered := latest != nil && latest.Clean && latest.PR == d.PR && latest.Head != "" && latest.Head == pr.HeadSHA
 	// The same bar the gate applies: a clean review of this head and CI that finished.
 	// Without both, the task stays under review and the gate hands it over (D120).
-	if covered && ci != nil && ci.State != task.CIPending {
+	if reviewCovers(rec, pr.HeadSHA) && ci != nil && ci.State != task.CIPending {
 		rec.State = task.ReadyForHuman
 		rec.LastOutcome = &task.Outcome{Status: "feedback_answered",
 			Summary: fmt.Sprintf("answered %d %s on PR #%d; no change was needed", len(comments), plural(len(comments), "comment", "comments"), d.PR), At: now}

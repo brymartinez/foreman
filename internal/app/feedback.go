@@ -137,21 +137,55 @@ func (a App) handsOver(r *task.Record) bool {
 	return r.State == task.ReadyForHuman || r.State == task.Reviewed
 }
 
-// unanswered is the comments a run has to answer before it does anything else. A read
-// that fails is logged and treated as nothing to answer: the gate picks the comments up
-// on its next refresh. Decisions come first, so a run carrying an answer the agent has
-// not received yet delivers that and finds the comments on its way out.
-func (a App) unanswered(ctx context.Context, rec *task.Record, log io.Writer) ([]PRComment, *task.Record) {
+// unanswered is the comments a run has to answer before it does anything else.
+// Decisions come first, so a run carrying an answer the agent has not received yet
+// delivers that and finds the comments on its way out. done reports that the run
+// has nothing else to do: a task whose clean review covers its PR head and whose
+// comments are gone, or could not be read, must not fall through to an
+// implementation turn that redoes the issue (D125).
+func (a App) unanswered(ctx, final context.Context, rec *task.Record, log io.Writer) (comments []PRComment, updated *task.Record, done bool, err error) {
 	d := rec.Delegation
 	if d == nil || d.PR == 0 || len(rec.UnhandledFeedback()) == 0 || len(rec.Undelivered()) > 0 {
-		return nil, rec
+		return nil, rec, false, nil
 	}
-	updated, waiting, err := a.readFeedback(ctx, rec)
-	if err != nil {
-		fmt.Fprintf(log, "foreman: %v; the next refresh will pick the comments up\n", err)
-		return nil, rec
+	updated, waiting, readErr := a.readFeedback(ctx, rec)
+	if len(waiting) > 0 {
+		return waiting, updated, false, nil
 	}
-	return waiting, updated
+	if !reviewCovers(updated, d.PRHead) {
+		// Open findings or an unreviewed head: the run has that work to do anyway, and
+		// the comments are picked up before it hands over.
+		if readErr != nil {
+			fmt.Fprintf(log, "foreman: %v; the next refresh will pick the comments up\n", readErr)
+		}
+		return nil, updated, false, nil
+	}
+	if readErr != nil {
+		// The comments are still waiting, so the task stays where the developer can
+		// resume it once GitHub answers.
+		fmt.Fprintf(log, "foreman: %v; leaving the comments for the next resume\n", readErr)
+		updated, err = a.update(final, rec.Key, existing(func(cur *task.Record) {
+			cur.State = task.Reviewed
+			cur.LastOutcome = &task.Outcome{Status: "reviewed", Summary: "could not read the PR comments; resume to try again", At: a.Now()}
+		}))
+		return nil, updated, true, err
+	}
+	fmt.Fprintf(log, "foreman: PR #%d has no comments left to answer\n", d.PR)
+	updated, err = a.update(final, rec.Key, existing(func(cur *task.Record) {
+		cur.State = task.Reviewing
+		if cur.CI != nil && cur.CI.State != task.CIPending {
+			cur.State = task.ReadyForHuman
+		}
+		cur.LastOutcome = &task.Outcome{Status: "feedback_answered", Summary: fmt.Sprintf("every comment on PR #%d is answered", cur.Delegation.PR), At: a.Now()}
+	}))
+	return nil, updated, true, err
+}
+
+// reviewCovers reports a clean review of head on the task's current PR, which is the
+// review bar the gate applies before it hands a task over.
+func reviewCovers(rec *task.Record, head string) bool {
+	latest := rec.LatestReview()
+	return latest != nil && latest.Clean && latest.PR == rec.Delegation.PR && head != "" && latest.Head == head
 }
 
 // beforeHandover answers comments that arrived while the run worked, so the developer

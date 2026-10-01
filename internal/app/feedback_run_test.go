@@ -97,6 +97,40 @@ func TestFailedFeedbackTurnKeepsTheCommentsWaiting(t *testing.T) {
 	}
 }
 
+// A comment deleted between the refresh and the resume leaves nothing to answer, and
+// the clean review still covers the head, so no agent turn runs (D125).
+func TestResumeWithTheCommentGoneHandsBackWithoutATurn(t *testing.T) {
+	f := newFixture()
+	key := waiting(t, f)
+	reviews := len(f.store.recs[key].Reviews)
+	f.gh.prComments[912] = nil
+
+	rec := resumeRun(t, f, key)
+	if rec.State != task.ReadyForHuman {
+		t.Fatalf("state = %s, want READY_FOR_HUMAN", rec.State)
+	}
+	if f.claude.starts != 1 || len(f.claude.resumed) != 0 || len(rec.Reviews) != reviews {
+		t.Errorf("starts %d resumes %d reviews %d; nothing should have run", f.claude.starts, len(f.claude.resumed), len(rec.Reviews))
+	}
+	if len(rec.Feedback) != 0 {
+		t.Errorf("feedback = %+v", rec.Feedback)
+	}
+}
+
+func TestResumeWithUnreadableCommentsStaysReviewed(t *testing.T) {
+	f := newFixture()
+	key := waiting(t, f)
+	f.gh.prCommentErr = errors.New("HTTP 502")
+
+	rec := resumeRun(t, f, key)
+	if rec.State != task.Reviewed || len(rec.UnhandledFeedback()) != 1 {
+		t.Fatalf("state = %s unanswered = %d; the comment must wait for the next resume", rec.State, len(rec.UnhandledFeedback()))
+	}
+	if f.claude.starts != 1 || len(f.claude.resumed) != 0 {
+		t.Errorf("starts %d resumes %d; no turn can answer comments it cannot read", f.claude.starts, len(f.claude.resumed))
+	}
+}
+
 // Restarting failed feedback with the other agent hands it the comments first (D124).
 func TestRestartWithAnotherAgentAnswersTheWaitingComments(t *testing.T) {
 	f := newFixture()

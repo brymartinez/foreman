@@ -565,6 +565,8 @@ request. Each fix is its own commit with a decision.
 - Review round 1 fixes (D124): the `mentions` filter keeps delegated FAILED and
   REVIEWED tasks selectable, and a restart with another agent keeps the PR while
   comments wait, so the new agent answers them.
+- Review round 2 fix (D125): a resume that finds no comment to answer, or cannot read
+  them, ends without an agent turn when the clean review covers the PR head.
 - Verified with `go vet ./...`, `go test ./...`, `go build -o dist/foreman
   ./cmd/foreman`, `scripts/e2e.sh` (a new `feedback` scenario covers comment, REVIEWED,
   resume, reply, and no second round), and `git diff --check`.
@@ -694,6 +696,7 @@ what it replaced. Current summary:
   run answers new comments before handing over, at most three times. D122. INBOX
   offers only work the developer can move. D123. The cleaned log renders Codex items.
   D124. Waiting PR feedback stays reachable under the mention filter and an agent switch.
+  D125. A resume with no comments to answer runs no turn.
 
 ## Next stage
 
