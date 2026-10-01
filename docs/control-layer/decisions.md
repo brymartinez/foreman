@@ -1546,3 +1546,23 @@ Entry format:
 - **Consequence.** A log is never displayed merely because a task is highlighted or
   because a local refresh chose the newest delegation. The 60 by 12 layout still
   shows the selected task's PR and state when the log is open.
+
+## D112. Codex can write the worktree's git directory
+
+- Date: 2026-10-01. Requested by the user after midsoln/foreman#5 failed when Codex
+  couldn't commit its fixes. D107 to D111 are taken on that issue's branch.
+- **Context.** Foreman's worktrees are linked to a clone under `repositories/`. Their
+  git data lives in that clone's `.git`, outside the worktree, and Codex's
+  workspace-write sandbox only writes inside the worktree (plus the temp dirs). Codex
+  could edit and test but not commit, so the task failed. The probe missed this
+  because its clone was under `$TMPDIR`. Claude's Bash tool runs outside a sandbox, so
+  it was not affected.
+- **Decision.** The Codex adapter reads the worktree's `.git` file and `commondir` to
+  find the clone's `.git` and adds it with
+  `-c sandbox_workspace_write.writable_roots=[...]` on `exec` and `exec resume`. A
+  plain checkout adds nothing. The reviewer stays read-only. The probe checks the
+  commit with the temp dirs excluded: it must fail without the root and succeed with
+  it, on `exec` and `exec resume`.
+- **Consequence.** Codex can commit and push from foreman's worktrees. It can write to
+  the whole clone's `.git`, not just this worktree's entry, which is the same access a
+  plain checkout gives. Network access for `gh` and `git push` is unchanged (D7).

@@ -73,9 +73,14 @@ Headless mode is `codex exec <prompt>`.
   made it return `200`.
 - **GitHub credentials in the sandbox.** With network access on, `gh` and git over HTTPS
   work inside the Codex sandbox using the user's keyring login.
-- **Worktrees.** Codex with `-s workspace-write` can commit inside a linked git worktree.
-  That needs write access to the main repo's `.git/worktrees/<name>`, and it worked
-  without `--add-dir`.
+- **Worktrees.** A linked worktree keeps its index, refs, and objects in the main clone's
+  `.git`, outside the worktree. `-s workspace-write` doesn't let Codex write there, so
+  `git commit` fails. Adding that directory with
+  `-c 'sandbox_workspace_write.writable_roots=["<clone>/.git"]'` fixes it, for both
+  `exec` and `exec resume`. `exec resume` has no `--add-dir` flag. The earlier note said
+  no flag was needed, but the probe's clone was under `$TMPDIR`, which workspace-write
+  can write by default. The probe now excludes `/tmp` and `$TMPDIR` for these checks
+  (D112).
 - **Review.** `codex exec review --base <branch>` is a built-in review command and accepts
   `--output-schema`. Foreman doesn't use it. It uses plain `codex exec` with its own
   review prompt, so both reviewers get the same inputs and return the same schema.

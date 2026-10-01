@@ -493,6 +493,15 @@ request. Each fix is its own commit with a decision.
   `git diff --check`. Focused TUI tests cover hidden and opened logs, Escape, task
   changes, navigation, narrow layout, branch display, and color dividers.
 
+### Fix (complete): Codex commits in a linked worktree
+
+- midsoln/foreman#5 failed because Codex couldn't write the clone's `.git` from its
+  workspace-write sandbox, so it couldn't commit (D112). The Codex adapter now adds
+  that directory as a writable root on `exec` and `exec resume`.
+- Verified with `go vet ./...`, `go test ./...` (a new test uses a real linked worktree),
+  `scripts/e2e.sh`, and `scripts/probe-agents.sh` (24 checks on Codex 0.156.1). The
+  probe shows the commit failing without the root and succeeding with it.
+
 ## Known limitations
 
 - The gate runs only when `inbox` or `status` runs, or while the dashboard is open
@@ -600,6 +609,7 @@ what it replaced. Current summary:
   dashboard follows the newest delegation and colors and divides its panes. D105. The
   log is focusable and scrolls with vim keys. D106 (amends D104 and D105). A delegated
   task opens its log on demand; `h`/`l` navigate the two list panes.
+- D112. Codex can write the worktree's git directory.
 
 ## Next stage
 

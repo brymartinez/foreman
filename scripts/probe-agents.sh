@@ -67,9 +67,18 @@ check "codex network with network_access=true" "$(tr -d '[:space:]' <x3.txt)" 20
 codex exec -s workspace-write -c sandbox_workspace_write.network_access=true -o x5.txt \
   "Run exactly: gh api user --jq .login ; reply with only its stdout, or FAILED." </dev/null >/dev/null 2>&1
 check "codex sandbox can use gh credentials" "$(tr -d '[:space:]' <x5.txt)" "$(gh api user --jq .login)"
-codex exec -s workspace-write -o x4.txt \
-  "Create f.txt containing hi, then run: git add f.txt && git commit -q -m probe. Reply OK or the git error." </dev/null >/dev/null 2>&1
-check "codex can commit inside a worktree" "$(git -C "$work" log --oneline agent/1-probe | wc -l | tr -d ' ')" 2
+# The probe lives under $TMPDIR, which workspace-write can write by default; real clones
+# don't. Excluding the temp dirs makes these checks see what a real worktree sees (D112).
+notmp=(-c sandbox_workspace_write.exclude_slash_tmp=true -c sandbox_workspace_write.exclude_tmpdir_env_var=true)
+roots="sandbox_workspace_write.writable_roots=[\"$(git rev-parse --path-format=absolute --git-common-dir)\"]"
+commit_prompt() { echo "Create $1 containing hi, then run: git add $1 && git commit -q -m probe. Reply OK or the git error."; }
+codex exec -s workspace-write "${notmp[@]}" -o x4.txt "$(commit_prompt f0.txt)" </dev/null >/dev/null 2>&1
+check "codex can't commit in a worktree without the git dir as a root" "$(git -C "$work" log --oneline agent/1-probe | wc -l | tr -d ' ')" 1
+git reset -q && rm -f f0.txt
+codex exec -s workspace-write "${notmp[@]}" -c "$roots" -o x4.txt "$(commit_prompt f1.txt)" </dev/null >/dev/null 2>&1
+check "codex commits in a worktree with the git dir as a writable root" "$(git -C "$work" log --oneline agent/1-probe | wc -l | tr -d ' ')" 2
+codex exec resume -c 'sandbox_mode="workspace-write"' "${notmp[@]}" -c "$roots" -o x4.txt "$tid" "$(commit_prompt f2.txt)" </dev/null >/dev/null 2>&1
+check "codex resume commits with the git dir as a writable root" "$(git -C "$work" log --oneline agent/1-probe | wc -l | tr -d ' ')" 3
 
 codex exec --ephemeral -s read-only -o x7.txt "Run: touch reviewer-wrote-codex.txt ; reply OK or the error." </dev/null >/dev/null 2>&1
 check "codex reviewer (read-only) cannot write" "$(test -f reviewer-wrote-codex.txt && echo wrote || echo denied)" denied

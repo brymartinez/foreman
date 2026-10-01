@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -150,6 +152,50 @@ func TestCodexStart(t *testing.T) {
 	}
 	if !strings.Contains(log.String(), "thread.started") {
 		t.Errorf("events not logged: %q", log.String())
+	}
+}
+
+// A linked worktree's git data lives in the main clone, outside the sandbox's
+// workspace, so both Start and Resume must make it writable or commits fail (D112).
+func TestCodexCanWriteTheWorktreesGitDir(t *testing.T) {
+	dir := t.TempDir()
+	clone, wt := filepath.Join(dir, "clone"), filepath.Join(dir, "wt")
+	for _, args := range [][]string{
+		{"init", "-q", clone},
+		{"-C", clone, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"},
+		{"-C", clone, "worktree", "add", "-q", "-b", "feat/1-x", wt},
+	} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	out, err := exec.Command("git", "-C", wt, "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "sandbox_workspace_write.writable_roots=[" + fmt.Sprintf("%q", strings.TrimSpace(string(out))) + "]"
+
+	var got Command
+	run := func(_ context.Context, c Command) error {
+		got = c
+		io.WriteString(c.Stdout, "{\"type\":\"thread.started\",\"thread_id\":\"th-1\"}\n")
+		return os.WriteFile(argValue(c.Args, "-o"), []byte(prOpened), 0o600)
+	}
+	codex := Codex{Bin: "codex", Exec: run}
+	if _, err := codex.Start(context.Background(), StartInput{Worktree: wt, Prompt: "p"}, func(task.Session) {}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(got.Args, want) {
+		t.Errorf("start argv = %q, want %q", got.Args, want)
+	}
+	if _, err := codex.Resume(context.Background(), task.Session{Agent: task.Codex, ID: "th-1"}, StartInput{Worktree: wt, Prompt: "p"}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(got.Args, want) {
+		t.Errorf("resume argv = %q, want %q", got.Args, want)
+	}
+	if args := gitWriteArgs(clone); args != nil {
+		t.Errorf("a plain checkout's .git is inside the workspace; got %q", args)
 	}
 }
 

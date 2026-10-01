@@ -9,12 +9,15 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/brymartinez/foreman/internal/task"
 )
 
 // Codex drives `codex exec`. The workspace-write sandbox blocks network by default;
-// the agent needs it to push and open the PR (D7), so it is enabled explicitly.
+// the agent needs it to push and open the PR (D7), so it is enabled explicitly. It also
+// can't write outside the worktree, where a linked worktree keeps its git data, so that
+// directory is added as a writable root (D112).
 type Codex struct {
 	Bin   string
 	Model string
@@ -27,14 +30,14 @@ func (Codex) Name() task.Agent { return task.Codex }
 
 func (c Codex) Start(ctx context.Context, in StartInput, onSession func(task.Session)) (Turn, error) {
 	return c.run(ctx, in, func(schema, last string) []string {
-		return []string{
+		return append([]string{
 			"exec", "--json",
 			"-C", in.Worktree,
 			"-s", "workspace-write",
 			"-c", "sandbox_workspace_write.network_access=true",
 			"--output-schema", schema,
 			"-o", last,
-		}
+		}, gitWriteArgs(in.Worktree)...)
 	}, "", onSession)
 }
 
@@ -42,14 +45,52 @@ func (c Codex) Start(ctx context.Context, in StartInput, onSession func(task.Ses
 // sandbox is set through -c and the directory through the process cwd.
 func (c Codex) Resume(ctx context.Context, s task.Session, in StartInput) (Turn, error) {
 	return c.run(ctx, in, func(schema, last string) []string {
-		return []string{
+		return append([]string{
 			"exec", "resume", "--json",
 			"-c", `sandbox_mode="workspace-write"`,
 			"-c", "sandbox_workspace_write.network_access=true",
 			"--output-schema", schema,
 			"-o", last,
-		}
+		}, gitWriteArgs(in.Worktree)...)
 	}, s.ID, func(task.Session) {})
+}
+
+// gitWriteArgs makes the repository's git directory writable in the sandbox. A linked
+// worktree's index, refs, and objects live in the main clone's .git, outside the
+// worktree, so without it `git commit` fails. `exec resume` has no --add-dir flag, so
+// both commands set it through -c (D112).
+func gitWriteArgs(worktree string) []string {
+	dir := gitCommonDir(worktree)
+	if dir == "" {
+		return nil
+	}
+	roots, _ := json.Marshal([]string{dir})
+	return []string{"-c", "sandbox_workspace_write.writable_roots=" + string(roots)}
+}
+
+// gitCommonDir follows a linked worktree's .git file to the main clone's .git. It
+// returns "" for a plain checkout, whose .git is already inside the worktree.
+func gitCommonDir(worktree string) string {
+	b, err := os.ReadFile(filepath.Join(worktree, ".git"))
+	if err != nil {
+		return ""
+	}
+	gitdir, ok := strings.CutPrefix(strings.TrimSpace(string(b)), "gitdir: ")
+	if !ok {
+		return ""
+	}
+	if !filepath.IsAbs(gitdir) {
+		gitdir = filepath.Join(worktree, gitdir)
+	}
+	common, err := os.ReadFile(filepath.Join(gitdir, "commondir"))
+	if err != nil {
+		return filepath.Clean(gitdir)
+	}
+	dir := strings.TrimSpace(string(common))
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(gitdir, dir)
+	}
+	return filepath.Clean(dir)
 }
 
 // Review runs a disposable (--ephemeral) session in the read-only sandbox.
