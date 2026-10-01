@@ -1972,3 +1972,14 @@ Entry format:
     Changing it is outside issue #12.
 - **Consequence.** A retargeted PR is checked and reviewed against its new base. The
   developer always sees which files to resolve.
+
+## D131 (amends D130). Always list the conflicts in a blocked merge question
+
+- Date: 2026-10-02. Issue midsoln/foreman#12, review round 2 of PR #16.
+- **Context.** D130 added the conflict list only when the question's text did not
+  contain every file name. A substring search treats `a.go` as named when the text
+  names only `dir/a.go`, so the developer could miss a file.
+- **Decision.** `withConflicts` always appends the conflicting files and the worktree
+  to each question from a blocked merge turn.
+- **Consequence.** The list can repeat files the agent already named. The developer
+  always sees every file to resolve.

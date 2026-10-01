@@ -611,6 +611,8 @@ request. Each fix is its own commit with a decision.
   finishes the merge, and the run checks again before its review.
 - Review round 1 fixes (D130): a retargeted PR is checked and reviewed against its
   new base, and a blocked merge question always names the conflicting files.
+- Review round 2 fix (D131): the conflict list is always appended, since a substring
+  search can mistake `dir/a.go` for `a.go`.
 - Verified with `go vet ./...`, `go test ./...`, `go build -o dist/foreman
   ./cmd/foreman`, and `scripts/e2e.sh` (a new `conflicts` scenario covers a
   conflicting base and a clean base update).
@@ -746,6 +748,7 @@ what it replaced. Current summary:
   effort are selected per stage. D128. Merge fresh sessions with the PR feedback loop.
 - D129. Resolve PR merge conflicts with an implementer turn before each review.
 - D130. Follow a retargeted PR's base, and name the files in a blocked merge question.
+- D131. Always list the conflicts in a blocked merge question.
 
 ## Next stage
 
