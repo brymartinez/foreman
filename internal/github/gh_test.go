@@ -9,8 +9,8 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"time"
 	"testing"
+	"time"
 
 	"github.com/brymartinez/foreman/internal/app"
 	"github.com/brymartinez/foreman/internal/task"

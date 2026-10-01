@@ -97,6 +97,32 @@ func TestFailedFeedbackTurnKeepsTheCommentsWaiting(t *testing.T) {
 	}
 }
 
+// Restarting failed feedback with the other agent hands it the comments first (D124).
+func TestRestartWithAnotherAgentAnswersTheWaitingComments(t *testing.T) {
+	f := newFixture()
+	key := waiting(t, f)
+	f.claude.resumeErr = errors.New("usage limit reached")
+	if rec := resumeRun(t, f, key); rec.State != task.Failed {
+		t.Fatalf("setup: state %s", rec.State)
+	}
+	req := startReq(t)
+	req.Agent = task.Codex
+	if _, err := f.app.Start(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	f.codex.turn = prTurn("cx-1")
+	f.codex.turn.Session.Agent = task.Codex
+	if err := f.app.RunTask(context.Background(), key, 4244, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if f.codex.starts != 1 || !strings.Contains(f.codex.prompt, "This retries 4xx too.") {
+		t.Fatalf("codex started %d times; its prompt lacks the comment:\n%s", f.codex.starts, f.codex.prompt)
+	}
+	if rec := f.store.recs[key]; len(rec.UnhandledFeedback()) != 0 {
+		t.Errorf("%d comments still unanswered", len(rec.UnhandledFeedback()))
+	}
+}
+
 // A question from a feedback turn is the developer's to answer, and the comments stay
 // waiting until a turn actually answers them.
 func TestBlockedFeedbackTurnKeepsTheCommentsWaiting(t *testing.T) {

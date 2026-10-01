@@ -1833,3 +1833,20 @@ Entry format:
 - **Consequence.** A Codex run is readable in the dashboard. The event shape was checked
   against a real `codex exec --json` run on 0.156.1: the discriminator inside `item` is
   `type`, not `item_type` as the posted design assumed.
+
+## D124 (amends D63, D110, and D122). Waiting PR feedback stays reachable
+
+- Date: 2026-10-01. Issue midsoln/foreman#7, review round 1 of PR #10.
+- **Context.** Two paths lost comments that were still waiting. With `mentions` off,
+  `hideMentionOnly` dropped a delegated REVIEWED or FAILED task whose only involvement
+  was a mention, so the picker and the dashboard could not offer it. A FAILED feedback
+  run restarted with the other agent lost its PR number under D63, and the runner reads
+  comments through that number, so the new agent never saw them.
+- **Decision.** The mention filter keeps every delegated entry `CanDelegate` accepts.
+  `Start` keeps the PR number, URL, and head for another agent on the same branch when
+  the task has comments waiting. The new agent's first turn answers them in a fresh
+  session. With no comments waiting, another agent still starts over as D63 says.
+- **Consequence.** A task that needs the developer stays selectable under any setting,
+  and switching agents does not drop feedback. A restart with another agent that keeps
+  the PR can, if the comment read fails, pick up at the review of a head the new
+  reviewer wrote. The next refresh reads the comments again.

@@ -27,7 +27,7 @@ type InboxReport struct {
 	Changed []InboxEntry
 	// Current contains every item in the current refresh, including unchanged items.
 	// It is used by the interactive picker; the report sections retain their diff semantics.
-	Current        []InboxEntry
+	Current       []InboxEntry
 	NeedsDecision []*task.Record
 	// Reviewed holds the tasks whose PR has comments the agent has not answered (D117).
 	Reviewed       []*task.Record
@@ -143,13 +143,14 @@ const goneNote = "no longer on GitHub or no longer accessible; foreman stopped c
 // developer, for issues and pull requests alike. The searches still run and the
 // snapshots still record every reason, so a lost reason is still reported and the
 // items come back the moment the setting does. Delegated work waiting on the
-// developer is not an inbox find, so it is left alone. The note for an item that left
+// developer is not an inbox find, so it is left alone, and a delegated FAILED or
+// REVIEWED task is how the developer restarts or resumes it (D124). The note for an item that left
 // GitHub is filtered where it is built, because it carries no reasons of its own.
 func hideMentionOnly(r *InboxReport, stored map[task.Key][]task.InboxReason) {
 	keep := func(entries []InboxEntry) []InboxEntry {
 		var out []InboxEntry
 		for _, e := range entries {
-			if !mentionOnly(involvement(e.Item, stored)) {
+			if (e.Delegated && CanDelegate(e)) || !mentionOnly(involvement(e.Item, stored)) {
 				out = append(out, e)
 			}
 		}

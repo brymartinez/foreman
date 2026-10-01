@@ -562,6 +562,9 @@ request. Each fix is its own commit with a decision.
 - The cleaned log renders Codex messages, commands and their results, file changes,
   searches, MCP calls, errors, and turn totals. `--raw` still prints the JSON (D123).
 - `show` lists each PR comment foreman tracks and whether it is answered.
+- Review round 1 fixes (D124): the `mentions` filter keeps delegated FAILED and
+  REVIEWED tasks selectable, and a restart with another agent keeps the PR while
+  comments wait, so the new agent answers them.
 - Verified with `go vet ./...`, `go test ./...`, `go build -o dist/foreman
   ./cmd/foreman`, `scripts/e2e.sh` (a new `feedback` scenario covers comment, REVIEWED,
   resume, reply, and no second round), and `git diff --check`.
@@ -690,6 +693,7 @@ what it replaced. Current summary:
   own command. D120. A feedback turn is judged by whether the PR head moved. D121. A
   run answers new comments before handing over, at most three times. D122. INBOX
   offers only work the developer can move. D123. The cleaned log renders Codex items.
+  D124. Waiting PR feedback stays reachable under the mention filter and an agent switch.
 
 ## Next stage
 

@@ -410,6 +410,26 @@ func TestHideMentionOnlyKeepsChangedEntries(t *testing.T) {
 	}
 }
 
+func TestHideMentionOnlyKeepsDelegatedWorkToResume(t *testing.T) {
+	recs := []*task.Record{
+		seen(1, task.Reviewed, "open", t0, task.Mentioned),
+		seen(2, task.Failed, "open", t0, task.Mentioned),
+		seen(3, task.ReadyForHuman, "open", t0, task.Mentioned),
+		seen(4, task.Discovered, "open", t0, task.Mentioned),
+	}
+	for _, r := range recs[:3] {
+		r.Delegation = &task.Delegation{PR: 900 + r.Number}
+	}
+	items := []InboxItem{item(1, "open", t0, task.Mentioned), item(2, "open", t0, task.Mentioned),
+		item(3, "open", t0, task.Mentioned), item(4, "open", t0, task.Mentioned)}
+	stored := storedReasons(recs)
+	report, _ := Reconcile(items, recs, nil, true, now)
+	hideMentionOnly(&report, stored)
+	if got := entryNumbers(Delegable(report)); !slices.Equal(got, []int{1, 2}) {
+		t.Errorf("delegable = %v, want the REVIEWED and FAILED tasks", got)
+	}
+}
+
 func TestMergeObservedKeepsRunnerState(t *testing.T) {
 	cur := seen(7, task.Reviewing, "open", t0, task.Assigned)
 	cur.Delegation = &task.Delegation{PR: 912}
