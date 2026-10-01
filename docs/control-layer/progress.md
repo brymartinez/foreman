@@ -609,6 +609,8 @@ request. Each fix is its own commit with a decision.
 - A blocked merge turn, or two turns that still leave conflicts, ends in
   NEEDS_DECISION with the files. `foreman respond` resumes the implementer, which
   finishes the merge, and the run checks again before its review.
+- Review round 1 fixes (D130): a retargeted PR is checked and reviewed against its
+  new base, and a blocked merge question always names the conflicting files.
 - Verified with `go vet ./...`, `go test ./...`, `go build -o dist/foreman
   ./cmd/foreman`, and `scripts/e2e.sh` (a new `conflicts` scenario covers a
   conflicting base and a clean base update).
@@ -743,6 +745,7 @@ what it replaced. Current summary:
 - D117. Fresh implementation session after planning. D118. Models and reasoning
   effort are selected per stage. D128. Merge fresh sessions with the PR feedback loop.
 - D129. Resolve PR merge conflicts with an implementer turn before each review.
+- D130. Follow a retargeted PR's base, and name the files in a blocked merge question.
 
 ## Next stage
 

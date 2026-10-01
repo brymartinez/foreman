@@ -1949,3 +1949,26 @@ Entry format:
 - **Consequence.** Every review covers a PR that merges into its latest base. Each
   pass costs one `git fetch` and needs git 2.38 or newer. The stand-in agent in
   `scripts/e2e.sh` now pushes its branch, because the check reads `origin/<branch>`.
+
+## D130 (amends D31, D67, and D129). Review round 1 of PR #16
+
+- Date: 2026-10-02. Issue midsoln/foreman#12, review round 1 of PR #16.
+- **Context.** The reviewer found three gaps. `verifyPR` rejected a PR whose base no
+  longer matched the task's, so a maintainer who retargeted the open PR failed the
+  task before the conflict check. A blocked merge turn's question could leave out
+  conflicting files. And a resumed review whose PR was no longer open ran the
+  implementer instead of failing.
+- **Decision.**
+  - `verifyPR` still requires the task's base for a new PR (D31). The task's own PR
+    may target another base. `resolveConflicts` checks against the base GitHub
+    reports and records it as the task's `BaseRef`, so later checks, prompts, and the
+    reviewer's `git diff origin/<base>...HEAD` use it. `Start` keeps the base of a PR
+    it keeps.
+  - A blocked merge turn's questions get the conflicting files and the worktree
+    appended to their context when the agent's text does not name every file.
+  - A resumed review whose PR is no longer open still runs the implementer, as D67
+    decided. That happens before the review pass, so the conflict check is not
+    involved, and the gate records a closed PR as PR_CLOSED on its own (D107).
+    Changing it is outside issue #12.
+- **Consequence.** A retargeted PR is checked and reviewed against its new base. The
+  developer always sees which files to resolve.
