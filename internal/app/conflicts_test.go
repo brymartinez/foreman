@@ -258,13 +258,14 @@ func TestRetargetedPRIsCheckedAgainstItsNewBase(t *testing.T) {
 func TestBlockedMergeQuestionNamesEveryFile(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
-	q := task.Question{Issue: "How should the backoff changes combine?", Context: "Both sides changed the backoff.",
+	// The agent names dir/a.go only; a.go, a substring of it, still needs resolving.
+	q := task.Question{Issue: "How should the backoff changes combine?", Context: "Both sides changed dir/a.go.",
 		Options: []task.Option{{Label: "A", Description: "I resolved the files; verify, commit, push"}, {Label: "B", Description: "Keep main's"}}, Recommendation: "A", ImpactIfWrong: "x"}
 	f.claude.turns = []agent.Turn{prTurn("sid-1"), {Session: task.Session{Agent: task.Claude, ID: "sid-1"}, Outcome: agent.Outcome{Status: agent.Blocked, Summary: "?", Questions: []task.Question{q}}}}
-	f.wt.conflicts = [][]string{{"go.mod", "retry.go"}}
+	f.wt.conflicts = [][]string{{"a.go", "dir/a.go"}}
 	got := run(t, f, key)
 	c := got.Pending().Question.Context
-	if !strings.Contains(c, "Both sides changed the backoff.") || !strings.Contains(c, "go.mod, retry.go") || !strings.Contains(c, got.Delegation.Worktree) {
+	if !strings.Contains(c, "Both sides changed dir/a.go.") || !strings.Contains(c, "conflicts in a.go, dir/a.go.") || !strings.Contains(c, got.Delegation.Worktree) {
 		t.Fatalf("question context lacks the files or worktree:\n%s", c)
 	}
 }

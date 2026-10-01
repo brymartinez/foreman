@@ -74,17 +74,13 @@ func (a App) resolveConflicts(ctx, final context.Context, rec *task.Record, log 
 	}
 }
 
-// withConflicts makes sure each question from a blocked merge turn names every
-// conflicting file and where the merge waits, whatever the agent wrote.
+// withConflicts adds every conflicting file and where the merge waits to each question
+// from a blocked merge turn. It always adds them, because the agent's text can leave a
+// file out in ways a text search can't tell apart, such as a.go next to dir/a.go.
 func withConflicts(qs []task.Question, worktree, base string, files []string) []task.Question {
 	out := make([]task.Question, len(qs))
 	for i, q := range qs {
-		for _, f := range files {
-			if !strings.Contains(q.Issue+q.Context, f) {
-				q.Context += fmt.Sprintf("\n\nMerging origin/%s left conflicts in %s. The merge is in progress in the worktree %s.", base, strings.Join(files, ", "), worktree)
-				break
-			}
-		}
+		q.Context += fmt.Sprintf("\n\nMerging origin/%s left conflicts in %s. The merge is in progress in the worktree %s.", base, strings.Join(files, ", "), worktree)
 		out[i] = q
 	}
 	return out
