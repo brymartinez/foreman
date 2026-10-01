@@ -10,7 +10,7 @@ import (
 // ReplyMarker opens every reply the agent posts on a pull request. The agent answers
 // through the developer's own gh login, so the author cannot tell its replies from the
 // developer's comments, and a comment the developer writes has to count. Markdown
-// hides the marker, and foreman drops any comment that carries it (D118).
+// hides the marker, and foreman drops any comment that carries it (D120).
 const ReplyMarker = "<!-- foreman:reply -->"
 
 type TaskBrief struct {
@@ -42,7 +42,7 @@ type TaskBrief struct {
 	// PRD is the posted PRD's text, for the reviewer, who has no network.
 	PRD string
 	// PR is the task's pull request, and Feedback the comments on it still waiting for
-	// an answer when a fresh turn replaces a session that could not be resumed (D118).
+	// an answer when a fresh turn replaces a session that could not be resumed (D120).
 	PR       int
 	Feedback []FeedbackItem
 }
@@ -133,11 +133,11 @@ Set fields that do not apply to null, or [] for validation and questions. %s
 }
 
 // planningSection turns the first turn into planning only: foreman posts the
-// documents on the issue, then resumes the session to implement them (D90).
+// documents on the issue, then starts a fresh session to implement them.
 func planningSection(s *strings.Builder, instructions string) {
 	s.WriteString(`## Plan first
 
-This turn is for planning only. Read the issue, its comments, and the code, then write four Markdown documents: analysis, prd, design, and plan (the implementation plan). foreman posts each one on the issue as its own comment under its own heading, so start each document with its content, not a title. Then foreman resumes this session so you implement the plan. The sections below on the workspace and the pull request apply to that next turn.
+This turn is for planning only. Read the issue, its comments, and the code, then write four Markdown documents: analysis, prd, design, and plan (the implementation plan). foreman posts each one on the issue as its own comment under its own heading, so start each document with its content, not a title. Then foreman starts a fresh session to implement the plan. The sections below on the workspace and the pull request apply to that next turn.
 
 Do not change, commit, or push anything in this turn. If writing the documents needs a decision from the developer, report "blocked" with the questions instead.
 
@@ -166,15 +166,6 @@ func writePlanLinks(s *strings.Builder, plan []task.PlanComment) {
 	for _, c := range plan {
 		fmt.Fprintf(s, "- %s: %s\n", c.Doc.Title(), c.URL)
 	}
-}
-
-// PlanPostedMessage resumes the planning session once its documents are on the issue.
-func PlanPostedMessage(plan []task.PlanComment) string {
-	var s strings.Builder
-	s.WriteString("foreman posted your documents on the issue:\n\n")
-	writePlanLinks(&s, plan)
-	s.WriteString("\nNow implement the plan under the instructions from the start of this session. End with the JSON outcome: pr_opened, blocked, or failed.\n")
-	return s.String()
 }
 
 func answeredDecisions(ds []task.Decision) []task.Decision {

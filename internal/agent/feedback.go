@@ -22,7 +22,7 @@ type FeedbackItem struct {
 
 // FeedbackMessage resumes the session that wrote the pull request so it answers the
 // comments on it. The agent replies where each comment is, so the conversation stays
-// where the developer left it (D118).
+// where the developer left it (D120).
 func FeedbackMessage(repo task.Repo, pr int, items []FeedbackItem) string {
 	var s strings.Builder
 	fmt.Fprintf(&s, "Pull request #%d has %s you have not answered.\n\n", pr, countText(len(items)))

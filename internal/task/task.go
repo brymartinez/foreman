@@ -263,7 +263,7 @@ type Record struct {
 	// Plan holds the planning documents posted on the issue, in PlanDocs order (D90).
 	Plan []PlanComment
 	// Feedback is every comment on the task's PR foreman has read, and whether the
-	// agent has answered it (D117).
+	// agent has answered it (D119).
 	Feedback []Feedback
 	// CI is the readiness gate's last look at the PR's checks on GitHub. Any implementer
 	// turn clears it.

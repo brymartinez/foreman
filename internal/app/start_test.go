@@ -89,8 +89,10 @@ type fakeAgent struct {
 	turns     []agent.Turn // consumed before turn, one per Start/Resume
 	err       error
 	prompt    string
+	prompts   []string
 	starts    int
 	resumed   []string
+	stages    []task.Stage
 	resumeErr error
 	reviews   []agent.ReviewOutcome // consumed in order; clean once empty
 	reviewErr error
@@ -124,6 +126,7 @@ func (f *fakeAgent) Review(_ context.Context, in agent.StartInput) (agent.Review
 func (f *fakeAgent) Name() task.Agent { return f.name }
 func (f *fakeAgent) Resume(_ context.Context, s task.Session, in agent.StartInput) (agent.Turn, error) {
 	f.resumed = append(f.resumed, s.ID+": "+in.Prompt)
+	f.stages = append(f.stages, in.Stage)
 	if f.onResume != nil {
 		f.onResume()
 	}
@@ -135,10 +138,12 @@ func (f *fakeAgent) Resume(_ context.Context, s task.Session, in agent.StartInpu
 
 func (f *fakeAgent) Start(_ context.Context, in agent.StartInput, onSession func(task.Session)) (agent.Turn, error) {
 	f.starts++
+	f.stages = append(f.stages, in.Stage)
 	if f.during != nil {
 		f.during()
 	}
 	f.prompt = in.Prompt
+	f.prompts = append(f.prompts, in.Prompt)
 	t, err := f.next()
 	onSession(t.Session)
 	return t, err

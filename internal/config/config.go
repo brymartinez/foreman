@@ -65,14 +65,19 @@ type Cleanup struct {
 
 type Claude struct {
 	Command     string `yaml:"command"`
-	Model       string `yaml:"model"`
+	Model       string `yaml:"model"`        // implementation, including PR creation
+	PlanModel   string `yaml:"plan_model"`   // "" plans with Model
 	ReviewModel string `yaml:"review_model"` // "" reviews with Model
 }
 
 type Codex struct {
-	Command     string `yaml:"command"`
-	Model       string `yaml:"model"`
-	ReviewModel string `yaml:"review_model"` // "" reviews with Model
+	Command               string `yaml:"command"`
+	Model                 string `yaml:"model"`        // implementation, including PR creation
+	PlanModel             string `yaml:"plan_model"`   // "" plans with Model
+	ReviewModel           string `yaml:"review_model"` // "" reviews with Model
+	ReasoningEffort       string `yaml:"reasoning_effort"`
+	PlanReasoningEffort   string `yaml:"plan_reasoning_effort"`   // "" uses ReasoningEffort
+	ReviewReasoningEffort string `yaml:"review_reasoning_effort"` // "" uses ReasoningEffort
 }
 
 // Load starts from defaults, overlays the config file ($FOREMAN_CONFIG or

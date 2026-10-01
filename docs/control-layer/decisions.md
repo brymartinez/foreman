@@ -1719,7 +1719,45 @@ Entry format:
 - **Consequence.** Code comments and progress references identify the intended
   decision after PR #6 merges.
 
-## D117. A REVIEWED state, and how a pull request comment is identified
+## D117 (amends D90). Start implementation with a fresh agent session
+
+- Date: 2026-10-01. Foreman token usage investigation.
+- **Context.** Planning and implementation shared one Claude session. On issue #7,
+  the implementation inherited about 214,000 tokens of planning context and the
+  session grew to about 386,000 tokens. Each later turn read that history again.
+- **Decision.** After the runner posts the four plan comments, it starts a new
+  implementer session from the task record and comment links. Planning questions
+  still resume the planning session; later decisions and review findings resume
+  the implementation session. The plan and implement stage files ask for a few
+  cohesive milestones and focused checks during editing, with full validation
+  after the code is complete.
+- **Consequence.** Implementation no longer carries planning tool output in its
+  context. The task file records the new session ID for later resumes. The local
+  configuration trials Sonnet for Claude work and lowers the implementer budget
+  from $100 to $25 per invocation.
+
+## D118 (amends D85). Select the model for each agent turn
+
+- Date: 2026-10-01. Requested during the token usage investigation.
+- **Context.** Planning and implementation now use separate sessions, but both used
+  the implementer's `model` setting. The reviewer had its own model setting. Codex
+  reasoning effort came only from the Codex CLI configuration.
+- **Decision.** Keep the task's chosen implementer for planning and implementation,
+  and the competing agent for review. `claude.model` and `codex.model` select the
+  implementation model, including PR creation. Add `plan_model` for planning and
+  retain `review_model` for review; an empty stage model uses `model`. Codex also
+  accepts `reasoning_effort`, `plan_reasoning_effort`, and
+  `review_reasoning_effort`. An empty stage effort uses `reasoning_effort`, and an
+  empty base effort leaves the Codex CLI default. Pass the chosen model and effort
+  on fresh and resumed turns. Show the resolved values in `config --show` and write
+  the fields when `config --edit` creates a new file. The PR instructions require
+  Basic English and cut filler and unsupported claims.
+- **Consequence.** The local configuration can use `sonnet` and `gpt-6-luna` at
+  `xhigh` for planning, then `opus` and `gpt-6-sol` at `medium` for implementation
+  and review. PR creation uses the implementation model. Existing configs still
+  work because empty new fields use the prior model or CLI effort.
+
+## D119. A REVIEWED state, and how a pull request comment is identified
 
 - Date: 2026-10-01. Issue midsoln/foreman#7.
 - **Context.** A task that reached READY_FOR_HUMAN stopped listening. Nothing read the
@@ -1737,7 +1775,7 @@ Entry format:
   this shipped has its first fetch record what is there, so comments the developer has
   already read count once, and then never again.
 
-## D118. The agent's replies carry a marker
+## D120. The agent's replies carry a marker
 
 - Date: 2026-10-01. Issue midsoln/foreman#7.
 - **Context.** The agent answers comments through the developer's own `gh` login, so a
@@ -1750,9 +1788,9 @@ Entry format:
   ids it answered would add a field to the outcome schema for every turn of every task
   and would trust the agent's report over GitHub's record.
 - **Consequence.** An agent that forgets the marker reads its own reply as new feedback.
-  D121 bounds what that costs, and the developer can see the rounds in the log.
+  D123 bounds what that costs, and the developer can see the rounds in the log.
 
-## D119. Feedback is read where the gate already reads GitHub, and resuming is its own command
+## D121. Feedback is read where the gate already reads GitHub, and resuming is its own command
 
 - Date: 2026-10-01. Issue midsoln/foreman#7.
 - **Context.** Nothing runs between commands except a task's own runner (D5), so a
@@ -1770,7 +1808,7 @@ Entry format:
   60 seconds by default. The runner's pid is judged by whether the process is alive, so
   a pid a killed runner left behind cannot hide a comment for good.
 
-## D120. A feedback turn is judged by whether the pull request head moved
+## D122. A feedback turn is judged by whether the pull request head moved
 
 - Date: 2026-10-01. Issue midsoln/foreman#7.
 - **Context.** Feedback that needs no code change must come back to the developer
@@ -1789,7 +1827,7 @@ Entry format:
 - **Consequence.** No new outcome status and nothing for the agent to misreport. A
   reply-only turn costs one agent turn and no reviewer turn.
 
-## D121. A run answers comments before it hands the task back, at most three times
+## D123. A run answers comments before it hands the task back, at most three times
 
 - Date: 2026-10-01. Issue midsoln/foreman#7.
 - **Context.** A comment that arrives while an agent is working must not interrupt it,
@@ -1799,10 +1837,10 @@ Entry format:
   in the same run. One run answers at most `maxFeedbackRounds` (3) times; past that it
   records the rest as REVIEWED for the developer to resume.
 - **Consequence.** A comment written during a run is answered by that run. The cap is
-  what stops an agent that forgot the reply marker (D118) from answering itself without
+  what stops an agent that forgot the reply marker (D120) from answering itself without
   end, and it needs no configuration to do it.
 
-## D122. INBOX offers only work the developer can move
+## D124. INBOX offers only work the developer can move
 
 - Date: 2026-10-01. Issue midsoln/foreman#7.
 - **Context.** INBOX listed every issue a search returned, including ones an agent was
@@ -1817,7 +1855,7 @@ Entry format:
   things to start. A delegated task in WORKING with new activity now reports that
   activity in the interactive view instead of being silently dropped.
 
-## D123. The cleaned log renders Codex items, and the adapter stops printing its own
+## D125. The cleaned log renders Codex items, and the adapter stops printing its own
 
 - Date: 2026-10-01. Issue midsoln/foreman#7.
 - **Context.** `cleanLine` printed every Codex event as its bare type, so a run showed a
@@ -1834,7 +1872,7 @@ Entry format:
   against a real `codex exec --json` run on 0.156.1: the discriminator inside `item` is
   `type`, not `item_type` as the posted design assumed.
 
-## D124 (amends D63, D110, and D122). Waiting PR feedback stays reachable
+## D126 (amends D63, D110, and D124). Waiting PR feedback stays reachable
 
 - Date: 2026-10-01. Issue midsoln/foreman#7, review round 1 of PR #10.
 - **Context.** Two paths lost comments that were still waiting. With `mentions` off,
@@ -1851,7 +1889,7 @@ Entry format:
   the PR can, if the comment read fails, pick up at the review of a head the new
   reviewer wrote. The next refresh reads the comments again.
 
-## D125 (amends D120). A resume with no comments to answer runs no turn
+## D127 (amends D122). A resume with no comments to answer runs no turn
 
 - Date: 2026-10-01. Issue midsoln/foreman#7, review round 2 of PR #10.
 - **Context.** A resumed REVIEWED task whose comment was deleted before the runner read
@@ -1864,7 +1902,22 @@ Entry format:
   If the read failed, the task stays REVIEWED with its comments waiting, for the
   developer to resume again. A task with open findings or an unreviewed head keeps its
   normal flow, because the run has that work to do anyway and reads the comments
-  again before it hands over (D121).
+  again before it hands over (D123).
 - **Consequence.** No agent turn runs without comments to answer when the code is
   already reviewed. A GitHub outage during a resume costs the developer one more
   resume.
+
+
+## D128 (amends D90, D119, and D122). Merge PR feedback with fresh implementation sessions
+
+- Date: 2026-10-01. Merge resolution for PR #10 against main.
+- **Context.** Main now starts implementation in a fresh session after planning (D117),
+  while issue #7's branch resumed the planning session after posting the plan. Both
+  branches also used D117 and D118 for unrelated decisions.
+- **Decision.** Keep the fresh implementation session and stage-specific model from
+  main. Keep issue #7's feedback loop: a REVIEWED task resumes its current
+  implementation session with the comments, or starts from durable task context if
+  that session is gone. Renumber issue #7's decisions D119 through D127 and keep
+  both branches' decision histories.
+- **Consequence.** Planning history does not burden implementation or feedback turns,
+  and issue #7's comments remain actionable after the merge.

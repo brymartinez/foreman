@@ -72,6 +72,26 @@ func TestAgentSettingsOverlayDefaults(t *testing.T) {
 	}
 }
 
+func TestStageModelsAndEffortLoadFromConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("FOREMAN_CONFIG", path)
+	t.Setenv("FOREMAN_TASKS_DIR", "")
+	raw := "claude:\n  model: opus\n  plan_model: sonnet\n  review_model: opus\ncodex:\n  model: gpt-6-sol\n  plan_model: gpt-6-luna\n  review_model: gpt-6-sol\n  reasoning_effort: medium\n  plan_reasoning_effort: xhigh\n  review_reasoning_effort: medium\n"
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Claude.Model != "opus" || cfg.Claude.PlanModel != "sonnet" || cfg.Claude.ReviewModel != "opus" {
+		t.Errorf("claude stage models = %+v", cfg.Claude)
+	}
+	if cfg.Codex.Model != "gpt-6-sol" || cfg.Codex.PlanModel != "gpt-6-luna" || cfg.Codex.ReviewModel != "gpt-6-sol" || cfg.Codex.ReasoningEffort != "medium" || cfg.Codex.PlanReasoningEffort != "xhigh" || cfg.Codex.ReviewReasoningEffort != "medium" {
+		t.Errorf("codex stage settings = %+v", cfg.Codex)
+	}
+}
+
 func TestLoadMentionsAndRefresh(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -117,12 +137,12 @@ func TestLoadValidatesIgnoredRepositories(t *testing.T) {
 func TestMaterializeWritesDefaultsOnlyForEmptyFiles(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	cfg := Config{TasksDir: "/tasks", Budgets: Budgets{ImplementerUSD: 3, ReviewerUSD: 1}, Notifications: Notifications{Enabled: true}}
+	cfg := Config{TasksDir: "/tasks", Claude: Claude{Model: "opus", PlanModel: "sonnet"}, Codex: Codex{Model: "gpt-6-sol", PlanModel: "gpt-6-luna", ReasoningEffort: "medium", PlanReasoningEffort: "xhigh"}, Budgets: Budgets{ImplementerUSD: 3, ReviewerUSD: 1}, Notifications: Notifications{Enabled: true}}
 	if err := Materialize(path, cfg); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(path)
-	if err != nil || len(raw) == 0 || !strings.Contains(string(raw), "implementer_usd: 3") {
+	if err != nil || len(raw) == 0 || !strings.Contains(string(raw), "implementer_usd: 3") || !strings.Contains(string(raw), "plan_model: sonnet") || !strings.Contains(string(raw), "plan_reasoning_effort: xhigh") {
 		t.Fatalf("materialized config = %q, err = %v", raw, err)
 	}
 	if err := os.WriteFile(path, []byte("tasks_dir: /custom\n"), 0o600); err != nil {

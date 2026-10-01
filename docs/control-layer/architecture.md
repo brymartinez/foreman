@@ -32,9 +32,9 @@ foreman start 825 --agent claude          (run from a checkout of the repo)
   └─ spawn detached `foreman __run owner/repo#825` (pid + log recorded), exit
 
 runner (one process per task, exits when the task leaves WORKING/REVIEWING):
-  if the PR has comments the agent has not answered (D117, resumed from REVIEWED):
+  if the PR has comments the agent has not answered (D119, resumed from REVIEWED):
     turn = implementer.Resume(session, each comment, where it is, and how to reply)
-    head unchanged -> mark them answered, keep CI, READY_FOR_HUMAN (D120)
+    head unchanged -> mark them answered, keep CI, READY_FOR_HUMAN (D122)
     head moved     -> mark them answered, review the new head like any change
   if the verified PR head has no review (crash mid-review, or new commits, D63):
     re-verify the PR, record its head, skip to the review below
@@ -42,7 +42,7 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
   until every planning document is on the issue (and no PR exists), the turn plans (D90):
     planned      -> gh: post analysis, PRD, design, and plan as four issue comments
                     (edit the earlier comments on a re-plan), record their ids and URLs,
-                    then turn = implementer.Resume(session, "plan posted; implement it")
+                    then turn = implementer.Start(new session, posted plan links)
   switch turn.Outcome.Status
     blocked      -> save each of Questions as a decision, state NEEDS_DECISION, exit
     failed       -> state FAILED, exit
@@ -51,7 +51,7 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
                     review = reviewer.Review(disposable read-only session,
                                              issue + context + decisions + git diff + earlier rounds)
                     clean    -> record review and the head it covered; read the PR's comments,
-                and answer anything new before handing over (D121); stay REVIEWING, exit
+                and answer anything new before handing over (D123); stay REVIEWING, exit
                     findings -> WORKING; implementer.Resume(session, findings); agent pushes
                                 fixes and reports pr_opened again; re-verify; re-review
                     findings after fix_rounds reviewed fixes since the last answer ->
@@ -59,7 +59,7 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
 
 foreman resume 825    -> a REVIEWED task goes back to WORKING with its branch,
                          worktree, PR, and session kept; the runner answers the
-                         comments (D119)
+                         comments (D121)
 foreman respond 825   -> answer each waiting question in order; after the last,
                          state WORKING, spawn runner
                          runner: Resume(session, all answers); on ErrNoSession, a fresh
@@ -74,7 +74,7 @@ foreman               -> the dashboard (D93), until q or ctrl+c:
                          every `refresh` seconds (60 by default): app.Inbox, the
                            same as `foreman inbox` (D95, D110)
                          enter on an inbox issue -> agent, context file, app.Start
-                         enter on a REVIEWED issue -> app.Resume, no prompts (D119)
+                         enter on a REVIEWED issue -> app.Resume, no prompts (D121)
                          enter on delegated work -> open that task's log below the lists
                          left/right, h/l -> focus the inbox/delegated work
                          esc -> close the log
@@ -94,8 +94,8 @@ foreman inbox|status  -> runner pid dead while WORKING/REVIEWING -> FAILED
                            READY_FOR_HUMAN: refresh the CI result; flag new commits
                          and then, per task the agents are done with (READY_FOR_HUMAN
                          or REVIEWED, PR open, no live runner):
-                           read the PR's comments, drop the agent's own replies (D118)
-                           any unanswered -> REVIEWED, shown in INBOX (D117)
+                           read the PR's comments, drop the agent's own replies (D120)
+                           any unanswered -> REVIEWED, shown in INBOX (D119)
                            none left      -> READY_FOR_HUMAN
                         inbox only, cleanup.on_done: DONE task -> git worktree remove
                            (kept if dirty); branch -D only if its PR merged
@@ -120,7 +120,7 @@ FAILED, or READY_FOR_HUMAN (D59).
   runner stops the tools its agent started (D59).
 - **INBOX is work to start.** The list offers issues foreman has never delegated plus
   delegated ones in FAILED or REVIEWED. Everything else an agent holds stays in
-  DELEGATED WORK, so the same issue is never delegated twice (D122).
+  DELEGATED WORK, so the same issue is never delegated twice (D124).
 - **Structured outcomes.** Both CLIs validate the final message against
   `internal/agent/outcome.schema.json`. `ParseOutcome` is the single place where
   external agent output becomes typed data.
@@ -129,6 +129,10 @@ FAILED, or READY_FOR_HUMAN (D59).
   the issue, the context file, and `git diff <base>...HEAD`. It never sees the
   implementer's session. Repo instructions load on their own because the reviewer runs
   in the worktree.
+- **Stage models.** The chosen implementer uses its plan model until the four plan
+  comments are posted, then its implementation model in a new session. Fixes resume
+  that implementation session. The competing reviewer uses its review model in a
+  disposable session. Codex can set reasoning effort for each of these turns.
 - **Naming.** `task.WorkName` gives `<issue>-<slug>`, for example
   `825-provider-retries`. The slug is at most 5 words and 40 characters, and a
   conventional-commit prefix is removed. The branch is `<type>/<workName>`, where the type is `feat`, `fix` and so on,

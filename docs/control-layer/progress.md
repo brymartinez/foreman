@@ -2,8 +2,8 @@
 
 ## Current stage
 
-Stage 17 (PR feedback, the INBOX filter, and readable Codex logs for issue #7) is
-complete.
+Stage 19 (PR feedback, the INBOX filter, and readable Codex logs for issue #7) is
+complete. Completed runs are needed to measure the effect of the model and budget choices.
 
 ## Completed
 
@@ -416,7 +416,7 @@ request. Each fix is its own commit with a decision.
   implementation plan, following the new required `plan` stage file. It changes no
   code. The outcome contract gains a `planned` status carrying the documents (D90).
 - The runner posts each document on the issue as its own comment, records the comment
-  ids and URLs in the task file, and resumes the planning session to implement. A
+  ids and URLs in the task file, and starts a fresh session to implement (D117). A
   re-plan edits the same comments. There is no approval gate: a planning question goes
   to NEEDS_DECISION, and otherwise the run continues to the PR.
 - The reviewer's prompt carries the posted PRD. `foreman show` links the comments.
@@ -545,31 +545,61 @@ request. Each fix is its own commit with a decision.
   `internal/app`, `internal/tui`, `internal/config`, and `internal/agent`, a build, and
   `scripts/e2e.sh`.
 
-### Stage 17 (complete): PR feedback, the INBOX filter, and Codex logs for issue #7
+### Stage 17 (complete): lower implementer token use
+
+- The plan-to-implementation handoff starts a fresh session with the posted plan
+  links and the current task context. Planning decisions still resume the planning
+  session, while later findings resume the new implementation session (D117).
+- The plan and implement stage defaults use cohesive milestones and focused checks
+  during editing. The local config uses Sonnet and a $25 implementer cap for a trial.
+- `go vet ./...`, `go test ./...`, the binary build, and every `scripts/e2e.sh`
+  scenario passed. `foreman config --show` confirmed the live model and budget.
+
+### Stage 18 (complete): models per agent turn
+
+- Planning, implementation, and review each select a model. Codex also selects
+  reasoning effort for each turn. Planning answers keep the planning setting; fixes
+  keep the implementation setting. PR creation stays in implementation (D118).
+- The local config uses Claude `sonnet` and Codex `gpt-6-luna` at `xhigh` for
+  planning, then Claude `opus` and Codex `gpt-6-sol` at `medium` for implementation
+  and review. The global PR instructions ask for Basic English.
+- `config --edit` materialized the new fields in a new file and loaded the live
+  settings. `config --show` displayed all nine stage values. `go vet ./...`,
+  `go test ./...`, the binary build, and every `scripts/e2e.sh` scenario passed.
+
+### Stage 19 (complete): PR feedback, the INBOX filter, and Codex logs for issue #7
 
 - A new or text-edited comment on an open foreman PR moves a READY_FOR_HUMAN task to
-  the new `REVIEWED` state (D117). The gate reads the conversation, the inline comments
-  and replies, and the reviews on every refresh (D119). Replies that start with
-  `<!-- foreman:reply -->` are dropped, so the agent's answers start no new round (D118).
+  the new `REVIEWED` state (D119). The gate reads the conversation, the inline comments
+  and replies, and the reviews on every refresh (D121). Replies that start with
+  `<!-- foreman:reply -->` are dropped, so the agent's answers start no new round (D120).
 - `foreman resume <issue>`, the picker, and enter on the dashboard resume the task's own
-  session in its own worktree with each unanswered comment and where to reply (D119).
+  session in its own worktree with each unanswered comment and where to reply (D121).
   A turn that leaves the PR head unchanged returns to READY_FOR_HUMAN with no new review;
   a turn that pushes goes through review and CI again. Comments count as answered only
-  after a `pr_opened` turn (D120).
+  after a `pr_opened` turn (D122).
 - The runner reads the conversation again before it hands over and answers what arrived
-  during the run, at most three times per run (D121).
-- INBOX lists never delegated issues plus delegated FAILED and REVIEWED ones (D122).
+  during the run, at most three times per run (D123).
+- INBOX lists never delegated issues plus delegated FAILED and REVIEWED ones (D124).
 - The cleaned log renders Codex messages, commands and their results, file changes,
-  searches, MCP calls, errors, and turn totals. `--raw` still prints the JSON (D123).
+  searches, MCP calls, errors, and turn totals. `--raw` still prints the JSON (D125).
 - `show` lists each PR comment foreman tracks and whether it is answered.
-- Review round 1 fixes (D124): the `mentions` filter keeps delegated FAILED and
+- Review round 1 fixes (D126): the `mentions` filter keeps delegated FAILED and
   REVIEWED tasks selectable, and a restart with another agent keeps the PR while
   comments wait, so the new agent answers them.
-- Review round 2 fix (D125): a resume that finds no comment to answer, or cannot read
+- Review round 2 fix (D127): a resume that finds no comment to answer, or cannot read
   them, ends without an agent turn when the clean review covers the PR head.
 - Verified with `go vet ./...`, `go test ./...`, `go build -o dist/foreman
   ./cmd/foreman`, `scripts/e2e.sh` (a new `feedback` scenario covers comment, REVIEWED,
   resume, reply, and no second round), and `git diff --check`.
+
+### Merge resolution (complete): PR #10 with main
+
+- Kept main's fresh implementation session and per-stage model settings alongside
+  issue #7's PR feedback flow. Issue #7's decision IDs are D119 to D127, after
+  main's D117 and D118 (D128).
+- Verified the combined tree with `go test ./...`, `go vet ./...`, a binary build,
+  and all `scripts/e2e.sh` scenarios with normal process access.
 
 ## Known limitations
 
@@ -584,7 +614,7 @@ request. Each fix is its own commit with a decision.
 - A search that returns 1000 results is flagged, and lost reasons aren't judged
   while one is truncated (D64).
 - An agent that leaves the reply marker off reads its own reply as new feedback. That
-  costs one extra round, bounded by the per-run cap (D118, D121).
+  costs one extra round, bounded by the per-run cap (D120, D123).
 - PR feedback has been checked against the stand-in `gh` and fixtures, not a live PR.
 - The release workflow has not run: the repo has no GitHub remote yet.
 
@@ -690,14 +720,17 @@ what it replaced. Current summary:
   D110). Judge the gone note by the reasons the task stored. D115 (amends D110 and
   D114). Resolve a tracked fetch's reasons before filtering. D116. Keep both sets of
   decisions and their references after the merge.
-- D117. The REVIEWED state; a comment is its kind, id, and text digest. D118. The
-  agent's replies carry a marker. D119. Feedback is read by the gate; `resume` is its
-  own command. D120. A feedback turn is judged by whether the PR head moved. D121. A
-  run answers new comments before handing over, at most three times. D122. INBOX
-  offers only work the developer can move. D123. The cleaned log renders Codex items.
-  D124. Waiting PR feedback stays reachable under the mention filter and an agent switch.
-  D125. A resume with no comments to answer runs no turn.
+- D119. The REVIEWED state; a comment is its kind, id, and text digest. D120. The
+  agent's replies carry a marker. D121. Feedback is read by the gate; `resume` is its
+  own command. D122. A feedback turn is judged by whether the PR head moved. D123. A
+  run answers new comments before handing over, at most three times. D124. INBOX
+  offers only work the developer can move. D125. The cleaned log renders Codex items.
+  D126. Waiting PR feedback stays reachable under the mention filter and an agent switch.
+  D127. A resume with no comments to answer runs no turn.
+
+- D117. Fresh implementation session after planning. D118. Models and reasoning
+  effort are selected per stage. D128. Merge fresh sessions with the PR feedback loop.
 
 ## Next stage
 
-None. Stages 0 to 17 are complete. Further work needs a new request.
+Compare completed task usage and outcomes before changing the models or budgets.

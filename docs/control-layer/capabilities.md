@@ -68,6 +68,9 @@ Headless mode is `codex exec <prompt>`.
 - **Resume.** `codex exec resume <thread_id> <message>` continues the thread and keeps
   the ID. It accepts `--output-schema`, `--json`, and `-o`. It has no `-s` flag, so the
   sandbox is set with `-c sandbox_mode=...` or comes from config.
+- **Stage settings.** `codex exec` and `codex exec resume` accept `-m <model>` and
+  `-c model_reasoning_effort="<effort>"`. The installed CLI help confirms both flags;
+  stage-specific model calls have not been probed against the service.
 - **Sandbox.** `-s workspace-write` blocks network access by default. With it, curl to
   api.github.com returned `000`. Adding `-c sandbox_workspace_write.network_access=true`
   made it return `200`.
@@ -119,7 +122,7 @@ The user is authenticated through the keyring.
   per page, so the parser unwraps `[][]comment`. A reply inside an inline thread is
   `--method POST repos/<owner>/<repo>/pulls/<n>/comments/<id>/replies`. Verified against
   the REST reference and unit tests over recorded responses, not probed live, because a
-  probe would comment on a real pull request (D117).
+  probe would comment on a real pull request (D119).
 
 ## git worktree
 

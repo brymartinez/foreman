@@ -378,10 +378,10 @@ func plannedTurn(id string) agent.Turn {
 	}}
 }
 
-func TestPlanIsPostedThenTheSessionImplementsIt(t *testing.T) {
+func TestPlanIsPostedThenAFreshSessionImplementsIt(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
-	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-1")}
+	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2")}
 	var log strings.Builder
 	if err := f.app.RunTask(context.Background(), key, 4242, &log); err != nil {
 		t.Fatal(err)
@@ -397,17 +397,36 @@ func TestPlanIsPostedThenTheSessionImplementsIt(t *testing.T) {
 			t.Errorf("comment %d = %+v body %q", i, c, body)
 		}
 	}
-	if !strings.Contains(f.claude.prompt, "## Plan first") || !strings.Contains(f.claude.prompt, "plan instructions") {
-		t.Errorf("the first turn must plan:\n%s", f.claude.prompt)
+	if len(f.claude.prompts) != 2 || !strings.Contains(f.claude.prompts[0], "## Plan first") || !strings.Contains(f.claude.prompts[0], "plan instructions") {
+		t.Errorf("the first turn must plan: %q", f.claude.prompts)
 	}
-	if f.claude.starts != 1 || len(f.claude.resumed) != 1 || !strings.Contains(f.claude.resumed[0], "sid-1: foreman posted your documents") || !strings.Contains(f.claude.resumed[0], "- Implementation plan: https://github.com/") {
-		t.Errorf("the planning session must be resumed to implement: starts %d resumed %q", f.claude.starts, f.claude.resumed)
+	if f.claude.starts != 2 || len(f.claude.resumed) != 0 || got.Delegation.Implementer.ID != "sid-2" || !strings.Contains(f.claude.prompt, "- Implementation plan: https://github.com/") || !strings.Contains(f.claude.prompt, "implement instructions") || strings.Contains(f.claude.prompt, "## Plan first") {
+		t.Errorf("implementation must start fresh with the posted plan and instructions: starts %d resumed %q session %q prompt %q", f.claude.starts, f.claude.resumed, got.Delegation.Implementer.ID, f.claude.prompt)
+	}
+	if !slices.Equal(f.claude.stages, []task.Stage{task.StagePlan, task.StageImplement}) {
+		t.Errorf("implementer stages = %v", f.claude.stages)
 	}
 	if !strings.Contains(f.codex.reviewed[0], "## PRD") || !strings.Contains(f.codex.reviewed[0], "R1. Retry 5xx.") {
 		t.Errorf("the review must carry the PRD:\n%s", f.codex.reviewed[0])
 	}
 	if got.Usage.ClaudeCostUSD != 0.5 || !strings.Contains(log.String(), "foreman: posted the PRD: https://") {
 		t.Errorf("usage %+v log %q", got.Usage, log.String())
+	}
+}
+
+func TestReviewFindingsResumeImplementationSessionAfterPlan(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2"), prTurn("sid-2")}
+	f.codex.reviews = []agent.ReviewOutcome{findings("blocking")}
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if f.claude.starts != 2 || len(f.claude.resumed) != 1 || !strings.HasPrefix(f.claude.resumed[0], "sid-2: Review round 1 of PR #912") {
+		t.Errorf("review findings must resume the implementation session: starts %d resumed %q", f.claude.starts, f.claude.resumed)
+	}
+	if !slices.Equal(f.claude.stages, []task.Stage{task.StagePlan, task.StageImplement, task.StageImplement}) {
+		t.Errorf("implementer stages = %v", f.claude.stages)
 	}
 }
 
@@ -428,7 +447,7 @@ func TestReplanningEditsTheSameComments(t *testing.T) {
 	f.gh.postErr = nil
 	delete(f.gh.comments, 1002)
 	started(t, f, startReq(t))
-	f.claude.turns = []agent.Turn{plannedTurn("sid-2"), prTurn("sid-2")}
+	f.claude.turns = []agent.Turn{plannedTurn("sid-2"), prTurn("sid-3")}
 	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -444,12 +463,16 @@ func TestAnsweredPlanningQuestionResumesThePlanning(t *testing.T) {
 	rec := f.store.recs[key]
 	rec.Delegation.Implementer.ID = "sid-1"
 	rec.Decisions = []task.Decision{{Question: task.Question{Issue: "Retry 4xx?"}, Answer: "A. 5xx only", AnsweredAt: f.app.Now()}}
-	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-1")}
+	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2")}
 	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.claude.resumed) != 2 || !strings.Contains(f.claude.resumed[0], "planned, blocked, or failed") || !strings.Contains(f.claude.resumed[1], "foreman posted your documents") {
-		t.Errorf("resumed %q", f.claude.resumed)
+	got := f.store.recs[key]
+	if len(f.claude.resumed) != 1 || !strings.Contains(f.claude.resumed[0], "planned, blocked, or failed") || f.claude.starts != 1 || got.Delegation.Implementer.ID != "sid-2" {
+		t.Errorf("planning answer must resume before implementation starts fresh: resumed %q starts %d", f.claude.resumed, f.claude.starts)
+	}
+	if !slices.Equal(f.claude.stages, []task.Stage{task.StagePlan, task.StageImplement}) {
+		t.Errorf("implementer stages = %v", f.claude.stages)
 	}
 }
 
@@ -480,7 +503,7 @@ func TestCodexPlansAndClaudeReviewsAgainstThePRD(t *testing.T) {
 	key := started(t, f, req)
 	planned := plannedTurn("th-1")
 	planned.Session.Agent = task.Codex
-	f.codex.turns = []agent.Turn{planned, {Session: task.Session{Agent: task.Codex, ID: "th-1"}, Outcome: prTurn("").Outcome}}
+	f.codex.turns = []agent.Turn{planned, {Session: task.Session{Agent: task.Codex, ID: "th-2"}, Outcome: prTurn("").Outcome}}
 	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -488,8 +511,8 @@ func TestCodexPlansAndClaudeReviewsAgainstThePRD(t *testing.T) {
 	if got.State != task.Reviewing || !got.PlanPosted() {
 		t.Fatalf("state %s plan %+v", got.State, got.Plan)
 	}
-	if !strings.Contains(f.codex.prompt, "## Plan first") || len(f.codex.resumed) != 1 || !strings.HasPrefix(f.codex.resumed[0], "th-1: foreman posted your documents") {
-		t.Errorf("codex must plan, then resume its thread to implement: resumed %q", f.codex.resumed)
+	if len(f.codex.prompts) != 2 || !strings.Contains(f.codex.prompts[0], "## Plan first") || !strings.Contains(f.codex.prompt, "- Implementation plan: https://github.com/") || len(f.codex.resumed) != 0 || got.Delegation.Implementer.ID != "th-2" {
+		t.Errorf("codex must implement in a fresh thread: prompts %q resumed %q session %q", f.codex.prompts, f.codex.resumed, got.Delegation.Implementer.ID)
 	}
 	if len(f.claude.reviewed) != 1 || !strings.Contains(f.claude.reviewed[0], "R1. Retry 5xx.") {
 		t.Errorf("claude's review must carry the PRD: %q", f.claude.reviewed)

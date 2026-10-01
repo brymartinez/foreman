@@ -41,11 +41,8 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 	}))
 
 	var findings *task.Review
-	// planPosted is set for the turn right after the plan went up on the issue, which
-	// resumes the planning session to implement it (D90).
-	planPosted := false
 	// feedback is the comments on the PR this run has to answer, and rounds is how many
-	// times it has answered. A resumed task starts here (D120).
+	// times it has answered. A resumed task starts here (D122).
 	feedback, rec, done, err := a.unanswered(ctx, final, rec, log)
 	if err != nil || done {
 		return err
@@ -64,7 +61,7 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 			}
 			if rec.State != task.Reviewing && rec.State != task.ReadyForHuman {
 				// Blocked, failed, or stopped. The comments stay unanswered, so the next
-				// run asks for them again (D120).
+				// run asks for them again (D122).
 				return nil
 			}
 			// A turn that pushed nothing leaves the code its review already covers, so
@@ -94,8 +91,7 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 			}
 		}
 		if !answered && !reviewNext {
-			turn, runErr := a.implement(ctx, rec, findings, planPosted, nil, log)
-			planPosted = false
+			turn, runErr := a.implement(ctx, rec, findings, nil, log)
 			step := "implementation"
 			if a.needsPlan(rec) {
 				step = "planning"
@@ -122,7 +118,6 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 				if rec, err = a.postPlan(ctx, final, rec, turn.Outcome.Documents, log); err != nil || rec.State != task.Working {
 					return err
 				}
-				planPosted = true
 				continue
 			}
 			if rec.State != task.Reviewing {
@@ -147,7 +142,7 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 		}
 		if rec.State != task.Working {
 			// A clean review hands the task to the gate, so this is the run's last
-			// chance to answer comments that arrived while it worked (D121).
+			// chance to answer comments that arrived while it worked (D123).
 			if reviewErr == nil && review.Clean && rec.State == task.Reviewing {
 				if feedback, rec, err = a.beforeHandover(ctx, final, rec, rounds, log); err != nil || len(feedback) == 0 {
 					return err
@@ -208,14 +203,18 @@ func (a App) needsPlan(rec *task.Record) bool {
 	return !rec.PlanPosted() && rec.Delegation.PR == 0
 }
 
-func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Review, planPosted bool, feedback []PRComment, log io.Writer) (agent.Turn, error) {
+func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Review, feedback []PRComment, log io.Writer) (agent.Turn, error) {
 	d := rec.Delegation
 	adapter, ok := a.Agents[d.Implementer.Agent]
 	if !ok {
 		return agent.Turn{}, fmt.Errorf("agent %s is not configured", d.Implementer.Agent)
 	}
-	in := agent.StartInput{Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD}
 	planning := a.needsPlan(rec)
+	stage := task.StageImplement
+	if planning {
+		stage = task.StagePlan
+	}
+	in := agent.StartInput{Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD, Stage: stage}
 	resume := ""
 	if decs := rec.Undelivered(); len(decs) > 0 {
 		var open *task.Review
@@ -223,8 +222,6 @@ func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Rev
 			open = latest
 		}
 		resume = agent.ResumeMessage(decs, open, planning)
-	} else if planPosted {
-		resume = agent.PlanPostedMessage(rec.Plan)
 	} else if len(feedback) > 0 {
 		resume = agent.FeedbackMessage(rec.Repo, d.PR, feedbackItems(feedback))
 	} else if findings != nil {
@@ -277,12 +274,12 @@ func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Rev
 }
 
 // answerFeedback runs one turn that answers the comments it is given. The PR head
-// before the turn is what tells a reply-only turn from one that changed code (D120).
+// before the turn is what tells a reply-only turn from one that changed code (D122).
 func (a App) answerFeedback(ctx, final context.Context, rec *task.Record, comments []PRComment, log io.Writer) (*task.Record, error) {
 	d := rec.Delegation
 	headBefore := d.PRHead
 	fmt.Fprintf(log, "foreman: %s\n", feedbackNote(len(comments), d.PR))
-	turn, runErr := a.implement(ctx, rec, nil, false, comments, log)
+	turn, runErr := a.implement(ctx, rec, nil, comments, log)
 	var pr *PullRequest
 	if runErr == nil && turn.Outcome.Status == agent.PROpened {
 		if pr, runErr = a.verifyPR(ctx, rec, turn.Outcome); runErr == nil {
@@ -303,7 +300,7 @@ func (a App) answerFeedback(ctx, final context.Context, rec *task.Record, commen
 // failed or asked a question leaves them for the next one. A turn that pushed nothing
 // leaves the code its review already covers, so the task goes straight back to the
 // developer with its CI result; a turn that pushed goes through the review and CI flow
-// like any other change (D120).
+// like any other change (D122).
 func applyFeedbackTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error, comments []PRComment, headBefore string, now time.Time) {
 	ci := rec.CI
 	applyTurn(rec, turn, pr, runErr, now)
@@ -317,7 +314,7 @@ func applyFeedbackTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runEr
 	rec.CI = ci
 	d := rec.Delegation
 	// The same bar the gate applies: a clean review of this head and CI that finished.
-	// Without both, the task stays under review and the gate hands it over (D120).
+	// Without both, the task stays under review and the gate hands it over (D122).
 	if reviewCovers(rec, pr.HeadSHA) && ci != nil && ci.State != task.CIPending {
 		rec.State = task.ReadyForHuman
 		rec.LastOutcome = &task.Outcome{Status: "feedback_answered",

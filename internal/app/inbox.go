@@ -15,7 +15,7 @@ type InboxEntry struct {
 	Item    InboxItem
 	Changes []string
 	// Delegated says foreman has a run for this item, and State is that run's state.
-	// Together they are what keeps work already in hand out of INBOX (D122).
+	// Together they are what keeps work already in hand out of INBOX (D124).
 	Delegated bool
 	State     task.State
 }
@@ -29,7 +29,7 @@ type InboxReport struct {
 	// It is used by the interactive picker; the report sections retain their diff semantics.
 	Current       []InboxEntry
 	NeedsDecision []*task.Record
-	// Reviewed holds the tasks whose PR has comments the agent has not answered (D117).
+	// Reviewed holds the tasks whose PR has comments the agent has not answered (D119).
 	Reviewed       []*task.Record
 	Ready          []*task.Record
 	WaitingChanges map[task.Key][]string
@@ -144,7 +144,7 @@ const goneNote = "no longer on GitHub or no longer accessible; foreman stopped c
 // snapshots still record every reason, so a lost reason is still reported and the
 // items come back the moment the setting does. Delegated work waiting on the
 // developer is not an inbox find, so it is left alone, and a delegated FAILED or
-// REVIEWED task is how the developer restarts or resumes it (D124). The note for an item that left
+// REVIEWED task is how the developer restarts or resumes it (D126). The note for an item that left
 // GitHub is filtered where it is built, because it carries no reasons of its own.
 func hideMentionOnly(r *InboxReport, stored map[task.Key][]task.InboxReason) {
 	keep := func(entries []InboxEntry) []InboxEntry {
@@ -355,7 +355,7 @@ func Reconcile(items []InboxItem, recs []*task.Record, notes map[task.Key][]stri
 }
 
 // entryFor is one item in the current refresh, carrying the state of the run foreman
-// has for it. INBOX reads that state to leave work already in hand alone (D122).
+// has for it. INBOX reads that state to leave work already in hand alone (D124).
 func entryFor(rec *task.Record, it InboxItem, changes []string) InboxEntry {
 	return InboxEntry{Item: it, Changes: changes, Delegated: rec.Delegation != nil, State: rec.State}
 }

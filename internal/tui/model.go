@@ -269,7 +269,7 @@ func (m *Model) enter() Action {
 		}
 		if e.State == task.Reviewed {
 			// The task keeps its agent, worktree, and session, so there is nothing to
-			// ask: it goes straight back to work on the comments (D119).
+			// ask: it goes straight back to work on the comments (D121).
 			m.manualTask = false
 			m.Message = fmt.Sprintf("Resuming %s#%d to answer its PR feedback…", e.Item.Key.Repo, e.Item.Key.Number)
 			return Action{Kind: ActionResume, Resume: e.Item.Key}

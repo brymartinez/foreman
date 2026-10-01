@@ -52,7 +52,7 @@ type PullRequest struct {
 }
 
 // PRComment is one comment on a pull request. Path, Line, and InReplyTo are set for
-// an inline review comment, and are what tell the agent where to reply (D117).
+// an inline review comment, and are what tell the agent where to reply (D119).
 type PRComment struct {
 	Kind      task.CommentKind
 	ID        int64
@@ -101,7 +101,7 @@ type GitHubClient interface {
 	GetIssueComment(ctx context.Context, repo task.Repo, id int64) (IssueComment, error)
 	// PullRequestComments reads every comment on a pull request: the conversation
 	// comments, the inline review comments and their replies, and the body of each
-	// submitted review. A review with no body is left out (D117).
+	// submitted review. A review with no body is left out (D119).
 	PullRequestComments(ctx context.Context, pr task.Key) ([]PRComment, error)
 }
 

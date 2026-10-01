@@ -13,7 +13,7 @@ import (
 // maxFeedbackRounds caps how many times one run answers comments. Without it, an agent
 // that forgets the reply marker would read its own reply as new feedback and answer
 // itself until the task file ran out of patience. Anything past the cap waits in
-// REVIEWED for the developer, who can see the rounds in the log (D121).
+// REVIEWED for the developer, who can see the rounds in the log (D123).
 const maxFeedbackRounds = 3
 
 // commentKey identifies a comment the way the task file does: a review id and a
@@ -38,7 +38,7 @@ func answered(comments []PRComment) []task.Feedback {
 // readFeedback records the comments on a task's pull request and returns the record as
 // it now stands with the ones still waiting for an answer, text and all. The task file
 // keeps each comment's identity alone, so the text is read from GitHub whenever a turn
-// needs it (D117).
+// needs it (D119).
 func (a App) readFeedback(ctx context.Context, rec *task.Record) (*task.Record, []PRComment, error) {
 	pr := rec.Delegation.PR
 	comments, err := a.GitHub.PullRequestComments(ctx, task.Key{Repo: rec.Repo, Number: pr})
@@ -49,7 +49,7 @@ func (a App) readFeedback(ctx context.Context, rec *task.Record) (*task.Record, 
 	for _, c := range comments {
 		// The agent answers through the developer's own gh login, so its replies carry
 		// the marker instead; nothing else can tell them from the developer's own
-		// comments, which have to count (D118).
+		// comments, which have to count (D120).
 		if strings.TrimSpace(c.Body) == "" || strings.Contains(c.Body, agent.ReplyMarker) {
 			continue
 		}
@@ -126,7 +126,7 @@ func plural(n int, one, many string) string {
 
 // handsOver reports a task whose pull request is the developer's to comment on: the
 // agents are done with it and no runner is driving it, so a comment is feedback rather
-// than something the current run is about to answer itself (D119). The runner's pid is
+// than something the current run is about to answer itself (D121). The runner's pid is
 // judged by whether the process is alive, so a pid a killed runner left behind cannot
 // hide a comment for good.
 func (a App) handsOver(r *task.Record) bool {
@@ -142,7 +142,7 @@ func (a App) handsOver(r *task.Record) bool {
 // delivers that and finds the comments on its way out. done reports that the run
 // has nothing else to do: a task whose clean review covers its PR head and whose
 // comments are gone, or could not be read, must not fall through to an
-// implementation turn that redoes the issue (D125).
+// implementation turn that redoes the issue (D127).
 func (a App) unanswered(ctx, final context.Context, rec *task.Record, log io.Writer) (comments []PRComment, updated *task.Record, done bool, err error) {
 	d := rec.Delegation
 	if d == nil || d.PR == 0 || len(rec.UnhandledFeedback()) == 0 || len(rec.Undelivered()) > 0 {
@@ -189,7 +189,7 @@ func reviewCovers(rec *task.Record, head string) bool {
 }
 
 // beforeHandover answers comments that arrived while the run worked, so the developer
-// never gets a task back with feedback nobody has read (D121). It returns the comments
+// never gets a task back with feedback nobody has read (D123). It returns the comments
 // the next turn should answer; none means the run is done. Past maxFeedbackRounds it
 // leaves them in REVIEWED instead, for the developer to resume.
 func (a App) beforeHandover(ctx, final context.Context, rec *task.Record, rounds int, log io.Writer) ([]PRComment, *task.Record, error) {
