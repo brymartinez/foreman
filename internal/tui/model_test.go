@@ -533,3 +533,23 @@ func TestShowReachesEveryLine(t *testing.T) {
 		}
 	}
 }
+
+func TestShowScrollsUpAfterTheTextShrinks(t *testing.T) {
+	m := model()
+	m.Width, m.Height = minWidth, minHeight
+	longShow(&m)
+	press(&m, rune_('l'), Key{Kind: KeyEnter}, rune_('s'), rune_('G'))
+	m.Selected().Reviews[0].Findings = m.Selected().Reviews[0].Findings[:2]
+	limit := m.showLimit()
+	press(&m, rune_('u'))
+	if want := max(limit-m.logPage(), 0); m.ShowTop != want {
+		t.Errorf("u after the text shrank left ShowTop at %d; want %d (limit %d)", m.ShowTop, want, limit)
+	}
+	press(&m, rune_('G'))
+	m.Width = 200
+	limit = m.showLimit()
+	press(&m, Key{Kind: KeyPageUp})
+	if want := max(limit-m.logPage(), 0); m.ShowTop != want {
+		t.Errorf("page up after a resize left ShowTop at %d; want %d (limit %d)", m.ShowTop, want, limit)
+	}
+}

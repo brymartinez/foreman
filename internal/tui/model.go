@@ -284,7 +284,10 @@ func (m *Model) showLimit() int {
 // or toward the top of the show text.
 func (m *Model) scrollLog(by int) {
 	if m.ShowOpen {
-		m.ShowTop = min(max(m.ShowTop-by, 0), m.showLimit())
+		// A refresh or a resize can shrink the text under a stored ShowTop, so the step
+		// starts from the page the frame draws, not from the stale position.
+		limit := m.showLimit()
+		m.ShowTop = min(max(min(m.ShowTop, limit)-by, 0), limit)
 		return
 	}
 	m.LogOffset += by
