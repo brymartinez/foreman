@@ -90,6 +90,22 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
+func TestMarkdownRoundTripsPRClosed(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	want := delegated()
+	want.State = task.PRClosed
+	if err := s.Save(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, want.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != task.PRClosed || got.Delegation.Branch != want.Delegation.Branch {
+		t.Fatalf("state %s branch %q", got.State, got.Delegation.Branch)
+	}
+}
+
 func TestFileMatchesDesignDocShape(t *testing.T) {
 	s := Markdown{Dir: t.TempDir()}
 	if err := s.Save(ctx, delegated()); err != nil {
