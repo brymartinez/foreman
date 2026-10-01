@@ -448,6 +448,16 @@ func Show(w io.Writer, r *task.Record) {
 			fmt.Fprintf(w, "  - [%s]%s %s\n", f.Severity, loc, f.Summary)
 		}
 	}
+	if len(r.Feedback) > 0 {
+		fmt.Fprintln(w, "\nPull request comments")
+		for _, f := range r.Feedback {
+			state := "waiting"
+			if !f.HandledAt.IsZero() {
+				state = "answered " + f.HandledAt.Local().Format(time.DateTime)
+			}
+			fmt.Fprintf(w, "  %s %s · %s · %s\n", mark(!f.HandledAt.IsZero()), orDash(f.Author), state, f.URL)
+		}
+	}
 	var answered []task.Decision
 	for _, d := range r.Decisions {
 		if d.Answer != "" {

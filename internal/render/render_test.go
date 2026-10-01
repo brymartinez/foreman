@@ -197,6 +197,23 @@ func TestShowCI(t *testing.T) {
 	}
 }
 
+func TestShowFeedback(t *testing.T) {
+	var buf bytes.Buffer
+	Show(&buf, &task.Record{
+		Key: task.Key{Repo: "a/b", Number: 825}, State: task.Reviewed,
+		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912},
+		Feedback: []task.Feedback{
+			{Kind: task.IssueComment, ID: 1, Author: "dev", URL: "https://x/1", HandledAt: time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)},
+			{Kind: task.ReviewComment, ID: 2, Author: "bot", URL: "https://x/2"},
+		},
+	})
+	for _, want := range []string{"Pull request comments\n", "dev · answered ", "https://x/1\n", "bot · waiting · https://x/2\n"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("missing %q in:\n%s", want, buf.String())
+		}
+	}
+}
+
 func TestShowClaudeTranscript(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "/cfg")
 	var buf bytes.Buffer

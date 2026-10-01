@@ -32,6 +32,10 @@ foreman start 825 --agent claude          (run from a checkout of the repo)
   └─ spawn detached `foreman __run owner/repo#825` (pid + log recorded), exit
 
 runner (one process per task, exits when the task leaves WORKING/REVIEWING):
+  if the PR has comments the agent has not answered (D117, resumed from REVIEWED):
+    turn = implementer.Resume(session, each comment, where it is, and how to reply)
+    head unchanged -> mark them answered, keep CI, READY_FOR_HUMAN (D120)
+    head moved     -> mark them answered, review the new head like any change
   if the verified PR head has no review (crash mid-review, or new commits, D63):
     re-verify the PR, record its head, skip to the review below
   turn = implementer.Start(worktree, prompt)          # later: Resume(session, msg)
@@ -46,12 +50,16 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
                     record PR and its head commit, state REVIEWING
                     review = reviewer.Review(disposable read-only session,
                                              issue + context + decisions + git diff + earlier rounds)
-                    clean    -> record review and the head it covered, stay REVIEWING, exit
+                    clean    -> record review and the head it covered; read the PR's comments,
+                and answer anything new before handing over (D121); stay REVIEWING, exit
                     findings -> WORKING; implementer.Resume(session, findings); agent pushes
                                 fixes and reports pr_opened again; re-verify; re-review
                     findings after fix_rounds reviewed fixes since the last answer ->
                                 NEEDS_DECISION (A: another round, B: accept remaining), exit
 
+foreman resume 825    -> a REVIEWED task goes back to WORKING with its branch,
+                         worktree, PR, and session kept; the runner answers the
+                         comments (D119)
 foreman respond 825   -> answer each waiting question in order; after the last,
                          state WORKING, spawn runner
                          runner: Resume(session, all answers); on ErrNoSession, a fresh
@@ -66,6 +74,7 @@ foreman               -> the dashboard (D93), until q or ctrl+c:
                          every `refresh` seconds (60 by default): app.Inbox, the
                            same as `foreman inbox` (D95, D110)
                          enter on an inbox issue -> agent, context file, app.Start
+                         enter on a REVIEWED issue -> app.Resume, no prompts (D119)
                          enter on delegated work -> open that task's log below the lists
                          left/right, h/l -> focus the inbox/delegated work
                          esc -> close the log
@@ -83,6 +92,11 @@ foreman inbox|status  -> runner pid dead while WORKING/REVIEWING -> FAILED
                              pending              -> record, wait
                              finished             -> READY_FOR_HUMAN, ✓ CI or ✗ CI: <checks>
                            READY_FOR_HUMAN: refresh the CI result; flag new commits
+                         and then, per task the agents are done with (READY_FOR_HUMAN
+                         or REVIEWED, PR open, no live runner):
+                           read the PR's comments, drop the agent's own replies (D118)
+                           any unanswered -> REVIEWED, shown in INBOX (D117)
+                           none left      -> READY_FOR_HUMAN
                         inbox only, cleanup.on_done: DONE task -> git worktree remove
                            (kept if dirty); branch -D only if its PR merged
 foreman clean [<issue>] -> the same cleanup on demand; <issue> may also be FAILED
@@ -104,6 +118,9 @@ FAILED, or READY_FOR_HUMAN (D59).
   runner timestamps its own lines. A writer in the launcher would need a pipe, which
   dies with the launcher (D58). Agents run in their own process group, so stopping a
   runner stops the tools its agent started (D59).
+- **INBOX is work to start.** The list offers issues foreman has never delegated plus
+  delegated ones in FAILED or REVIEWED. Everything else an agent holds stays in
+  DELEGATED WORK, so the same issue is never delegated twice (D122).
 - **Structured outcomes.** Both CLIs validate the final message against
   `internal/agent/outcome.schema.json`. `ParseOutcome` is the single place where
   external agent output becomes typed data.

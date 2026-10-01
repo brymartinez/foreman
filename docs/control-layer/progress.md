@@ -2,7 +2,7 @@
 
 ## Current stage
 
-Stage 16 (dashboard navigation, visibility, and refresh settings for issue #5) is
+Stage 17 (PR feedback, the INBOX filter, and readable Codex logs for issue #7) is
 complete.
 
 ## Completed
@@ -545,6 +545,27 @@ request. Each fix is its own commit with a decision.
   `internal/app`, `internal/tui`, `internal/config`, and `internal/agent`, a build, and
   `scripts/e2e.sh`.
 
+### Stage 17 (complete): PR feedback, the INBOX filter, and Codex logs for issue #7
+
+- A new or text-edited comment on an open foreman PR moves a READY_FOR_HUMAN task to
+  the new `REVIEWED` state (D117). The gate reads the conversation, the inline comments
+  and replies, and the reviews on every refresh (D119). Replies that start with
+  `<!-- foreman:reply -->` are dropped, so the agent's answers start no new round (D118).
+- `foreman resume <issue>`, the picker, and enter on the dashboard resume the task's own
+  session in its own worktree with each unanswered comment and where to reply (D119).
+  A turn that leaves the PR head unchanged returns to READY_FOR_HUMAN with no new review;
+  a turn that pushes goes through review and CI again. Comments count as answered only
+  after a `pr_opened` turn (D120).
+- The runner reads the conversation again before it hands over and answers what arrived
+  during the run, at most three times per run (D121).
+- INBOX lists never delegated issues plus delegated FAILED and REVIEWED ones (D122).
+- The cleaned log renders Codex messages, commands and their results, file changes,
+  searches, MCP calls, errors, and turn totals. `--raw` still prints the JSON (D123).
+- `show` lists each PR comment foreman tracks and whether it is answered.
+- Verified with `go vet ./...`, `go test ./...`, `go build -o dist/foreman
+  ./cmd/foreman`, `scripts/e2e.sh` (a new `feedback` scenario covers comment, REVIEWED,
+  resume, reply, and no second round), and `git diff --check`.
+
 ## Known limitations
 
 - The gate runs only when `inbox` or `status` runs, or while the dashboard is open
@@ -557,6 +578,9 @@ request. Each fix is its own commit with a decision.
   check, and foreman gates on it.
 - A search that returns 1000 results is flagged, and lost reasons aren't judged
   while one is truncated (D64).
+- An agent that leaves the reply marker off reads its own reply as new feedback. That
+  costs one extra round, bounded by the per-run cap (D118, D121).
+- PR feedback has been checked against the stand-in `gh` and fixtures, not a live PR.
 - The release workflow has not run: the repo has no GitHub remote yet.
 
 ## Architectural decisions
@@ -661,7 +685,12 @@ what it replaced. Current summary:
   D110). Judge the gone note by the reasons the task stored. D115 (amends D110 and
   D114). Resolve a tracked fetch's reasons before filtering. D116. Keep both sets of
   decisions and their references after the merge.
+- D117. The REVIEWED state; a comment is its kind, id, and text digest. D118. The
+  agent's replies carry a marker. D119. Feedback is read by the gate; `resume` is its
+  own command. D120. A feedback turn is judged by whether the PR head moved. D121. A
+  run answers new comments before handing over, at most three times. D122. INBOX
+  offers only work the developer can move. D123. The cleaned log renders Codex items.
 
 ## Next stage
 
-None. Stages 0 to 16 are complete. Further work needs a new request.
+None. Stages 0 to 17 are complete. Further work needs a new request.
