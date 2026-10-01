@@ -42,6 +42,9 @@ const (
 	ReadyForHuman State = "READY_FOR_HUMAN"
 	Done          State = "DONE"
 	Failed        State = "FAILED"
+	// PRClosed means the task's PR was closed without merging. The agent did not
+	// fail, so the task keeps its file, worktree, and branch.
+	PRClosed State = "PR_CLOSED"
 )
 
 // Repo is "owner/name", as gh reports nameWithOwner.

@@ -59,7 +59,7 @@ Usage:
   foreman start <issue> --agent claude|codex [--context path.md] [--type fix]
   foreman respond <issue>                         Answer a NEEDS_DECISION task
   foreman cancel <issue>                          Stop a task's running agent
-  foreman clean [<issue>] [--dry-run]             Remove worktrees of DONE tasks (or one DONE/FAILED task)
+  foreman clean [<issue>] [--dry-run]             Remove worktrees of DONE tasks (or one finished task)
   foreman config --stages                         Where each stage's instructions come from
   foreman config --show                           Show the resolved configuration
   foreman config --edit                           Edit the configuration file

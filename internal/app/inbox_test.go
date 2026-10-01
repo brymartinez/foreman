@@ -146,7 +146,14 @@ func (f *fakeStore) Save(_ context.Context, r *task.Record) error {
 func (f *fakeStore) Update(ctx context.Context, k task.Key, fn func(*task.Record) (*task.Record, error)) (*task.Record, error) {
 	cur := f.recs[k]
 	if cur != nil {
+		// The Markdown store decodes a record per read, so the copy must not share the
+		// delegation with the caller's: a write here is not visible to a list taken
+		// before it.
 		c := *cur
+		if c.Delegation != nil {
+			d := *c.Delegation
+			c.Delegation = &d
+		}
 		cur = &c
 	}
 	next, err := fn(cur)
@@ -174,6 +181,7 @@ type fakeGitHub struct {
 	issue     Issue
 	repo      RepoInfo
 	prs       map[int]PullRequest
+	onPR      func() // runs once, inside the next GetPullRequest
 	ci        map[int]task.CIStatus
 	comments  map[int64]IssueComment // posted issue comments by id
 	edits     int                    // PostIssueComment calls that edited a comment
@@ -218,6 +226,12 @@ func (f *fakeGitHub) CIStatus(_ context.Context, k task.Key) (task.CIStatus, err
 }
 
 func (f *fakeGitHub) GetPullRequest(_ context.Context, k task.Key) (PullRequest, error) {
+	if f.onPR != nil {
+		// Plays another process writing between a refresh's read and its own write.
+		hook := f.onPR
+		f.onPR = nil
+		hook()
+	}
 	pr, ok := f.prs[k.Number]
 	if !ok {
 		return PullRequest{}, fmt.Errorf("gh: no pull requests found for %d", k.Number)
@@ -270,6 +284,104 @@ func TestInboxFetchesDelegatedTasksMissingFromSearch(t *testing.T) {
 	}
 	if len(report.Changed) != 1 || report.Changed[0].Changes[0] != "closed" {
 		t.Errorf("changed = %+v", report.Changed)
+	}
+}
+
+func TestInboxHidesMentionOnlyItems(t *testing.T) {
+	mentionedPR := item(2, "open", t0, task.Mentioned)
+	mentionedPR.Kind = task.PullRequest
+	items := []InboxItem{
+		item(1, "open", t0, task.Mentioned), // mention-only issue: hidden
+		mentionedPR,                         // mention-only PR: hidden
+		item(3, "open", t0, task.Mentioned, task.Assigned), // also assigned: kept
+		item(4, "open", t0, task.ReviewRequested),          // review requested: kept
+	}
+	shown := func(hide bool) []int {
+		store := &fakeStore{recs: map[task.Key]*task.Record{}}
+		a := App{Store: store, GitHub: &fakeGitHub{items: items}, Runners: &fakeRunners{},
+			HideMentionOnly: hide, Now: func() time.Time { return now }}
+		report, err := a.Inbox(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := entryNumbers(report.New); !slices.Equal(got, entryNumbers(report.Current)) {
+			t.Fatalf("hide=%v: new %v and current %v disagree", hide, got, entryNumbers(report.Current))
+		}
+		return entryNumbers(report.Current)
+	}
+	if got := shown(false); !slices.Equal(got, []int{1, 2, 3, 4}) {
+		t.Errorf("mentions shown = %v, want every item", got)
+	}
+	if got := shown(true); !slices.Equal(got, []int{3, 4}) {
+		t.Errorf("mentions hidden = %v, want only the assigned and review-requested items", got)
+	}
+}
+
+// trackedGitHub answers a tracked fetch with an open item that has new activity. That
+// is what a search hitting its result limit produces: the item is still the
+// developer's, but no search returned it, so the fetch has only the `tracked` reason.
+type trackedGitHub struct {
+	*fakeGitHub
+}
+
+func (g *trackedGitHub) GetItem(_ context.Context, k task.Key) (InboxItem, error) {
+	return item(k.Number, "open", t1, task.Tracked), nil
+}
+
+func TestInboxHidesAMentionOnlyItemATruncatedSearchMissed(t *testing.T) {
+	report := func(hide bool, kind task.Kind, reasons ...task.InboxReason) InboxReport {
+		rec := seen(1, task.Discovered, "open", t0, reasons...)
+		rec.Kind = kind
+		store := &fakeStore{recs: map[task.Key]*task.Record{rec.Key: rec}}
+		gh := &trackedGitHub{fakeGitHub: &fakeGitHub{truncated: []string{"mentions"}}}
+		a := App{Store: store, GitHub: gh, Runners: &fakeRunners{}, HideMentionOnly: hide,
+			Now: func() time.Time { return now }}
+		got, err := a.Inbox(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got.Truncated) == 0 {
+			t.Fatal("the search must report a truncation for this path to run")
+		}
+		return got
+	}
+	for _, tc := range []struct {
+		name    string
+		hide    bool
+		kind    task.Kind
+		reasons []task.InboxReason
+		want    []int
+	}{
+		{"mention only, mentions off", true, task.Issue, []task.InboxReason{task.Mentioned}, nil},
+		{"mention-only PR, mentions off", true, task.PullRequest, []task.InboxReason{task.Mentioned}, nil},
+		{"mention only, mentions on", false, task.Issue, []task.InboxReason{task.Mentioned}, []int{1}},
+		{"also assigned, mentions off", true, task.Issue, []task.InboxReason{task.Mentioned, task.Assigned}, []int{1}},
+		{"review requested, mentions off", true, task.Issue, []task.InboxReason{task.Mentioned, task.ReviewRequested}, []int{1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := report(tc.hide, tc.kind, tc.reasons...)
+			if n := entryNumbers(got.Changed); !slices.Equal(n, tc.want) {
+				t.Errorf("changed = %v, want %v", n, tc.want)
+			}
+			// The dashboard pane reads Current, so the setting has to reach it too.
+			if n := entryNumbers(got.Current); !slices.Equal(n, tc.want) {
+				t.Errorf("current = %v, want %v", n, tc.want)
+			}
+		})
+	}
+}
+
+func TestHideMentionOnlyKeepsChangedEntries(t *testing.T) {
+	recs := []*task.Record{
+		seen(1, task.Discovered, "open", t0, task.Mentioned),
+		seen(3, task.Discovered, "open", t0, task.Mentioned),
+	}
+	items := []InboxItem{item(1, "open", t1, task.Mentioned), item(3, "open", t1, task.Mentioned, task.Assigned)}
+	stored := storedReasons(recs)
+	report, _ := Reconcile(items, recs, nil, true, now)
+	hideMentionOnly(&report, stored)
+	if got := entryNumbers(report.Changed); !slices.Equal(got, []int{3}) {
+		t.Errorf("changed = %v, want only the assigned item", got)
 	}
 }
 

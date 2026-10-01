@@ -33,13 +33,10 @@ import (
 	"golang.org/x/term"
 )
 
-// The dashboard's two refresh rates. The GitHub one runs the searches, the readiness
-// gate, and the cleanup, so it is as rare as watching allows; the local one only
-// re-reads task files and the selected log (D95).
-const (
-	gitHubRefresh = 60 * time.Second
-	localRefresh  = time.Second
-)
+// localRefresh is how often the dashboard re-reads the task files and the selected
+// log. It is cheap, so it is fixed; the GitHub refresh runs the searches, the
+// readiness gate, and the cleanup, so its interval is the `refresh` setting (D95).
+const localRefresh = time.Second
 
 // version is set at release time with -ldflags "-X main.version=v1.2.3".
 var version = developmentVersion
@@ -108,6 +105,7 @@ func run(argv []string) int {
 		CleanOnDone:          cfg.Cleanup.OnDone,
 		DeleteMergedBranches: cfg.Cleanup.DeleteMergedBranch,
 		IgnoredRepositories:  cfg.IgnoredRepos,
+		HideMentionOnly:      !cfg.Mentions,
 		Now:                  func() time.Time { return time.Now().Truncate(time.Second) },
 	}
 
@@ -122,7 +120,7 @@ func run(argv []string) int {
 		}
 		if err := tui.Run(ctx, tui.Options{
 			In: os.Stdin, Out: os.Stdout, Source: a,
-			GitHubEvery: gitHubRefresh, LocalEvery: localRefresh,
+			GitHubEvery: time.Duration(cfg.Refresh) * time.Second, LocalEvery: localRefresh,
 		}); err != nil {
 			return fail(err)
 		}

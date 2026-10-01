@@ -115,6 +115,20 @@ func TestTabMovesFocus(t *testing.T) {
 	}
 }
 
+func TestArrowKeysSelectPanes(t *testing.T) {
+	arrows, letters := model(), model()
+	for i, k := range []Key{{Kind: KeyRight}, {Kind: KeyLeft}, {Kind: KeyRight}} {
+		press(&arrows, k)
+		press(&letters, rune_(map[KeyKind]rune{KeyRight: 'l', KeyLeft: 'h'}[k.Kind]))
+		if arrows.Focus != letters.Focus {
+			t.Fatalf("press %d: arrow left focus at %v, the letter at %v", i, arrows.Focus, letters.Focus)
+		}
+	}
+	if arrows.Focus != TaskPane {
+		t.Errorf("right did not focus delegated work: %v", arrows.Focus)
+	}
+}
+
 func TestEnterOpensSelectedLogAndKeysScrollIt(t *testing.T) {
 	m := model()
 	m.Log = make([]string, 200)

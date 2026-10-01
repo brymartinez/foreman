@@ -120,12 +120,22 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 // errTaskRemoved stops a runner whose task file was deleted while it ran.
 var errTaskRemoved = errors.New("the task file was removed; stopping")
 
+// errPRClosed stops a runner whose PR was closed while it ran. The gate records
+// PR_CLOSED before it stops the runner, so the stop that follows is foreman's doing,
+// not a failure of the agent's, and recording it would tell the developer their run
+// failed when they closed the PR themselves (D107).
+var errPRClosed = errors.New("the task's PR was closed; stopping")
+
 // existing adapts a change to a task the runner owns. A task without a file or a
-// delegation can't be advanced, so the run stops instead of recreating it.
+// delegation can't be advanced, so the run stops instead of recreating it, and
+// neither can one foreman has already ended.
 func existing(change func(cur *task.Record)) func(cur *task.Record) (*task.Record, error) {
 	return func(cur *task.Record) (*task.Record, error) {
 		if cur == nil || cur.Delegation == nil {
 			return nil, errTaskRemoved
+		}
+		if cur.State == task.PRClosed {
+			return nil, errPRClosed
 		}
 		change(cur)
 		return cur, nil

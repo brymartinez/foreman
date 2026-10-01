@@ -1547,6 +1547,103 @@ Entry format:
   because a local refresh chose the newest delegation. The 60 by 12 layout still
   shows the selected task's PR and state when the log is open.
 
+## D107. A closed PR ends its task in PR_CLOSED, not FAILED
+
+- Date: 2026-10-01. Issue midsoln/foreman#5. Requested by the user.
+- **Context.** The gate mapped a closed PR to FAILED, which is the state a crashed
+  agent gets: it notified "Run failed", colored the row red, and kept the task in
+  DELEGATED WORK forever. The gate also skipped any task a runner was driving, so a PR
+  closed mid-run was never seen and the agent kept working on a PR that was gone.
+- **Decision.** Add the state `PR_CLOSED`. The gate watches every task with a PR, not
+  only the ones waiting on GitHub, and fetches the PR for each; CI is still fetched
+  only for a gated task or one coming back from `PR_CLOSED`. A PR closed without
+  merging records the outcome `pr_closed` with the summary "PR #N closed without
+  merging; the branch and worktree are kept", and only then is the runner stopped:
+  `existing` refuses every runner write to a `PR_CLOSED` task, so the stop that
+  follows is never saved as a failed or cancelled run and the developer is never told
+  one failed. The pid comes from that locked write, not from the list that preceded
+  it, and only the pid foreman stopped is cleared, so a run started since keeps its
+  runner. A runner that will not stop keeps its pid and warns; the stop is driven by
+  the record's pid, so every refresh tries again. `PR_CLOSED` is not in `attention`, so
+  the task leaves DELEGATED WORK in the dashboard and in `foreman status`. Nothing
+  notifies the developer, who closed the PR. `foreman start` and `foreman clean
+  <issue>` accept the state, as they accept FAILED, and a start from `PR_CLOSED` drops
+  the closed PR's number, which would otherwise have the gate end the new run.
+  A task whose runner is still alive is startable and cleanable by neither: the
+  retained pid means that runner still owns the worktree and the task file, and a
+  start would both share them with a second runner and lift the `PR_CLOSED` state
+  that holds the first one off.
+  `PR_CLOSED` also survives the issue reconciliation that follows in the same refresh:
+  a closed issue turns a delegated task DONE, and DONE is cleaned automatically, so
+  without that the worktree and branch this decision promises would be removed and the
+  gate would stop watching for the PR to reopen.
+- **Consequence.** Closing a PR is how a developer calls off delegated work, and it
+  reads as that rather than as a failure. The cost is one `gh pr view` per active task
+  with a PR, per refresh. The task file, worktree, and branch survive, so the work can
+  be resumed or cleaned on the developer's terms.
+
+## D108. A reopened PR returns the task to delegated work
+
+- Date: 2026-10-01. Issue midsoln/foreman#5. Requested by the user.
+- **Context.** D107 leaves a task in `PR_CLOSED`. A developer who reopens the PR means
+  to carry on, and foreman had no path back.
+- **Decision.** The gate reads the CI of a reopened PR and derives the state from the
+  review it already has: READY_FOR_HUMAN when the latest review is clean, covers that
+  PR, names the head GitHub reports now, and CI has finished; REVIEWING otherwise. The
+  head must match explicitly, not merely fail to differ: a review from before heads
+  were recorded (D63) has none, and cannot be shown to cover the reopened PR. No agent
+  is started. REVIEWING with a clean review is what the existing gate promotes once CI
+  finishes, so the two paths converge instead of duplicating the rule.
+- **Consequence.** Reopening is enough to get the task back in the list. Work that was
+  not finished when the PR closed waits in REVIEWING for `foreman start`, rather than
+  foreman spending an agent the developer did not ask for.
+
+## D109 (amends D104). Dashboard rows keep the terminal's foreground
+
+- Date: 2026-10-01. Issue midsoln/foreman#5. Requested by the user.
+- **Context.** D104 colored whole task rows by state. On a light terminal the greens and
+  yellows washed out, and under the selected row's reverse video a colored row became a
+  colored background with background-colored text, which could not be read at all. The
+  colored span also closed with SGR 0, which ended the reverse video mid-line.
+- **Decision.** Row text carries no color. A row names the one word to accent, its
+  state, and `highlight` wraps that word after the line is truncated and padded, so the
+  column arithmetic (D101) is untouched and a truncated state is simply left plain. A
+  selected row is drawn from the plain line in reverse video alone. `colored` ends with
+  SGR 39 and `dimmed` with SGR 22, so neither clears another attribute. Left and Right
+  join `h` and `l` as pane keys.
+- **Consequence.** Color now means heading, divider, message, or task state. The
+  selection reads on a light theme and a dark one, because reverse video over the
+  default foreground is readable by construction.
+
+## D110. mentions and refresh are settings
+
+- Date: 2026-10-01. Issue midsoln/foreman#5. Requested by the user.
+- **Context.** The inbox always showed items found only because they mention the
+  developer, which is the noisiest of the four searches, and the dashboard's GitHub
+  refresh was a 60 second constant.
+- **Decision.** `mentions` (default true) and `refresh` (default 60 seconds, minimum 5)
+  join the config. `mentions: false` filters the finished report, dropping entries whose
+  only reason is `mentioned`, rather than dropping the searches: the snapshots keep
+  every reason, so "no longer mentions you" still works and the items return as soon as
+  the setting does. A `refresh` below 5 fails `config.Load` with the file and the
+  minimum. Local task and log rereads stay at one second, and `r` still refreshes.
+- **Consequence.** The quiet inbox costs nothing in accuracy, and the refresh rate is
+  the developer's call within a floor that keeps one refresh from overlapping the next.
+
+## D111 (amends D107 and D108). Check PR state before reaping its runner
+
+- Date: 2026-10-01. Issue midsoln/foreman#5. Review findings.
+- **Context.** A runner can exit before the next GitHub refresh. Reaping it during a
+  local task reread would record FAILED before the gate could see that its PR closed.
+  A runner that resisted a stop could also keep writing after its PR reopened.
+- **Decision.** Local rereads defer reaping tasks with a PR. `status` and `inbox`
+  identify dead runners, check PR state, then reap only tasks the gate left running.
+  Before a `PR_CLOSED` task returns to active work, the gate stops its retained runner
+  or clears its stale pid. A failed stop leaves the task closed for another refresh.
+- **Consequence.** A dead runner with a PR can remain WORKING until the next GitHub
+  refresh. A closed PR records `PR_CLOSED` without a failure notification, and a
+  reopened PR cannot release an old live runner into the active task.
+
 ## D112. Codex can write the worktree's git directory
 
 - Date: 2026-10-01. Requested by the user after midsoln/foreman#5 failed when Codex
@@ -1566,3 +1663,58 @@ Entry format:
 - **Consequence.** Codex can commit and push from foreman's worktrees. It can write to
   the whole clone's `.git`, not just this worktree's entry, which is the same access a
   plain checkout gives. Network access for `gh` and `git push` is unchanged (D7).
+
+## D113 (amends D111). Reap a dead runner only once its PR has been read
+
+- Date: 2026-10-01. Issue midsoln/foreman#5. Review finding.
+- **Context.** D111 reaped after the gate so a closed PR would be seen first, but it
+  reaped every dead runner the pass had found. A failed `GetPullRequest` only warns and
+  leaves the task WORKING, so the reap still recorded FAILED and notified. A later
+  refresh could correct the state, never the notification.
+- **Decision.** `gate` returns the keys whose PR it read. `reapable` keeps a dead runner
+  only when its task had no PR, which takes no GitHub call to judge, or when the gate
+  read that PR this pass. An unread task keeps its state for the next refresh.
+- **Consequence.** GitHub being down delays a FAILED verdict instead of risking a wrong
+  one. The condition is positive, so a future early return in `gate` leaves a task
+  unread, and unread means unreaped.
+
+## D114 (amends D110). Judge the gone note by the reasons the task stored
+
+- Date: 2026-10-01. Issue midsoln/foreman#5. Review finding.
+- **Context.** An item that leaves GitHub gets a CHANGED note built from the task
+  record, not from a search result, so the entry carries no reasons. `hideMentionOnly`
+  keeps an entry with no `mentioned` reason, so with `mentions: false` a mention-only
+  item still announced itself on the way out.
+- **Decision.** `Inbox` reads the stored reasons before `stopTracking` clears them and
+  drops the note when the setting is off and those reasons were a mention alone. The
+  check sits where the entry is built, not in `hideMentionOnly`, because the entry's
+  empty reasons are what tell `render.InboxActivity` to always show a gone note.
+  Filling them in would hide the note from the picker even with mentions on.
+- **Consequence.** The setting covers the item's whole life, including its last note.
+  The record still stops being checked either way: the setting hides the note, not the
+  bookkeeping that ends the refreshes.
+
+## D115 (amends D110 and D114). Resolve a tracked fetch's reasons before filtering
+
+- Date: 2026-10-01. Issue midsoln/foreman#5. Review finding.
+- **Context.** A search that hits its 1000 result limit can leave a tracked item out.
+  `fetchTracked` then retrieves it with the synthetic `tracked` reason alone, and new
+  activity puts it in CHANGED. `mentionOnly` saw no `mentioned` reason, so with
+  `mentions: false` the item still printed.
+- **Decision.** `storedReasons` snapshots each record's involvement before `Reconcile`,
+  which calls `observe` and rewrites those records in place. `involvement` resolves an
+  entry carrying `tracked` alone to that snapshot, and `hideMentionOnly` filters on the
+  result. This covers NEW, CHANGED, and the dashboard's `Current`.
+- **Consequence.** The setting holds when the searches are incomplete, which is when a
+  mention-only item is most likely to arrive as a tracked fetch. An item foreman has
+  never stored has no snapshot, so it keeps the reasons the search gave it.
+
+## D116. Keep both worktree and issue decisions after the merge
+
+- Date: 2026-10-01. PR midsoln/foreman#6 merge resolution.
+- **Context.** The issue branch and main independently assigned D112 to different
+  decisions. Both changes are needed and their references must stay unambiguous.
+- **Decision.** Keep main's D112 for the Codex worktree fix and renumber the issue
+  branch's later review decisions D113 to D115. Preserve both sets of changes.
+- **Consequence.** Code comments and progress references identify the intended
+  decision after PR #6 merges.

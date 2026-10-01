@@ -48,7 +48,7 @@ func TestCleanKeepsBranchUnlessMergedAndEnabled(t *testing.T) {
 		enable bool
 		pr     string
 		issue  int
-	}{{"setting off", false, "merged", 0}, {"closed PR", true, "closed", 825}} {
+	}{{"setting off", false, "merged", 0}, {"PR closed without merging", true, "closed", 825}} {
 		f := newFixture()
 		f.app.DeleteMergedBranches = tc.enable
 		done(t, f, tc.pr)
@@ -56,6 +56,22 @@ func TestCleanKeepsBranchUnlessMergedAndEnabled(t *testing.T) {
 		if err != nil || len(res) != 1 || res[0].BranchDeleted || f.wt.removed[0].DeleteBranch {
 			t.Errorf("%s: %+v %v %+v", tc.name, res, err, f.wt.removed)
 		}
+	}
+}
+
+func TestCleanRefusesATaskWhoseRunnerIsStillGoing(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	// The gate ended the task but its runner would not stop, so it keeps its pid and
+	// is still working in the worktree (D107).
+	f.store.recs[key].State = task.PRClosed
+	f.store.recs[key].Delegation.RunnerPID = 77
+	f.runners.alive[77] = true
+	if _, err := f.app.Clean(context.Background(), CleanRequest{Issue: 825}); err == nil || !strings.Contains(err.Error(), "still running (pid 77)") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(f.wt.removed) != 0 {
+		t.Errorf("removed a worktree under a live runner: %+v", f.wt.removed)
 	}
 }
 

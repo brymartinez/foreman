@@ -351,7 +351,7 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 
 func validState(s task.State) bool {
 	switch s {
-	case task.Discovered, task.Working, task.NeedsDecision, task.Reviewing, task.ReadyForHuman, task.Done, task.Failed:
+	case task.Discovered, task.Working, task.NeedsDecision, task.Reviewing, task.ReadyForHuman, task.Done, task.Failed, task.PRClosed:
 		return true
 	}
 	return false

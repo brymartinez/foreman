@@ -43,6 +43,47 @@ func TestInboxStopsCheckingAnIssueGitHubNoLongerHas(t *testing.T) {
 	}
 }
 
+func TestGoneNoteFollowsTheMentionsSetting(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		hide    bool
+		reasons []task.InboxReason
+		want    int
+	}{
+		// The item is already off GitHub, so the stored reasons are all that is left to
+		// judge it by. stopTracking clears them, so they have to be read first.
+		{"mention only, mentions off", true, []task.InboxReason{task.Mentioned}, 0},
+		{"mention only, mentions on", false, []task.InboxReason{task.Mentioned}, 1},
+		{"also assigned, mentions off", true, []task.InboxReason{task.Mentioned, task.Assigned}, 1},
+		{"review requested, mentions off", true, []task.InboxReason{task.Mentioned, task.ReviewRequested}, 1},
+		{"assigned only, mentions off", true, []task.InboxReason{task.Assigned}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gone := seen(2, task.Discovered, "open", t0, tc.reasons...)
+			store := &fakeStore{recs: map[task.Key]*task.Record{gone.Key: gone}}
+			notFound := fmt.Errorf("%w: gh: Not Found (HTTP 404)", ErrGone)
+			gh := &refreshGitHub{fakeGitHub: &fakeGitHub{}, calls: map[task.Key]int{}, errs: map[task.Key]error{gone.Key: notFound}}
+			a := App{Store: store, GitHub: gh, Runners: &fakeRunners{}, HideMentionOnly: tc.hide, Now: func() time.Time { return now }}
+
+			report, err := a.Inbox(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(report.Changed) != tc.want {
+				t.Errorf("changed = %+v, want %d", report.Changed, tc.want)
+			}
+			// The item stops being checked either way; the setting hides the note, not
+			// the bookkeeping that ends the refreshes.
+			if got := store.recs[gone.Key]; len(got.GitHub.Reasons) != 0 {
+				t.Errorf("reasons not cleared: %+v", got.GitHub.Reasons)
+			}
+			if tc.want == 1 && len(report.Changed[0].Item.Reasons) != 0 {
+				t.Errorf("the gone note must carry no reasons, so InboxActivity still shows it: %+v", report.Changed[0].Item.Reasons)
+			}
+		})
+	}
+}
+
 func TestStatusListsTasksWhenAPRLookupFails(t *testing.T) {
 	f := newFixture()
 	key := reviewed(t, f)

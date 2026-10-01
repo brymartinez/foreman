@@ -2,7 +2,8 @@
 
 ## Current stage
 
-Stage 15 (dashboard views for issue #3) is complete.
+Stage 16 (dashboard navigation, visibility, and refresh settings for issue #5) is
+complete.
 
 ## Completed
 
@@ -493,6 +494,39 @@ request. Each fix is its own commit with a decision.
   `git diff --check`. Focused TUI tests cover hidden and opened logs, Escape, task
   changes, navigation, narrow layout, branch display, and color dividers.
 
+### Stage 16 (complete): navigation, visibility, and settings for issue #5
+
+- Left and Right select the two list panes beside `tab`, `h`, and `l` (D109).
+- Row text keeps the terminal's foreground, and only a task's state is colored. The
+  selected row is reverse video alone, which reads on a light theme and a dark one
+  (D109).
+- A PR closed without merging stops its runner, moves the task to the new `PR_CLOSED`
+  state, and drops it from DELEGATED WORK without a failure or a notification (D107).
+  Reopening the PR brings the task back, as READY_FOR_HUMAN or REVIEWING depending on
+  the review it has and the PR's current CI (D108). Local rereads defer reaping a dead
+  runner with a PR until the GitHub gate checks it. Reopening waits for a retained
+  runner to stop or clears its stale pid (D111). A dead runner is reaped only once the
+  gate has read its PR, so a failed lookup delays the verdict instead of guessing it
+  (D113).
+- `mentions` hides items found only because they mention the developer; `refresh` sets
+  the dashboard's GitHub interval, 60 seconds by default and 5 at the least (D110).
+  The note for an item that left GitHub follows the setting too, judged by the reasons
+  the task stored before they were cleared (D114). An item a truncated search missed
+  arrives as a tracked fetch, and is judged by the involvement the task stored before
+  the refresh rewrote it (D115).
+- Verified with `go vet ./...`, `go test ./...`, `go build -o dist/foreman
+  ./cmd/foreman`, `scripts/e2e.sh`, and `git diff --check`. New tests cover the arrow
+  keys, the row and selection colors, the closed and reopened PR paths including a
+  running and an unstoppable runner, the mention filter, and the two settings.
+- The D111 and D113 to D115 review fixes passed `go vet ./...`, `go test ./...`, `go test
+  -race` over `internal/app`, `internal/render`, `internal/tui`, and `internal/config`,
+  the build, `scripts/e2e.sh`, and `git diff --check`. The closed and reopened PR paths
+  have no end-to-end check; `gate_test.go` covers them, including a dead runner, a stop
+  that will not take, and a PR lookup that fails. `inbox_gone_test.go` covers the gone
+  note against the mentions setting, and `inbox_test.go` covers a tracked fetch under a
+  truncated search. The D113, D114, and D115 tests were confirmed to fail without their
+  fixes.
+
 ### Fix (complete): Codex commits in a linked worktree
 
 - midsoln/foreman#5 failed because Codex couldn't write the clone's `.git` from its
@@ -501,6 +535,15 @@ request. Each fix is its own commit with a decision.
 - Verified with `go vet ./...`, `go test ./...` (a new test uses a real linked worktree),
   `scripts/e2e.sh`, and `scripts/probe-agents.sh` (24 checks on Codex 0.156.1). The
   probe shows the commit failing without the root and succeeding with it.
+
+### Merge resolution (complete): PR #6 with main
+
+- Preserved the issue #5 changes and the Codex worktree fix. Both branches had used
+  D112, so D112 remains the worktree decision and the later issue #5 review decisions
+  are D113 to D115 (D116).
+- Verified the combined tree with `go vet ./...`, `go test ./...`, race tests for
+  `internal/app`, `internal/tui`, `internal/config`, and `internal/agent`, a build, and
+  `scripts/e2e.sh`.
 
 ## Known limitations
 
@@ -609,8 +652,16 @@ what it replaced. Current summary:
   dashboard follows the newest delegation and colors and divides its panes. D105. The
   log is focusable and scrolls with vim keys. D106 (amends D104 and D105). A delegated
   task opens its log on demand; `h`/`l` navigate the two list panes.
+- D107. A closed PR ends its task in `PR_CLOSED`, not FAILED. D108. A reopened PR
+  returns the task to delegated work. D109 (amends D104). Dashboard rows keep the
+  terminal's foreground, and the arrows select panes. D110. `mentions` and `refresh`
+  are settings. D111 (amends D107 and D108). Check PR state before reaping its runner.
 - D112. Codex can write the worktree's git directory.
+- D113 (amends D111). Reap a dead runner only once its PR has been read. D114 (amends
+  D110). Judge the gone note by the reasons the task stored. D115 (amends D110 and
+  D114). Resolve a tracked fetch's reasons before filtering. D116. Keep both sets of
+  decisions and their references after the merge.
 
 ## Next stage
 
-None. Stages 0 to 15 are complete. Further work needs a new request.
+None. Stages 0 to 16 are complete. Further work needs a new request.

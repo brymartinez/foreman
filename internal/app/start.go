@@ -77,6 +77,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		if err := a.startable(cur); err != nil {
 			return nil, err
 		}
+		was := cur.State
 		cur.Kind, cur.Title, cur.URL, cur.State = task.Issue, issue.Title, issue.URL, task.Working
 		if cur.GitHub == nil {
 			cur.GitHub = &task.Snapshot{UpdatedAt: issue.UpdatedAt, State: issue.State}
@@ -93,8 +94,10 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			ContextFile: req.ContextFile,
 		}
 		// The same branch has the same PR, so a restart can pick up at its review (D63).
-		// Another implementer starts over: its reviewer wrote the existing PR.
-		if prev != nil && prev.Branch == wt.Branch && prev.Implementer.Agent == req.Agent {
+		// Another implementer starts over: its reviewer wrote the existing PR. A
+		// PR_CLOSED task's PR cannot be picked up, and keeping its number would have
+		// the readiness gate end this run on its next refresh (D107).
+		if was != task.PRClosed && prev != nil && prev.Branch == wt.Branch && prev.Implementer.Agent == req.Agent {
 			cur.Delegation.PR, cur.Delegation.PRURL, cur.Delegation.PRHead = prev.PR, prev.PRURL, prev.PRHead
 		}
 		cur.LastOutcome = &task.Outcome{Status: "started", Summary: fmt.Sprintf("dispatched to %s", req.Agent), At: now}
@@ -156,10 +159,11 @@ func (a App) startable(rec *task.Record) error {
 	}
 	ref := fmt.Sprintf("%s#%d", rec.Repo, rec.Number)
 	switch rec.State {
-	case task.Discovered, task.Failed:
-		return nil
-	case task.Working, task.Reviewing:
-		if rec.Delegation != nil && rec.Delegation.RunnerPID > 0 && a.Runners.Alive(rec.Delegation.RunnerPID) {
+	case task.Discovered, task.Failed, task.PRClosed, task.Working, task.Reviewing:
+		// A second runner would share the worktree and the task file with the first,
+		// and the first stops being held off by its state the moment this start
+		// changes it.
+		if a.liveRunner(rec) {
 			return fmt.Errorf("%s is already running (pid %d)", ref, rec.Delegation.RunnerPID)
 		}
 		return nil

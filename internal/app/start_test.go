@@ -250,6 +250,15 @@ func TestStartRefuses(t *testing.T) {
 			rec.Key = task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
 			f.store.recs[rec.Key] = rec
 		},
+		// The gate leaves a PR_CLOSED task its pid until the stop succeeds (D107), and
+		// that runner is still working in the worktree a second one would share.
+		"PR_CLOSED with a live runner": func(f *fixture, r *StartRequest) {
+			rec := seen(825, task.PRClosed, "open", t0)
+			rec.Key = task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+			rec.Delegation = &task.Delegation{Implementer: task.Session{Agent: task.Claude}, RunnerPID: 77}
+			f.store.recs[rec.Key] = rec
+			f.runners.alive[77] = true
+		},
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -263,6 +272,25 @@ func TestStartRefuses(t *testing.T) {
 				t.Error("runner spawned despite refusal")
 			}
 		})
+	}
+}
+
+func TestStartAcceptsPRClosed(t *testing.T) {
+	f := newFixture()
+	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.PRClosed,
+		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Branch: "feat/825-provider-retries", PR: 912}}
+	rec, err := f.app.Start(context.Background(), startReq(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.State != task.Working || len(f.runners.spawned) != 1 {
+		t.Errorf("state %s spawned %d", rec.State, len(f.runners.spawned))
+	}
+	// Keeping the closed PR's number would have the gate end this run on its next
+	// refresh, and a closed PR cannot be picked up at its review anyway.
+	if rec.Delegation.PR != 0 || rec.Delegation.Branch != "feat/825-provider-retries" {
+		t.Errorf("the restart carried the closed PR: pr %d branch %s", rec.Delegation.PR, rec.Delegation.Branch)
 	}
 }
 

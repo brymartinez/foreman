@@ -100,19 +100,22 @@ foreman · 2 delegated · 3 in the inbox · refreshed 10:01:22
 ────────────────────────────────────────────────────────────────────────────────
 LOG · midsoln/foreman#2 · ~/.local/share/foreman/logs/2.log
 2026-09-29T10:01:04Z claude Bash go test ./internal/tui
-j/k move · tab pane · enter delegate · c cancel · r refresh · q quit
+j/k task · u/d log page · ctrl-u/d half page · g/G ends · esc close · h/l pane
 ```
 
 The left pane holds issues you can delegate, and the right pane holds delegated work.
-Press `h` or `l` to switch between them. In DELEGATED WORK, use `j`/`k` to pick a task
-and Enter to open its log below the lists. Escape closes the log. With the log open,
-`u`/`d` and `g`/`G` scroll it while `j`/`k` still select tasks. Press `c` from either
-list to cancel the highlighted delegated task, after confirmation. Colors mark task
-states and the dividers.
+Press `←`/`→`, `h`/`l`, or `tab` to switch between them. In DELEGATED WORK, use `j`/`k`
+to pick a task and Enter to open its log below the lists. Escape closes the log. With
+the log open, `u`/`d` and `g`/`G` scroll it while `j`/`k` still select tasks. Press `c`
+from either list to cancel the highlighted delegated task, after confirmation.
+
+Row text is drawn in your terminal's own foreground, so it reads on a light theme and a
+dark one alike. Color is kept for the headings, the dividers, the message line, and each
+task's state. The selected row is drawn in reverse video with no color inside it.
 
 | Key | What it does |
 |---|---|
-| `tab`, `h` `l` | switch between inbox and delegated work |
+| `tab`, `←` `→`, `h` `l` | switch between inbox and delegated work |
 | `↑` `↓`, `k` `j` | move the focused list cursor |
 | `enter` on an issue | delegate it: pick `1` for Claude or `2` for Codex, then type an optional context file |
 | `enter` on a task | open its log below; show how to answer a waiting question |
@@ -126,9 +129,10 @@ states and the dividers.
 | `q`, `ctrl+c` | quit |
 
 Delegated work is re-read from the task files every second, so a state change shows up
-on its own. GitHub is refreshed every 60 seconds and when you press `r`: that runs the
-same work as `foreman inbox`, including the readiness gate and the DONE cleanup. The
-dashboard refreshes only while it is open and starts no background process.
+on its own. GitHub is refreshed every `refresh` seconds, 60 by default, and when you
+press `r`: that runs the same work as `foreman inbox`, including the readiness gate and
+the DONE cleanup. The dashboard refreshes only while it is open and starts no background
+process.
 
 `foreman tui` is the same command spelled out. The dashboard needs a terminal at least
 60 by 12; below that it says so. When stdin or stdout is not a terminal, `foreman`
@@ -141,6 +145,15 @@ points you at.
 you, and PRs that request your review. It also reports what changed since the last run,
 including a reason an item lost, such as "no longer assigned to you". Each search
 returns up to 1000 results, and the inbox warns when one hits that limit.
+
+Set `mentions: false` to leave out the items found only because they mention you, in the
+inbox and in the dashboard's INBOX pane. An item that is also assigned to you, or that
+requests your review, still appears. The searches keep running either way, so the
+changes an item reports stay accurate and the items come back the moment you turn the
+setting on. A hidden item stays hidden when it leaves GitHub, so it does not announce
+itself on the way out; foreman still stops checking it. It also stays hidden when a
+search hits its result limit and foreman has to fetch it by key, because the setting
+is applied to the involvement foreman recorded for it.
 
 Waiting tasks show changes beneath their NEEDS DECISION or READY FOR YOU entry,
 including CI changes. Missing undelegated items are checked until a successful
@@ -192,7 +205,8 @@ retry behavior". The agent treats it as part of the task.
    - CI belongs to the repo's owners, so foreman never runs or fixes it. You decide
      whether a failure comes from the change or from CI itself.
    - A repo with no checks shows `✓ CI (no checks)`.
-   - A merged PR marks the task DONE.
+   - A merged PR marks the task DONE. A PR closed without merging marks it
+     `PR_CLOSED` and stops the run.
 6. Every review records the commit it covered. If the PR gets new commits after a clean
    review, the next `inbox` or `status` has the reviewer look at them before the task
    is READY FOR YOU. Once a task is READY FOR YOU, the PR is yours: new commits are
@@ -250,7 +264,7 @@ foreman config --stages         # where each stage's instructions come from
 
 When `inbox` finds a task DONE, it removes the task's worktree. When the PR was merged,
 it also deletes the local `feat/...` or `fix/...` branch. `foreman clean` does the same on demand,
-and `foreman clean <issue>` also works for a FAILED task.
+and `foreman clean <issue>` also works for a FAILED or PR_CLOSED task.
 
 - A worktree with uncommitted or untracked changes is never removed. Inbox reports it,
   and you rerun `foreman clean <issue>` once it is tidy.
@@ -314,6 +328,26 @@ after the third fix (`fix_rounds`) still has findings, foreman asks the same way
 another round, or accept the remaining findings. The implementer gets those findings
 along with your answer.
 
+## When you close a PR
+
+Closing a delegated PR without merging it ends the task. On the next GitHub refresh,
+foreman stops the agent if one is still running, moves the task to `PR_CLOSED`, and
+drops it from DELEGATED WORK. Nothing is deleted: the task file, the worktree, and the
+branch are kept, and `foreman clean <issue>` removes the worktree when you want it gone.
+Closing the issue as well leaves the task `PR_CLOSED` rather than DONE, so the worktree
+is not cleaned up behind you.
+The run did not fail, so there is no failure notification; the change is reported as an
+inbox note the next time you look.
+
+Reopen the PR and the task comes back on the following refresh. Foreman reads the PR's
+CI and uses the review it already has: a clean review of the PR's current head with
+finished CI makes the task `READY_FOR_HUMAN`, and anything else makes it `REVIEWING`,
+which `foreman start` picks up. No agent is started for you either way.
+
+If the agent does not stop at once, the task is `PR_CLOSED` but keeps its runner, and
+every refresh tries again. `foreman start` and `foreman clean` refuse it until that
+runner is gone, so a second agent never shares the worktree with the first.
+
 ## States
 
 | State | Meaning | Your move |
@@ -323,7 +357,8 @@ along with your answer.
 | `REVIEWING` | PR open; under review, or waiting on CI | Wait, or `foreman cancel` to stop a running review |
 | `READY_FOR_HUMAN` | Review clean, CI finished (✓ or ✗ shown) | Review and merge the PR |
 | `DONE` | PR merged or issue closed | Nothing |
-| `FAILED` | The agent failed, the run was cancelled, the runner died, or the PR was closed | `foreman show` to see why, then `foreman start` to retry |
+| `FAILED` | The agent failed, the run was cancelled, or the runner died | `foreman show` to see why, then `foreman start` to retry |
+| `PR_CLOSED` | You closed the PR without merging it | Nothing, or reopen the PR, or `foreman start` to retry |
 
 ## Task files
 
@@ -359,6 +394,8 @@ repositories_dir: ~/.local/share/foreman/repositories # inbox source checkouts
 log_dir: ~/.local/share/foreman/logs
 review_rounds: 3                     # reviewer passes over the whole PR per review
 fix_rounds: 3                        # fix and re-review cycles before foreman asks you
+mentions: true                       # show items found only because they mention you
+refresh: 60                          # seconds between the dashboard's GitHub refreshes
 budgets:                             # Claude only: Codex reports no cost, so it has no cap
   implementer_usd: 3.00              # Claude maximum per implementation turn
   reviewer_usd: 1.00                 # Claude maximum per review turn
@@ -379,6 +416,10 @@ cleanup:
 ```
 
 `FOREMAN_TASKS_DIR` overrides `tasks_dir`.
+
+`refresh` must be at least 5 seconds; foreman refuses to start with a smaller value.
+Task files and the open log are re-read every second regardless, and `r` refreshes
+GitHub whenever you ask.
 
 `ignore_repositories` accepts exact repository names such as `acme/widgets`. Ignored
 repositories are excluded from fresh inbox results and tracked-task refreshes.

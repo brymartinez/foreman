@@ -76,13 +76,59 @@ func TestFrameHidesLogUntilTaskEnterAndShowsBranch(t *testing.T) {
 func TestFrameColorsAndDividesThePanes(t *testing.T) {
 	m := model()
 	lines := Frame(m)
-	if !strings.Contains(lines[0], cyan) || !strings.Contains(lines[1], colored("│", cyan)) || !strings.Contains(lines[2], green) {
+	if !strings.Contains(lines[0], cyan) || !strings.Contains(lines[1], colored("│", cyan)) || !strings.Contains(lines[2], colored("WORKING", green)) {
 		t.Fatalf("frame lacks color or a pane divider:\n%s", strings.Join(lines[:3], "\n"))
 	}
 	m.Message = "! GitHub failed"
 	if !strings.Contains(Frame(m)[m.Height-2], red) {
 		t.Fatal("an error message has no error color")
 	}
+}
+
+func TestRowTextKeepsTheTerminalForeground(t *testing.T) {
+	m := model()
+	m.Tasks[0].Delegation.Branch = "feat/10-task"
+	// The second task is not under the cursor, so its row is drawn without selection.
+	row := taskRow(t, Frame(m), "a/b#11")
+	if !strings.Contains(row, colored("REVIEWING", green)) {
+		t.Fatalf("the state is not the row's status cue: %q", row)
+	}
+	if rest := strings.ReplaceAll(row, colored("REVIEWING", green), "REVIEWING"); escapes.MatchString(rest) {
+		t.Errorf("row text carries color beyond the state: %q", rest)
+	}
+	// In a narrow pane the state wraps onto its own line, and the cue follows it.
+	m.Width = minWidth
+	if row := taskRow(t, Frame(m), "Claude · REVIEWING"); !strings.Contains(row, colored("REVIEWING", green)) {
+		t.Errorf("the wrapped state lost its color: %q", row)
+	}
+}
+
+func TestSelectedRowIsReadableOnAnyTheme(t *testing.T) {
+	m := model()
+	m.Focus = TaskPane
+	row := taskRow(t, Frame(m), "a/b#10") // the cursor starts on the newest task
+	if !strings.HasPrefix(row, reverseOn) || !strings.HasSuffix(row, attrsReset) {
+		t.Fatalf("the selected row is not drawn in reverse video: %q", row)
+	}
+	inner := strings.TrimSuffix(strings.TrimPrefix(row, reverseOn), attrsReset)
+	if escapes.MatchString(inner) {
+		// A foreground color under reverse video paints the text in the terminal's
+		// background color, which is what light themes cannot read.
+		t.Errorf("the selected row holds color inside its reverse video: %q", inner)
+	}
+}
+
+// taskRow is the frame line that holds identity, from the task pane.
+func taskRow(t *testing.T, lines []string, identity string) string {
+	t.Helper()
+	for _, l := range lines {
+		_, right, found := strings.Cut(l, colored("│", cyan))
+		if found && strings.Contains(escapes.ReplaceAllString(right, ""), identity) {
+			return right
+		}
+	}
+	t.Fatalf("no task row for %s in:\n%s", identity, strings.Join(plain(lines), "\n"))
+	return ""
 }
 
 func TestFrameMarksTheFocusedPane(t *testing.T) {

@@ -14,12 +14,17 @@ import (
 const focusMark = "▸ "
 
 const (
-	reverseOn  = "\x1b[7m"
-	dim        = "\x1b[2m"
-	cyan       = "\x1b[36m"
-	green      = "\x1b[32m"
-	yellow     = "\x1b[33m"
-	red        = "\x1b[31m"
+	reverseOn = "\x1b[7m"
+	dim       = "\x1b[2m"
+	cyan      = "\x1b[36m"
+	green     = "\x1b[32m"
+	yellow    = "\x1b[33m"
+	red       = "\x1b[31m"
+	// fgDefault and dimOff end one color or one attribute. A full reset would also
+	// end the reverse video a selected line is drawn with, and the rest of that line
+	// would lose its highlight.
+	fgDefault  = "\x1b[39m"
+	dimOff     = "\x1b[22m"
 	attrsReset = "\x1b[0m"
 )
 
@@ -77,11 +82,20 @@ func header(m Model) string {
 	return strings.Join(parts, " · ")
 }
 
-// row is one list entry: its lines, drawn together and selectable as a unit.
+// row is one list entry: its lines, drawn together and selectable as a unit. The
+// text itself keeps the terminal's foreground, so it reads on a light theme and a
+// dark one alike; accent is the one word drawn in color, the task's state.
 type row struct {
-	lines []string
-	color string
+	lines  []string
+	accent string
+	// accentLine is where the accent sits: the identity line, or the line the agent
+	// and the state wrap onto in a narrow pane.
+	accentLine int
+	color      string
 }
+
+// cue is one line's accent, carried beside the line while the pane is laid out.
+type cue struct{ word, color string }
 
 // pane is a titled list of rows, with the text shown when it has none.
 type pane struct {
@@ -121,12 +135,13 @@ func taskPane(m Model, width, body int) pane {
 	for _, rec := range m.Tasks {
 		rows := render.TaskRows(rec)
 		lines := []string{rows[0]}
+		stateLine := 0
 		// status pads the identity to a fixed column so its rows line up. That padding
 		// does not fit a narrow pane, and truncating it would drop the state, so wrap
 		// the agent and the state onto their own line instead.
 		if textWidth(rows[0])+markerWidth > width {
 			identity, agent, state := render.TaskHead(rec)
-			lines = []string{identity, "  " + agent + " · " + state}
+			lines, stateLine = []string{identity, "  " + agent + " · " + state}, 1
 		}
 		lines = append(lines, "  "+rows[1]) // the title
 		if body > taskRowLines && rec.Delegation.Branch != "" {
@@ -145,7 +160,7 @@ func taskPane(m Model, width, body int) pane {
 		if q != "" {
 			lines = append(lines, "  "+q)
 		}
-		p.rows = append(p.rows, row{lines: lines, color: taskColor(rec.State)})
+		p.rows = append(p.rows, row{lines: lines, accent: string(rec.State), accentLine: stateLine, color: taskColor(rec.State)})
 	}
 	return p
 }
@@ -225,7 +240,10 @@ func paneLines(p pane, width, height int, focused bool, cursor int) []string {
 	out := []string{colored(pad(truncate(title, width), width), cyan)}
 	body := height - 1
 
+	// Every line is built plain, and color goes on at the end, so a selected row can
+	// be drawn in reverse video alone.
 	var lines []string
+	var cues []cue
 	selectedFrom, selectedTo := 0, 0
 	for i, r := range p.rows {
 		if i == cursor {
@@ -236,21 +254,24 @@ func paneLines(p pane, width, height int, focused bool, cursor int) []string {
 			if j == 0 && i == cursor {
 				marker = "> "
 			}
-			line := pad(truncate(marker+l, width), width)
-			if r.color != "" {
-				line = colored(line, r.color)
+			lines = append(lines, pad(truncate(marker+l, width), width))
+			c := cue{}
+			if j == r.accentLine {
+				c = cue{word: r.accent, color: r.color}
 			}
-			lines = append(lines, line)
+			cues = append(cues, c)
 		}
 		if i == cursor {
 			selectedTo = len(lines)
 		}
 		if i < len(p.rows)-1 {
 			lines = append(lines, strings.Repeat(" ", width))
+			cues = append(cues, cue{})
 		}
 	}
 	if len(p.rows) == 0 {
 		lines = append(lines, pad(truncate("  "+p.empty, width), width))
+		cues = append(cues, cue{})
 	}
 
 	start := 0
@@ -261,11 +282,13 @@ func paneLines(p pane, width, height int, focused bool, cursor int) []string {
 		start = 0
 	}
 	for i := start; i < len(lines) && len(out) < height; i++ {
-		l := lines[i]
 		if focused && i >= selectedFrom && i < selectedTo {
-			l = reverseOn + l + attrsReset
+			// Reverse video and nothing else: a foreground color under it would draw
+			// the text in the terminal's background color.
+			out = append(out, reverseOn+lines[i]+attrsReset)
+			continue
 		}
-		out = append(out, l)
+		out = append(out, highlight(lines[i], cues[i].word, cues[i].color))
 	}
 	for len(out) < height {
 		out = append(out, strings.Repeat(" ", width))
@@ -386,9 +409,23 @@ func pad(s string, width int) string {
 	return s
 }
 
-func dimmed(s string) string { return dim + s + attrsReset }
+func dimmed(s string) string { return dim + s + dimOff }
 
-func colored(s, color string) string { return color + s + attrsReset }
+func colored(s, color string) string { return color + s + fgDefault }
+
+// highlight draws word in color inside line, which is already truncated and padded.
+// The escapes go in after all of the width arithmetic, so they are never counted as
+// columns (D101). A word a truncation cut is not there, and the line stays plain.
+func highlight(line, word, color string) string {
+	if word == "" || color == "" {
+		return line
+	}
+	i := strings.LastIndex(line, word)
+	if i < 0 {
+		return line
+	}
+	return line[:i] + colored(word, color) + line[i+len(word):]
+}
 
 func taskColor(state task.State) string {
 	switch state {

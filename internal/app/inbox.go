@@ -53,18 +53,25 @@ type App struct {
 	// DeleteMergedBranches deletes the local branch with the worktree once its PR is merged.
 	DeleteMergedBranches bool
 	IgnoredRepositories  []task.Repo
-	Now                  func() time.Time
+	// HideMentionOnly drops items the searches found only because they mention the
+	// developer. False shows every item, which is the default.
+	HideMentionOnly bool
+	Now             func() time.Time
 }
 
 // Inbox fetches GitHub state, reports what changed since the last run, and records
 // the new state as seen. Only records that changed are rewritten.
 func (a App) Inbox(ctx context.Context) (InboxReport, error) {
-	recs, err := a.listReaped(ctx)
+	recs, err := a.Store.List(ctx)
 	if err != nil {
 		return InboxReport{}, err
 	}
-	notes, warnings, err := a.gate(ctx, recs)
+	dead := a.deadRunners(recs)
+	notes, checked, warnings, err := a.gate(ctx, recs)
 	if err != nil {
+		return InboxReport{}, err
+	}
+	if err := a.reap(ctx, recs, reapable(recs, dead, checked)); err != nil {
 		return InboxReport{}, err
 	}
 	if a.CleanOnDone {
@@ -79,6 +86,8 @@ func (a App) Inbox(ctx context.Context) (InboxReport, error) {
 	if err != nil {
 		return InboxReport{}, err
 	}
+	// Taken before Reconcile, which calls observe and rewrites these in place.
+	stored := storedReasons(recs)
 	report, dirty := Reconcile(append(items, tracked...), recs, notes, len(search.Truncated) == 0, a.Now())
 	report.Truncated = search.Truncated
 	report.Warnings = append(warnings, refreshWarnings...)
@@ -90,9 +99,16 @@ func (a App) Inbox(ctx context.Context) (InboxReport, error) {
 		}
 	}
 	for _, key := range gone {
+		// The reasons are read before stopTracking clears them. This note is about an
+		// item that is already off GitHub, so nothing reports its reasons any more, and
+		// why foreman was tracking it is the only thing left to judge it by.
+		var tracked []task.InboxReason
 		rec, err := a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
 			if cur == nil || cur.Delegation != nil {
 				return nil, nil
+			}
+			if cur.GitHub != nil {
+				tracked = slices.Clone(cur.GitHub.Reasons)
 			}
 			stopTracking(cur, a.Now())
 			return cur, nil
@@ -100,14 +116,70 @@ func (a App) Inbox(ctx context.Context) (InboxReport, error) {
 		if err != nil {
 			return InboxReport{}, err
 		}
-		if rec != nil {
-			report.Changed = append(report.Changed, InboxEntry{Item: InboxItem{Key: rec.Key, Kind: rec.Kind, Title: rec.Title, URL: rec.URL}, Changes: []string{goneNote}})
+		// The setting is applied here rather than in hideMentionOnly: the entry carries
+		// no reasons of its own, and that is what tells InboxActivity to always show a
+		// gone note. Giving it the tracked reasons would hide the note from the picker
+		// even with mentions on.
+		if rec == nil || (a.HideMentionOnly && mentionOnly(tracked)) {
+			continue
 		}
+		report.Changed = append(report.Changed, InboxEntry{Item: InboxItem{Key: rec.Key, Kind: rec.Kind, Title: rec.Title, URL: rec.URL}, Changes: []string{goneNote}})
+	}
+	if a.HideMentionOnly {
+		hideMentionOnly(&report, stored)
 	}
 	return report, nil
 }
 
 const goneNote = "no longer on GitHub or no longer accessible; foreman stopped checking it"
+
+// hideMentionOnly drops the items a search returned only because they mention the
+// developer, for issues and pull requests alike. The searches still run and the
+// snapshots still record every reason, so a lost reason is still reported and the
+// items come back the moment the setting does. Delegated work waiting on the
+// developer is not an inbox find, so it is left alone. The note for an item that left
+// GitHub is filtered where it is built, because it carries no reasons of its own.
+func hideMentionOnly(r *InboxReport, stored map[task.Key][]task.InboxReason) {
+	keep := func(entries []InboxEntry) []InboxEntry {
+		var out []InboxEntry
+		for _, e := range entries {
+			if !mentionOnly(involvement(e.Item, stored)) {
+				out = append(out, e)
+			}
+		}
+		return out
+	}
+	r.New, r.Changed, r.Current = keep(r.New), keep(r.Changed), keep(r.Current)
+}
+
+// involvement is why the developer is involved with it. A tracked fetch carries the
+// synthetic `tracked` reason alone, because no search returned the item: a search that
+// hit its result limit can leave a tracked item out. What the task stored is then the
+// only account of the involvement, so the filter judges the item by that.
+func involvement(it InboxItem, stored map[task.Key][]task.InboxReason) []task.InboxReason {
+	if slices.Equal(it.Reasons, []task.InboxReason{task.Tracked}) {
+		return stored[it.Key]
+	}
+	return it.Reasons
+}
+
+// storedReasons indexes why the developer is involved with each item foreman tracks.
+// It must be read before Reconcile, which rewrites the records it reads.
+func storedReasons(recs []*task.Record) map[task.Key][]task.InboxReason {
+	stored := map[task.Key][]task.InboxReason{}
+	for _, r := range recs {
+		if r.GitHub != nil && len(r.GitHub.Reasons) > 0 {
+			stored[r.Key] = slices.Clone(r.GitHub.Reasons)
+		}
+	}
+	return stored
+}
+
+func mentionOnly(reasons []task.InboxReason) bool {
+	return slices.Contains(reasons, task.Mentioned) &&
+		!slices.Contains(reasons, task.Assigned) &&
+		!slices.Contains(reasons, task.ReviewRequested)
+}
 
 // stopTracking clears an undelegated item's reasons, which is what ends its refreshes.
 func stopTracking(rec *task.Record, now time.Time) {
@@ -127,11 +199,18 @@ func mergeObserved(cur, seen *task.Record) *task.Record {
 	}
 	cur.Title, cur.URL, cur.Kind = seen.Title, seen.URL, seen.Kind
 	cur.GitHub, cur.LastGitHubSync = seen.GitHub, seen.LastGitHubSync
-	if seen.State == task.Done && !running(cur.State) {
+	if seen.State == task.Done && !keepsState(cur.State) {
 		cur.State = task.Done
 	}
 	return cur
 }
+
+// keepsState reports a task the inbox leaves in the state it found. A runner owns the
+// task it is driving, and the gate has already recorded why a PR_CLOSED task ended: a
+// closed issue must not turn that into DONE, which would clean away the worktree and
+// branch the developer was promised, and stop the gate watching for the PR to reopen
+// (D107).
+func keepsState(s task.State) bool { return running(s) || s == task.PRClosed }
 
 // fetchTracked refreshes missing delegated work and undelegated items whose last
 // involvement reasons have not yet been cleared by a complete refresh. gone lists
@@ -296,9 +375,9 @@ func observe(rec *task.Record, it InboxItem, complete bool, now time.Time) {
 	rec.Title, rec.URL, rec.Kind = it.Title, it.URL, it.Kind
 	rec.GitHub = &task.Snapshot{UpdatedAt: it.UpdatedAt, State: it.State, Reasons: reasons}
 	rec.LastGitHubSync = now
-	// A closed issue or merged PR ends the task unless a runner is still driving it;
-	// the gate ends those when their PR is merged or closed.
-	if it.State != "open" && !running(rec.State) {
+	// A closed issue or merged PR ends the task unless the state is already someone
+	// else's to set; the gate ends a delegated task when its PR is merged or closed.
+	if it.State != "open" && !keepsState(rec.State) {
 		rec.State = task.Done
 	}
 }
