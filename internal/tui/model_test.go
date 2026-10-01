@@ -394,3 +394,27 @@ func TestMovingTheTaskCursorFollowsTheNewTail(t *testing.T) {
 		t.Errorf("offset = %d; a new selection shows its own tail", m.LogOffset)
 	}
 }
+
+func TestEnterOnReviewedResumesInsteadOfAsking(t *testing.T) {
+	m := Model{Width: 100, Height: 30, Inbox: []app.InboxEntry{{
+		Item:      app.InboxItem{Key: task.Key{Repo: "a/b", Number: 7}, Kind: task.Issue, Title: "Add retries"},
+		Delegated: true,
+		State:     task.Reviewed,
+	}}}
+	got := m.Key(Key{Kind: KeyEnter})
+	if got.Kind != ActionResume || got.Resume != (task.Key{Repo: "a/b", Number: 7}) {
+		t.Fatalf("action = %+v", got)
+	}
+	if m.Mode != Browsing {
+		t.Errorf("mode = %v; a resume asks for no agent", m.Mode)
+	}
+}
+
+func TestEnterOnAnUndelegatedIssueStillAsksForAnAgent(t *testing.T) {
+	m := Model{Width: 100, Height: 30, Inbox: []app.InboxEntry{
+		{Item: app.InboxItem{Key: task.Key{Repo: "a/b", Number: 8}, Kind: task.Issue, Title: "New"}},
+	}}
+	if got := m.Key(Key{Kind: KeyEnter}); got.Kind != ActionNone || m.Mode != ChoosingAgent {
+		t.Fatalf("action = %+v mode = %v", got, m.Mode)
+	}
+}

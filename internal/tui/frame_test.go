@@ -404,3 +404,18 @@ func TestFrameScrollsTheLog(t *testing.T) {
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+func TestInboxRowShowsADelegatedState(t *testing.T) {
+	m := Model{Width: 100, Height: 30, Inbox: []app.InboxEntry{
+		{Item: app.InboxItem{Key: task.Key{Repo: "a/b", Number: 7}, Title: "Add retries"},
+			Delegated: true, State: task.Reviewed, Changes: []string{"2 comments to answer on PR #9"}},
+		{Item: app.InboxItem{Key: task.Key{Repo: "a/b", Number: 8}, Title: "New one"}, Changes: []string{"assigned to you"}},
+	}}
+	out := strings.Join(Frame(m), "\n")
+	if !strings.Contains(out, "REVIEWED · 2 comments to answer on PR #9") {
+		t.Errorf("inbox row missing the state:\n%s", out)
+	}
+	if strings.Contains(out, "  · assigned to you") {
+		t.Errorf("an undelegated row gained a separator:\n%s", out)
+	}
+}

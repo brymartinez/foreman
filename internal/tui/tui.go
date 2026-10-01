@@ -131,6 +131,10 @@ func Run(ctx context.Context, o Options) (err error) {
 				rec := a.Cancel
 				pending++
 				go func() { results <- stop(ctx, o.Source, rec) }()
+			case ActionResume:
+				key := a.Resume
+				pending++
+				go func() { results <- resume(ctx, o.Source, key) }()
 			}
 			if m.Selected() != before || (!wasOpen && m.LogOpen) {
 				// The heading names the new task, so the body must not still hold the
@@ -196,6 +200,20 @@ func start(ctx context.Context, s Source, req app.StartRequest) result {
 		return result{message: fmt.Sprintf("! %s#%d could not start: %s", rec.Repo, rec.Number, rec.LastOutcome.Summary), finished: true}
 	}
 	return result{message: fmt.Sprintf("Started %s#%d on %s", rec.Repo, rec.Number, rec.Delegation.Branch), finished: true}
+}
+
+// resume puts a REVIEWED task back to work on the comments on its pull request. Like
+// start, it is counted as pending, because App.Resume records WORKING before it spawns
+// the runner.
+func resume(ctx context.Context, s Source, key task.Key) result {
+	rec, err := s.Resume(ctx, key)
+	if err != nil {
+		return result{err: fmt.Errorf("resume %s#%d: %w", key.Repo, key.Number, err), finished: true}
+	}
+	if rec.State == task.Failed {
+		return result{message: fmt.Sprintf("! %s#%d could not resume: %s", rec.Repo, rec.Number, rec.LastOutcome.Summary), finished: true}
+	}
+	return result{message: fmt.Sprintf("Resumed %s#%d on PR #%d", rec.Repo, rec.Number, rec.Delegation.PR), finished: true}
 }
 
 func stop(ctx context.Context, s Source, rec *task.Record) result {
