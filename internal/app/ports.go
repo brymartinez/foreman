@@ -141,6 +141,17 @@ type WorktreeManager interface {
 	// Remove deletes the worktree, and the branch if asked. It refuses a worktree with
 	// uncommitted or untracked changes. A path that no longer exists is already removed.
 	Remove(ctx context.Context, req WorktreeRemoval) error
+	// MergeConflicts fetches Base and Branch from origin and lists the files that
+	// conflict when origin/Base merges into origin/Branch. None means a clean merge. It
+	// changes neither the branch nor the worktree.
+	MergeConflicts(ctx context.Context, check MergeCheck) ([]string, error)
+}
+
+// MergeCheck names the worktree to fetch in, the PR's head branch, and its base branch.
+type MergeCheck struct {
+	Dir    string
+	Branch string
+	Base   string
 }
 
 type AgentAdapter interface {

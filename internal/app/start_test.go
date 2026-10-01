@@ -18,6 +18,22 @@ type fakeWorktrees struct {
 	reqs      []WorktreeRequest
 	removed   []WorktreeRemoval
 	removeErr error
+	checks    []MergeCheck
+	conflicts [][]string // consumed one per check; clean once empty
+	checkErr  error
+}
+
+func (f *fakeWorktrees) MergeConflicts(_ context.Context, c MergeCheck) ([]string, error) {
+	f.checks = append(f.checks, c)
+	if f.checkErr != nil {
+		return nil, f.checkErr
+	}
+	if len(f.conflicts) == 0 {
+		return nil, nil
+	}
+	files := f.conflicts[0]
+	f.conflicts = f.conflicts[1:]
+	return files, nil
 }
 
 type fakeRepositories struct {

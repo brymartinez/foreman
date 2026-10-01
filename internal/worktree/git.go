@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/brymartinez/foreman/internal/app"
@@ -83,6 +84,40 @@ func (Git) Remove(ctx context.Context, req app.WorktreeRemoval) error {
 		_, err = git(ctx, common, "branch", "-D", req.Branch)
 	}
 	return err
+}
+
+// MergeConflicts uses git merge-tree (git 2.38+), which merges in memory: exit 0 is a
+// clean merge and exit 1 lists the conflicting files after the tree id.
+func (Git) MergeConflicts(ctx context.Context, check app.MergeCheck) ([]string, error) {
+	if _, err := git(ctx, check.Dir, "fetch", "origin", check.Base, check.Branch); err != nil {
+		return nil, err
+	}
+	args := []string{"merge-tree", "--write-tree", "--name-only", "--no-messages", "origin/" + check.Branch, "origin/" + check.Base}
+	var stdout, stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", check.Dir}, args...)...)
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
+	if err == nil {
+		return nil, nil
+	}
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+		return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	}
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	seen := map[string]bool{}
+	var files []string
+	for _, f := range lines[1:] {
+		if f != "" && !seen[f] {
+			seen[f] = true
+			files = append(files, f)
+		}
+	}
+	sort.Strings(files)
+	if len(files) == 0 {
+		return nil, fmt.Errorf("git %s reported a conflict without naming a file", strings.Join(args, " "))
+	}
+	return files, nil
 }
 
 type entry struct{ path, branch string }
