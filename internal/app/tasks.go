@@ -25,11 +25,11 @@ func (a App) Status(ctx context.Context) ([]*task.Record, []error, error) {
 		return nil, nil, err
 	}
 	dead := a.deadRunners(recs)
-	_, warnings, err := a.gate(ctx, recs)
+	_, checked, warnings, err := a.gate(ctx, recs)
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := a.reap(ctx, recs, dead); err != nil {
+	if err := a.reap(ctx, recs, reapable(recs, dead, checked)); err != nil {
 		return nil, nil, err
 	}
 	return activeTasks(recs), warnings, nil
@@ -100,19 +100,36 @@ func (a App) listReaped(ctx context.Context) ([]*task.Record, error) {
 	}
 	var local []deadRunner
 	for _, dr := range a.deadRunners(recs) {
-		if recs[dr.index].Delegation.PR == 0 {
+		if dr.pr == 0 {
 			local = append(local, dr)
 		}
 	}
 	return recs, a.reap(ctx, recs, local)
 }
 
-// deadRunner is a task in a list whose runner is gone, and the pid that was gone. reap
-// keeps the pid so it fails only the run deadRunners judged, not whatever the task
-// holds by the time it writes.
+// deadRunner is a task in a list whose runner is gone: where it sits in the list, the
+// pid that was gone, and the PR the task had. reap keeps the pid so it fails only the
+// run deadRunners judged, not whatever the task holds by the time it writes. The PR is
+// what reapable needs to tell a local judgement from one the gate has to make.
 type deadRunner struct {
 	index int
 	pid   int
+	pr    int
+}
+
+// reapable drops the dead runners whose task the gate did not read this pass. A task
+// with a PR is only safe to fail once the gate has seen that PR: a PR the developer
+// closed ends the task instead of failing it (D107), and a GitHub call that fails
+// leaves foreman unable to tell the two apart. A failure notification cannot be taken
+// back, so an unread task keeps its state and the next refresh judges it (D112).
+func reapable(recs []*task.Record, dead []deadRunner, checked map[task.Key]bool) []deadRunner {
+	var out []deadRunner
+	for _, dr := range dead {
+		if dr.pr == 0 || checked[recs[dr.index].Key] {
+			out = append(out, dr)
+		}
+	}
+	return out
 }
 
 // deadRunners finds the tasks in recs that a runner should be driving but no longer
@@ -129,7 +146,7 @@ func (a App) deadRunners(recs []*task.Record) []deadRunner {
 	for i, r := range recs {
 		d := r.Delegation
 		if running(r.State) && d != nil && d.RunnerPID != 0 && !a.Runners.Alive(d.RunnerPID) {
-			dead = append(dead, deadRunner{index: i, pid: d.RunnerPID})
+			dead = append(dead, deadRunner{index: i, pid: d.RunnerPID, pr: d.PR})
 		}
 	}
 	return dead

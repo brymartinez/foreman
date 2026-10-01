@@ -1643,3 +1643,17 @@ Entry format:
 - **Consequence.** A dead runner with a PR can remain WORKING until the next GitHub
   refresh. A closed PR records `PR_CLOSED` without a failure notification, and a
   reopened PR cannot release an old live runner into the active task.
+
+## D112 (amends D111). Reap a dead runner only once its PR has been read
+
+- Date: 2026-10-01. Issue midsoln/foreman#5. Review finding.
+- **Context.** D111 reaped after the gate so a closed PR would be seen first, but it
+  reaped every dead runner the pass had found. A failed `GetPullRequest` only warns and
+  leaves the task WORKING, so the reap still recorded FAILED and notified. A later
+  refresh could correct the state, never the notification.
+- **Decision.** `gate` returns the keys whose PR it read. `reapable` keeps a dead runner
+  only when its task had no PR, which takes no GitHub call to judge, or when the gate
+  read that PR this pass. An unread task keeps its state for the next refresh.
+- **Consequence.** GitHub being down delays a FAILED verdict instead of risking a wrong
+  one. The condition is positive, so a future early return in `gate` leaves a task
+  unread, and unread means unreaped.

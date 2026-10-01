@@ -14,9 +14,12 @@ import (
 // without merging is PR_CLOSED, and a clean review with finished CI is
 // READY_FOR_HUMAN. CI belongs to the repo's owners, so foreman only reads GitHub's
 // check results and hands failures to the developer instead of fixing them (D46).
-// It returns what changed, per task.
-func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]string, []error, error) {
+// It returns what changed, per task, and the tasks whose PR state it read. A caller
+// that fails a dead runner must check the second map first: reaping a task this pass
+// could not read would record a PR the developer closed as a failed run (D112).
+func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]string, map[task.Key]bool, []error, error) {
 	notes := map[task.Key][]string{}
+	checked := map[task.Key]bool{}
 	var warnings []error
 	for i, r := range recs {
 		if !watched(r) {
@@ -25,15 +28,16 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 		pr, err := a.GitHub.GetPullRequest(ctx, task.Key{Repo: r.Repo, Number: r.Delegation.PR})
 		if err != nil {
 			if ctx.Err() != nil {
-				return nil, nil, ctx.Err()
+				return nil, nil, nil, ctx.Err()
 			}
 			warnings = append(warnings, fmt.Errorf("refresh %s#%d PR: %w", r.Repo, r.Number, err))
 			continue
 		}
+		checked[r.Key] = true
 		if pr.State == "closed" {
 			updated, note, err := a.endClosed(ctx, r)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			if endedBy(updated, pr.Key.Number) {
 				if err := a.stopRun(ctx, updated); err != nil {
@@ -65,7 +69,7 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 		if pr.State == "open" {
 			if ci, err = a.GitHub.CIStatus(ctx, pr.Key); err != nil {
 				if ctx.Err() != nil {
-					return nil, nil, ctx.Err()
+					return nil, nil, nil, ctx.Err()
 				}
 				warnings = append(warnings, fmt.Errorf("refresh %s#%d CI: %w", r.Repo, r.Number, err))
 				continue
@@ -91,11 +95,11 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			return cur, nil
 		})
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		if updated.State == task.Working && r.State != task.Working {
 			if updated, err = a.launch(ctx, r.Key); err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 		}
 		if note != "" {
@@ -103,7 +107,7 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 		}
 		recs[i] = updated
 	}
-	return notes, warnings, nil
+	return notes, checked, warnings, nil
 }
 
 // watched tasks have a PR whose state the refresh must read. It is wider than gated,

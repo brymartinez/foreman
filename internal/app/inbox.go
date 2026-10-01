@@ -67,11 +67,11 @@ func (a App) Inbox(ctx context.Context) (InboxReport, error) {
 		return InboxReport{}, err
 	}
 	dead := a.deadRunners(recs)
-	notes, warnings, err := a.gate(ctx, recs)
+	notes, checked, warnings, err := a.gate(ctx, recs)
 	if err != nil {
 		return InboxReport{}, err
 	}
-	if err := a.reap(ctx, recs, dead); err != nil {
+	if err := a.reap(ctx, recs, reapable(recs, dead, checked)); err != nil {
 		return InboxReport{}, err
 	}
 	if a.CleanOnDone {

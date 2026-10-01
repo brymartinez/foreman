@@ -281,6 +281,88 @@ func TestGateClosedPRWithADeadRunnerNeverReportsAFailure(t *testing.T) {
 	}
 }
 
+func TestGateUnreadablePRLeavesADeadRunnerAlone(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	f.store.recs[key].State = task.Working
+	f.store.recs[key].Delegation.RunnerPID = 77 // never added to f.runners.alive
+	setCI(f, task.CIStatus{State: task.CIPassing})
+	closed := f.gh.prs[912]
+	closed.State = "closed"
+	delete(f.gh.prs, 912) // the PR lookup now fails
+	f.notes.sent = nil
+
+	// The runner died and GitHub did not answer, so foreman cannot yet tell a crash
+	// from a PR the developer closed. Failing it here would notify about a failure
+	// that may not have happened, and no later refresh can take that back.
+	_, warnings, err := f.app.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0].Error(), "PR:") {
+		t.Errorf("warnings = %v", warnings)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Working || got.Delegation.RunnerPID != 77 {
+		t.Fatalf("the refresh judged an unread PR: state %s pid %d", got.State, got.Delegation.RunnerPID)
+	}
+	if len(f.notes.sent) != 0 {
+		t.Fatalf("notifications %v", f.notes.sent)
+	}
+
+	// GitHub answers on the next refresh, and the close ends the task.
+	f.gh.prs[912] = closed
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.PRClosed || got.Delegation.RunnerPID != 0 {
+		t.Errorf("state %s pid %d", got.State, got.Delegation.RunnerPID)
+	}
+	if len(f.notes.sent) != 0 {
+		t.Errorf("notifications %v", f.notes.sent)
+	}
+}
+
+func TestInboxUnreadablePRLeavesADeadRunnerAlone(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	f.store.recs[key].State = task.Working
+	f.store.recs[key].Delegation.RunnerPID = 77
+	delete(f.gh.prs, 912)
+	f.notes.sent = nil
+	if _, err := f.app.Inbox(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Working || got.Delegation.RunnerPID != 77 {
+		t.Errorf("state %s pid %d", got.State, got.Delegation.RunnerPID)
+	}
+	if len(f.notes.sent) != 0 {
+		t.Errorf("notifications %v", f.notes.sent)
+	}
+}
+
+func TestReapStillFailsADeadRunnerWithNoPR(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	f.store.recs[key].State = task.Working
+	f.store.recs[key].Delegation.PR = 0 // nothing pushed yet, so nothing to read
+	f.store.recs[key].Delegation.RunnerPID = 77
+	f.notes.sent = nil
+	// No PR means no GitHub call stands between the dead runner and the verdict, so
+	// the one second reread still fails it.
+	if _, err := f.app.Tasks(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Failed || got.Delegation.RunnerPID != 0 {
+		t.Errorf("state %s pid %d", got.State, got.Delegation.RunnerPID)
+	}
+	if len(f.notes.sent) != 1 {
+		t.Errorf("notifications %v", f.notes.sent)
+	}
+}
+
 func TestGateReopenedPRStopsARunnerThatWouldNotStop(t *testing.T) {
 	f := newFixture()
 	key := reviewed(t, f)
