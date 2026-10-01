@@ -110,6 +110,16 @@ The user is authenticated through the keyring.
   raw string; `-F` would read a leading `@` as a file. GitHub caps a comment at 65,536
   characters. This is from the REST API reference and unit tests against its response
   shape; it wasn't probed live, because a probe would post on a real issue.
+- **Pull request comments.** A pull request's conversation is spread over three REST
+  endpoints: `repos/<owner>/<repo>/issues/<n>/comments` for the conversation comments,
+  `repos/<owner>/<repo>/pulls/<n>/comments` for the inline comments and their replies
+  (`path`, `line`, `original_line`, `in_reply_to_id`), and
+  `repos/<owner>/<repo>/pulls/<n>/reviews` for each submitted review, whose `body` is
+  empty for a bare approval. `gh api <path> --paginate --slurp` returns one JSON array
+  per page, so the parser unwraps `[][]comment`. A reply inside an inline thread is
+  `--method POST repos/<owner>/<repo>/pulls/<n>/comments/<id>/replies`. Verified against
+  the REST reference and unit tests over recorded responses, not probed live, because a
+  probe would comment on a real pull request (D117).
 
 ## git worktree
 

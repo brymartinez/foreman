@@ -236,6 +236,98 @@ func parseComment(out []byte) (app.IssueComment, error) {
 	return app.IssueComment{ID: r.ID, URL: r.HTMLURL, Body: r.Body}, nil
 }
 
+// prComment is the REST shape the three comment endpoints share. A review carries
+// submitted_at instead of updated_at, and only an inline comment carries a location.
+type prComment struct {
+	ID      int64  `json:"id"`
+	HTMLURL string `json:"html_url"`
+	Body    string `json:"body"`
+	User    struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	SubmittedAt time.Time `json:"submitted_at"`
+	Path        string    `json:"path"`
+	// Line is null once the diff moves on; original_line still locates the comment.
+	Line         *int  `json:"line"`
+	OriginalLine *int  `json:"original_line"`
+	InReplyToID  int64 `json:"in_reply_to_id"`
+}
+
+// commentThreads are the three endpoints a pull request's conversation is spread over.
+var commentThreads = []struct {
+	kind task.CommentKind
+	path string
+}{
+	{task.IssueComment, "repos/%s/issues/%d/comments"},
+	{task.ReviewComment, "repos/%s/pulls/%d/comments"},
+	{task.ReviewSummary, "repos/%s/pulls/%d/reviews"},
+}
+
+// PullRequestComments reads the three threads concurrently, in their listed order, so
+// the result is the same whichever call returns first. A thread that fails fails the
+// whole read: an empty conversation and an unreachable one must not look alike.
+func (c Client) PullRequestComments(ctx context.Context, pr task.Key) ([]app.PRComment, error) {
+	results := make([][]app.PRComment, len(commentThreads))
+	errs := make([]error, len(commentThreads))
+	var wg sync.WaitGroup
+	for i, thread := range commentThreads {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			path := fmt.Sprintf(thread.path, pr.Repo, pr.Number)
+			// --slurp returns one array per page, which flatten unwraps.
+			out, err := c.Run(ctx, "", "api", path, "--paginate", "--slurp")
+			if err != nil {
+				errs[i] = fmt.Errorf("read %s: %w", path, gone(err))
+				return
+			}
+			results[i], errs[i] = parsePRComments(out, thread.kind, path)
+		}()
+	}
+	wg.Wait()
+	var comments []app.PRComment
+	for i, err := range errs {
+		if err != nil {
+			return nil, err
+		}
+		comments = append(comments, results[i]...)
+	}
+	return comments, nil
+}
+
+func parsePRComments(out []byte, kind task.CommentKind, path string) ([]app.PRComment, error) {
+	var pages [][]prComment
+	if err := json.Unmarshal(out, &pages); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	var comments []app.PRComment
+	for _, page := range pages {
+		for _, r := range page {
+			// A review with no body is an approval or a rejection with nothing to answer.
+			if strings.TrimSpace(r.Body) == "" {
+				continue
+			}
+			at := r.UpdatedAt
+			if at.IsZero() {
+				at = r.SubmittedAt
+			}
+			comment := app.PRComment{
+				Kind: kind, ID: r.ID, Author: r.User.Login, Body: r.Body,
+				URL: r.HTMLURL, UpdatedAt: at, Path: r.Path, InReplyTo: r.InReplyToID,
+			}
+			switch {
+			case r.Line != nil:
+				comment.Line = *r.Line
+			case r.OriginalLine != nil:
+				comment.Line = *r.OriginalLine
+			}
+			comments = append(comments, comment)
+		}
+	}
+	return comments, nil
+}
+
 func (c Client) GetIssue(ctx context.Context, key task.Key) (app.Issue, error) {
 	out, err := c.Run(ctx, "", "issue", "view", fmt.Sprint(key.Number), "--repo", string(key.Repo), "--json", "number,title,body,labels,url,state,updatedAt")
 	if err != nil {
