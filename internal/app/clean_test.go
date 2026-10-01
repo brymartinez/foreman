@@ -48,7 +48,7 @@ func TestCleanKeepsBranchUnlessMergedAndEnabled(t *testing.T) {
 		enable bool
 		pr     string
 		issue  int
-	}{{"setting off", false, "merged", 0}, {"closed PR", true, "closed", 825}} {
+	}{{"setting off", false, "merged", 0}, {"PR closed without merging", true, "closed", 825}} {
 		f := newFixture()
 		f.app.DeleteMergedBranches = tc.enable
 		done(t, f, tc.pr)

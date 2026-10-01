@@ -34,8 +34,8 @@ func (a App) Clean(ctx context.Context, req CleanRequest) ([]CleanResult, error)
 		}
 		ref := fmt.Sprintf("%s#%d", rec.Repo, rec.Number)
 		switch {
-		case rec.State != task.Done && rec.State != task.Failed:
-			return nil, fmt.Errorf("%s is %s; only DONE or FAILED tasks are cleaned", ref, rec.State)
+		case !finished(rec.State):
+			return nil, fmt.Errorf("%s is %s; only DONE, FAILED, or PR_CLOSED tasks are cleaned", ref, rec.State)
 		case !hasWorktree(rec):
 			return nil, fmt.Errorf("%s has no worktree to remove", ref)
 		}
@@ -81,6 +81,12 @@ func cleanNote(res CleanResult) string {
 		return "worktree and merged branch removed"
 	}
 	return "worktree removed"
+}
+
+// finished states have no agent left to run, so their worktree can be removed by
+// name. Only DONE is cleaned automatically; the other two are the developer's call.
+func finished(s task.State) bool {
+	return s == task.Done || s == task.Failed || s == task.PRClosed
 }
 
 func hasWorktree(r *task.Record) bool {

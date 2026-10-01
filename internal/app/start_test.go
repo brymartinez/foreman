@@ -266,6 +266,20 @@ func TestStartRefuses(t *testing.T) {
 	}
 }
 
+func TestStartAcceptsPRClosed(t *testing.T) {
+	f := newFixture()
+	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.PRClosed,
+		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Branch: "feat/825-provider-retries", PR: 912}}
+	rec, err := f.app.Start(context.Background(), startReq(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.State != task.Working || len(f.runners.spawned) != 1 {
+		t.Errorf("state %s spawned %d", rec.State, len(f.runners.spawned))
+	}
+}
+
 func TestRestartKeepsBranchWhenTitleChanged(t *testing.T) {
 	f := newFixture()
 	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}

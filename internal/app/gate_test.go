@@ -114,12 +114,12 @@ func TestGateRefreshesCIOnReadyTasks(t *testing.T) {
 	}
 }
 
-func TestGateMergedIsDoneAndClosedIsFailed(t *testing.T) {
+func TestGateMergedIsDoneAndClosedIsPRClosed(t *testing.T) {
 	for _, tc := range []struct {
 		pr    string
 		state task.State
 		note  string
-	}{{"merged", task.Done, "PR #912 merged"}, {"closed", task.Failed, "PR #912 closed without merging"}} {
+	}{{"merged", task.Done, "PR #912 merged"}, {"closed", task.PRClosed, prClosedNote}} {
 		f := newFixture()
 		key := reviewed(t, f)
 		setCI(f, task.CIStatus{State: task.CIPassing})
@@ -136,6 +136,121 @@ func TestGateMergedIsDoneAndClosedIsFailed(t *testing.T) {
 		if got.State != tc.state || len(report.Changed) != 1 || !slices.Contains(report.Changed[0].Changes, tc.note) || len(report.Ready) != 0 {
 			t.Errorf("%s: state %s changed %+v ready %d", tc.pr, got.State, report.Changed, len(report.Ready))
 		}
+	}
+}
+
+const prClosedNote = "PR #912 closed without merging; the branch and worktree are kept"
+
+func TestGateClosedPRIsPRClosedNotFailed(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	setPR(f, "closed")
+	f.gh.items = []InboxItem{item(825, "open", t0, task.Assigned)}
+	report, err := f.app.Inbox(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.PRClosed || got.LastOutcome.Status != "pr_closed" || got.LastOutcome.Summary != prClosedNote {
+		t.Fatalf("state %s outcome %+v", got.State, got.LastOutcome)
+	}
+	if strings.Contains(got.LastOutcome.Summary, "failed") {
+		t.Errorf("a closed PR reads as a failure: %q", got.LastOutcome.Summary)
+	}
+	if len(f.notes.sent) != 0 {
+		t.Errorf("a closed PR notified the developer: %v", f.notes.sent)
+	}
+	if len(report.Changed) != 1 || !slices.Contains(report.Changed[0].Changes, prClosedNote) {
+		t.Errorf("changed = %+v", report.Changed)
+	}
+}
+
+func TestGateClosedPRStopsARunningAgent(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	f.store.recs[key].Delegation.RunnerPID = 77
+	f.runners.alive[77] = true
+	setPR(f, "closed")
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if !slices.Equal(f.runners.stopped, []int{77}) {
+		t.Errorf("stopped = %v, want the running runner", f.runners.stopped)
+	}
+	if got.State != task.PRClosed || got.Delegation.RunnerPID != 0 {
+		t.Errorf("state %s pid %d", got.State, got.Delegation.RunnerPID)
+	}
+}
+
+func TestGateClosedPRWithAStuckRunnerWarnsAndWaits(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	f.store.recs[key].Delegation.RunnerPID = 77
+	f.runners.alive[77] = true
+	f.runners.stuck = true
+	setPR(f, "closed")
+	_, warnings, err := f.app.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Reviewing || got.Delegation.RunnerPID != 77 {
+		t.Errorf("a runner that would not stop lost its task: state %s pid %d", got.State, got.Delegation.RunnerPID)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0].Error(), "has not exited yet") {
+		t.Errorf("warnings = %v", warnings)
+	}
+}
+
+func TestGateReopenedPRReturnsToTheActiveList(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		clean bool
+		want  task.State
+	}{{"clean review and finished CI", true, task.ReadyForHuman}, {"review requested changes", false, task.Reviewing}} {
+		f := newFixture()
+		key := reviewed(t, f)
+		if !tc.clean {
+			f.store.recs[key].Reviews[0].Clean = false
+		}
+		setPR(f, "closed")
+		if _, _, err := f.app.Status(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if f.store.recs[key].State != task.PRClosed {
+			t.Fatalf("%s: setup state %s", tc.name, f.store.recs[key].State)
+		}
+		setPR(f, "open")
+		setCI(f, task.CIStatus{State: task.CIPassing})
+		recs, _, err := f.app.Status(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := f.store.recs[key]
+		if got.State != tc.want || len(recs) != 1 || recs[0].Key != key {
+			t.Errorf("%s: state %s, delegated work %d", tc.name, got.State, len(recs))
+		}
+		if got.LastOutcome.Status != "pr_reopened" || !strings.Contains(got.LastOutcome.Summary, "PR #912 reopened") {
+			t.Errorf("%s: outcome %+v", tc.name, got.LastOutcome)
+		}
+	}
+}
+
+func TestPRClosedLeavesDelegatedWork(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	setPR(f, "closed")
+	recs, _, err := f.app.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 0 {
+		t.Errorf("delegated work still holds %d tasks", len(recs))
+	}
+	d := f.store.recs[key].Delegation
+	if d.Worktree == "" || d.Branch == "" || !d.WorktreeRemovedAt.IsZero() {
+		t.Errorf("worktree or branch lost: %+v", d)
 	}
 }
 
