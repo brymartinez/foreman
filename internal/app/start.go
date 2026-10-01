@@ -159,10 +159,11 @@ func (a App) startable(rec *task.Record) error {
 	}
 	ref := fmt.Sprintf("%s#%d", rec.Repo, rec.Number)
 	switch rec.State {
-	case task.Discovered, task.Failed, task.PRClosed:
-		return nil
-	case task.Working, task.Reviewing:
-		if rec.Delegation != nil && rec.Delegation.RunnerPID > 0 && a.Runners.Alive(rec.Delegation.RunnerPID) {
+	case task.Discovered, task.Failed, task.PRClosed, task.Working, task.Reviewing:
+		// A second runner would share the worktree and the task file with the first,
+		// and the first stops being held off by its state the moment this start
+		// changes it.
+		if a.liveRunner(rec) {
 			return fmt.Errorf("%s is already running (pid %d)", ref, rec.Delegation.RunnerPID)
 		}
 		return nil

@@ -182,7 +182,9 @@ func closePR(rec *task.Record, now time.Time) string {
 // reopen returns a PR_CLOSED task to delegated work once its PR is open again. The
 // review it already has decides where: a clean review of this head with finished CI
 // hands the task to the developer, and anything else leaves it under review, which is
-// where the gate picks it up again.
+// where the gate picks it up again. The review must name the head GitHub reports now.
+// A review from before heads were recorded (D63) has none, and cannot be shown to
+// cover the reopened PR, so it does not hand anything over.
 func reopen(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) string {
 	d := rec.Delegation
 	if pr.HeadSHA != "" {
@@ -190,7 +192,7 @@ func reopen(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) s
 	}
 	rec.CI = &ci
 	latest := rec.LatestReview()
-	reviewed := latest != nil && latest.Clean && latest.PR == d.PR && !rec.CommitsSinceReview()
+	reviewed := latest != nil && latest.Clean && latest.PR == d.PR && latest.Head != "" && latest.Head == pr.HeadSHA
 	rec.State = task.Reviewing
 	if reviewed && ci.State != task.CIPending {
 		rec.State = task.ReadyForHuman

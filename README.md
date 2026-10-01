@@ -341,6 +341,10 @@ CI and uses the review it already has: a clean review of the PR's current head w
 finished CI makes the task `READY_FOR_HUMAN`, and anything else makes it `REVIEWING`,
 which `foreman start` picks up. No agent is started for you either way.
 
+If the agent does not stop at once, the task is `PR_CLOSED` but keeps its runner, and
+every refresh tries again. `foreman start` and `foreman clean` refuse it until that
+runner is gone, so a second agent never shares the worktree with the first.
+
 ## States
 
 | State | Meaning | Your move |

@@ -1569,6 +1569,10 @@ Entry format:
   notifies the developer, who closed the PR. `foreman start` and `foreman clean
   <issue>` accept the state, as they accept FAILED, and a start from `PR_CLOSED` drops
   the closed PR's number, which would otherwise have the gate end the new run.
+  A task whose runner is still alive is startable and cleanable by neither: the
+  retained pid means that runner still owns the worktree and the task file, and a
+  start would both share them with a second runner and lift the `PR_CLOSED` state
+  that holds the first one off.
   `PR_CLOSED` also survives the issue reconciliation that follows in the same refresh:
   a closed issue turns a delegated task DONE, and DONE is cleaned automatically, so
   without that the worktree and branch this decision promises would be removed and the
@@ -1585,8 +1589,10 @@ Entry format:
   to carry on, and foreman had no path back.
 - **Decision.** The gate reads the CI of a reopened PR and derives the state from the
   review it already has: READY_FOR_HUMAN when the latest review is clean, covers that
-  PR, matches its current head, and CI has finished; REVIEWING otherwise. No agent is
-  started. REVIEWING with a clean review is what the existing gate promotes once CI
+  PR, names the head GitHub reports now, and CI has finished; REVIEWING otherwise. The
+  head must match explicitly, not merely fail to differ: a review from before heads
+  were recorded (D63) has none, and cannot be shown to cover the reopened PR. No agent
+  is started. REVIEWING with a clean review is what the existing gate promotes once CI
   finishes, so the two paths converge instead of duplicating the rule.
 - **Consequence.** Reopening is enough to get the task back in the list. Work that was
   not finished when the PR closed waits in REVIEWING for `foreman start`, rather than

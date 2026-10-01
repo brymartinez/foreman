@@ -250,6 +250,15 @@ func TestStartRefuses(t *testing.T) {
 			rec.Key = task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
 			f.store.recs[rec.Key] = rec
 		},
+		// The gate leaves a PR_CLOSED task its pid until the stop succeeds (D107), and
+		// that runner is still working in the worktree a second one would share.
+		"PR_CLOSED with a live runner": func(f *fixture, r *StartRequest) {
+			rec := seen(825, task.PRClosed, "open", t0)
+			rec.Key = task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+			rec.Delegation = &task.Delegation{Implementer: task.Session{Agent: task.Claude}, RunnerPID: 77}
+			f.store.recs[rec.Key] = rec
+			f.runners.alive[77] = true
+		},
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

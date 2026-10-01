@@ -36,6 +36,10 @@ func (a App) Clean(ctx context.Context, req CleanRequest) ([]CleanResult, error)
 		switch {
 		case !finished(rec.State):
 			return nil, fmt.Errorf("%s is %s; only DONE, FAILED, or PR_CLOSED tasks are cleaned", ref, rec.State)
+		case a.liveRunner(rec):
+			// A PR_CLOSED task keeps its pid until the stop succeeds (D107), and the
+			// runner is still working in the worktree this would remove.
+			return nil, fmt.Errorf("%s is still running (pid %d); cancel it first", ref, rec.Delegation.RunnerPID)
 		case !hasWorktree(rec):
 			return nil, fmt.Errorf("%s has no worktree to remove", ref)
 		}
@@ -62,7 +66,7 @@ func (a App) Clean(ctx context.Context, req CleanRequest) ([]CleanResult, error)
 // inbox notes and updates recs in place.
 func (a App) cleanDone(ctx context.Context, recs []*task.Record, notes map[task.Key][]string) {
 	for i, r := range recs {
-		if r.State != task.Done || !hasWorktree(r) {
+		if r.State != task.Done || !hasWorktree(r) || a.liveRunner(r) {
 			continue
 		}
 		res := a.clean(ctx, r, false)

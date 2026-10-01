@@ -276,15 +276,20 @@ func TestGateClosedPRLeavesARestartedRunnerAlone(t *testing.T) {
 
 func TestGateReopenedPRReturnsToTheActiveList(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		clean bool
-		want  task.State
-	}{{"clean review and finished CI", true, task.ReadyForHuman}, {"review requested changes", false, task.Reviewing}} {
+		name   string
+		review func(*task.Review)
+		want   task.State
+	}{
+		{"clean review of the head GitHub reports", func(*task.Review) {}, task.ReadyForHuman},
+		{"review requested changes", func(r *task.Review) { r.Clean = false }, task.Reviewing},
+		{"clean review of an earlier head", func(r *task.Review) { r.Head = "older01" }, task.Reviewing},
+		// A review from before heads were recorded (D63) cannot be shown to cover the
+		// reopened PR, so it must not hand the task to the developer.
+		{"clean review with no recorded head", func(r *task.Review) { r.Head = "" }, task.Reviewing},
+	} {
 		f := newFixture()
 		key := reviewed(t, f)
-		if !tc.clean {
-			f.store.recs[key].Reviews[0].Clean = false
-		}
+		tc.review(&f.store.recs[key].Reviews[0])
 		setPR(f, "closed")
 		if _, _, err := f.app.Status(context.Background()); err != nil {
 			t.Fatal(err)

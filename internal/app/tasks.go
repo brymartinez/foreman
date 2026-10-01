@@ -119,6 +119,14 @@ func (a App) listReaped(ctx context.Context) ([]*task.Record, error) {
 // running states are the ones a runner drives: implementing, or reviewing and fixing.
 func running(s task.State) bool { return s == task.Working || s == task.Reviewing }
 
+// liveRunner reports a task whose runner process is still going. That runner owns the
+// worktree and the task file until it exits, whatever state the task is in: a
+// PR_CLOSED task keeps its pid until the stop succeeds, so it can have one too (D107).
+func (a App) liveRunner(r *task.Record) bool {
+	d := r.Delegation
+	return d != nil && d.RunnerPID > 0 && a.Runners.Alive(d.RunnerPID)
+}
+
 // Cancel stops a running task's runner, which stops its agent. The runner records
 // the stop as FAILED with a cancelled outcome. The branch, worktree, and PR are
 // kept, so start picks the task up again.
