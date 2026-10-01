@@ -59,8 +59,17 @@ repositories_dir: $sandbox/repositories
 log_dir: $sandbox/logs
 claude:
   command: $sandbox/bin/claude
+  model: opus
+  plan_model: sonnet
+  review_model: opus
 codex:
   command: $sandbox/bin/codex
+  model: gpt-6-sol
+  plan_model: gpt-6-luna
+  review_model: gpt-6-sol
+  reasoning_effort: medium
+  plan_reasoning_effort: xhigh
+  review_reasoning_effort: medium
 EOF
 	mkdir -p "$sandbox/tasks" "$sandbox/stages"
 	cp "$root"/defaults/stages/*.md "$sandbox/stages/"
@@ -113,6 +122,7 @@ EOF
 	# Implementer: commits a change, records an open PR for its branch, and reports it.
 	cat >"$sandbox/bin/claude" <<'EOF'
 #!/usr/bin/env bash
+for arg in "$@"; do case "$arg" in sonnet|opus) echo "claude model=$arg" >>"$E2E_STATE/models.log" ;; esac; done
 if [[ " $* " == *" --no-session-persistence "* ]]; then
 	echo "claude review" >>"$E2E_STATE/agents.log"
 	echo '{"type":"result","session_id":"r1","subtype":"success","total_cost_usd":0.05,"structured_output":{"verdict":"clean","summary":"looks right","findings":[]}}'
@@ -159,6 +169,7 @@ EOF
 	# Reviewer on the codex JSONL protocol.
 	cat >"$sandbox/bin/codex" <<'EOF'
 #!/usr/bin/env bash
+for arg in "$@"; do case "$arg" in gpt-6-luna|gpt-6-sol) echo "codex model=$arg" >>"$E2E_STATE/models.log" ;; model_reasoning_effort=*) echo "codex $arg" >>"$E2E_STATE/models.log" ;; esac; done
 if [[ " $* " == *" --ephemeral "* ]]; then echo "codex review"; else echo "codex implement"; fi >>"$E2E_STATE/agents.log"
 last=
 while [ $# -gt 0 ]; do [ "$1" = -o ] && last=$2; shift; done
@@ -198,6 +209,10 @@ scenario_runner() {
 	check "the four documents are posted on the issue" test "$(grep -c 'api --method POST repos/acme/widgets/issues/42/comments' "$state/gh.log")" = 4
 	check "the PRD comment has its heading" contains "$state/comment-3002.md" "## PRD"
 	check "a fresh session implements the posted plan" contains "$state/plan-posted-prompt.txt" "- Implementation plan: https://github.com/acme/widgets/issues/42#issuecomment-3004"
+	check "planning uses its Claude model" contains "$state/models.log" "claude model=sonnet"
+	check "implementation uses its Claude model" contains "$state/models.log" "claude model=opus"
+	check "review uses its Codex model" contains "$state/models.log" "codex model=gpt-6-sol"
+	check "review uses medium Codex effort" contains "$state/models.log" 'codex model_reasoning_effort="medium"'
 	check "show lists the plan" bash -c "cd '$FOREMAN_CWD' && '$work/foreman' show 42 | grep -qF 'Plan          Analysis https://github.com/acme/widgets/issues/42#issuecomment-3001'"
 	rm "$sandbox/stages/pr.md"
 	check "a missing stage file stops foreman" bash -c "cd '$FOREMAN_CWD' && ! '$work/foreman' status 2>'$sandbox/err.txt' && grep -qF 'stages/pr.md' '$sandbox/err.txt'"
@@ -300,6 +315,8 @@ scenario_inbox() {
 
 	foreman config --show >"$sandbox/show.txt"
 	check "config --show lists the ignored repository" contains "$sandbox/show.txt" "Ignore repositories: acme/ignored"
+	check "config --show lists the plan model" contains "$sandbox/show.txt" "Codex plan model: gpt-6-luna"
+	check "config --show lists the plan effort" contains "$sandbox/show.txt" "Codex plan reasoning effort: xhigh"
 	printf '#!/bin/sh\n[ "$1" = -w ] && echo "edited $2" >"%s/edited"\n' "$sandbox" >"$sandbox/bin/editor"
 	chmod +x "$sandbox/bin/editor"
 	check "config --edit runs an editor with arguments" bash -c "cd '$sandbox' && EDITOR='editor -w' VISUAL= '$work/foreman' config --edit && grep -qF '$sandbox/config.yaml' '$sandbox/edited'"

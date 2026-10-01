@@ -19,11 +19,15 @@ import (
 // can't write outside the worktree, where a linked worktree keeps its git data, so that
 // directory is added as a writable root (D112).
 type Codex struct {
-	Bin   string
-	Model string
+	Bin       string
+	Model     string
+	PlanModel string
 	// ReviewModel replaces Model for reviews; "" keeps Model (D85).
-	ReviewModel string
-	Exec        Exec
+	ReviewModel           string
+	ReasoningEffort       string
+	PlanReasoningEffort   string
+	ReviewReasoningEffort string
+	Exec                  Exec
 }
 
 func (Codex) Name() task.Agent { return task.Codex }
@@ -98,6 +102,9 @@ func (c Codex) Review(ctx context.Context, in StartInput) (ReviewOutcome, error)
 	if c.ReviewModel != "" {
 		c.Model = c.ReviewModel
 	}
+	if c.ReviewReasoningEffort != "" {
+		c.ReasoningEffort = c.ReviewReasoningEffort
+	}
 	_, raw, usage, err := c.exec(ctx, in, ReviewSchema, func(schema, last string) []string {
 		return []string{
 			"exec", "--json", "--ephemeral",
@@ -116,6 +123,14 @@ func (c Codex) Review(ctx context.Context, in StartInput) (ReviewOutcome, error)
 }
 
 func (c Codex) run(ctx context.Context, in StartInput, baseArgs func(schema, last string) []string, resumeID string, onSession func(task.Session)) (Turn, error) {
+	if in.Stage == task.StagePlan {
+		if c.PlanModel != "" {
+			c.Model = c.PlanModel
+		}
+		if c.PlanReasoningEffort != "" {
+			c.ReasoningEffort = c.PlanReasoningEffort
+		}
+	}
 	session, raw, usage, err := c.exec(ctx, in, OutcomeSchema, baseArgs, resumeID, onSession)
 	if err != nil {
 		return Turn{Session: session, Usage: usage}, err
@@ -138,6 +153,9 @@ func (c Codex) exec(ctx context.Context, in StartInput, schema []byte, baseArgs 
 	args := baseArgs(schemaPath, lastPath)
 	if c.Model != "" {
 		args = append(args, "-m", c.Model)
+	}
+	if c.ReasoningEffort != "" {
+		args = append(args, "-c", fmt.Sprintf("model_reasoning_effort=%q", c.ReasoningEffort))
 	}
 	if resumeID != "" {
 		args = append(args, resumeID)

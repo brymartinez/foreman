@@ -403,6 +403,9 @@ func TestPlanIsPostedThenAFreshSessionImplementsIt(t *testing.T) {
 	if f.claude.starts != 2 || len(f.claude.resumed) != 0 || got.Delegation.Implementer.ID != "sid-2" || !strings.Contains(f.claude.prompt, "- Implementation plan: https://github.com/") || !strings.Contains(f.claude.prompt, "implement instructions") || strings.Contains(f.claude.prompt, "## Plan first") {
 		t.Errorf("implementation must start fresh with the posted plan and instructions: starts %d resumed %q session %q prompt %q", f.claude.starts, f.claude.resumed, got.Delegation.Implementer.ID, f.claude.prompt)
 	}
+	if !slices.Equal(f.claude.stages, []task.Stage{task.StagePlan, task.StageImplement}) {
+		t.Errorf("implementer stages = %v", f.claude.stages)
+	}
 	if !strings.Contains(f.codex.reviewed[0], "## PRD") || !strings.Contains(f.codex.reviewed[0], "R1. Retry 5xx.") {
 		t.Errorf("the review must carry the PRD:\n%s", f.codex.reviewed[0])
 	}
@@ -421,6 +424,9 @@ func TestReviewFindingsResumeImplementationSessionAfterPlan(t *testing.T) {
 	}
 	if f.claude.starts != 2 || len(f.claude.resumed) != 1 || !strings.HasPrefix(f.claude.resumed[0], "sid-2: Review round 1 of PR #912") {
 		t.Errorf("review findings must resume the implementation session: starts %d resumed %q", f.claude.starts, f.claude.resumed)
+	}
+	if !slices.Equal(f.claude.stages, []task.Stage{task.StagePlan, task.StageImplement, task.StageImplement}) {
+		t.Errorf("implementer stages = %v", f.claude.stages)
 	}
 }
 
@@ -464,6 +470,9 @@ func TestAnsweredPlanningQuestionResumesThePlanning(t *testing.T) {
 	got := f.store.recs[key]
 	if len(f.claude.resumed) != 1 || !strings.Contains(f.claude.resumed[0], "planned, blocked, or failed") || f.claude.starts != 1 || got.Delegation.Implementer.ID != "sid-2" {
 		t.Errorf("planning answer must resume before implementation starts fresh: resumed %q starts %d", f.claude.resumed, f.claude.starts)
+	}
+	if !slices.Equal(f.claude.stages, []task.Stage{task.StagePlan, task.StageImplement}) {
+		t.Errorf("implementer stages = %v", f.claude.stages)
 	}
 }
 

@@ -1735,3 +1735,24 @@ Entry format:
   context. The task file records the new session ID for later resumes. The local
   configuration trials Sonnet for Claude work and lowers the implementer budget
   from $100 to $25 per invocation.
+
+## D118 (amends D85). Select the model for each agent turn
+
+- Date: 2026-10-01. Requested during the token usage investigation.
+- **Context.** Planning and implementation now use separate sessions, but both used
+  the implementer's `model` setting. The reviewer had its own model setting. Codex
+  reasoning effort came only from the Codex CLI configuration.
+- **Decision.** Keep the task's chosen implementer for planning and implementation,
+  and the competing agent for review. `claude.model` and `codex.model` select the
+  implementation model, including PR creation. Add `plan_model` for planning and
+  retain `review_model` for review; an empty stage model uses `model`. Codex also
+  accepts `reasoning_effort`, `plan_reasoning_effort`, and
+  `review_reasoning_effort`. An empty stage effort uses `reasoning_effort`, and an
+  empty base effort leaves the Codex CLI default. Pass the chosen model and effort
+  on fresh and resumed turns. Show the resolved values in `config --show` and write
+  the fields when `config --edit` creates a new file. The PR instructions require
+  Basic English and cut filler and unsupported claims.
+- **Consequence.** The local configuration can use `sonnet` and `gpt-6-luna` at
+  `xhigh` for planning, then `opus` and `gpt-6-sol` at `medium` for implementation
+  and review. PR creation uses the implementation model. Existing configs still
+  work because empty new fields use the prior model or CLI effort.

@@ -9,5 +9,5 @@
    4. **Risk.** What could break and where, such as callers, data, or config. If the risk is low, say so and why in one sentence.
    5. `Closes #N`
 4. When the developer answers a question later, add the decision to the fix section with `gh pr edit --body`.
-5. Write it plainly. No em dashes, no filler, no "This PR...".
+5. Write the title and body in Basic English. Use common words and short, direct sentences. State what changed and what the tests showed. Cut filler, stock phrases, and claims without evidence. No em dashes or "This PR...".
 6. The title and body carry no agent attribution. Leave out any "Generated with" or "Powered by" line.
