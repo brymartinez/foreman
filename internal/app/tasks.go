@@ -121,7 +121,7 @@ type deadRunner struct {
 // with a PR is only safe to fail once the gate has seen that PR: a PR the developer
 // closed ends the task instead of failing it (D107), and a GitHub call that fails
 // leaves foreman unable to tell the two apart. A failure notification cannot be taken
-// back, so an unread task keeps its state and the next refresh judges it (D112).
+// back, so an unread task keeps its state and the next refresh judges it (D113).
 func reapable(recs []*task.Record, dead []deadRunner, checked map[task.Key]bool) []deadRunner {
 	var out []deadRunner
 	for _, dr := range dead {

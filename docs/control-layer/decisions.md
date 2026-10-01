@@ -1644,7 +1644,27 @@ Entry format:
   refresh. A closed PR records `PR_CLOSED` without a failure notification, and a
   reopened PR cannot release an old live runner into the active task.
 
-## D112 (amends D111). Reap a dead runner only once its PR has been read
+## D112. Codex can write the worktree's git directory
+
+- Date: 2026-10-01. Requested by the user after midsoln/foreman#5 failed when Codex
+  couldn't commit its fixes. D107 to D111 are taken on that issue's branch.
+- **Context.** Foreman's worktrees are linked to a clone under `repositories/`. Their
+  git data lives in that clone's `.git`, outside the worktree, and Codex's
+  workspace-write sandbox only writes inside the worktree (plus the temp dirs). Codex
+  could edit and test but not commit, so the task failed. The probe missed this
+  because its clone was under `$TMPDIR`. Claude's Bash tool runs outside a sandbox, so
+  it was not affected.
+- **Decision.** The Codex adapter reads the worktree's `.git` file and `commondir` to
+  find the clone's `.git` and adds it with
+  `-c sandbox_workspace_write.writable_roots=[...]` on `exec` and `exec resume`. A
+  plain checkout adds nothing. The reviewer stays read-only. The probe checks the
+  commit with the temp dirs excluded: it must fail without the root and succeed with
+  it, on `exec` and `exec resume`.
+- **Consequence.** Codex can commit and push from foreman's worktrees. It can write to
+  the whole clone's `.git`, not just this worktree's entry, which is the same access a
+  plain checkout gives. Network access for `gh` and `git push` is unchanged (D7).
+
+## D113 (amends D111). Reap a dead runner only once its PR has been read
 
 - Date: 2026-10-01. Issue midsoln/foreman#5. Review finding.
 - **Context.** D111 reaped after the gate so a closed PR would be seen first, but it
@@ -1658,7 +1678,7 @@ Entry format:
   one. The condition is positive, so a future early return in `gate` leaves a task
   unread, and unread means unreaped.
 
-## D113 (amends D110). Judge the gone note by the reasons the task stored
+## D114 (amends D110). Judge the gone note by the reasons the task stored
 
 - Date: 2026-10-01. Issue midsoln/foreman#5. Review finding.
 - **Context.** An item that leaves GitHub gets a CHANGED note built from the task
@@ -1674,7 +1694,7 @@ Entry format:
   The record still stops being checked either way: the setting hides the note, not the
   bookkeeping that ends the refreshes.
 
-## D114 (amends D110 and D113). Resolve a tracked fetch's reasons before filtering
+## D115 (amends D110 and D114). Resolve a tracked fetch's reasons before filtering
 
 - Date: 2026-10-01. Issue midsoln/foreman#5. Review finding.
 - **Context.** A search that hits its 1000 result limit can leave a tracked item out.
@@ -1688,3 +1708,13 @@ Entry format:
 - **Consequence.** The setting holds when the searches are incomplete, which is when a
   mention-only item is most likely to arrive as a tracked fetch. An item foreman has
   never stored has no snapshot, so it keeps the reasons the search gave it.
+
+## D116. Keep both worktree and issue decisions after the merge
+
+- Date: 2026-10-01. PR midsoln/foreman#6 merge resolution.
+- **Context.** The issue branch and main independently assigned D112 to different
+  decisions. Both changes are needed and their references must stay unambiguous.
+- **Decision.** Keep main's D112 for the Codex worktree fix and renumber the issue
+  branch's later review decisions D113 to D115. Preserve both sets of changes.
+- **Consequence.** Code comments and progress references identify the intended
+  decision after PR #6 merges.

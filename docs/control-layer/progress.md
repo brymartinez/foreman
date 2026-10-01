@@ -507,25 +507,43 @@ request. Each fix is its own commit with a decision.
   runner with a PR until the GitHub gate checks it. Reopening waits for a retained
   runner to stop or clears its stale pid (D111). A dead runner is reaped only once the
   gate has read its PR, so a failed lookup delays the verdict instead of guessing it
-  (D112).
+  (D113).
 - `mentions` hides items found only because they mention the developer; `refresh` sets
   the dashboard's GitHub interval, 60 seconds by default and 5 at the least (D110).
   The note for an item that left GitHub follows the setting too, judged by the reasons
-  the task stored before they were cleared (D113). An item a truncated search missed
+  the task stored before they were cleared (D114). An item a truncated search missed
   arrives as a tracked fetch, and is judged by the involvement the task stored before
-  the refresh rewrote it (D114).
+  the refresh rewrote it (D115).
 - Verified with `go vet ./...`, `go test ./...`, `go build -o dist/foreman
   ./cmd/foreman`, `scripts/e2e.sh`, and `git diff --check`. New tests cover the arrow
   keys, the row and selection colors, the closed and reopened PR paths including a
   running and an unstoppable runner, the mention filter, and the two settings.
-- The D111 to D114 review fixes passed `go vet ./...`, `go test ./...`, `go test
+- The D111 and D113 to D115 review fixes passed `go vet ./...`, `go test ./...`, `go test
   -race` over `internal/app`, `internal/render`, `internal/tui`, and `internal/config`,
   the build, `scripts/e2e.sh`, and `git diff --check`. The closed and reopened PR paths
   have no end-to-end check; `gate_test.go` covers them, including a dead runner, a stop
   that will not take, and a PR lookup that fails. `inbox_gone_test.go` covers the gone
   note against the mentions setting, and `inbox_test.go` covers a tracked fetch under a
-  truncated search. The D112, D113, and D114 tests were confirmed to fail without their
+  truncated search. The D113, D114, and D115 tests were confirmed to fail without their
   fixes.
+
+### Fix (complete): Codex commits in a linked worktree
+
+- midsoln/foreman#5 failed because Codex couldn't write the clone's `.git` from its
+  workspace-write sandbox, so it couldn't commit (D112). The Codex adapter now adds
+  that directory as a writable root on `exec` and `exec resume`.
+- Verified with `go vet ./...`, `go test ./...` (a new test uses a real linked worktree),
+  `scripts/e2e.sh`, and `scripts/probe-agents.sh` (24 checks on Codex 0.156.1). The
+  probe shows the commit failing without the root and succeeding with it.
+
+### Merge resolution (complete): PR #6 with main
+
+- Preserved the issue #5 changes and the Codex worktree fix. Both branches had used
+  D112, so D112 remains the worktree decision and the later issue #5 review decisions
+  are D113 to D115 (D116).
+- Verified the combined tree with `go vet ./...`, `go test ./...`, race tests for
+  `internal/app`, `internal/tui`, `internal/config`, and `internal/agent`, a build, and
+  `scripts/e2e.sh`.
 
 ## Known limitations
 
@@ -638,9 +656,11 @@ what it replaced. Current summary:
   returns the task to delegated work. D109 (amends D104). Dashboard rows keep the
   terminal's foreground, and the arrows select panes. D110. `mentions` and `refresh`
   are settings. D111 (amends D107 and D108). Check PR state before reaping its runner.
-  D112 (amends D111). Reap a dead runner only once its PR has been read. D113 (amends
-  D110). Judge the gone note by the reasons the task stored. D114 (amends D110 and
-  D113). Resolve a tracked fetch's reasons before filtering.
+- D112. Codex can write the worktree's git directory.
+- D113 (amends D111). Reap a dead runner only once its PR has been read. D114 (amends
+  D110). Judge the gone note by the reasons the task stored. D115 (amends D110 and
+  D114). Resolve a tracked fetch's reasons before filtering. D116. Keep both sets of
+  decisions and their references after the merge.
 
 ## Next stage
 

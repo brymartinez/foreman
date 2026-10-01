@@ -16,7 +16,7 @@ import (
 // check results and hands failures to the developer instead of fixing them (D46).
 // It returns what changed, per task, and the tasks whose PR state it read. A caller
 // that fails a dead runner must check the second map first: reaping a task this pass
-// could not read would record a PR the developer closed as a failed run (D112).
+// could not read would record a PR the developer closed as a failed run (D113).
 func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]string, map[task.Key]bool, []error, error) {
 	notes := map[task.Key][]string{}
 	checked := map[task.Key]bool{}
