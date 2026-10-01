@@ -331,6 +331,8 @@ Closing a delegated PR without merging it ends the task. On the next GitHub refr
 foreman stops the agent if one is still running, moves the task to `PR_CLOSED`, and
 drops it from DELEGATED WORK. Nothing is deleted: the task file, the worktree, and the
 branch are kept, and `foreman clean <issue>` removes the worktree when you want it gone.
+Closing the issue as well leaves the task `PR_CLOSED` rather than DONE, so the worktree
+is not cleaned up behind you.
 The run did not fail, so there is no failure notification; the change is reported as an
 inbox note the next time you look.
 

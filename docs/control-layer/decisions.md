@@ -1569,6 +1569,10 @@ Entry format:
   notifies the developer, who closed the PR. `foreman start` and `foreman clean
   <issue>` accept the state, as they accept FAILED, and a start from `PR_CLOSED` drops
   the closed PR's number, which would otherwise have the gate end the new run.
+  `PR_CLOSED` also survives the issue reconciliation that follows in the same refresh:
+  a closed issue turns a delegated task DONE, and DONE is cleaned automatically, so
+  without that the worktree and branch this decision promises would be removed and the
+  gate would stop watching for the PR to reopen.
 - **Consequence.** Closing a PR is how a developer calls off delegated work, and it
   reads as that rather than as a failure. The cost is one `gh pr view` per active task
   with a PR, per refresh. The task file, worktree, and branch survive, so the work can

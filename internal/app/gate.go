@@ -35,8 +35,10 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			if err != nil {
 				return nil, nil, err
 			}
-			if err := a.stopRun(ctx, updated); err != nil {
-				warnings = append(warnings, fmt.Errorf("stop the runner of %s#%d after PR #%d closed: %w", r.Repo, r.Number, r.Delegation.PR, err))
+			if endedBy(updated, pr.Key.Number) {
+				if err := a.stopRun(ctx, updated); err != nil {
+					warnings = append(warnings, fmt.Errorf("stop the runner of %s#%d after PR #%d closed: %w", r.Repo, r.Number, r.Delegation.PR, err))
+				}
 			}
 			if note != "" {
 				notes[r.Key] = append(notes[r.Key], note)
@@ -126,6 +128,15 @@ func (a App) endClosed(ctx context.Context, r *task.Record) (*task.Record, strin
 		return cur, nil
 	})
 	return updated, note, err
+}
+
+// endedBy reports a task this refresh has ended for the closed pr: PR_CLOSED, and
+// still on that PR. endClosed writes nothing when a start since the list gave the
+// task another PR, and that run is not the closed PR's to stop; the record it
+// returned is then the new run's, pid and all. An already PR_CLOSED task on the same
+// PR is ours, which is how a runner that would not stop is stopped on a later refresh.
+func endedBy(rec *task.Record, pr int) bool {
+	return rec != nil && rec.Delegation != nil && rec.Delegation.PR == pr && rec.State == task.PRClosed
 }
 
 // stopRun stops the runner a task still holds once its PR is closed, so no agent keeps

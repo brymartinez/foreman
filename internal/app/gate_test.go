@@ -308,6 +308,40 @@ func TestGateReopenedPRReturnsToTheActiveList(t *testing.T) {
 	}
 }
 
+func TestGateClosedPRDoesNotStopARunStartedSinceItClosed(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	setPR(f, "closed")
+	f.gh.prs[913] = PullRequest{Key: task.Key{Repo: key.Repo, Number: 913}, State: "open", HeadRefName: "feat/825-provider-retries", BaseRefName: "main"}
+	// Between this refresh's list and its write, another refresh ends the task and
+	// the developer starts a new run, which opens a PR of its own.
+	f.gh.onPR = func() {
+		if _, err := f.app.Store.Update(context.Background(), key, func(cur *task.Record) (*task.Record, error) {
+			cur.State = task.PRClosed
+			return cur, nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.app.Store.Update(context.Background(), key, func(cur *task.Record) (*task.Record, error) {
+			cur.State, cur.Delegation.PR, cur.Delegation.RunnerPID = task.Working, 913, 99
+			return cur, nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		f.runners.alive[99] = true
+	}
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Working || got.Delegation.PR != 913 || got.Delegation.RunnerPID != 99 {
+		t.Errorf("the new run was ended by the old PR: state %s pr %d pid %d", got.State, got.Delegation.PR, got.Delegation.RunnerPID)
+	}
+	if len(f.runners.stopped) != 0 {
+		t.Errorf("stopped a runner that belongs to another PR: %v", f.runners.stopped)
+	}
+}
+
 func TestGatePRClosedThenMergedIsDone(t *testing.T) {
 	f := newFixture()
 	key := reviewed(t, f)
@@ -322,6 +356,28 @@ func TestGatePRClosedThenMergedIsDone(t *testing.T) {
 	}
 	if got := f.store.recs[key]; got.State != task.Done || got.LastOutcome.Status != "merged" {
 		t.Errorf("state %s outcome %+v", got.State, got.LastOutcome)
+	}
+}
+
+func TestPRClosedSurvivesAClosedIssue(t *testing.T) {
+	f := newFixture()
+	f.app.CleanOnDone, f.app.DeleteMergedBranches = true, true
+	key := reviewed(t, f)
+	setPR(f, "closed")
+	// No search returns the task, so the same refresh re-fetches the issue, which the
+	// developer closed along with the PR. That must not turn PR_CLOSED into DONE.
+	if _, err := f.app.Inbox(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.PRClosed || got.GitHub.State != "closed" {
+		t.Fatalf("state %s, issue %s", got.State, got.GitHub.State)
+	}
+	if _, err := f.app.Inbox(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.PRClosed || len(f.wt.removed) != 0 || !got.Delegation.WorktreeRemovedAt.IsZero() {
+		t.Errorf("the worktree was cleaned away: state %s removed %+v", got.State, f.wt.removed)
 	}
 }
 

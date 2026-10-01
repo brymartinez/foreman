@@ -146,7 +146,14 @@ func (f *fakeStore) Save(_ context.Context, r *task.Record) error {
 func (f *fakeStore) Update(ctx context.Context, k task.Key, fn func(*task.Record) (*task.Record, error)) (*task.Record, error) {
 	cur := f.recs[k]
 	if cur != nil {
+		// The Markdown store decodes a record per read, so the copy must not share the
+		// delegation with the caller's: a write here is not visible to a list taken
+		// before it.
 		c := *cur
+		if c.Delegation != nil {
+			d := *c.Delegation
+			c.Delegation = &d
+		}
 		cur = &c
 	}
 	next, err := fn(cur)
@@ -174,6 +181,7 @@ type fakeGitHub struct {
 	issue     Issue
 	repo      RepoInfo
 	prs       map[int]PullRequest
+	onPR      func() // runs once, inside the next GetPullRequest
 	ci        map[int]task.CIStatus
 	comments  map[int64]IssueComment // posted issue comments by id
 	edits     int                    // PostIssueComment calls that edited a comment
@@ -218,6 +226,12 @@ func (f *fakeGitHub) CIStatus(_ context.Context, k task.Key) (task.CIStatus, err
 }
 
 func (f *fakeGitHub) GetPullRequest(_ context.Context, k task.Key) (PullRequest, error) {
+	if f.onPR != nil {
+		// Plays another process writing between a refresh's read and its own write.
+		hook := f.onPR
+		f.onPR = nil
+		hook()
+	}
 	pr, ok := f.prs[k.Number]
 	if !ok {
 		return PullRequest{}, fmt.Errorf("gh: no pull requests found for %d", k.Number)

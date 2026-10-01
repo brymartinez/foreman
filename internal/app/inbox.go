@@ -157,11 +157,18 @@ func mergeObserved(cur, seen *task.Record) *task.Record {
 	}
 	cur.Title, cur.URL, cur.Kind = seen.Title, seen.URL, seen.Kind
 	cur.GitHub, cur.LastGitHubSync = seen.GitHub, seen.LastGitHubSync
-	if seen.State == task.Done && !running(cur.State) {
+	if seen.State == task.Done && !keepsState(cur.State) {
 		cur.State = task.Done
 	}
 	return cur
 }
+
+// keepsState reports a task the inbox leaves in the state it found. A runner owns the
+// task it is driving, and the gate has already recorded why a PR_CLOSED task ended: a
+// closed issue must not turn that into DONE, which would clean away the worktree and
+// branch the developer was promised, and stop the gate watching for the PR to reopen
+// (D107).
+func keepsState(s task.State) bool { return running(s) || s == task.PRClosed }
 
 // fetchTracked refreshes missing delegated work and undelegated items whose last
 // involvement reasons have not yet been cleared by a complete refresh. gone lists
@@ -326,9 +333,9 @@ func observe(rec *task.Record, it InboxItem, complete bool, now time.Time) {
 	rec.Title, rec.URL, rec.Kind = it.Title, it.URL, it.Kind
 	rec.GitHub = &task.Snapshot{UpdatedAt: it.UpdatedAt, State: it.State, Reasons: reasons}
 	rec.LastGitHubSync = now
-	// A closed issue or merged PR ends the task unless a runner is still driving it;
-	// the gate ends those when their PR is merged or closed.
-	if it.State != "open" && !running(rec.State) {
+	// A closed issue or merged PR ends the task unless the state is already someone
+	// else's to set; the gate ends a delegated task when its PR is merged or closed.
+	if it.State != "open" && !keepsState(rec.State) {
 		rec.State = task.Done
 	}
 }
