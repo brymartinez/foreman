@@ -13,9 +13,10 @@ import (
 var attention = map[task.State]int{
 	task.NeedsDecision: 0,
 	task.ReadyForHuman: 1,
-	task.Failed:        2,
-	task.Reviewing:     3,
-	task.Working:       4,
+	task.Reviewed:      2,
+	task.Failed:        3,
+	task.Reviewing:     4,
+	task.Working:       5,
 }
 
 // Status returns delegated work that is not finished, most urgent first.

@@ -7,6 +7,12 @@ import (
 	"github.com/brymartinez/foreman/internal/task"
 )
 
+// ReplyMarker opens every reply the agent posts on a pull request. The agent answers
+// through the developer's own gh login, so the author cannot tell its replies from the
+// developer's comments, and a comment the developer writes has to count. Markdown
+// hides the marker, and foreman drops any comment that carries it (D118).
+const ReplyMarker = "<!-- foreman:reply -->"
+
 type TaskBrief struct {
 	Key       task.Key
 	Title     string

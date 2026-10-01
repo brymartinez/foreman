@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -175,18 +176,42 @@ func (f *fakeStore) List(context.Context) ([]*task.Record, error) {
 }
 
 type fakeGitHub struct {
-	items     []InboxItem
-	truncated []string
-	fetched   []task.Key
-	issue     Issue
-	repo      RepoInfo
-	prs       map[int]PullRequest
-	onPR      func() // runs once, inside the next GetPullRequest
-	ci        map[int]task.CIStatus
-	comments  map[int64]IssueComment // posted issue comments by id
-	edits     int                    // PostIssueComment calls that edited a comment
-	postErr   error                  // fails the PostIssueComment call after the first postOK
-	postOK    int
+	items          []InboxItem
+	truncated      []string
+	fetched        []task.Key
+	issue          Issue
+	repo           RepoInfo
+	prs            map[int]PullRequest
+	onPR           func() // runs once, inside the next GetPullRequest
+	ci             map[int]task.CIStatus
+	comments       map[int64]IssueComment // posted issue comments by id
+	edits          int                    // PostIssueComment calls that edited a comment
+	postErr        error                  // fails the PostIssueComment call after the first postOK
+	postOK         int
+	prComments     map[int][]PRComment // the PR conversation, by PR number
+	prCommentErr   error
+	prCommentReads int
+	mu             sync.Mutex
+}
+
+func (f *fakeGitHub) PullRequestComments(_ context.Context, pr task.Key) ([]PRComment, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.prCommentReads++
+	if f.prCommentErr != nil {
+		return nil, f.prCommentErr
+	}
+	return slices.Clone(f.prComments[pr.Number]), nil
+}
+
+// addPRComment plays a comment arriving on a PR, from any goroutine.
+func (f *fakeGitHub) addPRComment(pr int, c PRComment) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.prComments == nil {
+		f.prComments = map[int][]PRComment{}
+	}
+	f.prComments[pr] = append(f.prComments[pr], c)
 }
 
 func (f *fakeGitHub) PostIssueComment(_ context.Context, k task.Key, id int64, body string) (IssueComment, error) {

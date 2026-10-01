@@ -305,6 +305,8 @@ func (a App) notify(key task.Key, rec *task.Record) {
 		}
 	case task.ReadyForHuman:
 		body = "Ready for human review"
+	case task.Reviewed:
+		body = "PR feedback to answer"
 	default:
 		return
 	}

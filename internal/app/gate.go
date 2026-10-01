@@ -105,6 +105,20 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 		if note != "" {
 			notes[r.Key] = append(notes[r.Key], note)
 		}
+		// A pull request the agents are done with is the developer's to comment on, so
+		// this is where feedback arrives (D117, D119). It runs after advance, so a task
+		// handed over by this same refresh is checked in the same pass.
+		if pr.State == "open" && handsOver(updated) {
+			withFeedback, feedbackNote, err := a.feedback(ctx, updated)
+			if err != nil {
+				warnings = append(warnings, err)
+			} else {
+				updated = withFeedback
+				if feedbackNote != "" {
+					notes[r.Key] = append(notes[r.Key], feedbackNote)
+				}
+			}
+		}
 		recs[i] = updated
 	}
 	return notes, checked, warnings, nil
@@ -226,7 +240,7 @@ func gated(r *task.Record) bool {
 		return false
 	}
 	switch r.State {
-	case task.ReadyForHuman:
+	case task.ReadyForHuman, task.Reviewed:
 		return true
 	case task.Reviewing:
 		latest := r.LatestReview()
@@ -237,7 +251,8 @@ func gated(r *task.Record) bool {
 
 // advance applies the PR state and CI result to a gated task, and returns the
 // inbox note for the change, if the developer should hear about it. A task that is
-// already READY_FOR_HUMAN only has its CI refreshed, so the view stays current.
+// already READY_FOR_HUMAN or REVIEWED only has its CI refreshed, so the view stays
+// current; where it goes next is the developer's call or the feedback check's.
 func advance(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) string {
 	d := rec.Delegation
 	outcome := func(status, summary string) string {
@@ -260,7 +275,7 @@ func advance(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) 
 	}
 	prev := rec.CI
 	rec.CI = &ci
-	if rec.State == task.ReadyForHuman {
+	if rec.State == task.ReadyForHuman || rec.State == task.Reviewed {
 		if prev != nil && prev.State != ci.State && ci.State != task.CIPending {
 			return fmt.Sprintf("CI now %s", ciText(ci))
 		}
