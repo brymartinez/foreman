@@ -12,6 +12,8 @@ const (
 	KeyRune
 	KeyUp
 	KeyDown
+	KeyLeft
+	KeyRight
 	KeyPageUp
 	KeyPageDown
 	KeyEnd
@@ -106,6 +108,10 @@ func escapeKey(params string, final byte) Key {
 		return Key{Kind: KeyUp}
 	case 'B':
 		return Key{Kind: KeyDown}
+	case 'C':
+		return Key{Kind: KeyRight}
+	case 'D':
+		return Key{Kind: KeyLeft}
 	case 'F':
 		return Key{Kind: KeyEnd}
 	case '~':

@@ -188,9 +188,9 @@ func (m *Model) browse(k Key) Action {
 		return Action{Kind: ActionRefresh}
 	case k.Kind == KeyTab:
 		m.Focus = (m.Focus + 1) % 2
-	case k.Kind == KeyRune && k.Rune == 'h':
+	case k.Kind == KeyLeft || (k.Kind == KeyRune && k.Rune == 'h'):
 		m.Focus = InboxPane
-	case k.Kind == KeyRune && k.Rune == 'l':
+	case k.Kind == KeyRight || (k.Kind == KeyRune && k.Rune == 'l'):
 		m.Focus = TaskPane
 	case k.Kind == KeyEscape:
 		m.LogOpen = false
