@@ -30,18 +30,24 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			warnings = append(warnings, fmt.Errorf("refresh %s#%d PR: %w", r.Repo, r.Number, err))
 			continue
 		}
-		closing := pr.State == "closed" && r.State != task.PRClosed
-		reopening := pr.State == "open" && r.State == task.PRClosed
-		if !closing && !reopening && !gated(r) {
+		if pr.State == "closed" {
+			updated, note, err := a.endClosed(ctx, r)
+			if err != nil {
+				return nil, nil, err
+			}
+			if err := a.stopRun(ctx, updated); err != nil {
+				warnings = append(warnings, fmt.Errorf("stop the runner of %s#%d after PR #%d closed: %w", r.Repo, r.Number, r.Delegation.PR, err))
+			}
+			if note != "" {
+				notes[r.Key] = append(notes[r.Key], note)
+			}
+			recs[i] = updated
+			continue
+		}
+		if r.State != task.PRClosed && !gated(r) {
 			// A task a runner is driving, with a PR that is still open: it is the
 			// runner's to advance, so only the PR's state was worth a look.
 			continue
-		}
-		if closing {
-			if stopped, err := a.stopRun(r); !stopped {
-				warnings = append(warnings, fmt.Errorf("stop the runner of %s#%d after PR #%d closed: %w", r.Repo, r.Number, r.Delegation.PR, err))
-				continue
-			}
 		}
 		var ci task.CIStatus
 		if pr.State == "open" {
@@ -62,9 +68,10 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			// The state is read again under the lock, so a runner that saved since the
 			// list is not overwritten by what this refresh expected to find.
 			switch {
-			case pr.State == "closed" && cur.State != task.PRClosed:
-				note = closePR(cur, a.Now())
-			case pr.State == "open" && cur.State == task.PRClosed:
+			case cur.State == task.PRClosed && pr.State == "merged":
+				// Reopened and merged between two refreshes: the work shipped.
+				note = advance(cur, pr, ci, a.Now())
+			case cur.State == task.PRClosed:
 				note = reopen(cur, pr, ci, a.Now())
 			case gated(cur):
 				note = advance(cur, pr, ci, a.Now())
@@ -102,30 +109,60 @@ func watched(r *task.Record) bool {
 	return active
 }
 
-// stopRun stops the runner driving r, so a task whose PR is gone does not keep
-// spending an agent on it. It reports whether nothing is left running.
-func (a App) stopRun(r *task.Record) (bool, error) {
+// endClosed records a task whose PR was closed without merging, and returns the task
+// as it now stands with the inbox note for the change. The state is written before the
+// runner is stopped, because a runner that finds its task already PR_CLOSED records
+// nothing: stopping it first would have it save the stop as a FAILED run and notify
+// the developer about a failure that did not happen (D107).
+func (a App) endClosed(ctx context.Context, r *task.Record) (*task.Record, string, error) {
+	var note string
+	updated, err := a.update(ctx, r.Key, func(cur *task.Record) (*task.Record, error) {
+		// Read again under the lock: a start since the list may have given the task
+		// another PR, and that run is not this PR's to end.
+		if cur.Delegation == nil || cur.Delegation.PR != r.Delegation.PR || cur.State == task.PRClosed {
+			return cur, nil
+		}
+		note = closePR(cur, a.Now())
+		return cur, nil
+	})
+	return updated, note, err
+}
+
+// stopRun stops the runner a task still holds once its PR is closed, so no agent keeps
+// working on a PR that is gone, and clears the pid it stopped. It takes the pid from
+// the record the locked write returned and clears only that pid, so a run started
+// since keeps its runner; the next refresh ends that one instead. A stop that fails
+// leaves the pid in place, and every refresh tries again.
+func (a App) stopRun(ctx context.Context, r *task.Record) error {
+	if r.Delegation == nil || r.Delegation.RunnerPID == 0 {
+		return nil
+	}
 	pid := r.Delegation.RunnerPID
-	if pid == 0 || !a.Runners.Alive(pid) {
-		return true, nil
+	if a.Runners.Alive(pid) {
+		stopped, err := a.Runners.Stop(r.Key, pid)
+		if err != nil {
+			return fmt.Errorf("stop runner %d: %w", pid, err)
+		}
+		if !stopped {
+			return fmt.Errorf("runner %d has not exited yet", pid)
+		}
 	}
-	stopped, err := a.Runners.Stop(r.Key, pid)
-	switch {
-	case err != nil:
-		return false, err
-	case !stopped:
-		return false, fmt.Errorf("runner %d has not exited yet", pid)
-	}
-	return true, nil
+	_, err := a.update(ctx, r.Key, func(cur *task.Record) (*task.Record, error) {
+		if cur != nil && cur.Delegation != nil && cur.Delegation.RunnerPID == pid {
+			cur.Delegation.RunnerPID = 0
+		}
+		return cur, nil
+	})
+	return err
 }
 
 // closePR ends a task whose PR was closed without merging. The agent did not fail, so
 // the outcome says only what happened and nothing notifies the developer, who closed
-// the PR. The branch and worktree stay for a later start.
+// the PR. The branch and worktree stay for a later start. The runner's pid stays too:
+// stopRun needs it, and clears it once the runner is gone.
 func closePR(rec *task.Record, now time.Time) string {
 	d := rec.Delegation
 	rec.State = task.PRClosed
-	d.RunnerPID = 0
 	summary := fmt.Sprintf("PR #%d closed without merging; the branch and worktree are kept", d.PR)
 	rec.LastOutcome = &task.Outcome{Status: "pr_closed", Summary: summary, At: now}
 	return summary

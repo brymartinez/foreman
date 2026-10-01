@@ -278,6 +278,11 @@ func TestStartAcceptsPRClosed(t *testing.T) {
 	if rec.State != task.Working || len(f.runners.spawned) != 1 {
 		t.Errorf("state %s spawned %d", rec.State, len(f.runners.spawned))
 	}
+	// Keeping the closed PR's number would have the gate end this run on its next
+	// refresh, and a closed PR cannot be picked up at its review anyway.
+	if rec.Delegation.PR != 0 || rec.Delegation.Branch != "feat/825-provider-retries" {
+		t.Errorf("the restart carried the closed PR: pr %d branch %s", rec.Delegation.PR, rec.Delegation.Branch)
+	}
 }
 
 func TestRestartKeepsBranchWhenTitleChanged(t *testing.T) {

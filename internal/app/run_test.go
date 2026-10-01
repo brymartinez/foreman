@@ -298,6 +298,25 @@ func TestRunTaskStopsWhenTheTaskFileIsRemoved(t *testing.T) {
 	}
 }
 
+func TestRunTaskStopsWhenThePRIsClosed(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	f.claude.turn = prTurn("sid-1")
+	// The gate ends the task while the agent works, as it does when the developer
+	// closes the PR. The runner must record nothing over it, least of all a failure.
+	f.claude.during = func() { f.store.recs[key].State = task.PRClosed }
+	f.notes.sent = nil
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); !errors.Is(err, errPRClosed) {
+		t.Fatalf("err = %v, want errPRClosed", err)
+	}
+	if got := f.store.recs[key]; got.State != task.PRClosed {
+		t.Errorf("the runner moved an ended task to %s", got.State)
+	}
+	if len(f.notes.sent) != 0 {
+		t.Errorf("the runner notified the developer: %v", f.notes.sent)
+	}
+}
+
 func TestRunTaskRecordsACancelledTurn(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))

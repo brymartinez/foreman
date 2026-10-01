@@ -1557,12 +1557,18 @@ Entry format:
 - **Decision.** Add the state `PR_CLOSED`. The gate watches every task with a PR, not
   only the ones waiting on GitHub, and fetches the PR for each; CI is still fetched
   only for a gated task or one coming back from `PR_CLOSED`. A PR closed without
-  merging stops the runner, clears its pid, and records the outcome `pr_closed` with
-  the summary "PR #N closed without merging; the branch and worktree are kept". A
-  runner that will not stop leaves the task alone and warns, to be retried next
-  refresh. `PR_CLOSED` is not in `attention`, so the task leaves DELEGATED WORK in the
-  dashboard and in `foreman status`. Nothing notifies the developer, who closed the PR.
-  `foreman start` and `foreman clean <issue>` accept the state, as they accept FAILED.
+  merging records the outcome `pr_closed` with the summary "PR #N closed without
+  merging; the branch and worktree are kept", and only then is the runner stopped:
+  `existing` refuses every runner write to a `PR_CLOSED` task, so the stop that
+  follows is never saved as a failed or cancelled run and the developer is never told
+  one failed. The pid comes from that locked write, not from the list that preceded
+  it, and only the pid foreman stopped is cleared, so a run started since keeps its
+  runner. A runner that will not stop keeps its pid and warns; the stop is driven by
+  the record's pid, so every refresh tries again. `PR_CLOSED` is not in `attention`, so
+  the task leaves DELEGATED WORK in the dashboard and in `foreman status`. Nothing
+  notifies the developer, who closed the PR. `foreman start` and `foreman clean
+  <issue>` accept the state, as they accept FAILED, and a start from `PR_CLOSED` drops
+  the closed PR's number, which would otherwise have the gate end the new run.
 - **Consequence.** Closing a PR is how a developer calls off delegated work, and it
   reads as that rather than as a failure. The cost is one `gh pr view` per active task
   with a PR, per refresh. The task file, worktree, and branch survive, so the work can

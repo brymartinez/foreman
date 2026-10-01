@@ -77,6 +77,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		if err := a.startable(cur); err != nil {
 			return nil, err
 		}
+		was := cur.State
 		cur.Kind, cur.Title, cur.URL, cur.State = task.Issue, issue.Title, issue.URL, task.Working
 		if cur.GitHub == nil {
 			cur.GitHub = &task.Snapshot{UpdatedAt: issue.UpdatedAt, State: issue.State}
@@ -93,8 +94,10 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			ContextFile: req.ContextFile,
 		}
 		// The same branch has the same PR, so a restart can pick up at its review (D63).
-		// Another implementer starts over: its reviewer wrote the existing PR.
-		if prev != nil && prev.Branch == wt.Branch && prev.Implementer.Agent == req.Agent {
+		// Another implementer starts over: its reviewer wrote the existing PR. A
+		// PR_CLOSED task's PR cannot be picked up, and keeping its number would have
+		// the readiness gate end this run on its next refresh (D107).
+		if was != task.PRClosed && prev != nil && prev.Branch == wt.Branch && prev.Implementer.Agent == req.Agent {
 			cur.Delegation.PR, cur.Delegation.PRURL, cur.Delegation.PRHead = prev.PR, prev.PRURL, prev.PRHead
 		}
 		cur.LastOutcome = &task.Outcome{Status: "started", Summary: fmt.Sprintf("dispatched to %s", req.Agent), At: now}

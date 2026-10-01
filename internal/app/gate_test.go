@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"io"
 	"slices"
 	"strings"
@@ -183,7 +184,7 @@ func TestGateClosedPRStopsARunningAgent(t *testing.T) {
 	}
 }
 
-func TestGateClosedPRWithAStuckRunnerWarnsAndWaits(t *testing.T) {
+func TestGateClosedPRWithAStuckRunnerWarnsAndRetries(t *testing.T) {
 	f := newFixture()
 	key := reviewed(t, f)
 	f.store.recs[key].Delegation.RunnerPID = 77
@@ -195,11 +196,81 @@ func TestGateClosedPRWithAStuckRunnerWarnsAndWaits(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.Reviewing || got.Delegation.RunnerPID != 77 {
-		t.Errorf("a runner that would not stop lost its task: state %s pid %d", got.State, got.Delegation.RunnerPID)
+	if got.State != task.PRClosed || got.Delegation.RunnerPID != 77 {
+		t.Errorf("a runner that would not stop must keep its pid for the retry: state %s pid %d", got.State, got.Delegation.RunnerPID)
 	}
 	if len(warnings) != 1 || !strings.Contains(warnings[0].Error(), "has not exited yet") {
 		t.Errorf("warnings = %v", warnings)
+	}
+	f.runners.stuck = false
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.Delegation.RunnerPID != 0 || !slices.Equal(f.runners.stopped, []int{77, 77}) {
+		t.Errorf("the next refresh did not stop the runner again: pid %d stopped %v", got.Delegation.RunnerPID, f.runners.stopped)
+	}
+}
+
+func TestGateClosedPRWithALiveRunnerNeverReportsAFailure(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	f.store.recs[key].Delegation.RunnerPID = 77
+	f.runners.alive[77] = true
+	// The real runner records its own stop as it exits. That write must not move the
+	// task out of PR_CLOSED, and must not tell the developer a run failed (R8).
+	stopped, cancel := context.WithCancel(context.Background())
+	cancel()
+	f.runners.onStop = func(pid int) {
+		_, runnerErr := f.app.update(context.Background(), key, existing(func(cur *task.Record) {
+			applyStop(stopped, cur, "implementation", io.Discard, now)
+			cur.Delegation.RunnerPID = 0
+		}))
+		if !errors.Is(runnerErr, errPRClosed) {
+			t.Errorf("the runner was allowed to record its stop: %v", runnerErr)
+		}
+	}
+	f.notes.sent = nil
+	setPR(f, "closed")
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.PRClosed || got.LastOutcome.Status != "pr_closed" || got.Delegation.RunnerPID != 0 {
+		t.Errorf("state %s outcome %+v pid %d", got.State, got.LastOutcome, got.Delegation.RunnerPID)
+	}
+	if len(f.notes.sent) != 0 {
+		t.Errorf("stopping the run notified the developer: %v", f.notes.sent)
+	}
+}
+
+func TestGateClosedPRLeavesARestartedRunnerAlone(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	f.store.recs[key].Delegation.RunnerPID = 77
+	f.runners.alive[77] = true
+	// The stopped runner exits and the developer restarts the task before the gate
+	// clears the pid. The new runner is driving another PR, so it is not this one's
+	// to stop, and its pid must survive.
+	f.runners.onStop = func(pid int) {
+		_, err := f.app.Store.Update(context.Background(), key, func(cur *task.Record) (*task.Record, error) {
+			cur.State, cur.Delegation.RunnerPID, cur.Delegation.PR = task.Working, 99, 0
+			return cur, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.runners.alive[99] = true
+	}
+	setPR(f, "closed")
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.Delegation.RunnerPID != 99 || got.State != task.Working {
+		t.Errorf("the restarted run lost its runner: state %s pid %d", got.State, got.Delegation.RunnerPID)
+	}
+	if !slices.Equal(f.runners.stopped, []int{77}) || !f.runners.alive[99] {
+		t.Errorf("stopped %v, 99 alive %t", f.runners.stopped, f.runners.alive[99])
 	}
 }
 
@@ -234,6 +305,23 @@ func TestGateReopenedPRReturnsToTheActiveList(t *testing.T) {
 		if got.LastOutcome.Status != "pr_reopened" || !strings.Contains(got.LastOutcome.Summary, "PR #912 reopened") {
 			t.Errorf("%s: outcome %+v", tc.name, got.LastOutcome)
 		}
+	}
+}
+
+func TestGatePRClosedThenMergedIsDone(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	setPR(f, "closed")
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// Reopened and merged between two refreshes: the gate sees only the merge.
+	setPR(f, "merged")
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.Done || got.LastOutcome.Status != "merged" {
+		t.Errorf("state %s outcome %+v", got.State, got.LastOutcome)
 	}
 }
 
