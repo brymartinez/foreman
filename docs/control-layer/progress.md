@@ -2,8 +2,7 @@
 
 ## Current stage
 
-Stage 19 (PR feedback, the INBOX filter, and readable Codex logs for issue #7) is
-complete. Completed runs are needed to measure the effect of the model and budget choices.
+Stage 20 (the dashboard show view for issue #11) is complete. Completed runs are needed to measure the effect of the model and budget choices.
 
 ## Completed
 
@@ -600,6 +599,16 @@ request. Each fix is its own commit with a decision.
   main's D117 and D118 (D128).
 - Verified the combined tree with `go test ./...`, `go vet ./...`, a binary build,
   and all `scripts/e2e.sh` scenarios with normal process access.
+
+### Stage 20 (complete): the dashboard show view for issue #11
+
+- With the lower pane open, `s` switches between the log and the `foreman show` text
+  for the selected task, with either list focused (D129). The heading reads
+  `SHOW · repo#N · state`, plus the line range when the text does not fit.
+- Show lines wrap at the terminal width. The log scroll keys scroll the show view, which
+  opens at its top. Returning to the log follows its tail.
+- Verified with `go vet ./...`, `go test ./...`, `go build -o dist/foreman
+  ./cmd/foreman`, and `scripts/e2e.sh`.
 
 ## Known limitations
 

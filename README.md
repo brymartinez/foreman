@@ -100,14 +100,17 @@ foreman · 2 delegated · 3 in the inbox · refreshed 10:01:22
 ────────────────────────────────────────────────────────────────────────────────
 LOG · midsoln/foreman#2 · ~/.local/share/foreman/logs/2.log
 2026-09-29T10:01:04Z claude Bash go test ./internal/tui
-j/k task · u/d log page · ctrl-u/d half page · g/G ends · esc close · h/l pane
+j/k task · u/d log page · ctrl-u/d half page · g/G ends · s show/log · esc close · h/l pane
 ```
 
 The left pane holds issues you can delegate, and the right pane holds delegated work.
 Press `←`/`→`, `h`/`l`, or `tab` to switch between them. In DELEGATED WORK, use `j`/`k`
 to pick a task and Enter to open its log below the lists. Escape closes the log. With
-the log open, `u`/`d` and `g`/`G` scroll it while `j`/`k` still select tasks. Press `c`
-from either list to cancel the highlighted delegated task, after confirmation.
+the log open, `u`/`d` and `g`/`G` scroll it while `j`/`k` still select tasks. Press `s`,
+from either list, to swap the log for the task's full `foreman show` output, wrapped to
+the terminal width and scrolled with the same keys. Press `s` again to return to the
+log. Press `c` from either list to cancel the highlighted delegated task, after
+confirmation.
 
 Row text is drawn in your terminal's own foreground, so it reads on a light theme and a
 dark one alike. Color is kept for the headings, the dividers, the message line, and each
@@ -124,6 +127,7 @@ task's state. The selected row is drawn in reverse video with no color inside it
 | `u` `d` with a log open | scroll up or down one page |
 | `ctrl+u` `ctrl+d` with a log open | scroll up or down half a page |
 | `g` `G` with a log open | jump to the oldest available line or follow the tail |
+| `s` with a log open | switch between the log and the task's `foreman show` output |
 | `pgup` `pgdn`, `end` | optional log scroll keys for keyboards that have them |
 | `esc` | close the log or abandon a prompt |
 | `q`, `ctrl+c` | quit |
