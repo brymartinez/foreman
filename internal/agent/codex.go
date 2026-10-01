@@ -214,13 +214,14 @@ func (e *codexEvents) consume(r io.Reader) {
 					ReasoningOutputTokens int64 `json:"reasoning_output_tokens"`
 				} `json:"usage"`
 			}
+			// The cleaned log renders this event itself, so the adapter only counts it
+			// (D123).
 			if json.Unmarshal(line, &done) == nil {
 				e.usage.CodexInputTokens += done.Usage.InputTokens
 				e.usage.CodexCachedTokens += done.Usage.CachedInputTokens
 				e.usage.CodexOutputTokens += done.Usage.OutputTokens
 				e.usage.CodexReasoningTokens += done.Usage.ReasoningOutputTokens
 				e.usage.CodexTurns++
-				fmt.Fprintf(e.log, "codex: turn completed input=%d cached=%d output=%d reasoning=%d (USD unavailable)\n", done.Usage.InputTokens, done.Usage.CachedInputTokens, done.Usage.OutputTokens, done.Usage.ReasoningOutputTokens)
 			}
 		}
 	}
