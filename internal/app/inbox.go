@@ -97,9 +97,16 @@ func (a App) Inbox(ctx context.Context) (InboxReport, error) {
 		}
 	}
 	for _, key := range gone {
+		// The reasons are read before stopTracking clears them. This note is about an
+		// item that is already off GitHub, so nothing reports its reasons any more, and
+		// why foreman was tracking it is the only thing left to judge it by.
+		var tracked []task.InboxReason
 		rec, err := a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
 			if cur == nil || cur.Delegation != nil {
 				return nil, nil
+			}
+			if cur.GitHub != nil {
+				tracked = slices.Clone(cur.GitHub.Reasons)
 			}
 			stopTracking(cur, a.Now())
 			return cur, nil
@@ -107,9 +114,14 @@ func (a App) Inbox(ctx context.Context) (InboxReport, error) {
 		if err != nil {
 			return InboxReport{}, err
 		}
-		if rec != nil {
-			report.Changed = append(report.Changed, InboxEntry{Item: InboxItem{Key: rec.Key, Kind: rec.Kind, Title: rec.Title, URL: rec.URL}, Changes: []string{goneNote}})
+		// The setting is applied here rather than in hideMentionOnly: the entry carries
+		// no reasons of its own, and that is what tells InboxActivity to always show a
+		// gone note. Giving it the tracked reasons would hide the note from the picker
+		// even with mentions on.
+		if rec == nil || (a.HideMentionOnly && mentionOnly(tracked)) {
+			continue
 		}
+		report.Changed = append(report.Changed, InboxEntry{Item: InboxItem{Key: rec.Key, Kind: rec.Kind, Title: rec.Title, URL: rec.URL}, Changes: []string{goneNote}})
 	}
 	if a.HideMentionOnly {
 		hideMentionOnly(&report)
@@ -123,7 +135,8 @@ const goneNote = "no longer on GitHub or no longer accessible; foreman stopped c
 // developer, for issues and pull requests alike. The searches still run and the
 // snapshots still record every reason, so a lost reason is still reported and the
 // items come back the moment the setting does. Delegated work waiting on the
-// developer is not an inbox find, so it is left alone.
+// developer is not an inbox find, so it is left alone. The note for an item that left
+// GitHub is filtered where it is built, because it carries no reasons of its own.
 func hideMentionOnly(r *InboxReport) {
 	keep := func(entries []InboxEntry) []InboxEntry {
 		var out []InboxEntry

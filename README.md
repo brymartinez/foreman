@@ -150,7 +150,8 @@ Set `mentions: false` to leave out the items found only because they mention you
 inbox and in the dashboard's INBOX pane. An item that is also assigned to you, or that
 requests your review, still appears. The searches keep running either way, so the
 changes an item reports stay accurate and the items come back the moment you turn the
-setting on.
+setting on. A hidden item stays hidden when it leaves GitHub, so it does not announce
+itself on the way out; foreman still stops checking it.
 
 Waiting tasks show changes beneath their NEEDS DECISION or READY FOR YOU entry,
 including CI changes. Missing undelegated items are checked until a successful

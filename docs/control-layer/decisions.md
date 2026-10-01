@@ -1657,3 +1657,19 @@ Entry format:
 - **Consequence.** GitHub being down delays a FAILED verdict instead of risking a wrong
   one. The condition is positive, so a future early return in `gate` leaves a task
   unread, and unread means unreaped.
+
+## D113 (amends D110). Judge the gone note by the reasons the task stored
+
+- Date: 2026-10-01. Issue midsoln/foreman#5. Review finding.
+- **Context.** An item that leaves GitHub gets a CHANGED note built from the task
+  record, not from a search result, so the entry carries no reasons. `hideMentionOnly`
+  keeps an entry with no `mentioned` reason, so with `mentions: false` a mention-only
+  item still announced itself on the way out.
+- **Decision.** `Inbox` reads the stored reasons before `stopTracking` clears them and
+  drops the note when the setting is off and those reasons were a mention alone. The
+  check sits where the entry is built, not in `hideMentionOnly`, because the entry's
+  empty reasons are what tell `render.InboxActivity` to always show a gone note.
+  Filling them in would hide the note from the picker even with mentions on.
+- **Consequence.** The setting covers the item's whole life, including its last note.
+  The record still stops being checked either way: the setting hides the note, not the
+  bookkeeping that ends the refreshes.

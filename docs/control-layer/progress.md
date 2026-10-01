@@ -510,16 +510,19 @@ request. Each fix is its own commit with a decision.
   (D112).
 - `mentions` hides items found only because they mention the developer; `refresh` sets
   the dashboard's GitHub interval, 60 seconds by default and 5 at the least (D110).
+  The note for an item that left GitHub follows the setting too, judged by the reasons
+  the task stored before they were cleared (D113).
 - Verified with `go vet ./...`, `go test ./...`, `go build -o dist/foreman
   ./cmd/foreman`, `scripts/e2e.sh`, and `git diff --check`. New tests cover the arrow
   keys, the row and selection colors, the closed and reopened PR paths including a
   running and an unstoppable runner, the mention filter, and the two settings.
-- D111 and D112 review fixes passed `go vet ./...`, `go test ./...`, `go test -race`
-  over `internal/app`, `internal/tui`, and `internal/config`, the build,
+- D111, D112, and D113 review fixes passed `go vet ./...`, `go test ./...`, `go test
+  -race` over `internal/app`, `internal/tui`, and `internal/config`, the build,
   `scripts/e2e.sh`, and `git diff --check`. The closed and reopened PR paths have no
   end-to-end check; `gate_test.go` covers them, including a dead runner, a stop that
-  will not take, and a PR lookup that fails. The two D112 tests were confirmed to fail
-  without the fix.
+  will not take, and a PR lookup that fails. `inbox_gone_test.go` covers the gone note
+  against the mentions setting. The D112 and D113 tests were confirmed to fail without
+  their fixes.
 
 ## Known limitations
 
@@ -632,7 +635,8 @@ what it replaced. Current summary:
   returns the task to delegated work. D109 (amends D104). Dashboard rows keep the
   terminal's foreground, and the arrows select panes. D110. `mentions` and `refresh`
   are settings. D111 (amends D107 and D108). Check PR state before reaping its runner.
-  D112 (amends D111). Reap a dead runner only once its PR has been read.
+  D112 (amends D111). Reap a dead runner only once its PR has been read. D113 (amends
+  D110). Judge the gone note by the reasons the task stored.
 
 ## Next stage
 
