@@ -2,8 +2,8 @@
 
 ## Current stage
 
-Stage 17 (lower implementer token use) is complete. The Sonnet and budget trial
-needs completed runs before its effect can be measured.
+Stage 18 (per-stage agent models) is complete. Completed runs are needed to measure
+the effect of the model and budget choices.
 
 ## Completed
 
@@ -672,7 +672,18 @@ what it replaced. Current summary:
 - `go vet ./...`, `go test ./...`, the binary build, and every `scripts/e2e.sh`
   scenario passed. `foreman config --show` confirmed the live model and budget.
 
+### Stage 18 (complete): models per agent turn
+
+- Planning, implementation, and review each select a model. Codex also selects
+  reasoning effort for each turn. Planning answers keep the planning setting; fixes
+  keep the implementation setting. PR creation stays in implementation (D118).
+- The local config uses Claude `sonnet` and Codex `gpt-6-luna` at `xhigh` for
+  planning, then Claude `opus` and Codex `gpt-6-sol` at `medium` for implementation
+  and review. The global PR instructions ask for Basic English.
+- `config --edit` materialized the new fields in a new file and loaded the live
+  settings. `config --show` displayed all nine stage values. `go vet ./...`,
+  `go test ./...`, the binary build, and every `scripts/e2e.sh` scenario passed.
+
 ## Next stage
 
-Compare completed task usage and outcomes before changing the model or budget
-again.
+Compare completed task usage and outcomes before changing the models or budgets.

@@ -15,6 +15,7 @@ import (
 type StartInput struct {
 	Worktree string
 	Prompt   string
+	Stage    task.Stage
 	// Log receives the agent's stderr and progress events; the runner points it at the task log.
 	Log          io.Writer
 	MaxBudgetUSD float64

@@ -20,6 +20,8 @@ import (
 type Claude struct {
 	Bin   string
 	Model string
+	// PlanModel replaces Model while writing or revising the plan.
+	PlanModel string
 	// ReviewModel replaces Model for reviews; "" keeps Model (D85).
 	ReviewModel  string
 	Exec         Exec
@@ -49,6 +51,9 @@ func (c Claude) Resume(ctx context.Context, s task.Session, in StartInput) (Turn
 }
 
 func (c Claude) run(ctx context.Context, in StartInput, session task.Session, sessionFlag string) (Turn, error) {
+	if in.Stage == task.StagePlan && c.PlanModel != "" {
+		c.Model = c.PlanModel
+	}
 	if in.Log != nil {
 		fmt.Fprintf(in.Log, "claude: transcript %s\n", ClaudeTranscript(in.Worktree, session.ID))
 	}

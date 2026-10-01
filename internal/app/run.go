@@ -166,8 +166,12 @@ func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Rev
 	if !ok {
 		return agent.Turn{}, fmt.Errorf("agent %s is not configured", d.Implementer.Agent)
 	}
-	in := agent.StartInput{Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD}
 	planning := a.needsPlan(rec)
+	stage := task.StageImplement
+	if planning {
+		stage = task.StagePlan
+	}
+	in := agent.StartInput{Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD, Stage: stage}
 	resume := ""
 	if decs := rec.Undelivered(); len(decs) > 0 {
 		var open *task.Review

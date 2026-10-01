@@ -38,7 +38,7 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
   until every planning document is on the issue (and no PR exists), the turn plans (D90):
     planned      -> gh: post analysis, PRD, design, and plan as four issue comments
                     (edit the earlier comments on a re-plan), record their ids and URLs,
-                    then turn = implementer.Resume(session, "plan posted; implement it")
+                    then turn = implementer.Start(new session, posted plan links)
   switch turn.Outcome.Status
     blocked      -> save each of Questions as a decision, state NEEDS_DECISION, exit
     failed       -> state FAILED, exit
@@ -112,6 +112,10 @@ FAILED, or READY_FOR_HUMAN (D59).
   the issue, the context file, and `git diff <base>...HEAD`. It never sees the
   implementer's session. Repo instructions load on their own because the reviewer runs
   in the worktree.
+- **Stage models.** The chosen implementer uses its plan model until the four plan
+  comments are posted, then its implementation model in a new session. Fixes resume
+  that implementation session. The competing reviewer uses its review model in a
+  disposable session. Codex can set reasoning effort for each of these turns.
 - **Naming.** `task.WorkName` gives `<issue>-<slug>`, for example
   `825-provider-retries`. The slug is at most 5 words and 40 characters, and a
   conventional-commit prefix is removed. The branch is `<type>/<workName>`, where the type is `feat`, `fix` and so on,

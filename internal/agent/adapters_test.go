@@ -59,6 +59,42 @@ func TestClaudeStart(t *testing.T) {
 	}
 }
 
+func TestClaudeStageModelsOnStartResumeAndReview(t *testing.T) {
+	var commands []Command
+	exec := func(_ context.Context, cmd Command) error {
+		commands = append(commands, cmd)
+		result := prOpened
+		if slices.Contains(cmd.Args, "--no-session-persistence") {
+			result = reviewJSON
+		}
+		fmt.Fprintf(cmd.Stdout, `{"type":"result","subtype":"success","structured_output":%s}`, result)
+		return nil
+	}
+	c := Claude{Bin: "claude", Model: "opus", PlanModel: "sonnet", ReviewModel: "opus", Exec: exec, NewSessionID: func() string { return "sid-1" }}
+	plan := StartInput{Worktree: "/wt", Stage: task.StagePlan}
+	implement := StartInput{Worktree: "/wt", Stage: task.StageImplement}
+	if _, err := c.Start(context.Background(), plan, func(task.Session) {}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Resume(context.Background(), task.Session{Agent: task.Claude, ID: "sid-1"}, plan); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Start(context.Background(), implement, func(task.Session) {}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Resume(context.Background(), task.Session{Agent: task.Claude, ID: "sid-2"}, implement); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Review(context.Background(), StartInput{Worktree: "/wt"}); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []string{"sonnet", "sonnet", "opus", "opus", "opus"} {
+		if got := argValue(commands[i].Args, "--model"); got != want {
+			t.Errorf("command %d model = %q, want %q", i, got, want)
+		}
+	}
+}
+
 func TestClaudeStreamReachesTheLog(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "/cfg")
 	exec := func(_ context.Context, c Command) error {
@@ -152,6 +188,48 @@ func TestCodexStart(t *testing.T) {
 	}
 	if !strings.Contains(log.String(), "thread.started") {
 		t.Errorf("events not logged: %q", log.String())
+	}
+}
+
+func TestCodexStageModelsAndEffortOnStartResumeAndReview(t *testing.T) {
+	var commands []Command
+	exec := func(_ context.Context, cmd Command) error {
+		commands = append(commands, cmd)
+		fmt.Fprintln(cmd.Stdout, `{"type":"thread.started","thread_id":"th-1"}`)
+		result := prOpened
+		if slices.Contains(cmd.Args, "--ephemeral") {
+			result = reviewJSON
+		}
+		return os.WriteFile(argValue(cmd.Args, "-o"), []byte(result), 0o600)
+	}
+	c := Codex{Bin: "codex", Model: "gpt-6-sol", PlanModel: "gpt-6-luna", ReviewModel: "gpt-6-sol",
+		ReasoningEffort: "medium", PlanReasoningEffort: "xhigh", ReviewReasoningEffort: "medium", Exec: exec}
+	plan := StartInput{Worktree: "/wt", Stage: task.StagePlan}
+	implement := StartInput{Worktree: "/wt", Stage: task.StageImplement}
+	if _, err := c.Start(context.Background(), plan, func(task.Session) {}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Resume(context.Background(), task.Session{Agent: task.Codex, ID: "th-1"}, plan); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Start(context.Background(), implement, func(task.Session) {}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Resume(context.Background(), task.Session{Agent: task.Codex, ID: "th-2"}, implement); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Review(context.Background(), StartInput{Worktree: "/wt"}); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []struct{ model, effort string }{
+		{"gpt-6-luna", "xhigh"}, {"gpt-6-luna", "xhigh"}, {"gpt-6-sol", "medium"}, {"gpt-6-sol", "medium"}, {"gpt-6-sol", "medium"},
+	} {
+		if got := argValue(commands[i].Args, "-m"); got != want.model {
+			t.Errorf("command %d model = %q, want %q", i, got, want.model)
+		}
+		if !slices.Contains(commands[i].Args, fmt.Sprintf("model_reasoning_effort=%q", want.effort)) {
+			t.Errorf("command %d missing %s effort: %q", i, want.effort, commands[i].Args)
+		}
 	}
 }
 

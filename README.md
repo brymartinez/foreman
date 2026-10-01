@@ -217,10 +217,10 @@ retry behavior". The agent treats it as part of the task.
 
 Before any code, the implementer writes four documents: an analysis, a PRD, a design,
 and an implementation plan. `plan.md` sets what each one covers. The runner posts each
-document on the issue as its own comment, then resumes the same agent session to
-implement the plan. There is no approval step: if planning needs a decision, the task
-goes to `NEEDS_DECISION` like any other question, and otherwise the run goes straight
-from the plan to the PR. The reviewer checks the PR against the posted PRD.
+document on the issue as its own comment. It then starts a fresh session with the
+posted plan links to implement the work. If planning needs a decision, the task goes
+to `NEEDS_DECISION`. Otherwise, it continues to the PR without an approval step.
+The reviewer checks the PR against the posted PRD.
 
 `foreman show` links the four comments. A task that plans again, for example after a
 failed run, edits the same comments instead of adding new ones. A task that already
@@ -403,12 +403,17 @@ notifications:
   enabled: true                      # decision, failure, and readiness alerts
 claude:
   command: claude
-  model: claude-opus-5               # "" uses the claude CLI's default
-  review_model: ""                   # "" reviews with model
+  model: claude-opus-5               # implementation and PR; "" uses the CLI default
+  plan_model: ""                     # "" uses model
+  review_model: ""                   # "" uses model
 codex:
   command: codex
-  model: gpt-6-sol                   # "" uses the codex CLI's default
-  review_model: ""                   # "" reviews with model
+  model: gpt-6-sol                   # implementation and PR; "" uses the CLI default
+  plan_model: ""                     # "" uses model
+  review_model: ""                   # "" uses model
+  reasoning_effort: ""               # implementation; "" uses the CLI default
+  plan_reasoning_effort: ""          # "" uses reasoning_effort
+  review_reasoning_effort: ""        # "" uses reasoning_effort
 ignore_repositories: []              # exact owner/name repositories excluded from inbox
 cleanup:
   on_done: true                   # inbox removes DONE tasks' worktrees
@@ -416,6 +421,25 @@ cleanup:
 ```
 
 `FOREMAN_TASKS_DIR` overrides `tasks_dir`.
+
+Planning, implementation, and review can use separate models. PR creation is part of
+implementation. The agent chosen for the task plans and implements; the competing
+agent reviews. Run `foreman config --edit` to set the values, then
+`foreman config --show` to see what each stage will use. For example:
+
+```yaml
+claude:
+  model: opus
+  plan_model: sonnet
+  review_model: opus
+codex:
+  model: gpt-6-sol
+  plan_model: gpt-6-luna
+  review_model: gpt-6-sol
+  reasoning_effort: medium
+  plan_reasoning_effort: xhigh
+  review_reasoning_effort: medium
+```
 
 `refresh` must be at least 5 seconds; foreman refuses to start with a smaller value.
 Task files and the open log are re-read every second regardless, and `r` refreshes
