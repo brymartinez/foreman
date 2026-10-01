@@ -14,17 +14,23 @@ import (
 type InboxEntry struct {
 	Item    InboxItem
 	Changes []string
+	// Delegated says foreman has a run for this item, and State is that run's state.
+	// Together they are what keeps work already in hand out of INBOX (D122).
+	Delegated bool
+	State     task.State
 }
 
 // InboxReport lists each item once, in the section with the highest priority:
-// NEEDS DECISION, then READY FOR YOU, then CHANGED, then NEW.
+// NEEDS DECISION, then REVIEWED, then READY FOR YOU, then CHANGED, then NEW.
 type InboxReport struct {
 	New     []InboxEntry
 	Changed []InboxEntry
 	// Current contains every item in the current refresh, including unchanged items.
 	// It is used by the interactive picker; the report sections retain their diff semantics.
 	Current        []InboxEntry
-	NeedsDecision  []*task.Record
+	NeedsDecision []*task.Record
+	// Reviewed holds the tasks whose PR has comments the agent has not answered (D117).
+	Reviewed       []*task.Record
 	Ready          []*task.Record
 	WaitingChanges map[task.Key][]string
 	Unchanged      int
@@ -297,7 +303,7 @@ func Reconcile(items []InboxItem, recs []*task.Record, notes map[task.Key][]stri
 			rec = discovered(it, now)
 			byKey[it.Key] = rec
 			dirty = append(dirty, rec)
-			report.Current = append(report.Current, InboxEntry{Item: it, Changes: reasonText(it.Reasons)})
+			report.Current = append(report.Current, entryFor(rec, it, reasonText(it.Reasons)))
 			if !needsHuman(rec) {
 				report.New = append(report.New, InboxEntry{Item: it, Changes: reasonText(it.Reasons)})
 			}
@@ -313,7 +319,7 @@ func Reconcile(items []InboxItem, recs []*task.Record, notes map[task.Key][]stri
 		if len(current) == 0 {
 			current = []string{"no change"}
 		}
-		report.Current = append(report.Current, InboxEntry{Item: it, Changes: current})
+		report.Current = append(report.Current, entryFor(rec, it, current))
 		switch {
 		case needsHuman(rec):
 			if len(changes) > 0 {
@@ -338,6 +344,8 @@ func Reconcile(items []InboxItem, recs []*task.Record, notes map[task.Key][]stri
 		switch r.State {
 		case task.NeedsDecision:
 			report.NeedsDecision = append(report.NeedsDecision, r)
+		case task.Reviewed:
+			report.Reviewed = append(report.Reviewed, r)
 		case task.ReadyForHuman:
 			report.Ready = append(report.Ready, r)
 		}
@@ -345,8 +353,14 @@ func Reconcile(items []InboxItem, recs []*task.Record, notes map[task.Key][]stri
 	return report, dirty
 }
 
+// entryFor is one item in the current refresh, carrying the state of the run foreman
+// has for it. INBOX reads that state to leave work already in hand alone (D122).
+func entryFor(rec *task.Record, it InboxItem, changes []string) InboxEntry {
+	return InboxEntry{Item: it, Changes: changes, Delegated: rec.Delegation != nil, State: rec.State}
+}
+
 func needsHuman(r *task.Record) bool {
-	return r.State == task.NeedsDecision || r.State == task.ReadyForHuman
+	return r.State == task.NeedsDecision || r.State == task.ReadyForHuman || r.State == task.Reviewed
 }
 
 func discovered(it InboxItem, now time.Time) *task.Record {

@@ -34,6 +34,15 @@ func Inbox(w io.Writer, r app.InboxReport) {
 			}
 		}
 	}
+	if len(r.Reviewed) > 0 {
+		section("REVIEWED")
+		for _, rec := range r.Reviewed {
+			reviewedTask(w, rec)
+			for _, change := range r.WaitingChanges[rec.Key] {
+				fmt.Fprintf(w, "        • %s\n", change)
+			}
+		}
+	}
 	if len(r.Ready) > 0 {
 		section("READY FOR YOU")
 		for i, rec := range r.Ready {
@@ -73,7 +82,9 @@ func InboxActivity(w io.Writer, r app.InboxReport) {
 	r.New, r.Current, r.Unchanged = nil, nil, 0
 	var changed []app.InboxEntry
 	for _, entry := range r.Changed {
-		if len(entry.Item.Reasons) == 0 || slices.Contains(entry.Item.Reasons, task.Tracked) || entry.Item.Kind == task.PullRequest {
+		// An entry with no reasons is a note about an item that left GitHub, which no
+		// picker can offer and the developer should still hear about.
+		if len(entry.Item.Reasons) == 0 || !app.CanDelegate(entry) {
 			changed = append(changed, entry)
 		}
 	}
@@ -125,6 +136,33 @@ func pendingQuestion(rec *task.Record) string {
 		return fmt.Sprintf("%s (+%d more)", p.Question.Issue, n-1)
 	}
 	return p.Question.Issue
+}
+
+// reviewedTask names the pull request whose comments are waiting, and who left them,
+// so the developer can tell their own note from a bot's before resuming the task.
+func reviewedTask(w io.Writer, rec *task.Record) {
+	d := rec.Delegation
+	waiting := rec.UnhandledFeedback()
+	detail := fmt.Sprintf("PR #%d · %d %s", d.PR, len(waiting), plural(len(waiting), "comment", "comments"))
+	if authors := feedbackAuthors(waiting); authors != "" {
+		detail += " from " + authors
+	}
+	line(w, rec.Key, rec.Title, detail)
+	if d.PRURL != "" {
+		fmt.Fprintf(w, "        %s\n", d.PRURL)
+	}
+}
+
+// feedbackAuthors lists who is waiting on an answer, each once, in the order GitHub
+// returned their comments.
+func feedbackAuthors(waiting []task.Feedback) string {
+	var authors []string
+	for _, f := range waiting {
+		if f.Author != "" && !slices.Contains(authors, f.Author) {
+			authors = append(authors, f.Author)
+		}
+	}
+	return strings.Join(authors, ", ")
 }
 
 // ready lists what the gate checked, so the developer knows what is left to review.
