@@ -201,8 +201,9 @@ func (a App) reviewRounds() int {
 }
 
 // implement runs one implementer turn. It resumes the session with an answered
-// decision, a merge, PR feedback, or a review round when there is one, and otherwise (or when the session
-// is gone) starts a fresh turn whose prompt is rebuilt from the task file.
+// decision, a merge, PR feedback, or a review round when there is one, and otherwise
+// (or when the session is gone) starts a fresh turn whose prompt is rebuilt from the
+// task file.
 // needsPlan is true until every planning document is on the issue. A task that
 // already has a PR, from before planning existed, goes on without one (D90).
 func (a App) needsPlan(rec *task.Record) bool {
