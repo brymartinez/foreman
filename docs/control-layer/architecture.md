@@ -63,15 +63,20 @@ foreman cancel 825    -> SIGTERM the runner, wait up to 30s for it to exit (D89)
 foreman               -> the dashboard (D93), until q or ctrl+c:
                          every 1s : app.Tasks re-reads the task files and, when open,
                                     re-tails the selected task's runner log; no GitHub call
-                         every 60s: app.Inbox, the same as `foreman inbox` (D95)
+                         every `refresh` seconds (60 by default): app.Inbox, the
+                           same as `foreman inbox` (D95, D110)
                          enter on an inbox issue -> agent, context file, app.Start
                          enter on delegated work -> open that task's log below the lists
-                         h/l -> focus the inbox/delegated work; esc -> close the log
+                         left/right, h/l -> focus the inbox/delegated work
+                         esc -> close the log
                          c on a running task     -> confirm, app.Cancel
 
 foreman inbox|status  -> runner pid dead while WORKING/REVIEWING -> FAILED
-                         readiness gate (gate.go), per idle task with a PR:
-                           PR merged -> DONE; PR closed -> FAILED
+                         readiness gate (gate.go), per task with a PR:
+                           PR closed  -> stop the runner, PR_CLOSED (D107)
+                           PR reopened -> READY_FOR_HUMAN or REVIEWING (D108)
+                         and then, per idle task with a PR:
+                           PR merged -> DONE
                            REVIEWING + clean review, PR head moved -> WORKING, spawn
                              a runner that reviews the new commits (D63)
                            REVIEWING + clean review: gh pr checks (read only, D46)
@@ -81,6 +86,7 @@ foreman inbox|status  -> runner pid dead while WORKING/REVIEWING -> FAILED
                         inbox only, cleanup.on_done: DONE task -> git worktree remove
                            (kept if dirty); branch -D only if its PR merged
 foreman clean [<issue>] -> the same cleanup on demand; <issue> may also be FAILED
+                           or PR_CLOSED
 ```
 
 Nothing runs in the background except the runner working on a task. The readiness and

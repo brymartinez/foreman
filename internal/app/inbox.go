@@ -113,6 +113,8 @@ func (a App) Inbox(ctx context.Context) (InboxReport, error) {
 	return report, nil
 }
 
+const goneNote = "no longer on GitHub or no longer accessible; foreman stopped checking it"
+
 // hideMentionOnly drops the items a search returned only because they mention the
 // developer, for issues and pull requests alike. The searches still run and the
 // snapshots still record every reason, so a lost reason is still reported and the
@@ -136,8 +138,6 @@ func mentionOnly(reasons []task.InboxReason) bool {
 		!slices.Contains(reasons, task.Assigned) &&
 		!slices.Contains(reasons, task.ReviewRequested)
 }
-
-const goneNote = "no longer on GitHub or no longer accessible; foreman stopped checking it"
 
 // stopTracking clears an undelegated item's reasons, which is what ends its refreshes.
 func stopTracking(rec *task.Record, now time.Time) {

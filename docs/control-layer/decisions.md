@@ -1546,3 +1546,70 @@ Entry format:
 - **Consequence.** A log is never displayed merely because a task is highlighted or
   because a local refresh chose the newest delegation. The 60 by 12 layout still
   shows the selected task's PR and state when the log is open.
+
+## D107. A closed PR ends its task in PR_CLOSED, not FAILED
+
+- Date: 2026-10-01. Issue midsoln/foreman#5. Requested by the user.
+- **Context.** The gate mapped a closed PR to FAILED, which is the state a crashed
+  agent gets: it notified "Run failed", colored the row red, and kept the task in
+  DELEGATED WORK forever. The gate also skipped any task a runner was driving, so a PR
+  closed mid-run was never seen and the agent kept working on a PR that was gone.
+- **Decision.** Add the state `PR_CLOSED`. The gate watches every task with a PR, not
+  only the ones waiting on GitHub, and fetches the PR for each; CI is still fetched
+  only for a gated task or one coming back from `PR_CLOSED`. A PR closed without
+  merging stops the runner, clears its pid, and records the outcome `pr_closed` with
+  the summary "PR #N closed without merging; the branch and worktree are kept". A
+  runner that will not stop leaves the task alone and warns, to be retried next
+  refresh. `PR_CLOSED` is not in `attention`, so the task leaves DELEGATED WORK in the
+  dashboard and in `foreman status`. Nothing notifies the developer, who closed the PR.
+  `foreman start` and `foreman clean <issue>` accept the state, as they accept FAILED.
+- **Consequence.** Closing a PR is how a developer calls off delegated work, and it
+  reads as that rather than as a failure. The cost is one `gh pr view` per active task
+  with a PR, per refresh. The task file, worktree, and branch survive, so the work can
+  be resumed or cleaned on the developer's terms.
+
+## D108. A reopened PR returns the task to delegated work
+
+- Date: 2026-10-01. Issue midsoln/foreman#5. Requested by the user.
+- **Context.** D107 leaves a task in `PR_CLOSED`. A developer who reopens the PR means
+  to carry on, and foreman had no path back.
+- **Decision.** The gate reads the CI of a reopened PR and derives the state from the
+  review it already has: READY_FOR_HUMAN when the latest review is clean, covers that
+  PR, matches its current head, and CI has finished; REVIEWING otherwise. No agent is
+  started. REVIEWING with a clean review is what the existing gate promotes once CI
+  finishes, so the two paths converge instead of duplicating the rule.
+- **Consequence.** Reopening is enough to get the task back in the list. Work that was
+  not finished when the PR closed waits in REVIEWING for `foreman start`, rather than
+  foreman spending an agent the developer did not ask for.
+
+## D109 (amends D104). Dashboard rows keep the terminal's foreground
+
+- Date: 2026-10-01. Issue midsoln/foreman#5. Requested by the user.
+- **Context.** D104 colored whole task rows by state. On a light terminal the greens and
+  yellows washed out, and under the selected row's reverse video a colored row became a
+  colored background with background-colored text, which could not be read at all. The
+  colored span also closed with SGR 0, which ended the reverse video mid-line.
+- **Decision.** Row text carries no color. A row names the one word to accent, its
+  state, and `highlight` wraps that word after the line is truncated and padded, so the
+  column arithmetic (D101) is untouched and a truncated state is simply left plain. A
+  selected row is drawn from the plain line in reverse video alone. `colored` ends with
+  SGR 39 and `dimmed` with SGR 22, so neither clears another attribute. Left and Right
+  join `h` and `l` as pane keys.
+- **Consequence.** Color now means heading, divider, message, or task state. The
+  selection reads on a light theme and a dark one, because reverse video over the
+  default foreground is readable by construction.
+
+## D110. mentions and refresh are settings
+
+- Date: 2026-10-01. Issue midsoln/foreman#5. Requested by the user.
+- **Context.** The inbox always showed items found only because they mention the
+  developer, which is the noisiest of the four searches, and the dashboard's GitHub
+  refresh was a 60 second constant.
+- **Decision.** `mentions` (default true) and `refresh` (default 60 seconds, minimum 5)
+  join the config. `mentions: false` filters the finished report, dropping entries whose
+  only reason is `mentioned`, rather than dropping the searches: the snapshots keep
+  every reason, so "no longer mentions you" still works and the items return as soon as
+  the setting does. A `refresh` below 5 fails `config.Load` with the file and the
+  minimum. Local task and log rereads stay at one second, and `r` still refreshes.
+- **Consequence.** The quiet inbox costs nothing in accuracy, and the refresh rate is
+  the developer's call within a floor that keeps one refresh from overlapping the next.

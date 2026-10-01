@@ -2,7 +2,8 @@
 
 ## Current stage
 
-Stage 15 (dashboard views for issue #3) is complete.
+Stage 16 (dashboard navigation, visibility, and refresh settings for issue #5) is
+complete.
 
 ## Completed
 
@@ -493,6 +494,23 @@ request. Each fix is its own commit with a decision.
   `git diff --check`. Focused TUI tests cover hidden and opened logs, Escape, task
   changes, navigation, narrow layout, branch display, and color dividers.
 
+### Stage 16 (complete): navigation, visibility, and settings for issue #5
+
+- Left and Right select the two list panes beside `tab`, `h`, and `l` (D109).
+- Row text keeps the terminal's foreground, and only a task's state is colored. The
+  selected row is reverse video alone, which reads on a light theme and a dark one
+  (D109).
+- A PR closed without merging stops its runner, moves the task to the new `PR_CLOSED`
+  state, and drops it from DELEGATED WORK without a failure or a notification (D107).
+  Reopening the PR brings the task back, as READY_FOR_HUMAN or REVIEWING depending on
+  the review it has and the PR's current CI (D108).
+- `mentions` hides items found only because they mention the developer; `refresh` sets
+  the dashboard's GitHub interval, 60 seconds by default and 5 at the least (D110).
+- Verified with `go vet ./...`, `go test ./...`, `go build -o dist/foreman
+  ./cmd/foreman`, `scripts/e2e.sh`, and `git diff --check`. New tests cover the arrow
+  keys, the row and selection colors, the closed and reopened PR paths including a
+  running and an unstoppable runner, the mention filter, and the two settings.
+
 ## Known limitations
 
 - The gate runs only when `inbox` or `status` runs, or while the dashboard is open
@@ -600,7 +618,11 @@ what it replaced. Current summary:
   dashboard follows the newest delegation and colors and divides its panes. D105. The
   log is focusable and scrolls with vim keys. D106 (amends D104 and D105). A delegated
   task opens its log on demand; `h`/`l` navigate the two list panes.
+- D107. A closed PR ends its task in `PR_CLOSED`, not FAILED. D108. A reopened PR
+  returns the task to delegated work. D109 (amends D104). Dashboard rows keep the
+  terminal's foreground, and the arrows select panes. D110. `mentions` and `refresh`
+  are settings.
 
 ## Next stage
 
-None. Stages 0 to 15 are complete. Further work needs a new request.
+None. Stages 0 to 16 are complete. Further work needs a new request.
