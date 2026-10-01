@@ -230,3 +230,41 @@ func TestBaseOnlyChangeStartsNoRun(t *testing.T) {
 		t.Fatalf("state %s spawned %d checks %d", got.State, len(f.runners.spawned), len(f.wt.checks)-checks)
 	}
 }
+
+func TestRetargetedPRIsCheckedAgainstItsNewBase(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	f.claude.turn = prTurn("sid-1")
+	f.codex.reviewErr = errors.New("killed")
+	run(t, f, key)
+	// The maintainer retargets the open PR, then the task restarts at its review.
+	pr := f.gh.prs[912]
+	pr.BaseRefName = "release"
+	f.gh.prs[912] = pr
+	f.codex.reviewErr = nil
+	key = started(t, f, startReq(t))
+	got := run(t, f, key)
+	if last := f.wt.checks[len(f.wt.checks)-1]; last.Base != "release" {
+		t.Fatalf("checked against %s, want the PR's current base", last.Base)
+	}
+	if got.State != task.Reviewing || got.Delegation.BaseRef != "origin/release" || len(got.Reviews) != 1 {
+		t.Fatalf("state %s base %s reviews %d", got.State, got.Delegation.BaseRef, len(got.Reviews))
+	}
+	if p := f.codex.reviewed[len(f.codex.reviewed)-1]; !strings.Contains(p, "git diff origin/release...HEAD") {
+		t.Errorf("review prompt uses the old base:\n%s", p)
+	}
+}
+
+func TestBlockedMergeQuestionNamesEveryFile(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	q := task.Question{Issue: "How should the backoff changes combine?", Context: "Both sides changed the backoff.",
+		Options: []task.Option{{Label: "A", Description: "I resolved the files; verify, commit, push"}, {Label: "B", Description: "Keep main's"}}, Recommendation: "A", ImpactIfWrong: "x"}
+	f.claude.turns = []agent.Turn{prTurn("sid-1"), {Session: task.Session{Agent: task.Claude, ID: "sid-1"}, Outcome: agent.Outcome{Status: agent.Blocked, Summary: "?", Questions: []task.Question{q}}}}
+	f.wt.conflicts = [][]string{{"go.mod", "retry.go"}}
+	got := run(t, f, key)
+	c := got.Pending().Question.Context
+	if !strings.Contains(c, "Both sides changed the backoff.") || !strings.Contains(c, "go.mod, retry.go") || !strings.Contains(c, got.Delegation.Worktree) {
+		t.Fatalf("question context lacks the files or worktree:\n%s", c)
+	}
+}

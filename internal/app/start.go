@@ -102,6 +102,10 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		sameAgent := prev != nil && prev.Implementer.Agent == req.Agent
 		if was != task.PRClosed && prev != nil && prev.Branch == wt.Branch && (sameAgent || len(cur.UnhandledFeedback()) > 0) {
 			cur.Delegation.PR, cur.Delegation.PRURL, cur.Delegation.PRHead = prev.PR, prev.PRURL, prev.PRHead
+			// A kept PR keeps the base it targets, which a retarget may have changed (D130).
+			if prev.BaseRef != "" {
+				cur.Delegation.BaseRef = prev.BaseRef
+			}
 		}
 		cur.LastOutcome = &task.Outcome{Status: "started", Summary: fmt.Sprintf("dispatched to %s", req.Agent), At: now}
 		return cur, nil

@@ -445,7 +445,8 @@ func (a App) brief(ctx context.Context, rec *task.Record) (agent.TaskBrief, erro
 
 // verifyPR checks the agent's pr_opened claim against GitHub: the PR must be open,
 // in this repo, from the task branch into the task's base. Without a number, the
-// open PR for the branch is looked up.
+// open PR for the branch is looked up. The task's own PR may target another base,
+// because a maintainer can retarget it; the conflict check then follows it (D130).
 func (a App) verifyPR(ctx context.Context, rec *task.Record, o agent.Outcome) (*PullRequest, error) {
 	d := rec.Delegation
 	var pr PullRequest
@@ -473,7 +474,7 @@ func (a App) verifyPR(ctx context.Context, rec *task.Record, o agent.Outcome) (*
 		return nil, fmt.Errorf("PR #%d comes from a fork, not %s", pr.Key.Number, rec.Repo)
 	case pr.HeadRefName != d.Branch:
 		return nil, fmt.Errorf("PR #%d is from %s, not the task branch %s", pr.Key.Number, pr.HeadRefName, d.Branch)
-	case pr.BaseRefName != base:
+	case pr.BaseRefName != base && (d.PR == 0 || pr.Key.Number != d.PR):
 		return nil, fmt.Errorf("PR #%d targets %s, not %s", pr.Key.Number, pr.BaseRefName, base)
 	}
 	return &pr, nil

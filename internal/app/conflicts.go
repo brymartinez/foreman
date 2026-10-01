@@ -31,6 +31,16 @@ func (a App) resolveConflicts(ctx, final context.Context, rec *task.Record, log 
 			}))
 			return rec, false, err
 		}
+		// A maintainer can retarget an open PR. The task follows it, so later checks,
+		// prompts, and the review use the base the PR has now.
+		if ref := "origin/" + base; ref != rec.Delegation.BaseRef {
+			fmt.Fprintf(log, "foreman: PR #%d now targets %s, not %s\n", d.PR, base, strings.TrimPrefix(rec.Delegation.BaseRef, "origin/"))
+			if rec, err = a.update(final, rec.Key, existing(func(cur *task.Record) {
+				cur.Delegation.BaseRef = ref
+			})); err != nil {
+				return rec, false, err
+			}
+		}
 		if len(files) == 0 {
 			return rec, true, nil
 		}
@@ -49,6 +59,9 @@ func (a App) resolveConflicts(ctx, final context.Context, rec *task.Record, log 
 				fmt.Fprintf(log, "foreman: verified PR #%d %s at %s\n", pr.Key.Number, pr.URL, short(pr.HeadSHA))
 			}
 		}
+		if runErr == nil && turn.Outcome.Status == agent.Blocked {
+			turn.Outcome.Questions = withConflicts(turn.Outcome.Questions, d.Worktree, base, files)
+		}
 		if rec, err = a.update(final, rec.Key, existing(func(cur *task.Record) {
 			applyTurn(cur, turn, pr, runErr, a.Now())
 			if runErr != nil {
@@ -59,6 +72,22 @@ func (a App) resolveConflicts(ctx, final context.Context, rec *task.Record, log 
 			return rec, false, err
 		}
 	}
+}
+
+// withConflicts makes sure each question from a blocked merge turn names every
+// conflicting file and where the merge waits, whatever the agent wrote.
+func withConflicts(qs []task.Question, worktree, base string, files []string) []task.Question {
+	out := make([]task.Question, len(qs))
+	for i, q := range qs {
+		for _, f := range files {
+			if !strings.Contains(q.Issue+q.Context, f) {
+				q.Context += fmt.Sprintf("\n\nMerging origin/%s left conflicts in %s. The merge is in progress in the worktree %s.", base, strings.Join(files, ", "), worktree)
+				break
+			}
+		}
+		out[i] = q
+	}
+	return out
 }
 
 // mergeConflicts checks the open PR against the base GitHub reports for it now.
