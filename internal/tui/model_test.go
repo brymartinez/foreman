@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -416,5 +417,119 @@ func TestEnterOnAnUndelegatedIssueStillAsksForAnAgent(t *testing.T) {
 	}}
 	if got := m.Key(Key{Kind: KeyEnter}); got.Kind != ActionNone || m.Mode != ChoosingAgent {
 		t.Fatalf("action = %+v mode = %v", got, m.Mode)
+	}
+}
+
+// longShow gives the selected task enough show text to scroll at any supported size.
+func longShow(m *Model) {
+	rec := m.Selected()
+	rec.LastOutcome = &task.Outcome{Status: "failed", Summary: strings.Repeat("the outcome summary wraps ", 12)}
+	rec.Reviews = []task.Review{{Round: 1, Reviewer: task.Codex, Findings: make([]task.Finding, 30)}}
+	for i := range rec.Reviews[0].Findings {
+		rec.Reviews[0].Findings[i] = task.Finding{Severity: "blocking", File: "internal/tui/model.go", Line: i + 1, Summary: "finding " + strconv.Itoa(i)}
+	}
+}
+
+func TestShowToggle(t *testing.T) {
+	m := model()
+	longShow(&m)
+	m.Log = make([]string, 200)
+	press(&m, rune_('s'))
+	if m.ShowOpen {
+		t.Fatal("s opened the show view with the pane closed")
+	}
+	press(&m, rune_('l'), Key{Kind: KeyEnter})
+	if m.ShowOpen {
+		t.Fatal("the pane opened on the show view; it opens on the log")
+	}
+	press(&m, rune_('u'), rune_('s'))
+	if !m.ShowOpen || m.ShowTop != 0 {
+		t.Fatalf("s did not open show at its top: open=%t top=%d", m.ShowOpen, m.ShowTop)
+	}
+	press(&m, rune_('d'), rune_('s'))
+	if m.ShowOpen || m.LogOffset != 0 {
+		t.Fatalf("s did not return to the log tail: open=%t offset=%d", m.ShowOpen, m.LogOffset)
+	}
+	press(&m, rune_('h'), rune_('s'))
+	if !m.ShowOpen || !m.LogOpen {
+		t.Fatalf("s did not switch views with INBOX focused: show=%t log=%t", m.ShowOpen, m.LogOpen)
+	}
+	if m.InboxCursor != 0 || m.Mode != Browsing {
+		t.Fatalf("s changed the inbox: cursor=%d mode=%v", m.InboxCursor, m.Mode)
+	}
+}
+
+func TestShowResetsOnClose(t *testing.T) {
+	m := model()
+	press(&m, rune_('l'), Key{Kind: KeyEnter}, rune_('s'))
+	press(&m, Key{Kind: KeyEnter})
+	if !m.ShowOpen {
+		t.Error("enter on an open pane left the show view")
+	}
+	press(&m, Key{Kind: KeyEscape}, Key{Kind: KeyEnter})
+	if m.ShowOpen {
+		t.Error("the pane reopened on show after esc")
+	}
+	press(&m, rune_('s'), rune_('j'), Key{Kind: KeyEnter})
+	if m.TaskCursor != 1 || m.ShowOpen {
+		t.Errorf("another task opened on show: task=%d show=%t", m.TaskCursor, m.ShowOpen)
+	}
+	press(&m, rune_('s'))
+	m.SetTasks(m.Tasks[2:])
+	if m.LogOpen || m.ShowOpen {
+		t.Errorf("a refresh that changed the task left the pane open: log=%t show=%t", m.LogOpen, m.ShowOpen)
+	}
+}
+
+func TestShowScrollKeys(t *testing.T) {
+	m := model()
+	m.Width, m.Height = minWidth, minHeight
+	longShow(&m)
+	press(&m, rune_('l'), Key{Kind: KeyEnter}, rune_('s'))
+	page, limit := m.logPage(), m.showLimit()
+	if limit < 3*page {
+		t.Fatalf("the test text is too short to scroll: limit %d page %d", limit, page)
+	}
+	for _, step := range []struct {
+		key  Key
+		want int
+	}{
+		{rune_('d'), page},
+		{Key{Kind: KeyCtrlD}, page + max(page/2, 1)},
+		{Key{Kind: KeyPageDown}, 2*page + max(page/2, 1)},
+		{rune_('u'), page + max(page/2, 1)},
+		{Key{Kind: KeyCtrlU}, page},
+		{Key{Kind: KeyPageUp}, 0},
+		{Key{Kind: KeyPageUp}, 0},
+		{rune_('G'), limit},
+		{rune_('d'), limit},
+		{rune_('g'), 0},
+		{Key{Kind: KeyEnd}, limit},
+	} {
+		press(&m, step.key)
+		if m.ShowTop != step.want {
+			t.Fatalf("after %+v ShowTop = %d; want %d", step.key, m.ShowTop, step.want)
+		}
+	}
+	if m.LogOffset != 0 {
+		t.Errorf("scrolling show moved the log: %d", m.LogOffset)
+	}
+}
+
+func TestShowReachesEveryLine(t *testing.T) {
+	m := model()
+	m.Width, m.Height = minWidth, minHeight
+	longShow(&m)
+	press(&m, rune_('l'), Key{Kind: KeyEnter}, rune_('s'))
+	want := m.showLines()
+	var seen []string
+	for range len(want) + 1 {
+		seen = append(seen, visibleShow(&m)...)
+		press(&m, rune_('d'))
+	}
+	for _, w := range want {
+		if strings.TrimSpace(w) != "" && !slices.Contains(seen, strings.TrimRight(w, " ")) {
+			t.Errorf("paging never showed %q", w)
+		}
 	}
 }
