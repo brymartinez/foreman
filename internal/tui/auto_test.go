@@ -89,8 +89,8 @@ func TestAutoStartUsesConfiguredAgentAndNoContext(t *testing.T) {
 	m.SetAuto(Auto{Enabled: true, Agent: task.Codex, Max: 3})
 	m.SetInbox([]app.InboxEntry{assigned("a/b", 1, 0)})
 	got := m.AutoStarts()
-	if len(got) != 1 || got[0] != (app.StartRequest{Repo: "a/b", Issue: 1, Agent: task.Codex}) {
-		t.Fatalf("auto start = %+v; want codex with no context file", got)
+	if len(got) != 1 || got[0] != (app.StartRequest{Repo: "a/b", Issue: 1, Agent: task.Codex, NewOnly: true}) {
+		t.Fatalf("auto start = %+v; want codex, no context file, and only if never delegated", got)
 	}
 }
 

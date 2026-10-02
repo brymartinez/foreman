@@ -2333,3 +2333,19 @@ Entry format:
   successful refresh, after a finished start, cancel, or resume, and when `a` turns
   auto mode on. The 1 second tick already reads first. With auto mode off, no extra
   read is made.
+
+## D147 (amends D144). Auto starts ask App.Start to refuse delegated issues
+
+- Date: 2026-10-03. Issue midsoln/foreman#30, review round 3 of PR #34.
+- **Context.** Auto mode reads "never delegated" from the last refresh. Between
+  refreshes another foreman command can start the issue, and the task can reach a
+  state `App.Tasks` leaves out, such as PR_CLOSED. The dashboard then sees no task and
+  started the issue again.
+- **Decision.** `StartRequest.NewOnly` makes `App.Start` return `ErrDelegated` when
+  the stored record has a delegation, in any state. It checks on the first read and
+  again inside the locked `update`, so a concurrent `foreman start` is caught too.
+  Auto starts set it. Manual starts do not, so FAILED and PR_CLOSED restarts keep
+  working by hand. The refused issue shows `! auto: ...` and stays tried.
+- **Rejected.** Adding a full task read to the `Source` port for the dashboard. The
+  record could still change between that read and the start, while the check under
+  the task lock cannot.

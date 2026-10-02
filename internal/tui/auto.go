@@ -100,7 +100,9 @@ func (m *Model) AutoStarts() []app.StartRequest {
 		busy[it.Key.Repo] = true
 		m.tried = mark(m.tried, it.Key)
 		m.starting = mark(m.starting, it.Key)
-		reqs = append(reqs, app.StartRequest{Repo: it.Key.Repo, Issue: it.Key.Number, Agent: m.AutoAgent})
+		// The task list leaves out inactive work such as PR_CLOSED, so only App.Start
+		// can see that another command delegated this issue since the refresh.
+		reqs = append(reqs, app.StartRequest{Repo: it.Key.Repo, Issue: it.Key.Number, Agent: m.AutoAgent, NewOnly: true})
 	}
 	return reqs
 }
