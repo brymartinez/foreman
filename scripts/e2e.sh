@@ -161,6 +161,21 @@ if [[ " $* " == *" --resume "* ]]; then
 		echo "claude resume" >>"$E2E_STATE/agents.log"
 		printf '%s' "$2" >"$E2E_STATE/resume-prompt.txt"
 		[[ "$2" == *"planned, blocked, or failed"* ]] && planning=1
+		# A merge conflict: merge main, keep both sides, push, and report the PR.
+		if [[ "$2" == *"conflicts with the latest origin/main"* ]]; then
+			echo "claude merge" >>"$E2E_STATE/agents.log"
+			b=$(git branch --show-current); i=${b#*/}; pr=$((900 + ${i%%-*}))
+			git fetch -q origin main
+			git -c user.email=e2e@example.com -c user.name=e2e merge -q origin/main >/dev/null 2>&1 || true
+			git show origin/main:widgets.go >widgets.go
+			echo "// retries" >>widgets.go
+			git add widgets.go
+			git -c user.email=e2e@example.com -c user.name=e2e commit -q --no-edit
+			git push -q origin "$b"
+			printf '{"number":%s,"url":"https://github.com/acme/widgets/pull/%s","state":"OPEN","headRefName":"%s","headRefOid":"%s","baseRefName":"main","isCrossRepository":false}\n' "$pr" "$pr" "$b" "$(git rev-parse HEAD)" >"$E2E_STATE/pr-$pr.json"
+			printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"pr_opened","summary":"merged main","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s","validation":[{"command":"go test ./...","passed":true}],"questions":[]}}\n' "$pr" "$pr"
+			exit 0
+		fi
 		# Repairing a merge conflict: merge the base, or fail when told to.
 		if [[ "$2" == *"now has merge conflicts"* ]]; then
 			echo "claude conflict" >>"$E2E_STATE/agents.log"
@@ -171,6 +186,7 @@ if [[ " $* " == *" --resume "* ]]; then
 			git fetch -q origin main
 			git -c user.email=e2e@example.com -c user.name=e2e merge -q --no-edit origin/main
 			b=$(git branch --show-current); i=${b#*/}; pr=$((900 + ${i%%-*}))
+			git push -q origin "$b"
 			printf '{"number":%s,"url":"https://github.com/acme/widgets/pull/%s","state":"OPEN","headRefName":"%s","headRefOid":"%s","baseRefName":"main","isCrossRepository":false,"mergeable":"MERGEABLE"}\n' "$pr" "$pr" "$b" "$(git rev-parse HEAD)" >"$E2E_STATE/pr-$pr.json"
 			printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"pr_opened","summary":"merged main","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s","validation":[{"command":"go test ./...","passed":true}],"questions":[]}}\n' "$pr" "$pr"
 			exit 0
@@ -209,6 +225,15 @@ sleep "${E2E_AGENT_SLEEP:-1}"
 branch=$(git branch --show-current)
 echo "// retries" >>widgets.go
 git -c user.email=e2e@example.com -c user.name=e2e commit -qam "feat: retries"
+git push -q origin "$branch"
+# main-moves is a command that changes main while this turn runs: a change to
+# widgets.go conflicts with the branch, and a new file merges cleanly.
+if [ -f "$E2E_STATE/main-moves" ]; then
+	m=$(mktemp -d)
+	git clone -q "$E2E_ORIGIN" "$m"
+	(cd "$m" && eval "$(cat "$E2E_STATE/main-moves")" && git add . && git -c user.email=e2e@example.com -c user.name=e2e commit -qm "main moves" && git push -q origin main)
+	rm -rf "$m" "$E2E_STATE/main-moves"
+fi
 issue=${branch#*/}
 pr=$((900 + ${issue%%-*}))
 printf '{"number":%s,"url":"https://github.com/acme/widgets/pull/%s","state":"OPEN","headRefName":"%s","headRefOid":"%s","baseRefName":"main","isCrossRepository":false}\n' "$pr" "$pr" "$branch" "$(git rev-parse HEAD)" >"$E2E_STATE/pr-$pr.json"
@@ -441,6 +466,30 @@ scenario_rereview() {
 	check "without implementing again" test "$(turns 'claude implement')" = 2
 }
 
+scenario_conflicts() {
+	echo "conflicts: a PR that conflicts with main is merged before its review"
+	setup conflicts
+	echo 'echo "// main" >>widgets.go' >"$state/main-moves"
+	foreman start 42 --agent claude >/dev/null
+	check "the merged PR reaches a clean review" wait_status "review ✓"
+	check "the implementer merged once" test "$(turns 'claude merge')" = 1
+	check "the merge took no fix round" test "$(turns 'codex review')" = 1
+	local branch head
+	branch=$(git -C "$sandbox/origin.git" for-each-ref --format='%(refname:short)' 'refs/heads/*/42-*')
+	head=$(git -C "$sandbox/origin.git" rev-parse "$branch")
+	check "the PR branch has a merge commit" test "$(git -C "$sandbox/origin.git" rev-list --merges --count main.."$branch")" = 1
+	check "main is merged in, not rebased onto" git -C "$sandbox/origin.git" merge-base --is-ancestor main "$branch"
+	check "the review covers the merge commit" grep -q "head: $head" "$sandbox/tasks/acme-widgets-42.md"
+
+	issue 43 "Fix pagination"
+	echo 'echo "package widgets" >other.go' >"$state/main-moves"
+	foreman start 43 --agent claude >/dev/null
+	check "a clean base update goes straight to review" bash -c "cd '$FOREMAN_CWD' && for i in \$(seq 100); do '$work/foreman' show 43 | grep -q 'review ✓\\|Latest review' && exit 0; sleep 0.1; done; exit 1"
+	check "with no merge turn" test "$(turns 'claude merge')" = 1
+	branch=$(git -C "$sandbox/origin.git" for-each-ref --format='%(refname:short)' 'refs/heads/*/43-*')
+	check "and no merge commit" test "$(git -C "$sandbox/origin.git" rev-list --merges --count "$branch")" = 0
+}
+
 scenario_respond() {
 	echo "respond: several questions from one turn, answered in one sitting"
 	setup respond
@@ -571,7 +620,7 @@ scenario_conflict() {
 	check "the worktree is kept" test -d "$wt"
 }
 
-scenarios=${*:-runner notify logs inbox inbox_lifecycle rereview respond cancel feedback conflict tui}
+scenarios=${*:-runner notify logs inbox inbox_lifecycle rereview conflicts respond cancel feedback conflict tui}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"

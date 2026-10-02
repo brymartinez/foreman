@@ -1997,3 +1997,79 @@ Entry format:
   all use it when a repair is pending. A cancelled repair still stays FAILED (D130).
 - **Consequence.** Every repair that does not finish reaches the developer as a
   decision. The attempt stays spent, so a refresh does not retry it.
+
+## D133 (amends D63 and D78). Resolve PR merge conflicts before each review
+
+- Date: 2026-10-01. Issue midsoln/foreman#12.
+- **Context.** The runner started a review whenever a PR head had none, without checking
+  the PR against its base branch. A conflicting PR got a clean review, and the
+  conflict resolution it still needed was never reviewed.
+- **Decision.** `RunTask` calls `resolveConflicts` right before every review pass: the
+  first, one after a fix, one after answered PR feedback, one after a decision, and one
+  in a resumed run. It verifies the PR, takes the base GitHub reports for it, and calls
+  `WorktreeManager.MergeConflicts`. `worktree.Git` fetches the base and the branch,
+  then runs `git merge-tree --write-tree --name-only` on `origin/<branch>` and
+  `origin/<base>`. That merge runs in memory, so a clean base update writes no commit
+  and changes neither the branch nor the worktree. GitHub's `mergeable` field was
+  rejected: it reads `UNKNOWN` for a while after a push and names no files. On a
+  conflict, the implementer gets one turn (`agent.MergeMessage`, or a `## Merge
+  conflicts` section in a fresh prompt) to merge `origin/<base>` into the branch,
+  never rebase or force-push, run the checks, commit, push, and report `pr_opened`.
+  That turn records no review, so it uses no fix round, and the review that follows
+  uses the normal settings. If the agent cannot resolve a file safely it leaves the
+  merge in progress and reports `blocked` with the files. After two merge turns that
+  still leave conflicts, foreman asks the developer itself (A: I resolved the files in
+  the worktree; B: try again). A failed check fails the task. The gate is unchanged: it
+  compares only PR heads (D63), so a base-only change after a clean review starts no
+  run.
+- **Consequence.** Every review covers a PR that merges into its latest base. Each
+  pass costs one `git fetch` and needs git 2.38 or newer. The stand-in agent in
+  `scripts/e2e.sh` now pushes its branch, because the check reads `origin/<branch>`.
+
+## D134 (amends D31, D67, and D133). Review round 1 of PR #16
+
+- Date: 2026-10-02. Issue midsoln/foreman#12, review round 1 of PR #16.
+- **Context.** The reviewer found three gaps. `verifyPR` rejected a PR whose base no
+  longer matched the task's, so a maintainer who retargeted the open PR failed the
+  task before the conflict check. A blocked merge turn's question could leave out
+  conflicting files. And a resumed review whose PR was no longer open ran the
+  implementer instead of failing.
+- **Decision.**
+  - `verifyPR` still requires the task's base for a new PR (D31). The task's own PR
+    may target another base. `resolveConflicts` checks against the base GitHub
+    reports and records it as the task's `BaseRef`, so later checks, prompts, and the
+    reviewer's `git diff origin/<base>...HEAD` use it. `Start` keeps the base of a PR
+    it keeps.
+  - A blocked merge turn's questions get the conflicting files and the worktree
+    appended to their context when the agent's text does not name every file.
+  - A resumed review whose PR is no longer open still runs the implementer, as D67
+    decided. That happens before the review pass, so the conflict check is not
+    involved, and the gate records a closed PR as PR_CLOSED on its own (D107).
+    Changing it is outside issue #12.
+- **Consequence.** A retargeted PR is checked and reviewed against its new base. The
+  developer always sees which files to resolve.
+
+## D135 (amends D134). Always list the conflicts in a blocked merge question
+
+- Date: 2026-10-02. Issue midsoln/foreman#12, review round 2 of PR #16.
+- **Context.** D134 added the conflict list only when the question's text did not
+  contain every file name. A substring search treats `a.go` as named when the text
+  names only `dir/a.go`, so the developer could miss a file.
+- **Decision.** `withConflicts` always appends the conflicting files and the worktree
+  to each question from a blocked merge turn.
+- **Consequence.** The list can repeat files the agent already named. The developer
+  always sees every file to resolve.
+
+## D136 (amends D130 and D133). Merge issue #17's conflict repair into issue #12's branch
+
+- Date: 2026-10-02. Merge resolution for PR #16 against main.
+- **Context.** Main merged issue #17 (D130 to D132), which repairs conflicts on a
+  handed-over PR from the gate. Issue #12's branch had used D129 to D131 for its
+  check before each review, and main had used D129 for issue #13.
+- **Decision.** Keep both flows. The gate's repair (D130) handles a READY_FOR_HUMAN
+  PR; its repaired head then goes through `resolveConflicts` before its review like
+  any other pass (D133). Renumber issue #12's decisions to D133 through D135.
+  `implement` takes both the repair from the delegation and the merge request. The
+  e2e repair stub now pushes its merge, because the check reads `origin/<branch>`.
+- **Consequence.** A conflict found before a review and one found after the handoff
+  both reach the implementer, and both are reviewed.

@@ -98,7 +98,7 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 			}
 		}
 		if !answered && !reviewNext {
-			turn, runErr := a.implement(ctx, rec, findings, nil, log)
+			turn, runErr := a.implement(ctx, rec, findings, nil, nil, log)
 			step := "implementation"
 			if a.needsPlan(rec) {
 				step = "planning"
@@ -132,6 +132,12 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 			}
 		}
 
+		// Every pass, including the first and one after a fix, reviews a PR that merges
+		// cleanly into its latest base (D133).
+		var ready bool
+		if rec, ready, err = a.resolveConflicts(ctx, final, rec, log); err != nil || !ready {
+			return err
+		}
 		review, reviewErr := a.review(ctx, rec, log)
 		if rec, err = a.update(final, key, existing(func(cur *task.Record) {
 			applyReview(cur, review, reviewErr, a.Now())
@@ -202,15 +208,16 @@ func (a App) reviewRounds() int {
 }
 
 // implement runs one implementer turn. It resumes the session with an answered
-// decision or a review round when there is one, and otherwise (or when the session
-// is gone) starts a fresh turn whose prompt is rebuilt from the task file.
+// decision, a merge, PR feedback, or a review round when there is one, and otherwise
+// (or when the session is gone) starts a fresh turn whose prompt is rebuilt from the
+// task file.
 // needsPlan is true until every planning document is on the issue. A task that
 // already has a PR, from before planning existed, goes on without one (D90).
 func (a App) needsPlan(rec *task.Record) bool {
 	return !rec.PlanPosted() && rec.Delegation.PR == 0
 }
 
-func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Review, feedback []PRComment, log io.Writer) (agent.Turn, error) {
+func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Review, feedback []PRComment, merge *agent.MergeBrief, log io.Writer) (agent.Turn, error) {
 	d := rec.Delegation
 	adapter, ok := a.Agents[d.Implementer.Agent]
 	if !ok {
@@ -233,6 +240,8 @@ func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Rev
 			open = latest
 		}
 		resume = agent.ResumeMessage(decs, open, planning)
+	} else if merge != nil {
+		resume = agent.MergeMessage(d.Branch, merge.Base, merge.Files)
 	} else if len(feedback) > 0 {
 		resume = agent.FeedbackMessage(rec.Repo, d.PR, feedbackItems(feedback))
 	} else if findings != nil {
@@ -251,9 +260,11 @@ func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Rev
 	if err != nil {
 		return agent.Turn{}, err
 	}
-	if latest := rec.LatestReview(); latest != nil && !latest.Clean {
+	// The turn that pushed before a merge already fixed the latest findings.
+	if latest := rec.LatestReview(); merge == nil && latest != nil && !latest.Clean {
 		brief.OpenFindings = latest.Findings
 	}
+	brief.Merge = merge
 	brief.PR, brief.Feedback, brief.Conflict = d.PR, feedbackItems(feedback), conflict
 	// The repo layer comes from the worktree: the committed .foreman/ on the base (D48).
 	implement, err := a.Stages.Resolve(d.Worktree, task.StageImplement)
@@ -290,7 +301,7 @@ func (a App) answerFeedback(ctx, final context.Context, rec *task.Record, commen
 	d := rec.Delegation
 	headBefore := d.PRHead
 	fmt.Fprintf(log, "foreman: %s\n", feedbackNote(len(comments), d.PR))
-	turn, runErr := a.implement(ctx, rec, nil, comments, log)
+	turn, runErr := a.implement(ctx, rec, nil, comments, nil, log)
 	var pr *PullRequest
 	if runErr == nil && turn.Outcome.Status == agent.PROpened {
 		if pr, runErr = a.verifyPR(ctx, rec, turn.Outcome); runErr == nil {
@@ -445,7 +456,8 @@ func (a App) brief(ctx context.Context, rec *task.Record) (agent.TaskBrief, erro
 
 // verifyPR checks the agent's pr_opened claim against GitHub: the PR must be open,
 // in this repo, from the task branch into the task's base. Without a number, the
-// open PR for the branch is looked up.
+// open PR for the branch is looked up. The task's own PR may target another base,
+// because a maintainer can retarget it; the conflict check then follows it (D134).
 func (a App) verifyPR(ctx context.Context, rec *task.Record, o agent.Outcome) (*PullRequest, error) {
 	d := rec.Delegation
 	var pr PullRequest
@@ -473,7 +485,7 @@ func (a App) verifyPR(ctx context.Context, rec *task.Record, o agent.Outcome) (*
 		return nil, fmt.Errorf("PR #%d comes from a fork, not %s", pr.Key.Number, rec.Repo)
 	case pr.HeadRefName != d.Branch:
 		return nil, fmt.Errorf("PR #%d is from %s, not the task branch %s", pr.Key.Number, pr.HeadRefName, d.Branch)
-	case pr.BaseRefName != base:
+	case pr.BaseRefName != base && (d.PR == 0 || pr.Key.Number != d.PR):
 		return nil, fmt.Errorf("PR #%d targets %s, not %s", pr.Key.Number, pr.BaseRefName, base)
 	}
 	return &pr, nil

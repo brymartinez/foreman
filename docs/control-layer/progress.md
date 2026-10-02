@@ -2,7 +2,7 @@
 
 ## Current stage
 
-Stage 21 (merge conflict repair on handed-over PRs for issue #17) is complete.
+Stage 22 (merge conflict check before each review for issue #12) is complete.
 Completed runs are needed to measure the effect of the model and budget choices.
 
 ## Completed
@@ -620,6 +620,26 @@ request. Each fix is its own commit with a decision.
 - Verified with `go vet ./...`, `go test ./...`, a binary build, and `scripts/e2e.sh`,
   which has a new `conflict` scenario.
 
+### Stage 22 (complete): merge conflicts before each review for issue #12
+
+- Before every review pass the runner checks the PR against its latest base with
+  `git merge-tree` (D133). A clean merge, even after the base moved, changes nothing.
+- A conflict gets one implementer turn that merges the base into the task branch and
+  pushes. The new head is reviewed. The turn uses no fix round.
+- A blocked merge turn, or two turns that still leave conflicts, ends in
+  NEEDS_DECISION with the files. `foreman respond` resumes the implementer, which
+  finishes the merge, and the run checks again before its review.
+- Review round 1 fixes (D134): a retargeted PR is checked and reviewed against its
+  new base, and a blocked merge question always names the conflicting files.
+- Review round 2 fix (D135): the conflict list is always appended, since a substring
+  search can mistake `dir/a.go` for `a.go`.
+- Verified with `go vet ./...`, `go test ./...`, `go build -o dist/foreman
+  ./cmd/foreman`, and `scripts/e2e.sh` (a new `conflicts` scenario covers a
+  conflicting base and a clean base update).
+- Merged main's conflict repair for issue #17 (D136). Issue #12's decisions are
+  D133 to D135. Verified with `go vet ./...`, `go test ./...`, a binary build, and
+  all `scripts/e2e.sh` scenarios, including both `conflicts` and `conflict`.
+
 ## Known limitations
 
 - The gate runs only when `inbox` or `status` runs, or while the dashboard is open
@@ -755,6 +775,10 @@ what it replaced. Current summary:
 
 - D117. Fresh implementation session after planning. D118. Models and reasoning
   effort are selected per stage. D128. Merge fresh sessions with the PR feedback loop.
+- D133. Resolve PR merge conflicts with an implementer turn before each review.
+  D134. Follow a retargeted PR's base, and name the files in a blocked merge question.
+  D135. Always list the conflicts in a blocked merge question. D136. Merge issue
+  #17's conflict repair with issue #12's check.
 
 ## Next stage
 
