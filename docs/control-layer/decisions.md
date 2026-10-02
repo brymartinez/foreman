@@ -1997,3 +1997,23 @@ Entry format:
   all use it when a repair is pending. A cancelled repair still stays FAILED (D130).
 - **Consequence.** Every repair that does not finish reaches the developer as a
   decision. The attempt stays spent, so a refresh does not retry it.
+
+
+## D133. Foreman's prompt carries a test-first, readable-test rule
+
+- Date: 2026-10-02. Issue midsoln/foreman#19.
+- **Context.** The only test rule lived in `defaults/stages/implement.md`: "Add or update
+  tests when behavior changes." Stage files are user-owned, `make config` never
+  overwrites them, and a repo without them gets nothing. Nothing asked for test-first
+  work, passing-only commits, or test names a reviewer can read as the change.
+- **Decision.** `ImplementationPrompt` writes a built-in `## Tests` section after the
+  developer's stage instructions on every implementation turn: write the behavior test
+  first, see it fail for the expected reason, implement and rerun, commit only passing
+  tests, and name tests by condition and expected behavior, matching the assertions.
+  It exempts changes with no new behavior and forbids rewriting existing tests for the
+  rule. The planning prompt adds one rule: the plan names each test and the behavior it
+  checks. A conflict repair turn gets neither. `defaults/stages` stays unchanged so the
+  text has one source. Nothing enforces the rule in code.
+- **Consequence.** Every delegated turn in any repo, with Claude or Codex, carries the
+  rule. An agent that ignores it is caught at review or by the developer at
+  READY_FOR_HUMAN.

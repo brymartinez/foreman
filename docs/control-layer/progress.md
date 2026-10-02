@@ -2,7 +2,8 @@
 
 ## Current stage
 
-Stage 21 (merge conflict repair on handed-over PRs for issue #17) is complete.
+Stage 22 (test-first, readable behavior tests in delegated work for issue #19) is
+complete.
 Completed runs are needed to measure the effect of the model and budget choices.
 
 ## Completed
@@ -620,6 +621,14 @@ request. Each fix is its own commit with a decision.
 - Verified with `go vet ./...`, `go test ./...`, a binary build, and `scripts/e2e.sh`,
   which has a new `conflict` scenario.
 
+### Stage 22 (complete): test-first, readable behavior tests for issue #19
+
+- Every implementation prompt has a built-in `## Tests` section: test first, see it
+  fail, implement, rerun, commit only passing tests, and name tests by behavior. The
+  planning prompt asks the plan to name each test's behavior. Conflict repair turns
+  get neither (D133).
+- Verified with `go vet ./...`, `go test ./...`, a binary build, and `scripts/e2e.sh`.
+
 ## Known limitations
 
 - The gate runs only when `inbox` or `status` runs, or while the dashboard is open
@@ -752,6 +761,7 @@ what it replaced. Current summary:
 - D130. A handed-over PR that conflicts with its base is repaired once per head pair.
   D131 (amends D130). Every attempted pair stays spent; failed checks fail a repair.
   D132 (amends D130). A repair runner that fails to start or dies needs a decision.
+- D133. The prompt carries a built-in test-first, readable-test rule.
 
 - D117. Fresh implementation session after planning. D118. Models and reasoning
   effort are selected per stage. D128. Merge fresh sessions with the PR feedback loop.
