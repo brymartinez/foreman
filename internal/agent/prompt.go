@@ -63,6 +63,9 @@ func ImplementationPrompt(b TaskBrief) string {
 	s.WriteString(body + "\n\n")
 
 	stageSection(&s, b.StageInstructions)
+	if !b.Planning && b.Conflict == nil {
+		testFirstSection(&s)
+	}
 	if b.Planning {
 		planningSection(&s, b.PlanInstructions)
 	} else if len(b.Plan) > 0 {
@@ -153,6 +156,32 @@ Do not change, commit, or push anything in this turn. If writing the documents n
 	if text := strings.TrimSpace(instructions); text != "" {
 		s.WriteString("The developer's instructions for the documents:\n\n" + text + "\n\n")
 	}
+	planningTestRule(s)
+}
+
+// planningTestRule makes the plan list the tests the implementer writes first, so the
+// reviewer can check them against the plan (D133).
+func planningTestRule(s *strings.Builder) {
+	s.WriteString("For new or changed behavior, the implementation plan names each test by its readable name and the behavior it checks. The implementer writes each of those tests first and sees it fail before writing the code.\n\n")
+}
+
+// testFirstSection is foreman's own test rule. It lives in the prompt, not in the
+// stage files, because those are user-owned and absent from many repositories (D133).
+// A conflict repair turn adds no behavior, so it does not get the section.
+func testFirstSection(s *strings.Builder) {
+	s.WriteString(`## Tests
+
+These rules apply to every behavior change, in any repository. Run tests the way the repository's own instructions say.
+
+1. For new or changed behavior, write the test that checks it before you write the code.
+2. Run the test and check that it fails for the expected reason: the behavior is missing, not a compile error or a typo in the test.
+3. Implement the change, then rerun the relevant tests until they pass.
+4. Commit a test only once it passes. Never commit a failing test.
+5. Name each test and subtest after the condition and the expected behavior, in plain language, so a reviewer can read the tests as a description of the change. The name must match what the assertions check.
+
+A change with no new behavior, such as a rename or a docs edit, needs no new test. Do not rewrite existing tests only to meet these rules.
+
+`)
 }
 
 func plannedStatus(planning bool) string {
