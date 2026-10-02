@@ -487,9 +487,11 @@ git tag v0.1.0 && git push origin v0.1.0
 
 Design, decisions, and status are in [`docs/control-layer/`](docs/control-layer/):
 
-- [progress.md](docs/control-layer/progress.md) covers each stage and the known
-  limitations.
-- [decisions.md](docs/control-layer/decisions.md) is the log of every decision.
+- [progress.md](docs/control-layer/progress.md) covers the current stage, open work,
+  and the known limitations.
+- [history.md](docs/control-layer/history.md) records each completed stage.
+- [decisions.md](docs/control-layer/decisions.md) is the log of recent decisions;
+  [decisions-archive.md](docs/control-layer/decisions-archive.md) holds D1 to D100.
 - [architecture.md](docs/control-layer/architecture.md) covers the package layout and
   the execution model.
 - [capabilities.md](docs/control-layer/capabilities.md) lists the verified CLI

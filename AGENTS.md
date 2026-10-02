@@ -2,11 +2,19 @@
 
 A local CLI that delegates GitHub issues to Claude Code or Codex. Design and status:
 
-- `docs/control-layer/progress.md` is the current stage, decisions, and next step. Read
-  it first and update it at every stage boundary.
-- `docs/control-layer/decisions.md` is the append-only log of every decision point.
-- `docs/control-layer/capabilities.md` lists the verified CLI behavior the adapters rely on.
-- `docs/control-layer/architecture.md` covers the package layout and the execution model.
+- `docs/control-layer/progress.md` is the current stage, open work, and next step. Read
+  it first. At each stage boundary, move the finished stage's entry to `history.md` and
+  update `progress.md`.
+- `docs/control-layer/decisions.md` is the append-only log of recent decisions (D1 to
+  D100 are in `decisions-archive.md`). Find the last number with
+  `grep '^## D' docs/control-layer/decisions.md | tail -1` and append; read an entry
+  only when you need it.
+
+Read these only when the task needs them:
+
+- `docs/control-layer/architecture.md`: the package layout and the execution model.
+- `docs/control-layer/capabilities.md`: the verified CLI behavior the adapters rely on.
+- `docs/control-layer/history.md`: what each completed stage did and how it was verified.
 
 ## Rules
 
