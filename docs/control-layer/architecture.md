@@ -38,6 +38,7 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
                     reported check passed (D131) -> REVIEWING, then the review below
     blocked      -> NEEDS_DECISION with the agent's questions, exit
     anything else -> NEEDS_DECISION, "merge again" or "I fixed it", exit
+    (a repair runner that cannot spawn or dies is also NEEDS_DECISION, D132)
   if the PR has comments the agent has not answered (D119, resumed from REVIEWED):
     turn = implementer.Resume(session, each comment, where it is, and how to reply)
     head unchanged -> mark them answered, keep CI, READY_FOR_HUMAN (D122)

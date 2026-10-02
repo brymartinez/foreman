@@ -133,7 +133,15 @@ func applyConflictTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, err e
 	if reason == "" {
 		reason = fmt.Sprintf("the agent ended with %q", turn.Outcome.Status)
 	}
+	failRepair(rec, reason, now)
+}
+
+// failRepair hands a repair that did not finish to the developer, with the reason and
+// a question on how to go on. It also covers a runner that could not start or died
+// mid-repair, so a spent attempt never ends FAILED with its repair still pending (D132).
+func failRepair(rec *task.Record, reason string, now time.Time) {
 	d := rec.Delegation
+	d.ConflictPending = false
 	base := strings.TrimPrefix(d.BaseRef, "origin/")
 	rec.State, rec.CI = task.NeedsDecision, nil
 	summary := fmt.Sprintf("merge conflict on PR #%d was not repaired: %s", d.PR, reason)

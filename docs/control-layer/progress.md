@@ -615,7 +615,8 @@ request. Each fix is its own commit with a decision.
   as CONFLICTING goes back to its implementer once per PR head and base head (D130).
 - The runner resumes the implementer to merge the base, checks with git that the new
   head includes the base head and that every reported check passed, and reviews it. A
-  failed repair is NEEDS_DECISION. Every attempted pair stays spent (D131).
+  failed repair is NEEDS_DECISION, including a runner that cannot start or dies
+  (D132). Every attempted pair stays spent (D131).
 - Verified with `go vet ./...`, `go test ./...`, a binary build, and `scripts/e2e.sh`,
   which has a new `conflict` scenario.
 
@@ -750,6 +751,7 @@ what it replaced. Current summary:
   D127. A resume with no comments to answer runs no turn.
 - D130. A handed-over PR that conflicts with its base is repaired once per head pair.
   D131 (amends D130). Every attempted pair stays spent; failed checks fail a repair.
+  D132 (amends D130). A repair runner that fails to start or dies needs a decision.
 
 - D117. Fresh implementation session after planning. D118. Models and reasoning
   effort are selected per stage. D128. Merge fresh sessions with the PR feedback loop.

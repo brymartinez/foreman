@@ -146,6 +146,10 @@ func (a App) sourceRepo(ctx context.Context, req *StartRequest) (RepoInfo, error
 func (a App) launch(ctx context.Context, key task.Key) (*task.Record, error) {
 	pid, logPath, spawnErr := a.Runners.Spawn(key)
 	return a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
+		if spawnErr != nil && cur.Delegation.ConflictPending {
+			failRepair(cur, "could not launch runner: "+spawnErr.Error(), a.Now())
+			return cur, nil
+		}
 		if spawnErr != nil {
 			cur.State = task.Failed
 			cur.LastOutcome = &task.Outcome{Status: "failed", Summary: "could not launch runner: " + spawnErr.Error(), At: a.Now()}

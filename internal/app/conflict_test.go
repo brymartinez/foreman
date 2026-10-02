@@ -384,6 +384,24 @@ func TestRepairAnsweredResumesWithTheDecision(t *testing.T) {
 	}
 }
 
+func TestRepairRunnerThatCannotStartNeedsDecision(t *testing.T) {
+	f := newFixture()
+	key := ready(t, f)
+	conflicting(f, Conflicting, "ba5e001")
+	f.runners.spawnErr = errors.New("fork: resource temporarily unavailable")
+	refresh(t, f)
+	f.runners.spawnErr = nil
+	assertNeedsDecision(t, f, key, "not repaired: could not launch runner: fork: resource temporarily unavailable")
+}
+
+func TestRepairRunnerThatDiesNeedsDecision(t *testing.T) {
+	f := newFixture()
+	key := repairing(t, f)
+	// The runner holds pid 4242, which is not alive, so the next refresh reaps it.
+	refresh(t, f)
+	assertNeedsDecision(t, f, key, "not repaired: runner (pid 4242) exited without recording an outcome")
+}
+
 func TestRepairCancelledStaysFailed(t *testing.T) {
 	f := newFixture()
 	key := repairing(t, f)

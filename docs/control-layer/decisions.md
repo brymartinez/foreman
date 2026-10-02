@@ -1982,3 +1982,18 @@ Entry format:
   `conflict_head` and `conflict_base` from D130 never shipped, so no file carries them.
 - **Consequence.** No pair is tried twice. The list grows by one entry per automatic
   repair, and each entry needs a new head pair and an agent run.
+
+
+## D132 (amends D130). A repair runner that fails to start or dies needs a decision
+
+- Date: 2026-10-02. Issue midsoln/foreman#17, review round 2 of PR #18.
+- **Context.** After the gate records a repair attempt, `launch` marked the task FAILED
+  when the runner could not spawn. A runner that died mid-repair was reaped as FAILED.
+  Neither path asked the developer, and both left `conflict_pending` set, while the
+  PRD wants every failed repair in NEEDS_DECISION with its blocker.
+- **Decision.** `failRepair` holds the NEEDS_DECISION path: it clears the pending flag,
+  records the reason, and adds the question (A: merge again, B: I fixed it). The
+  runner's failed repairs, `launch` with a spawn error, and `reap` for a dead runner
+  all use it when a repair is pending. A cancelled repair still stays FAILED (D130).
+- **Consequence.** Every repair that does not finish reaches the developer as a
+  decision. The attempt stays spent, so a refresh does not retry it.
