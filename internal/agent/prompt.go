@@ -45,6 +45,8 @@ type TaskBrief struct {
 	// an answer when a fresh turn replaces a session that could not be resumed (D120).
 	PR       int
 	Feedback []FeedbackItem
+	// Conflict is set when the turn repairs a merge conflict on the PR (D130).
+	Conflict *Conflict
 }
 
 // ImplementationPrompt is the execution contract handed to the implementation agent.
@@ -86,6 +88,12 @@ func ImplementationPrompt(b TaskBrief) string {
 		fmt.Fprintf(&s, "## Pull request feedback\n\nThese comments on pull request #%d are waiting for an answer.\n\n", b.PR)
 		feedbackRules(&s, b.Key.Repo, b.PR)
 		writeFeedback(&s, b.Key.Repo, b.PR, b.Feedback)
+	}
+
+	if c := b.Conflict; c != nil {
+		fmt.Fprintf(&s, "## Merge conflict\n\nYour pull request #%d is open and was handed to the developer. It now has merge conflicts with %s. This turn only repairs them.\n\n", c.PR, c.Base)
+		conflictRules(&s, *c)
+		s.WriteString("\n")
 	}
 
 	if len(b.OpenFindings) > 0 {

@@ -102,6 +102,9 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		sameAgent := prev != nil && prev.Implementer.Agent == req.Agent
 		if was != task.PRClosed && prev != nil && prev.Branch == wt.Branch && (sameAgent || len(cur.UnhandledFeedback()) > 0) {
 			cur.Delegation.PR, cur.Delegation.PRURL, cur.Delegation.PRHead = prev.PR, prev.PRURL, prev.PRHead
+			// The same PR keeps its conflict repair: a spent one is not repeated, and one a
+			// dead runner left pending is finished by this run (D130).
+			cur.Delegation.ConflictAttempts, cur.Delegation.ConflictPending = prev.ConflictAttempts, prev.ConflictPending
 		}
 		cur.LastOutcome = &task.Outcome{Status: "started", Summary: fmt.Sprintf("dispatched to %s", req.Agent), At: now}
 		return cur, nil
@@ -143,6 +146,10 @@ func (a App) sourceRepo(ctx context.Context, req *StartRequest) (RepoInfo, error
 func (a App) launch(ctx context.Context, key task.Key) (*task.Record, error) {
 	pid, logPath, spawnErr := a.Runners.Spawn(key)
 	return a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
+		if spawnErr != nil && cur.Delegation.ConflictPending {
+			failRepair(cur, "could not launch runner: "+spawnErr.Error(), a.Now())
+			return cur, nil
+		}
 		if spawnErr != nil {
 			cur.State = task.Failed
 			cur.LastOutcome = &task.Outcome{Status: "failed", Summary: "could not launch runner: " + spawnErr.Error(), At: a.Now()}

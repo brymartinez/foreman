@@ -49,7 +49,15 @@ type PullRequest struct {
 	BaseRefName       string
 	HeadSHA           string // the commit at the PR's head
 	IsCrossRepository bool
+	// Mergeable is mergeable, conflicting, or unknown. GitHub computes it lazily, so
+	// unknown is common right after a push to either branch.
+	Mergeable string
 }
+
+const (
+	Mergeable   = "mergeable"
+	Conflicting = "conflicting"
+)
 
 // PRComment is one comment on a pull request. Path, Line, and InReplyTo are set for
 // an inline review comment, and are what tell the agent where to reply (D119).
@@ -103,6 +111,8 @@ type GitHubClient interface {
 	// comments, the inline review comments and their replies, and the body of each
 	// submitted review. A review with no body is left out (D119).
 	PullRequestComments(ctx context.Context, pr task.Key) ([]PRComment, error)
+	// BranchHead returns the commit a branch points at on GitHub.
+	BranchHead(ctx context.Context, repo task.Repo, branch string) (string, error)
 }
 
 type IssueComment struct {
@@ -141,6 +151,9 @@ type WorktreeManager interface {
 	// Remove deletes the worktree, and the branch if asked. It refuses a worktree with
 	// uncommitted or untracked changes. A path that no longer exists is already removed.
 	Remove(ctx context.Context, req WorktreeRemoval) error
+	// Contains fetches origin into the worktree at dir, then reports whether ancestor
+	// is an ancestor of descendant, or the same commit.
+	Contains(ctx context.Context, dir, ancestor, descendant string) (bool, error)
 }
 
 type AgentAdapter interface {

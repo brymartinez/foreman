@@ -1938,3 +1938,62 @@ Entry format:
 - **Consequence.** New installs and new runs get the shorter style. `make setup` does
   not overwrite installed copies in `~/.config/foreman/stages/`, so existing users copy
   the new defaults by hand. Existing comments and PRs stay as they are.
+
+
+## D130. Repair a merge conflict on a handed-over PR once per head pair
+
+- Date: 2026-10-02. Issue midsoln/foreman#17.
+- **Context.** A READY_FOR_HUMAN PR can start conflicting with its base after handoff.
+  Nothing read mergeability, so the developer found out at merge time. Issue #12 covers
+  conflicts before the competing review and is out of scope here.
+- **Decision.** The gate asks `gh pr view` for `mergeable`. When an open
+  READY_FOR_HUMAN PR with no live runner and no comments waiting reports CONFLICTING,
+  the gate reads the base head with `gh api repos/<repo>/git/ref/heads/<base>`. In one
+  locked update it records the PR head and base head on the delegation
+  (`conflict_head`, `conflict_base`), sets `conflict_pending`, and moves the task to
+  WORKING. Then it launches the runner. UNKNOWN or MERGEABLE starts nothing. The
+  runner resumes the implementer session with `agent.ConflictMessage`: fetch the base,
+  merge it (no rebase, no force push), resolve, validate, push. A lost session gets a
+  fresh turn whose prompt carries the same rules. Foreman accepts the repair only if
+  the PR is the same one, its head moved, and `git merge-base --is-ancestor` finds the
+  recorded base head in the new head after `git fetch origin`. A verified repair goes
+  to REVIEWING and through the normal review, CI, and handoff. Anything else ends in
+  NEEDS_DECISION: a `blocked` turn keeps its questions, and a failed turn, a runner
+  error, or a failed check adds one question (A: merge again, B: I fixed it). A
+  cancelled repair stays FAILED. The pair is never tried again automatically. A
+  `start` that keeps the PR also keeps the pair, and a repair a dead runner left
+  pending runs in the restarted run.
+- **Consequence.** One agent run per conflicting (PR head, base head). A new commit on
+  either branch allows one more attempt. The branch and worktree are never removed
+  by a repair.
+
+
+## D131 (amends D130). Keep every attempted pair, and fail a repair on failed checks
+
+- Date: 2026-10-02. Issue midsoln/foreman#17, review round 1 of PR #18.
+- **Context.** D130 kept only the last (PR head, base head) pair. A base that moved
+  from A to B and back to A, with the same PR head, made the first pair look new, so
+  the gate tried it a second time. D130 also accepted a repair whose `pr_opened`
+  reported a failed validation command, and sent it to review and handoff.
+- **Decision.** The delegation keeps `conflict_attempts`, a list of every attempted
+  pair, oldest first. The runner repairs the last one. `ConflictAttempted` checks the
+  whole list. `checkRepair` also rejects a repair when any reported validation entry
+  has `passed: false`, so the task goes to NEEDS_DECISION and names the failed commands.
+  `conflict_head` and `conflict_base` from D130 never shipped, so no file carries them.
+- **Consequence.** No pair is tried twice. The list grows by one entry per automatic
+  repair, and each entry needs a new head pair and an agent run.
+
+
+## D132 (amends D130). A repair runner that fails to start or dies needs a decision
+
+- Date: 2026-10-02. Issue midsoln/foreman#17, review round 2 of PR #18.
+- **Context.** After the gate records a repair attempt, `launch` marked the task FAILED
+  when the runner could not spawn. A runner that died mid-repair was reaped as FAILED.
+  Neither path asked the developer, and both left `conflict_pending` set, while the
+  PRD wants every failed repair in NEEDS_DECISION with its blocker.
+- **Decision.** `failRepair` holds the NEEDS_DECISION path: it clears the pending flag,
+  records the reason, and adds the question (A: merge again, B: I fixed it). The
+  runner's failed repairs, `launch` with a spawn error, and `reap` for a dead runner
+  all use it when a repair is pending. A cancelled repair still stays FAILED (D130).
+- **Consequence.** Every repair that does not finish reaches the developer as a
+  decision. The attempt stays spent, so a refresh does not retry it.

@@ -40,6 +40,13 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 		}
 	}))
 
+	if rec.Delegation.ConflictPending {
+		// The gate found the handed-over PR conflicting with its base (D130). A repair
+		// that worked leaves a new head to review; anything else is the developer's.
+		if rec, err = a.repairConflict(ctx, final, rec, log); err != nil || rec.State != task.Reviewing {
+			return err
+		}
+	}
 	var findings *task.Review
 	// feedback is the comments on the PR this run has to answer, and rounds is how many
 	// times it has answered. A resumed task starts here (D122).
@@ -216,7 +223,11 @@ func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Rev
 	}
 	in := agent.StartInput{Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD, Stage: stage}
 	resume := ""
-	if decs := rec.Undelivered(); len(decs) > 0 {
+	var conflict *agent.Conflict
+	if d.ConflictPending {
+		conflict = &agent.Conflict{PR: d.PR, Base: strings.TrimPrefix(d.BaseRef, "origin/"), BaseHead: d.LastConflict().Base}
+		resume = agent.ConflictMessage(*conflict)
+	} else if decs := rec.Undelivered(); len(decs) > 0 {
 		var open *task.Review
 		if latest := rec.LatestReview(); latest != nil && !latest.Clean {
 			open = latest
@@ -243,7 +254,7 @@ func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Rev
 	if latest := rec.LatestReview(); latest != nil && !latest.Clean {
 		brief.OpenFindings = latest.Findings
 	}
-	brief.PR, brief.Feedback = d.PR, feedbackItems(feedback)
+	brief.PR, brief.Feedback, brief.Conflict = d.PR, feedbackItems(feedback), conflict
 	// The repo layer comes from the worktree: the committed .foreman/ on the base (D48).
 	implement, err := a.Stages.Resolve(d.Worktree, task.StageImplement)
 	if err != nil {
