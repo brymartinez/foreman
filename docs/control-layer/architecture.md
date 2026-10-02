@@ -92,6 +92,11 @@ foreman               -> the dashboard, until q or ctrl+c:
                          left/right, h/l -> focus the inbox/delegated work
                          esc -> close the log
                          c on a running task     -> confirm, app.Cancel
+                         a -> toggle auto mode, saved in state.json (D144)
+                         auto mode, after each successful refresh, finished start,
+                           and 1s tick: app.Start with auto.agent for assigned,
+                           never delegated issues, oldest first, while fewer than
+                           auto.max_concurrent runs are active (D144)
 
 foreman inbox|status  -> runner pid dead while WORKING/REVIEWING -> FAILED
                          readiness gate (gate.go), per task with a PR:

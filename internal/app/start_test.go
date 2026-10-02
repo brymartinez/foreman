@@ -540,3 +540,29 @@ func TestStartPicksBranchTypeFromLabelsOrOverride(t *testing.T) {
 		}
 	}
 }
+
+func TestStartNewOnlyRefusesAnIssueAlreadyDelegated(t *testing.T) {
+	// The dashboard's inbox can be a refresh old: another command may have started the
+	// issue, and it may already be PR_CLOSED, which the dashboard's task list leaves out.
+	f := newFixture()
+	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.PRClosed,
+		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Branch: "feat/825-provider-retries"}}
+	_, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Issue: 825, Agent: task.Claude, NewOnly: true})
+	if !errors.Is(err, ErrDelegated) {
+		t.Fatalf("start = %v; want ErrDelegated", err)
+	}
+	if len(f.runners.spawned) != 0 || len(f.wt.reqs) != 0 {
+		t.Errorf("a refused start spawned %d runners and made %d worktrees", len(f.runners.spawned), len(f.wt.reqs))
+	}
+}
+
+func TestStartNewOnlyStartsAnIssueNeverDelegated(t *testing.T) {
+	f := newFixture()
+	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.Discovered}
+	rec, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Issue: 825, Agent: task.Claude, NewOnly: true})
+	if err != nil || rec.State != task.Working || len(f.runners.spawned) != 1 {
+		t.Fatalf("start = %+v, %v; want a WORKING run for a tracked issue with no delegation", rec, err)
+	}
+}

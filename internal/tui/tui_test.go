@@ -65,19 +65,19 @@ func TestApplyKeepsTheInboxWhenARefreshFails(t *testing.T) {
 func TestStartReportsTheBranchAndAFailure(t *testing.T) {
 	started := &task.Record{Key: task.Key{Repo: "a/b", Number: 1}, State: task.Working,
 		Delegation: &task.Delegation{Branch: "feat/1-add-a-dashboard"}}
-	got := start(context.Background(), stubSource{rec: started}, app.StartRequest{Repo: "a/b", Issue: 1})
+	got := start(context.Background(), stubSource{rec: started}, app.StartRequest{Repo: "a/b", Issue: 1}, false)
 	if got.err != nil || !strings.Contains(got.message, "feat/1-add-a-dashboard") {
 		t.Errorf("start = %+v", got)
 	}
 
 	failed := &task.Record{Key: task.Key{Repo: "a/b", Number: 1}, State: task.Failed,
 		LastOutcome: &task.Outcome{Summary: "could not launch runner"}}
-	got = start(context.Background(), stubSource{rec: failed}, app.StartRequest{Repo: "a/b", Issue: 1})
+	got = start(context.Background(), stubSource{rec: failed}, app.StartRequest{Repo: "a/b", Issue: 1}, false)
 	if !strings.Contains(got.message, "could not launch runner") {
 		t.Errorf("failed start = %+v", got)
 	}
 
-	got = start(context.Background(), stubSource{err: errors.New("issue is closed")}, app.StartRequest{Repo: "a/b", Issue: 1})
+	got = start(context.Background(), stubSource{err: errors.New("issue is closed")}, app.StartRequest{Repo: "a/b", Issue: 1}, false)
 	if got.err == nil || !strings.Contains(got.err.Error(), "start a/b#1") {
 		t.Errorf("start error = %+v", got)
 	}
@@ -211,11 +211,11 @@ func TestStartMakesTheContextFileAbsolute(t *testing.T) {
 	var got app.StartRequest
 	s := recordingSource{rec: &task.Record{Key: task.Key{Repo: "a/b", Number: 1}, State: task.Working,
 		Delegation: &task.Delegation{Branch: "feat/1"}}, seen: &got}
-	start(context.Background(), s, app.StartRequest{Repo: "a/b", Issue: 1, ContextFile: "notes/825.md"})
+	start(context.Background(), s, app.StartRequest{Repo: "a/b", Issue: 1, ContextFile: "notes/825.md"}, false)
 	if !filepath.IsAbs(got.ContextFile) || !strings.HasSuffix(got.ContextFile, "notes/825.md") {
 		t.Errorf("context file = %q; want an absolute path", got.ContextFile)
 	}
-	start(context.Background(), s, app.StartRequest{Repo: "a/b", Issue: 1})
+	start(context.Background(), s, app.StartRequest{Repo: "a/b", Issue: 1}, false)
 	if got.ContextFile != "" {
 		t.Errorf("an empty context file became %q", got.ContextFile)
 	}
@@ -304,5 +304,121 @@ func TestDrawPaintsEveryLineWithoutATrailingNewline(t *testing.T) {
 	want := home + "one" + eraseLine + "\r\n" + "two" + eraseLine
 	if b.String() != want {
 		t.Errorf("draw = %q; want %q", b.String(), want)
+	}
+}
+
+// autoSource starts every issue except the ones in fail, which return an error.
+type autoSource struct {
+	stubSource
+	fail map[int]bool
+}
+
+func (s autoSource) Start(_ context.Context, req app.StartRequest) (*task.Record, error) {
+	if s.fail[req.Issue] {
+		return nil, errors.New("clone failed")
+	}
+	return &task.Record{Key: task.Key{Repo: req.Repo, Number: req.Issue}, State: task.Working,
+		Delegation: &task.Delegation{Branch: fmt.Sprintf("feat/%d", req.Issue)}}, nil
+}
+
+func refreshed(entries ...app.InboxEntry) result {
+	return result{report: &app.InboxReport{Current: entries}}
+}
+
+func receive(t *testing.T, results <-chan result) result {
+	t.Helper()
+	select {
+	case r := <-results:
+		return r
+	case <-time.After(2 * time.Second):
+		t.Fatal("no start came back")
+	}
+	return result{}
+}
+
+func TestAutoStartAfterARefreshCountsTowardPending(t *testing.T) {
+	m := Model{Width: 100, Height: 30, Refreshing: true}
+	m.SetAuto(Auto{Enabled: true, Agent: task.Claude, Max: 3})
+	results := make(chan result, 8)
+	src := autoSource{}
+	launched := settle(context.Background(), src, &m, refreshed(assigned("a/b", 1, 0), assigned("c/d", 2, 1)), results)
+	if launched != 2 {
+		t.Fatalf("a refresh launched %d auto starts; want 2 counted as pending", launched)
+	}
+	for range 2 {
+		r := receive(t, results)
+		if !r.finished || !r.auto || !strings.HasPrefix(r.message, "auto: Started") {
+			t.Fatalf("auto start result = %+v; want a finished auto result quitting waits for", r)
+		}
+		if n := settle(context.Background(), src, &m, r, results); n != 0 {
+			t.Fatalf("a finished start launched %d more; each issue starts once", n)
+		}
+	}
+	if n := settle(context.Background(), src, &m, result{report: &app.InboxReport{}, err: errors.New("gh down")}, results); n != 0 {
+		t.Fatalf("a failed refresh launched %d auto starts", n)
+	}
+}
+
+func TestAutoStartFailureShowsTheError(t *testing.T) {
+	m := Model{Width: 100, Height: 30, Refreshing: true}
+	m.SetAuto(Auto{Enabled: true, Agent: task.Claude, Max: 1})
+	results := make(chan result, 8)
+	src := autoSource{fail: map[int]bool{1: true}}
+	refresh := refreshed(assigned("a/b", 1, 0), assigned("a/b", 2, 1))
+	if n := settle(context.Background(), src, &m, refresh, results); n != 1 {
+		t.Fatalf("launched %d; want the oldest issue only", n)
+	}
+	failed := receive(t, results)
+	if n := settle(context.Background(), src, &m, failed, results); n != 1 {
+		t.Fatalf("after a failed start launched %d; want the next issue", n)
+	}
+	if !strings.Contains(m.Message, "! auto: start a/b#1: clone failed") {
+		t.Fatalf("message = %q; want the auto start error", m.Message)
+	}
+	settle(context.Background(), src, &m, receive(t, results), results)
+	if !strings.Contains(m.Message, "clone failed") {
+		t.Errorf("the next auto start's success replaced the error: %q", m.Message)
+	}
+	if n := settle(context.Background(), src, &m, refresh, results); n != 0 {
+		t.Fatalf("the next refresh retried the failed start: launched %d", n)
+	}
+}
+
+func TestAutoStartWaitsWhenTheTaskReadFails(t *testing.T) {
+	m := Model{Width: 100, Height: 30, Refreshing: true}
+	m.SetAuto(Auto{Enabled: true, Agent: task.Claude, Max: 1})
+	results := make(chan result, 8)
+	src := autoSource{}
+	if n := settle(context.Background(), src, &m, refreshed(assigned("a/b", 1, 0), assigned("c/d", 2, 1)), results); n != 1 {
+		t.Fatalf("launched %d; want one start for a limit of 1", n)
+	}
+	broken := autoSource{stubSource: stubSource{err: errors.New("tasks dir unreadable")}}
+	if n := settle(context.Background(), broken, &m, receive(t, results), results); n != 0 {
+		t.Fatalf("launched %d after the task read failed; the first run may still be WORKING", n)
+	}
+	if n := launchAuto(context.Background(), broken, &m, results); n != 0 {
+		t.Fatalf("a local tick launched %d with the task read still failing", n)
+	}
+}
+
+func TestAutoStartAfterARefreshCountsARunStartedElsewhere(t *testing.T) {
+	m := Model{Width: 100, Height: 30, Refreshing: true}
+	m.SetAuto(Auto{Enabled: true, Agent: task.Claude, Max: 1})
+	// Another foreman command started a/b#10 while the refresh ran.
+	src := autoSource{stubSource: stubSource{recs: []*task.Record{record(10, task.Working)}}}
+	results := make(chan result, 8)
+	if n := settle(context.Background(), src, &m, refreshed(assigned("c/d", 1, 0)), results); n != 0 {
+		t.Fatalf("a refresh launched %d with the only slot taken by a run the dashboard had not read", n)
+	}
+}
+
+func TestTurningAutoOnCountsARunStartedElsewhere(t *testing.T) {
+	m := Model{Width: 100, Height: 30}
+	m.SetAuto(Auto{Max: 1})
+	m.SetInbox([]app.InboxEntry{assigned("c/d", 1, 0)})
+	src := autoSource{stubSource: stubSource{recs: []*task.Record{record(10, task.Working)}}}
+	m.Key(rune_('a'))
+	if n := launchAutoFresh(context.Background(), src, &m, make(chan result, 8)); n != 0 {
+		t.Fatalf("turning auto on launched %d with the only slot taken by a run the dashboard had not read", n)
 	}
 }

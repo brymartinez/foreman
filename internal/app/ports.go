@@ -27,6 +27,7 @@ type InboxItem struct {
 	Title     string
 	URL       string
 	State     string // open, closed, merged
+	CreatedAt time.Time
 	UpdatedAt time.Time
 	Reasons   []task.InboxReason
 }

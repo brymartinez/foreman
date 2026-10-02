@@ -90,7 +90,7 @@ Run `foreman` with no arguments to open a live view. This example shows the log 
 pressing Enter on a delegated task:
 
 ```
-foreman · 2 delegated · 3 in the inbox · refreshed 10:01:22
+foreman · 2 delegated · 3 in the inbox · auto on 1/3 · refreshed 10:01:22
 ▸ INBOX                           │ DELEGATED WORK
 > midsoln/foreman#1  Be interactive │ ridezoomo/armada#340   Codex   READY_FOR_HUMAN
     assigned to you                │   Cache fleet lookups · ridezoomo/armada
@@ -123,6 +123,7 @@ task's state. The selected row is drawn in reverse video with no color inside it
 | `enter` on an issue | delegate it: pick `1` for Claude or `2` for Codex, then type an optional context file |
 | `enter` on a task | open its log below; show how to answer a waiting question |
 | `c` | cancel the highlighted delegated task, after a `y`/`n` confirm |
+| `a` | turn auto mode on or off; the choice is kept for the next launch |
 | `r` | refresh from GitHub now |
 | `u` `d` with a log open | scroll up or down one page |
 | `ctrl+u` `ctrl+d` with a log open | scroll up or down half a page |
@@ -144,6 +145,21 @@ prints this usage text and exits 0, so pipes and scripts are unaffected.
 
 Answering a question still belongs to `foreman respond <issue>`, which the dashboard
 points you at.
+
+Auto mode is on by default. While the dashboard is open, it starts open issues
+assigned to you that foreman has never delegated, oldest first, with `auto.agent` and
+no context file. It looks after the first refresh, after each successful refresh, and
+when a run leaves WORKING or REVIEWING. Mentions, FAILED tasks, and REVIEWED tasks
+never start on their own. At most `auto.max_concurrent` runs are active at once, and
+runs you start by hand count toward that limit. Issues in one repository start one
+at a time, because they share its checkout. You can still start an issue by hand
+when the limit is full. The header shows `auto on 1/3` (active runs and the limit) or
+`auto off`.
+
+Press `a` to turn auto mode off or on. Turning it off leaves running agents alone. The
+choice is saved in `~/.local/share/foreman/state.json` and read at the next launch. A
+start that fails is shown on the message line and is not retried until you reopen the
+dashboard. An issue that lacks detail goes through the usual decision flow.
 
 `foreman inbox` lists open issues assigned to you, open issues and PRs that mention
 you, and PRs that request your review. It also reports what changed since the last run,
@@ -406,6 +422,9 @@ review_rounds: 3                     # reviewer passes over the whole PR per rev
 fix_rounds: 3                        # fix and re-review cycles before foreman asks you
 mentions: true                       # show items found only because they mention you
 refresh: 60                          # seconds between the dashboard's GitHub refreshes
+auto:                                # the dashboard's auto mode; press a to turn it off
+  agent: claude                      # claude or codex
+  max_concurrent: 3                  # active runs, manual ones included
 budgets:                             # Claude only: Codex reports no cost, so it has no cap
   implementer_usd: 3.00              # Claude maximum per implementation turn
   reviewer_usd: 1.00                 # Claude maximum per review turn

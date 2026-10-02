@@ -38,6 +38,7 @@ const (
 	ActionStart
 	ActionCancel
 	ActionResume
+	ActionAuto
 )
 
 // Action is what a keystroke asks the driver to do. The model itself does no I/O.
@@ -79,9 +80,18 @@ type Model struct {
 	RefreshedAt time.Time
 	Warnings    []error
 
-	pending      app.StartRequest // the delegation being collected
-	cancelTarget task.Key         // the task named when cancellation was requested
-	manualTask   bool             // cursor movement stops following the latest delegation
+	// AutoOn starts eligible INBOX issues with AutoAgent while fewer than AutoMax
+	// runs are active.
+	AutoOn    bool
+	AutoAgent task.Agent
+	AutoMax   int
+
+	pending      app.StartRequest  // the delegation being collected
+	cancelTarget task.Key          // the task named when cancellation was requested
+	manualTask   bool              // cursor movement stops following the latest delegation
+	tried        map[task.Key]bool // issues started this session, by hand or automatically
+	starting     map[task.Key]bool // starts and resumes in flight, manual or automatic
+	tasksStale   bool              // the last task read failed
 }
 
 // Selected is the highlighted delegated task, or nil when nothing is delegated.
@@ -106,7 +116,7 @@ func (m *Model) SetTasks(recs []*task.Record) {
 	if cur := m.Selected(); cur != nil {
 		selected = cur.Key
 	}
-	m.Tasks = recs
+	m.Tasks, m.tasksStale = recs, false
 	if !m.manualTask {
 		m.TaskCursor = newestTask(recs)
 	} else {
@@ -196,6 +206,8 @@ func (m *Model) browse(k Key) Action {
 		return Action{Kind: ActionQuit}
 	case k.Kind == KeyRune && k.Rune == 'r':
 		return Action{Kind: ActionRefresh}
+	case k.Kind == KeyRune && k.Rune == 'a':
+		return m.toggleAuto()
 	case k.Kind == KeyTab:
 		m.Focus = (m.Focus + 1) % 2
 	case k.Kind == KeyLeft || (k.Kind == KeyRune && k.Rune == 'h'):
@@ -335,6 +347,7 @@ func (m *Model) enter() Action {
 			// ask: it goes straight back to work on the comments.
 			m.manualTask = false
 			m.Message = fmt.Sprintf("Resuming %s#%d to answer its PR feedback…", e.Item.Key.Repo, e.Item.Key.Number)
+			m.starting = mark(m.starting, e.Item.Key)
 			return Action{Kind: ActionResume, Resume: e.Item.Key}
 		}
 		m.pending = app.StartRequest{Repo: e.Item.Key.Repo, Issue: e.Item.Key.Number}
@@ -399,6 +412,8 @@ func (m *Model) typeContext(k Key) Action {
 		m.Mode, m.Input = Browsing, ""
 		m.manualTask = false
 		m.Message = fmt.Sprintf("Starting %s#%d with %s…", req.Repo, req.Issue, req.Agent)
+		k := task.Key{Repo: req.Repo, Number: req.Issue}
+		m.tried, m.starting = mark(m.tried, k), mark(m.starting, k)
 		return Action{Kind: ActionStart, Start: req}
 	}
 	return Action{}

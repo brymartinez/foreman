@@ -129,6 +129,7 @@ func run(argv []string) int {
 		if err := tui.Run(ctx, tui.Options{
 			In: os.Stdin, Out: os.Stdout, Source: a,
 			GitHubEvery: time.Duration(cfg.Refresh) * time.Second, LocalEvery: localRefresh,
+			Auto: autoMode(cfg.Auto),
 		}); err != nil {
 			return fail(err)
 		}
@@ -278,6 +279,20 @@ func run(argv []string) int {
 		fmt.Fprintf(log, "foreman: runner %d finished\n", os.Getpid())
 	}
 	return 0
+}
+
+// autoMode reads the saved auto mode choice. A state file that cannot be read
+// leaves auto mode on, and the dashboard shows why.
+func autoMode(cfg config.Auto) tui.Auto {
+	auto := tui.Auto{Enabled: true, Agent: cfg.Agent, Max: cfg.MaxConcurrent}
+	path, err := config.StatePath()
+	if err != nil {
+		auto.LoadErr = err
+		return auto
+	}
+	auto.Enabled, auto.LoadErr = config.LoadAutoEnabled(path)
+	auto.Save = func(on bool) error { return config.SaveAutoEnabled(path, on) }
+	return auto
 }
 
 func notification(cfg config.Config) app.Notifier {

@@ -2,9 +2,9 @@
 
 ## Current stage
 
-Stage 29 (Discord webhook alerts in place of desktop notifications, for issue #32) is
-complete. Completed runs are needed to measure the effect of the model and budget
-choices. The ranked refactor candidates below are the next code-quality stages.
+Stage 30 (dashboard auto mode for issue #30) is complete. Completed runs are needed to
+measure the effect of the model and budget choices. The ranked refactor candidates
+below are the next code-quality stages.
 
 ## Refactor candidates
 

@@ -56,7 +56,7 @@ func execGH(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	return stdout.Bytes(), nil
 }
 
-const searchFields = "number,title,url,state,updatedAt,repository"
+const searchFields = "number,title,url,state,createdAt,updatedAt,repository"
 
 // searchLimit is the most results gh search returns for one query.
 const searchLimit = 1000
@@ -80,6 +80,7 @@ type searchHit struct {
 	Title      string    `json:"title"`
 	URL        string    `json:"url"`
 	State      string    `json:"state"`
+	CreatedAt  time.Time `json:"createdAt"`
 	UpdatedAt  time.Time `json:"updatedAt"`
 	Repository struct {
 		NameWithOwner string `json:"nameWithOwner"`
@@ -146,6 +147,7 @@ func (c Client) search(ctx context.Context, s search) ([]app.InboxItem, error) {
 			Title:     h.Title,
 			URL:       h.URL,
 			State:     strings.ToLower(h.State),
+			CreatedAt: h.CreatedAt,
 			UpdatedAt: h.UpdatedAt,
 			Reasons:   []task.InboxReason{s.reason},
 		})
@@ -158,6 +160,7 @@ type restIssue struct {
 	Title       string    `json:"title"`
 	HTMLURL     string    `json:"html_url"`
 	State       string    `json:"state"`
+	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 	PullRequest *struct {
 		MergedAt *time.Time `json:"merged_at"`
@@ -180,6 +183,7 @@ func (c Client) GetItem(ctx context.Context, key task.Key) (app.InboxItem, error
 		Title:     r.Title,
 		URL:       r.HTMLURL,
 		State:     r.State,
+		CreatedAt: r.CreatedAt,
 		UpdatedAt: r.UpdatedAt,
 		Reasons:   []task.InboxReason{task.Tracked},
 	}
