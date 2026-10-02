@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"slices"
 	"testing"
@@ -10,10 +12,14 @@ import (
 	"github.com/brymartinez/foreman/internal/task"
 )
 
-type fakeNotifier struct{ sent []string }
+type fakeNotifier struct {
+	sent   []string
+	alerts []Alert
+}
 
-func (f *fakeNotifier) Notify(title, body string) error {
-	f.sent = append(f.sent, title+": "+body)
+func (f *fakeNotifier) Notify(a Alert) error {
+	f.sent = append(f.sent, fmt.Sprintf("Foreman %s#%d: %s", a.Key.Repo, a.Key.Number, a.Label()))
+	f.alerts = append(f.alerts, a)
 	return nil
 }
 
@@ -63,5 +69,43 @@ func TestNotifiesEveryTransitionThatNeedsTheDeveloper(t *testing.T) {
 				t.Errorf("notifications = %q, want %q", f.notes.sent, c.want)
 			}
 		})
+	}
+}
+
+func TestNotifyLinksThePRWhenOneExistsElseTheIssue(t *testing.T) {
+	t.Run("a task without a PR links its issue", func(t *testing.T) {
+		f := newFixture()
+		started(t, f, startReq(t))
+		if _, _, err := f.app.Status(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if len(f.notes.alerts) != 1 || f.notes.alerts[0].URL != "https://x/825" {
+			t.Errorf("alerts = %+v, want one linking https://x/825", f.notes.alerts)
+		}
+	})
+	t.Run("a task with a PR links the PR", func(t *testing.T) {
+		f := newFixture()
+		ready(t, f)
+		if len(f.notes.alerts) != 1 || f.notes.alerts[0].URL != "https://github.com/ridezoomo/armada-backend/pull/912" {
+			t.Errorf("alerts = %+v, want one linking PR 912", f.notes.alerts)
+		}
+	})
+}
+
+func TestNotifyCarriesTheStateAndMarksCancelledRuns(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	ctx, cancel := context.WithCancelCause(context.Background())
+	f.claude.err = errors.New("claude printed no result (signal: terminated)")
+	f.claude.during = func() { cancel(errors.New("terminated signal received")) }
+	if err := f.app.RunTask(ctx, key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.notes.alerts) != 1 {
+		t.Fatalf("alerts = %+v, want one", f.notes.alerts)
+	}
+	got := f.notes.alerts[0]
+	if got.State != task.Failed || !got.Cancelled || got.Key != key || got.Label() != "Run cancelled" {
+		t.Errorf("alert = %+v label %q, want a cancelled FAILED alert for %v", got, got.Label(), key)
 	}
 }

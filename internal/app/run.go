@@ -477,23 +477,17 @@ func (a App) notify(key task.Key, rec *task.Record) {
 	if a.Notifier == nil {
 		return
 	}
-	var body string
 	switch rec.State {
-	case task.NeedsDecision:
-		body = "Needs your decision"
-	case task.Failed:
-		body = "Run failed"
-		if rec.LastOutcome != nil && rec.LastOutcome.Status == Cancelled {
-			body = "Run cancelled"
-		}
-	case task.ReadyForHuman:
-		body = "Ready for human review"
-	case task.Reviewed:
-		body = "PR feedback to answer"
+	case task.NeedsDecision, task.Failed, task.ReadyForHuman, task.Reviewed:
 	default:
 		return
 	}
-	_ = a.Notifier.Notify(fmt.Sprintf("Foreman %s#%d", key.Repo, key.Number), body)
+	alert := Alert{State: rec.State, Key: key, URL: rec.URL}
+	alert.Cancelled = rec.State == task.Failed && rec.LastOutcome != nil && rec.LastOutcome.Status == Cancelled
+	if rec.Delegation != nil && rec.Delegation.PRURL != "" {
+		alert.URL = rec.Delegation.PRURL
+	}
+	_ = a.Notifier.Notify(alert)
 }
 
 // brief gathers the durable task context the implementation prompt is built from.
