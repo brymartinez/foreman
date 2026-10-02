@@ -29,3 +29,4 @@ These cover commit messages, code comments, the planning documents, and your fin
 17. Comments explain a non-obvious why. Delete comments that restate the code.
 18. Commit subjects use conventional prefixes (`feat:`, `fix:`, `chore:`, `docs:`, `test:`, `refactor:`) and stay under 72 characters.
 19. Commits carry no agent attribution. Leave out `Co-Authored-By` trailers for an agent and any "Generated with" or "Powered by" line. Commit under the repository's configured git identity.
+20. Lead with the result. The planning documents, commit bodies, and your final summary state the point first and the detail after.

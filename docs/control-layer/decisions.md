@@ -1921,3 +1921,20 @@ Entry format:
   both branches' decision histories.
 - **Consequence.** Planning history does not burden implementation or feedback turns,
   and issue #7's comments remain actionable after the merge.
+
+
+## D129. Concise planning comments and PR descriptions
+
+- Date: 2026-10-01. Issue midsoln/foreman#13.
+- **Context.** The four planning comments and the PR description held useful detail but
+  took too long to read, and the PR often repeated the plan. The writing style comes
+  only from the default stage files, which `internal/agent/prompt.go` embeds.
+- **Decision.** Edit the defaults only. `plan.md` gains a Style section: each document
+  opens with a `**Summary.**` of two or three sentences, keeps references, constraints,
+  decisions, and test steps, and cuts repeated background. `pr.md` limits the body to
+  about 25 lines and adds a Plan item that links the four planning comments instead of
+  repeating them. `implement.md` rule 20 asks every written output to lead with the
+  result. No Go change.
+- **Consequence.** New installs and new runs get the shorter style. `make setup` does
+  not overwrite installed copies in `~/.config/foreman/stages/`, so existing users copy
+  the new defaults by hand. Existing comments and PRs stay as they are.

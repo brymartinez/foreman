@@ -2,8 +2,8 @@
 
 ## Current stage
 
-Stage 19 (PR feedback, the INBOX filter, and readable Codex logs for issue #7) is
-complete. Completed runs are needed to measure the effect of the model and budget choices.
+Stage 20 (concise planning comments and PR descriptions for issue #13) is complete.
+Completed runs are needed to measure the effect of the model and budget choices.
 
 ## Completed
 
@@ -600,6 +600,14 @@ request. Each fix is its own commit with a decision.
   main's D117 and D118 (D128).
 - Verified the combined tree with `go test ./...`, `go vet ./...`, a binary build,
   and all `scripts/e2e.sh` scenarios with normal process access.
+
+### Stage 20 (complete): concise planning comments and PR descriptions for issue #13
+
+- `defaults/stages/plan.md` asks each planning document to open with a short summary
+  and to cut repeated background. `pr.md` caps the body at about 25 lines and links the
+  planning comments. `implement.md` rule 20 asks writing to lead with the result (D129).
+- Installed stage files, existing comments, and existing PRs do not change.
+- Verified with `go vet ./...`, `go test ./...`, a binary build, and `scripts/e2e.sh`.
 
 ## Known limitations
 
