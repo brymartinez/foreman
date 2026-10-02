@@ -513,3 +513,62 @@ func TestImplementationPromptPRInstructions(t *testing.T) {
 		t.Errorf("without PR instructions only Closes #N is required:\n%s", p)
 	}
 }
+
+func TestImplementationPromptRequiresTestFirstBehaviorTests(t *testing.T) {
+	p := ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}, StageInstructions: "Run make test."})
+	for _, want := range []string{
+		"## Tests",
+		"write the test that checks it before you write the code",
+		"check that it fails for the expected reason",
+		"rerun the relevant tests",
+		"Commit a test only once it passes. Never commit a failing test.",
+		"Name each test and subtest after the condition and the expected behavior",
+		"The name must match what the assertions check.",
+		"Do not rewrite existing tests only to meet these rules.",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("implementation prompt missing %q", want)
+		}
+	}
+	if strings.Index(p, "Run make test.") > strings.Index(p, "## Tests") {
+		t.Error("the test rules must follow the developer's stage instructions")
+	}
+}
+
+func TestImplementationPromptTestRulesApplyWithoutStageInstructions(t *testing.T) {
+	p := ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}})
+	if !strings.Contains(p, "## Tests") || !strings.Contains(p, "Never commit a failing test.") {
+		t.Errorf("a prompt without stage instructions lacks the test rules:\n%s", p)
+	}
+}
+
+func TestPlanningPromptAsksPlanToNameEachTestBehavior(t *testing.T) {
+	const rule = "the implementation plan names each test by its readable name and the behavior it checks"
+	if p := ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}, Planning: true}); !strings.Contains(p, rule) {
+		t.Errorf("planning prompt missing %q:\n%s", rule, p)
+	}
+	if p := ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}}); strings.Contains(p, rule) {
+		t.Error("an implementation prompt carries the planning test rule")
+	}
+}
+
+func TestPlanningPromptOmitsTheImplementationTestSection(t *testing.T) {
+	p := ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}, Planning: true})
+	if strings.Contains(p, "## Tests") || strings.Contains(p, "Never commit a failing test.") {
+		t.Errorf("a planning prompt carries the implementation test section:\n%s", p)
+	}
+}
+
+func TestConflictRepairPromptOmitsTheTestFirstSection(t *testing.T) {
+	p := ImplementationPrompt(TaskBrief{Branch: "feat/1-x", BaseBranch: "main", PR: 912, Conflict: &Conflict{PR: 912, Base: "main", BaseHead: "ba5e001"}})
+	if strings.Contains(p, "## Tests") {
+		t.Errorf("a conflict repair prompt carries the test section:\n%s", p)
+	}
+}
+
+func TestMergeBeforeReviewPromptOmitsTheTestFirstSection(t *testing.T) {
+	p := ImplementationPrompt(TaskBrief{Branch: "feat/1-x", BaseBranch: "main", Merge: &MergeBrief{Base: "main", Files: []string{"retry.go"}}})
+	if strings.Contains(p, "## Tests") {
+		t.Errorf("a merge-before-review prompt carries the test section:\n%s", p)
+	}
+}
