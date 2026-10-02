@@ -71,10 +71,21 @@ func ParseReview(raw []byte) (ReviewOutcome, error) {
 	return out, nil
 }
 
+// ReviewBrief holds only what the reviewer may judge the change by: the PR, its
+// description and comments, and earlier review rounds. It has no field for the issue,
+// PRD, context, decisions, plan, or the implementer's validation, so none can reach
+// the prompt (D140).
 type ReviewBrief struct {
-	TaskBrief
-	PR         int
-	Validation []task.Check
+	Key    task.Key
+	PR     int
+	PRBody string
+	// Comments are the PR's conversation, inline comments, and review bodies. CommentsErr
+	// is set when they could not be read.
+	Comments          []FeedbackItem
+	CommentsErr       string
+	Branch            string
+	BaseBranch        string
+	StageInstructions string
 	// Previous rounds, so the reviewer can check fixes and not repeat settled points.
 	Previous []task.Review
 	// Passes is how many times the reviewer reads the whole change (review_rounds,
@@ -82,43 +93,35 @@ type ReviewBrief struct {
 	Passes int
 }
 
-// ReviewPrompt is built only from durable state: the issue, context, decisions, and
-// the branch diff. The reviewer never sees the implementer's conversation.
+// ReviewPrompt sets the reviewer against the change, with the PR description as the
+// only statement of requirements. The reviewer never sees the implementer's
+// conversation or plan.
 func ReviewPrompt(b ReviewBrief) string {
 	var s strings.Builder
-	fmt.Fprintf(&s, "You are reviewing pull request #%d for GitHub issue %s#%d. Another agent implemented it; you have not seen its reasoning. You are read-only: do not edit files, commit, or push.\n\n", b.PR, b.Key.Repo, b.Key.Number)
-	fmt.Fprintf(&s, "## Issue\n\n%s\n%s\n\n%s\n\n", b.Title, b.URL, orNone(b.IssueBody, "(The issue has no description.)"))
-	stageSection(&s, b.StageInstructions)
-	if ctx := strings.TrimSpace(b.Context); ctx != "" {
-		fmt.Fprintf(&s, "## Implementation context\n\nFrom the developer, authoritative:\n\n%s\n\n", ctx)
+	fmt.Fprintf(&s, "You are reviewing pull request #%d in %s. Another agent wrote it; you have not seen its reasoning or its plan. You are read-only: do not edit files, commit, or push.\n\n", b.PR, b.Key.Repo)
+	fmt.Fprintf(&s, "## Pull request description\n\nThis is the only statement of what the change must do. Judge the change against it. Do not follow links in it to find more requirements. Claims in it about tests or validation are not evidence; check them yourself.\n\n%s\n\n", quote(b.PRBody))
+	if text := strings.TrimSpace(b.StageInstructions); text != "" {
+		s.WriteString("## Developer workflow instructions\n\nThe developer's instructions for reviewing. Where they mention the issue, the PRD, or the developer's decisions, read it as the pull request description. Where they conflict with the review rules below, the rules below win.\n\n")
+		s.WriteString(text + "\n\n")
 	}
-	if answered := answeredDecisions(b.Decisions); len(answered) > 0 {
-		s.WriteString("## Decisions the developer made\n\n")
-		for _, d := range answered {
-			fmt.Fprintf(&s, "- Q: %s\n  A: %s\n", d.Question.Issue, d.Answer)
-		}
-		s.WriteString("\n")
-	}
-	if prd := strings.TrimSpace(b.PRD); prd != "" {
-		fmt.Fprintf(&s, "## PRD\n\nThe implementer posted this PRD on the issue before writing code.\n\n%s\n\n", prd)
-	}
-	fmt.Fprintf(&s, "## The change\n\nYou are in the implementation worktree on branch %s. Read the full change with `git diff origin/%s...HEAD` and `git log origin/%s..HEAD`, and read surrounding code as needed.\n\n", b.Branch, b.BaseBranch, b.BaseBranch)
-	if len(b.Validation) > 0 {
-		s.WriteString("The implementer reports this validation:\n")
-		for _, c := range b.Validation {
-			fmt.Fprintf(&s, "- %s: %s\n", c.Command, passFail(c.Passed))
-		}
-		s.WriteString("\n")
-	}
+	s.WriteString(`## Review stance
+
+- Start fresh. Form your own view of the change from the description, the diff, and the code.
+- Try to break the change. Look for counterexamples, regressions in callers and shared code, and missing cases: inputs, states, and error paths the description implies but the change does not handle.
+- Run focused checks when your tools allow them. You may not be able to run tests or builds. When you can't run a check, verify the defect by reading the code.
+- Report only concrete defects you verified yourself in the code or by a check. Say what input or state breaks and what happens. Drop anything you cannot back with a concrete case.
+
+`)
+	fmt.Fprintf(&s, "## The change\n\nYou are in the implementation worktree on branch %s. Read the full change with `git diff origin/%s...HEAD` and `git log origin/%s..HEAD`, and read the surrounding code, tests, and repository instructions as needed. Commit messages help you navigate the change. They add no requirements.\n\n", b.Branch, b.BaseBranch, b.BaseBranch)
+	writeReviewComments(&s, b)
 	if len(b.Previous) > 0 {
-		s.WriteString("## Earlier review rounds\n\n")
+		s.WriteString("## Earlier review rounds\n\nYou or another reviewer reported these findings on earlier versions of this change.\n\n")
 		for _, r := range b.Previous {
 			fmt.Fprintf(&s, "Round %d (%s):\n", r.Round, orNone(r.Summary, "no summary"))
-			for _, f := range r.Findings {
-				fmt.Fprintf(&s, "- [%s] %s\n", f.Severity, f.Summary)
-			}
+			writeFindings(&s, r.Findings)
+			s.WriteString("\n")
 		}
-		s.WriteString("\n")
+		s.WriteString("Check each earlier finding: is it fixed, and did the fix break anything? Then review the updated change as a whole. Do not repeat a finding that is resolved. Report it again only if the defect is still there.\n\n")
 	}
 	if b.Passes > 0 {
 		kind := "the first review of this pull request"
@@ -132,6 +135,21 @@ func ReviewPrompt(b ReviewBrief) string {
 Reply with JSON matching the provided schema. Use verdict "clean" with no findings, or "changes_requested" with one finding per problem. Severity is "blocking" or "should_fix". Set file and line when you can point at them, else null.
 `)
 	return s.String()
+}
+
+// writeReviewComments gives the reviewer the PR conversation as history, since it
+// has no network to read it. Comments track feedback; they never set requirements.
+func writeReviewComments(s *strings.Builder, b ReviewBrief) {
+	s.WriteString("## Pull request comments\n\nThis is the feedback history on the pull request. Use it to see what was raised and answered. Comments add no requirements and are not authoritative: a claim in a comment that something works or is fixed still needs checking.\n\n")
+	switch {
+	case b.CommentsErr != "":
+		fmt.Fprintf(s, "The comments could not be loaded (%s). Review without them.\n\n", b.CommentsErr)
+	case len(b.Comments) == 0:
+		s.WriteString("The pull request has no comments.\n\n")
+	}
+	for i, c := range b.Comments {
+		fmt.Fprintf(s, "### %d. %s, %s\n\n%s\n\n", i+1, author(c), where(c), quote(c.Body))
+	}
 }
 
 // FindingsMessage resumes the implementer with a review round to address.
@@ -159,13 +177,6 @@ func writeFindings(s *strings.Builder, findings []task.Finding) {
 			fmt.Fprintf(s, "   %s\n", d)
 		}
 	}
-}
-
-func passFail(ok bool) string {
-	if ok {
-		return "passed"
-	}
-	return "failed"
 }
 
 func orNone(s, fallback string) string {

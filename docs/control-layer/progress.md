@@ -2,7 +2,7 @@
 
 ## Current stage
 
-Stage 25 (a shorter default PR description for issue #21) is complete.
+Stage 26 (adversarial reviews against the PR description for issue #22) is complete.
 Completed runs are needed to measure the effect of the model and budget choices.
 
 ## Completed
@@ -668,6 +668,15 @@ request. Each fix is its own commit with a decision.
 - Installed stage files and existing PRs do not change.
 - Verified with `go vet ./...`, `go test ./...`, and a binary build.
 
+### Stage 26 (complete): adversarial reviews for issue #22
+
+- The reviewer gets the PR description as its only requirements, plus the PR comments
+  as non-authoritative history. It no longer sees the issue, PRD, context, decisions,
+  or the implementer's validation. A blank or unreadable description stops the review.
+  The prompt asks for counterexamples and verified defects, and a re-review lists the
+  earlier findings in full (D140).
+- Verified with `go vet ./...`, `go test ./...`, a binary build, and `scripts/e2e.sh`.
+
 ## Known limitations
 
 - The gate runs only when `inbox` or `status` runs, or while the dashboard is open
@@ -810,6 +819,7 @@ what it replaced. Current summary:
 - D138. The prompt carries a built-in test-first, readable-test rule.
 - D139 (amends D129). The PR description holds Problem, Fix, Risk, and optional
   Review notes.
+- D140. The reviewer judges the PR against its description alone.
 
 ## Next stage
 

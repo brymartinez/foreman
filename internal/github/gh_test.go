@@ -163,6 +163,19 @@ func TestPullRequestMergeable(t *testing.T) {
 	}
 }
 
+func TestPullRequestBody(t *testing.T) {
+	c := Client{Run: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if !strings.Contains(strings.Join(args, " "), "body") {
+			t.Errorf("gh call does not ask for body: %v", args)
+		}
+		return []byte(`{"number":5,"state":"OPEN","body":"Retry 5xx only.\n\nCloses #4"}`), nil
+	}}
+	pr, err := c.GetPullRequest(context.Background(), task.Key{Repo: "a/b", Number: 5})
+	if err != nil || pr.Body != "Retry 5xx only.\n\nCloses #4" {
+		t.Errorf("body = %q, %v", pr.Body, err)
+	}
+}
+
 func TestBranchHead(t *testing.T) {
 	var got string
 	c := Client{Run: func(_ context.Context, _ string, args ...string) ([]byte, error) {

@@ -46,8 +46,8 @@ func TestReviewLoopCleanFirstRound(t *testing.T) {
 		t.Fatalf("wrong reviewer: codex %d claude %d", len(f.codex.reviewed), len(f.claude.reviewed))
 	}
 	p := f.codex.reviewed[0]
-	if !strings.Contains(p, "pull request #912") || !strings.Contains(p, "5xx-only retry semantics") || strings.Contains(p, "sid-1") {
-		t.Errorf("review prompt must carry durable context and no implementer session:\n%s", p)
+	if !strings.Contains(p, "pull request #912") || !strings.Contains(p, "> Retry 5xx only.") || strings.Contains(p, "5xx-only retry semantics") || strings.Contains(p, "sid-1") {
+		t.Errorf("review prompt must carry the PR description, no context, and no implementer session:\n%s", p)
 	}
 	if got.Delegation.RunnerPID != 0 || got.LastOutcome.Status != "review_clean" {
 		t.Errorf("pid %d outcome %+v", got.Delegation.RunnerPID, got.LastOutcome)
@@ -115,8 +115,10 @@ func TestReviewLoopEscalatesAfterRoundCapAndResumesOnAnswer(t *testing.T) {
 	if !strings.Contains(f.claude.resumed[resumedBefore], "Decision: B. Leave the code as is") || !strings.Contains(f.claude.resumed[resumedBefore], "Review round 4 of PR #912 requested these changes") {
 		t.Errorf("answer not delivered: %q", f.claude.resumed[resumedBefore:])
 	}
-	if !strings.Contains(f.codex.reviewed[len(f.codex.reviewed)-1], "A: B. Leave the code as is") {
-		t.Error("reviewer not told about the decision")
+	// The reviewer judges the change by the PR description alone, not the developer's
+	// answers to the implementer (D140).
+	if strings.Contains(f.codex.reviewed[len(f.codex.reviewed)-1], "Leave the code as is") {
+		t.Error("reviewer was shown the developer's decision")
 	}
 }
 
@@ -243,6 +245,70 @@ func TestReviewPromptGetsOnlyReviewInstructions(t *testing.T) {
 	}
 	if got := f.stages.calls; len(got) != 4 || got[2] != "/wt/ridezoomo-armada-backend/825-provider-retries plan" || got[3] != "/wt/ridezoomo-armada-backend/825-provider-retries review" {
 		t.Errorf("lookups %q; want implement, pr, plan, then review, all at the worktree root", got)
+	}
+}
+
+func TestReviewPromptUsesPRBodyNotIssue(t *testing.T) {
+	f := newFixture()
+	f.gh.prComments = map[int][]PRComment{912: {{Kind: task.IssueComment, ID: 1, Author: "dev", Body: "Also handle 429."}}}
+	key := started(t, f, startReq(t))
+	f.claude.turn = prTurn("sid-1")
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	p := f.codex.reviewed[0]
+	for _, want := range []string{"> Retry 5xx only.", "> Also handle 429."} {
+		if !strings.Contains(p, want) {
+			t.Errorf("review prompt missing %q:\n%s", want, p)
+		}
+	}
+	// The issue body, the context file, and the implementer's validation claim.
+	for _, leaked := range []string{"Retry failed requests.", "https://x/825", "Preserve the existing 5xx-only", "go test ./...: passed"} {
+		if strings.Contains(p, leaked) {
+			t.Errorf("review prompt carries %q:\n%s", leaked, p)
+		}
+	}
+}
+
+func TestReviewStopsWhenPRDescriptionIsEmpty(t *testing.T) {
+	f := newFixture()
+	pr := f.gh.prs[912]
+	pr.Body = " \n "
+	f.gh.prs[912] = pr
+	key := started(t, f, startReq(t))
+	f.claude.turn = prTurn("sid-1")
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Failed || !strings.Contains(got.LastOutcome.Summary, "the pull request description is empty") || len(f.codex.reviewed) != 0 || len(got.Reviews) != 0 {
+		t.Errorf("state %s outcome %+v reviews %d", got.State, got.LastOutcome, len(f.codex.reviewed))
+	}
+}
+
+func TestReviewStopsWhenPRCannotBeRead(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	rec := *f.store.recs[key]
+	d := *rec.Delegation
+	d.PR, d.Reviewer = 913, task.Codex
+	rec.Delegation = &d
+	_, err := f.app.review(context.Background(), &rec, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "no pull requests found") || len(f.codex.reviewed) != 0 {
+		t.Errorf("err %v reviews %d", err, len(f.codex.reviewed))
+	}
+}
+
+func TestReviewRunsWhenPRCommentsCannotBeRead(t *testing.T) {
+	f := newFixture()
+	f.gh.prCommentErr = errors.New("gh: HTTP 502")
+	key := started(t, f, startReq(t))
+	f.claude.turn = prTurn("sid-1")
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.codex.reviewed) != 1 || !strings.Contains(f.codex.reviewed[0], "could not be loaded (gh: HTTP 502)") {
+		t.Errorf("review must run and name the missing comments: %q", f.codex.reviewed)
 	}
 }
 
@@ -406,8 +472,8 @@ func TestPlanIsPostedThenAFreshSessionImplementsIt(t *testing.T) {
 	if !slices.Equal(f.claude.stages, []task.Stage{task.StagePlan, task.StageImplement}) {
 		t.Errorf("implementer stages = %v", f.claude.stages)
 	}
-	if !strings.Contains(f.codex.reviewed[0], "## PRD") || !strings.Contains(f.codex.reviewed[0], "R1. Retry 5xx.") {
-		t.Errorf("the review must carry the PRD:\n%s", f.codex.reviewed[0])
+	if strings.Contains(f.codex.reviewed[0], "## PRD") || strings.Contains(f.codex.reviewed[0], "R1. Retry 5xx.") {
+		t.Errorf("the review must not carry the PRD:\n%s", f.codex.reviewed[0])
 	}
 	if got.Usage.ClaudeCostUSD != 0.5 || !strings.Contains(log.String(), "foreman: posted the PRD: https://") {
 		t.Errorf("usage %+v log %q", got.Usage, log.String())
@@ -496,7 +562,7 @@ func TestPlanCommentFitsGitHubsLimit(t *testing.T) {
 	}
 }
 
-func TestCodexPlansAndClaudeReviewsAgainstThePRD(t *testing.T) {
+func TestCodexPlansAndClaudeReviewsWithoutThePRD(t *testing.T) {
 	f := newFixture()
 	req := startReq(t)
 	req.Agent = task.Codex
@@ -514,7 +580,7 @@ func TestCodexPlansAndClaudeReviewsAgainstThePRD(t *testing.T) {
 	if len(f.codex.prompts) != 2 || !strings.Contains(f.codex.prompts[0], "## Plan first") || !strings.Contains(f.codex.prompt, "- Implementation plan: https://github.com/") || len(f.codex.resumed) != 0 || got.Delegation.Implementer.ID != "th-2" {
 		t.Errorf("codex must implement in a fresh thread: prompts %q resumed %q session %q", f.codex.prompts, f.codex.resumed, got.Delegation.Implementer.ID)
 	}
-	if len(f.claude.reviewed) != 1 || !strings.Contains(f.claude.reviewed[0], "R1. Retry 5xx.") {
-		t.Errorf("claude's review must carry the PRD: %q", f.claude.reviewed)
+	if len(f.claude.reviewed) != 1 || strings.Contains(f.claude.reviewed[0], "R1. Retry 5xx.") || !strings.Contains(f.claude.reviewed[0], "> Retry 5xx only.") {
+		t.Errorf("claude's review must carry the PR description, not the PRD: %q", f.claude.reviewed)
 	}
 }

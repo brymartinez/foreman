@@ -373,10 +373,6 @@ func TestPlanningPromptWritesDocumentsOnly(t *testing.T) {
 	if strings.Contains(p, "## Plan first") || strings.Contains(p, `"planned"`) || !strings.Contains(p, "## The plan") || !strings.Contains(p, "- Implementation plan: https://x/4") {
 		t.Errorf("a turn after the plan must follow it, not write it:\n%s", p)
 	}
-	r := ReviewPrompt(ReviewBrief{TaskBrief: TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}, PRD: "R1. Retry 5xx."}, PR: 9})
-	if !strings.Contains(r, "## PRD") || !strings.Contains(r, "R1. Retry 5xx.") {
-		t.Errorf("review prompt lacks the PRD:\n%s", r)
-	}
 }
 
 func TestPromptIncludesAnsweredDecisions(t *testing.T) {
@@ -443,20 +439,7 @@ func TestReviewAdaptersAreReadOnlyAndDisposable(t *testing.T) {
 	}
 }
 
-func TestReviewPromptIsBuiltFromDurableState(t *testing.T) {
-	p := ReviewPrompt(ReviewBrief{
-		TaskBrief: TaskBrief{Key: task.Key{Repo: "a/b", Number: 825}, Title: "Provider retries", IssueBody: "Retry failed requests.",
-			Context: "Preserve 5xx-only.", Branch: "agent/825-provider-retries", BaseBranch: "main",
-			Decisions: []task.Decision{{Question: task.Question{Issue: "4xx?"}, Answer: "A. 5xx only"}}},
-		PR: 912, Validation: []task.Check{{Command: "go test ./...", Passed: true}},
-		Previous: []task.Review{{Round: 1, Summary: "one bug", Findings: []task.Finding{{Severity: "blocking", Summary: "4xx retried"}}}},
-	})
-	for _, want := range []string{"pull request #912", "a/b#825", "Retry failed requests.", "Preserve 5xx-only.", "A: A. 5xx only",
-		"git diff origin/main...HEAD", "go test ./...: passed", "Round 1", "[blocking] 4xx retried", "read-only", `"blocking" or "should_fix"`} {
-		if !strings.Contains(p, want) {
-			t.Errorf("review prompt missing %q", want)
-		}
-	}
+func TestFindingsMessageCarriesEachFinding(t *testing.T) {
 	msg := FindingsMessage(task.Review{Round: 2, PR: 912, Reviewer: task.Codex, Findings: []task.Finding{{Severity: "blocking", File: "retry.go", Line: 40, Summary: "4xx retried", Detail: "guard missing"}}})
 	for _, want := range []string{"Review round 2 of PR #912 by codex", "1. [blocking] 4xx retried", "retry.go:40", "guard missing", "under your implementation instructions"} {
 		if !strings.Contains(msg, want) {
@@ -473,30 +456,6 @@ func TestImplementationPromptStageInstructions(t *testing.T) {
 	}
 	if strings.Contains(ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 1}, StageInstructions: " \n"}), "## Developer workflow instructions") {
 		t.Error("blank instructions must add no section")
-	}
-}
-
-func TestReviewPromptPasses(t *testing.T) {
-	brief := ReviewBrief{TaskBrief: TaskBrief{Key: task.Key{Repo: "a/b", Number: 1}}, PR: 9, Passes: 3}
-	if p := ReviewPrompt(brief); !strings.Contains(p, "review_rounds to 3. This is the first review") {
-		t.Errorf("first review:\n%s", p)
-	}
-	brief.Previous = []task.Review{{Round: 1, Findings: []task.Finding{{Severity: "blocking", Summary: "x"}}}}
-	if p := ReviewPrompt(brief); !strings.Contains(p, "This is a re-review") {
-		t.Errorf("re-review:\n%s", p)
-	}
-	brief.Passes = 0
-	if p := ReviewPrompt(brief); strings.Contains(p, "## Review passes") {
-		t.Errorf("no passes must omit the section:\n%s", p)
-	}
-}
-
-func TestReviewPromptStageInstructions(t *testing.T) {
-	brief := ReviewBrief{TaskBrief: TaskBrief{Key: task.Key{Repo: "a/b", Number: 1}, Context: "Keep 5xx-only.", StageInstructions: "Perform three review passes."}, PR: 9}
-	p := ReviewPrompt(brief)
-	stage, ctx := strings.Index(p, "## Developer workflow instructions"), strings.Index(p, "## Implementation context")
-	if stage < 0 || ctx < stage || !strings.Contains(p, "Perform three review passes.") {
-		t.Errorf("review prompt must carry the instructions before the context:\n%s", p)
 	}
 }
 
