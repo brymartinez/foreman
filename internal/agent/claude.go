@@ -54,6 +54,7 @@ func (c Claude) run(ctx context.Context, in StartInput, session task.Session, se
 	if in.Stage == task.StagePlan && c.PlanModel != "" {
 		c.Model = c.PlanModel
 	}
+	logTurn(in.Log, task.Claude, c.Model, in.Step)
 	if in.Log != nil {
 		fmt.Fprintf(in.Log, "claude: transcript %s\n", ClaudeTranscript(in.Worktree, session.ID))
 	}
@@ -85,6 +86,7 @@ func (c Claude) Review(ctx context.Context, in StartInput) (ReviewOutcome, error
 	if c.ReviewModel != "" {
 		c.Model = c.ReviewModel
 	}
+	logTurn(in.Log, task.Claude, c.Model, in.Step)
 	args := []string{
 		"-p", in.Prompt,
 		"--no-session-persistence",

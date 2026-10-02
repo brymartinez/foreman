@@ -293,11 +293,16 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 		return agent.Turn{}, fmt.Errorf("agent %s is not configured", d.Implementer.Agent)
 	}
 	planning := a.needsPlan(rec)
-	stage := task.StageImplement
-	if planning {
-		stage = task.StagePlan
+	stage, step := task.StageImplement, agent.StepImplement
+	switch {
+	case planning:
+		stage, step = task.StagePlan, agent.StepPlan
+	case merge != nil || d.ConflictPending:
+		step = agent.StepMerge
+	case len(feedback) > 0:
+		step = agent.StepFeedback
 	}
-	in := agent.StartInput{Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD, Stage: stage}
+	in := agent.StartInput{Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD, Stage: stage, Step: step}
 	resume := ""
 	var conflict *agent.Conflict
 	if d.ConflictPending {
@@ -438,6 +443,7 @@ func (a App) review(ctx context.Context, rec *task.Record, log io.Writer) (agent
 		Log:          log,
 		MaxBudgetUSD: a.ReviewerBudgetUSD,
 		Prompt:       agent.ReviewPrompt(brief),
+		Step:         agent.StepReview,
 	})
 }
 

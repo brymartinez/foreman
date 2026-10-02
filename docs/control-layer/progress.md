@@ -2,7 +2,7 @@
 
 ## Current stage
 
-Stage 27 (the first refactor stage: the task runner as named steps, for issue #26) is
+Stage 28 (the first refactor stage: the task runner as named steps, for issue #26) is
 complete. Completed runs are needed to measure the effect of the model and budget
 choices. The ranked refactor candidates below are the next code-quality stages.
 
@@ -678,7 +678,15 @@ request. Each fix is its own commit with a decision.
   earlier findings in full (D140).
 - Verified with `go vet ./...`, `go test ./...`, a binary build, and `scripts/e2e.sh`.
 
-### Stage 27 (complete): the task runner as named steps for issue #26
+### Stage 27 (complete): the model and step for each agent turn, issue #25
+
+- Each plan, implement, review, feedback, and merge turn logs `agent:model:step`, for
+  example `codex:gpt-6-sol:review`. The model is the one the adapter passes to the CLI,
+  or `default` when none is set. Resumed and repeated turns each log their own line
+  (D141).
+- Verified with `go vet ./...`, `go test ./...`, a binary build, and `scripts/e2e.sh`.
+
+### Stage 28 (complete): the task runner as named steps for issue #26
 
 - `RunTask` runs a loop of named steps (`stepImplement`, `stepAnswer`,
   `stepPickUpReview`, `stepReview`, `stepHandover`) on a `taskRun`. `firstStep` picks
@@ -686,7 +694,7 @@ request. Each fix is its own commit with a decision.
 - `runTurn` and `finishTurn` in `internal/app/turn.go` replace four copies of the
   turn, verify, and record sequence. `implement` takes a `turnRequest`. `failTask`
   replaces six hand-written FAILED transitions.
-- No change to CLI output, exit codes, the task file, prompts, or log text (D141).
+- No change to CLI output, exit codes, the task file, prompts, or log text (D142).
 - New tests cover a merge turn whose PR can't be verified, a cancelled feedback turn,
   a deleted plan comment, a failed plan post, `failTask`, and `firstStep`.
 - Verified with `gofmt -l .`, `go vet ./...`, `go test ./...`, a binary build, and
@@ -694,8 +702,8 @@ request. Each fix is its own commit with a decision.
 
 ## Refactor candidates
 
-The stage 27 review of every Go package, ranked by how much each change would help.
-Findings 1 to 4 were fixed in stage 27 (D141).
+The stage 28 review of every Go package, ranked by how much each change would help.
+Findings 1 to 4 were fixed in stage 28 (D142).
 
 1. `internal/app/run.go` `RunTask`: phases implied by flags. Fixed.
 2. The turn, verify, and record sequence copied four times. Fixed.
@@ -859,7 +867,7 @@ what it replaced. Current summary:
 - D139 (amends D129). The PR description holds Problem, Fix, Risk, and optional
   Review notes.
 - D140. The reviewer judges the PR against its description alone.
-- D141. The runner is a loop of named steps over one shared turn pipeline.
+- D142. The runner is a loop of named steps over one shared turn pipeline.
 
 ## Next stage
 

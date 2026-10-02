@@ -136,7 +136,7 @@ FAILED, or READY_FOR_HUMAN (D59).
   dies with the launcher (D58). Agents run in their own process group, so stopping a
   runner stops the tools its agent started (D59).
 - **The runner is a step loop.** `RunTask` claims the task, runs any pending conflict
-  repair, reads waiting comments, and hands a `taskRun` to its loop (D141).
+  repair, reads waiting comments, and hands a `taskRun` to its loop (D142).
   `firstStep` picks the first step from the record alone. Each step is one method that
   returns the next:
 
