@@ -121,14 +121,6 @@ func TestReconcileSecondRunIsQuiet(t *testing.T) {
 	}
 }
 
-func TestFilterInboxItemsIgnoresExactRepositories(t *testing.T) {
-	items := []InboxItem{item(1, "open", t0, task.Assigned), {Key: task.Key{Repo: "acme/widgets", Number: 1}, State: "open"}}
-	got := filterInboxItems(items, []task.Repo{"ridezoomo/armada-backend"})
-	if len(got) != 1 || got[0].Key != items[1].Key {
-		t.Fatalf("filtered items = %+v", got)
-	}
-}
-
 func entryNumbers(es []InboxEntry) []int {
 	var out []int
 	for _, e := range es {

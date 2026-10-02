@@ -118,21 +118,39 @@ func TestLoadMentionsAndRefresh(t *testing.T) {
 	}
 }
 
-func TestLoadValidatesIgnoredRepositories(t *testing.T) {
+func TestLoadValidatesRepositoryLists(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("FOREMAN_CONFIG", "")
 	t.Setenv("FOREMAN_TASKS_DIR", "")
 	os.MkdirAll(filepath.Join(home, ".config/foreman"), 0o755)
-	os.WriteFile(filepath.Join(home, ".config/foreman/config.yaml"), []byte("ignore_repositories: [midsoln/foreman, acme/widgets]\n"), 0o644)
-	cfg, err := Load()
-	if err != nil || len(cfg.IgnoredRepos) != 2 || cfg.IgnoredRepos[1] != "acme/widgets" {
-		t.Fatalf("ignored repos = %+v, err = %v", cfg.IgnoredRepos, err)
+	write := func(body string) {
+		if err := os.WriteFile(filepath.Join(home, ".config/foreman/config.yaml"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 
-	os.WriteFile(filepath.Join(home, ".config/foreman/config.yaml"), []byte("ignore_repositories: [not-a-repo]\n"), 0o644)
-	if _, err := Load(); err == nil {
-		t.Fatal("invalid ignored repository accepted")
+	write("include_repositories: [midsoln/foreman]\nexclude_repositories: [midsoln/foreman, acme/widgets]\n")
+	cfg, err := Load()
+	if err != nil || len(cfg.IncludedRepos) != 1 || cfg.IncludedRepos[0] != "midsoln/foreman" || len(cfg.ExcludedRepos) != 2 || cfg.ExcludedRepos[1] != "acme/widgets" {
+		t.Fatalf("included = %+v, excluded = %+v, err = %v", cfg.IncludedRepos, cfg.ExcludedRepos, err)
+	}
+
+	for _, key := range []string{"include_repositories", "exclude_repositories"} {
+		write(key + ": [midsoln/foreman, not-a-repo]\n")
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), key+"[1]") {
+			t.Errorf("an invalid %s entry gave err = %v, want one naming %s[1]", key, err, key)
+		}
+	}
+}
+
+func TestLoadIgnoresRetiredIgnoreKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("FOREMAN_CONFIG", path)
+	os.WriteFile(path, []byte("ignore_repositories: [acme/widgets]\n"), 0o600)
+	cfg, err := Load()
+	if err != nil || len(cfg.IncludedRepos) != 0 || len(cfg.ExcludedRepos) != 0 {
+		t.Fatalf("included = %+v, excluded = %+v, err = %v; want both empty", cfg.IncludedRepos, cfg.ExcludedRepos, err)
 	}
 }
 

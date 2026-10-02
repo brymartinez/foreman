@@ -58,16 +58,26 @@ type App struct {
 	CleanOnDone bool
 	// DeleteMergedBranches deletes the local branch with the worktree once its PR is merged.
 	DeleteMergedBranches bool
-	IgnoredRepositories  []task.Repo
+	// IncludedRepositories, when nonempty, limits the inbox to these repositories
+	// and overrides ExcludedRepositories.
+	IncludedRepositories []task.Repo
+	ExcludedRepositories []task.Repo
 	// HideMentionOnly drops items the searches found only because they mention the
 	// developer. False shows every item, which is the default.
 	HideMentionOnly bool
 	Now             func() time.Time
 }
 
-// Inbox fetches GitHub state, reports what changed since the last run, and records
-// the new state as seen. Only records that changed are rewritten.
+// Inbox is InboxView with the configured repository filter.
 func (a App) Inbox(ctx context.Context) (InboxReport, error) {
+	return a.InboxView(ctx, false)
+}
+
+// InboxView fetches GitHub state, reports what changed since the last run, and
+// records the new state as seen. Only records that changed are rewritten. allRepos
+// ignores the include and exclude lists. Items outside the view are dropped before
+// Reconcile, so no record is written for them.
+func (a App) InboxView(ctx context.Context, allRepos bool) (InboxReport, error) {
 	recs, err := a.Store.List(ctx)
 	if err != nil {
 		return InboxReport{}, err
@@ -87,8 +97,8 @@ func (a App) Inbox(ctx context.Context) (InboxReport, error) {
 	if err != nil {
 		return InboxReport{}, err
 	}
-	items := filterInboxItems(search.Items, a.IgnoredRepositories)
-	tracked, gone, refreshWarnings, err := a.fetchTracked(ctx, recs, items)
+	items := a.visibleItems(search.Items, allRepos)
+	tracked, gone, refreshWarnings, err := a.fetchTracked(ctx, recs, items, allRepos)
 	if err != nil {
 		return InboxReport{}, err
 	}
@@ -221,7 +231,7 @@ func keepsState(s task.State) bool { return running(s) || s == task.PRClosed }
 // fetchTracked refreshes missing delegated work and undelegated items whose last
 // involvement reasons have not yet been cleared by a complete refresh. gone lists
 // undelegated items GitHub no longer has; any other lookup failure is a warning.
-func (a App) fetchTracked(ctx context.Context, recs []*task.Record, found []InboxItem) (items []InboxItem, gone []task.Key, warnings []error, err error) {
+func (a App) fetchTracked(ctx context.Context, recs []*task.Record, found []InboxItem, allRepos bool) (items []InboxItem, gone []task.Key, warnings []error, err error) {
 	inSearch := map[task.Key]bool{}
 	for _, it := range found {
 		inSearch[it.Key] = true
@@ -233,7 +243,7 @@ func (a App) fetchTracked(ctx context.Context, recs []*task.Record, found []Inbo
 		if r.Delegation == nil && r.GitHub != nil && len(r.GitHub.Reasons) == 0 {
 			continue
 		}
-		if r.State != task.Done && !inSearch[r.Key] && !containsRepo(a.IgnoredRepositories, r.Repo) {
+		if r.State != task.Done && !inSearch[r.Key] && a.repoVisible(r.Repo, allRepos) {
 			keys = append(keys, r.Key)
 		}
 	}
@@ -267,21 +277,27 @@ func (a App) fetchTracked(ctx context.Context, recs []*task.Record, found []Inbo
 	return items, gone, warnings, nil
 }
 
-func filterInboxItems(items []InboxItem, ignored []task.Repo) []InboxItem {
-	if len(ignored) == 0 {
-		return items
-	}
+func (a App) visibleItems(items []InboxItem, allRepos bool) []InboxItem {
 	filtered := make([]InboxItem, 0, len(items))
 	for _, item := range items {
-		if !containsRepo(ignored, item.Key.Repo) {
+		if a.repoVisible(item.Key.Repo, allRepos) {
 			filtered = append(filtered, item)
 		}
 	}
 	return filtered
 }
 
-func containsRepo(repos []task.Repo, want task.Repo) bool {
-	return slices.Contains(repos, want)
+// repoVisible says whether the inbox shows repo. A nonempty include list decides
+// alone; otherwise the exclude list applies.
+func (a App) repoVisible(repo task.Repo, allRepos bool) bool {
+	switch {
+	case allRepos:
+		return true
+	case len(a.IncludedRepositories) > 0:
+		return slices.Contains(a.IncludedRepositories, repo)
+	default:
+		return !slices.Contains(a.ExcludedRepositories, repo)
+	}
 }
 
 // Reconcile compares current GitHub items with stored records. notes are the readiness

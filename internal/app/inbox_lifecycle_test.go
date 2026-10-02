@@ -122,7 +122,7 @@ func TestCancelledRefreshIsNotSwallowed(t *testing.T) {
 	cancel()
 	gh := &refreshGitHub{fakeGitHub: &fakeGitHub{}, calls: map[task.Key]int{}}
 	a := App{GitHub: gh}
-	_, _, _, err := a.fetchTracked(ctx, []*task.Record{seen(1, task.Discovered, "open", t0, task.Assigned)}, nil)
+	_, _, _, err := a.fetchTracked(ctx, []*task.Record{seen(1, task.Discovered, "open", t0, task.Assigned)}, nil, false)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation: %v", err)
 	}

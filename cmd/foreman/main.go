@@ -112,7 +112,8 @@ func run(argv []string) int {
 		Notifier:             notification(cfg),
 		CleanOnDone:          cfg.Cleanup.OnDone,
 		DeleteMergedBranches: cfg.Cleanup.DeleteMergedBranch,
-		IgnoredRepositories:  cfg.IgnoredRepos,
+		IncludedRepositories: cfg.IncludedRepos,
+		ExcludedRepositories: cfg.ExcludedRepos,
 		HideMentionOnly:      !cfg.Mentions,
 		Now:                  func() time.Time { return time.Now().Truncate(time.Second) },
 	}
