@@ -156,3 +156,56 @@ func TestMaterializeWritesDefaultsOnlyForEmptyFiles(t *testing.T) {
 		t.Fatalf("existing config replaced: %q", got)
 	}
 }
+
+func TestLoadReadsWebhookURL(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("FOREMAN_CONFIG", path)
+	os.WriteFile(path, []byte("notifications:\n  webhook_url: https://discord.com/api/webhooks/1/token\n"), 0o600)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Notifications.Enabled || cfg.Notifications.WebhookURL != "https://discord.com/api/webhooks/1/token" {
+		t.Errorf("notifications = %+v, want enabled with the webhook URL", cfg.Notifications)
+	}
+}
+
+func webhookConfig(t *testing.T, enabled bool, url string, mode os.FileMode) Config {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("notifications: {}\n"), mode); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, mode); err != nil {
+		t.Fatal(err)
+	}
+	return Config{Path: path, Notifications: Notifications{Enabled: enabled, WebhookURL: url}}
+}
+
+func TestWebhookProblemsWarnsWhenURLMissing(t *testing.T) {
+	cfg := webhookConfig(t, true, "", 0o600)
+	got := cfg.WebhookProblems()
+	if len(got) != 1 || !strings.Contains(got[0], "notifications.webhook_url is not set in "+cfg.Path) {
+		t.Errorf("problems = %q, want one naming the key and %s", got, cfg.Path)
+	}
+}
+
+func TestWebhookProblemsQuietWhenDisabled(t *testing.T) {
+	if got := webhookConfig(t, false, "", 0o644).WebhookProblems(); len(got) != 0 {
+		t.Errorf("problems = %q, want none", got)
+	}
+}
+
+func TestWebhookProblemsFlagsReadableFile(t *testing.T) {
+	cfg := webhookConfig(t, true, "https://discord.com/api/webhooks/1/token", 0o644)
+	got := cfg.WebhookProblems()
+	if len(got) != 1 || !strings.Contains(got[0], "readable by other users") || !strings.Contains(got[0], "chmod 600 "+cfg.Path) || strings.Contains(got[0], "token") {
+		t.Errorf("problems = %q, want one permission warning without the URL", got)
+	}
+}
+
+func TestWebhookProblemsAcceptsOwnerOnlyFile(t *testing.T) {
+	if got := webhookConfig(t, true, "https://discord.com/api/webhooks/1/token", 0o600).WebhookProblems(); len(got) != 0 {
+		t.Errorf("problems = %q, want none", got)
+	}
+}

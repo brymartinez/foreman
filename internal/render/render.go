@@ -592,6 +592,14 @@ func Config(w io.Writer, c config.Config) {
 	fmt.Fprintf(w, "Implementer budget: $%.2f per Claude turn (Codex has no cap)\n", c.Budgets.ImplementerUSD)
 	fmt.Fprintf(w, "Reviewer budget: $%.2f per Claude turn (Codex has no cap)\n", c.Budgets.ReviewerUSD)
 	fmt.Fprintf(w, "Notifications: %t\n", c.Notifications.Enabled)
+	webhook := "not set"
+	if c.Notifications.WebhookURL != "" {
+		webhook = "set"
+	}
+	fmt.Fprintf(w, "Notification webhook: %s\n", webhook)
+	for _, problem := range c.WebhookProblems() {
+		fmt.Fprintf(w, "! %s\n", problem)
+	}
 	fmt.Fprintf(w, "Mentions: %t\n", c.Mentions)
 	fmt.Fprintf(w, "GitHub refresh: every %d seconds\n", c.Refresh)
 	fmt.Fprintf(w, "Ignore repositories: %s\n", repoList(c.IgnoredRepos))
