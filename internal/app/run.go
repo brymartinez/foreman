@@ -48,125 +48,193 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 			return err
 		}
 	}
-	var findings *task.Review
-	// feedback is the comments on the PR this run has to answer, and rounds is how many
-	// times it has answered. A resumed task starts here (D122).
+	// A resumed task answers the comments on its PR first (D122).
 	feedback, rec, done, err := a.unanswered(ctx, final, rec, log)
 	if err != nil || done {
 		return err
 	}
-	rounds := 0
-	for reviewNext := len(feedback) == 0 && rec.ReviewPending(); ; reviewNext = false {
-		// answered is set once a feedback turn has pushed a change, which goes to the
-		// reviewer like any other change rather than through another implementer turn.
-		answered := false
-		if len(feedback) > 0 {
-			rounds++
-			answering := feedback
-			feedback = nil
-			if rec, err = a.answerFeedback(ctx, final, rec, answering, log); err != nil {
-				return err
-			}
-			if rec.State != task.Reviewing && rec.State != task.ReadyForHuman {
-				// Blocked, failed, or stopped. The comments stay unanswered, so the next
-				// run asks for them again (D122).
-				return nil
-			}
-			// A turn that pushed nothing leaves the code its review already covers, so
-			// there is nothing to review and the task goes back to the developer.
-			if !rec.ReviewPending() {
-				if feedback, rec, err = a.beforeHandover(ctx, final, rec, rounds, log); err != nil || len(feedback) == 0 {
-					return err
-				}
-				continue
-			}
-			answered = true
-		}
-		if !answered && reviewNext {
-			// The PR is verified but its head has no review: pick up at the review. A
-			// PR that is no longer open can't be reviewed, so the implementer takes over.
-			pr, verifyErr := a.verifyPR(ctx, rec, agent.Outcome{PRNumber: rec.Delegation.PR})
-			if verifyErr != nil {
-				fmt.Fprintf(log, "foreman: can't review PR #%d (%v); implementing instead\n", rec.Delegation.PR, verifyErr)
-				reviewNext = false
-			} else {
-				if rec, err = a.update(final, key, existing(func(cur *task.Record) {
-					applyPRHead(cur, pr)
-				})); err != nil {
-					return err
-				}
-				fmt.Fprintf(log, "foreman: PR #%d head %s has no review yet; reviewing\n", pr.Key.Number, short(pr.HeadSHA))
-			}
-		}
-		if !answered && !reviewNext {
-			turn, runErr := a.implement(ctx, rec, findings, nil, nil, log)
-			step := "implementation"
-			if a.needsPlan(rec) {
-				step = "planning"
-			}
-			if step == "planning" && runErr == nil && turn.Outcome.Status == agent.PROpened {
-				fmt.Fprintf(log, "foreman: %s opened a PR without posting a plan\n", rec.Delegation.Implementer.Agent)
-			}
-			var pr *PullRequest
-			if runErr == nil && turn.Outcome.Status == agent.PROpened {
-				if pr, runErr = a.verifyPR(ctx, rec, turn.Outcome); runErr == nil {
-					fmt.Fprintf(log, "foreman: verified PR #%d %s at %s\n", pr.Key.Number, pr.URL, short(pr.HeadSHA))
-				}
-			}
-			if rec, err = a.update(final, key, existing(func(cur *task.Record) {
-				applyTurn(cur, turn, pr, runErr, a.Now())
-				if runErr != nil {
-					applyStop(ctx, cur, step, log, a.Now())
-				}
-				addUsage(&cur.Usage, turn.Usage)
-			})); err != nil {
-				return err
-			}
-			if runErr == nil && turn.Outcome.Status == agent.Planned {
-				if rec, err = a.postPlan(ctx, final, rec, turn.Outcome.Documents, log); err != nil || rec.State != task.Working {
-					return err
-				}
-				continue
-			}
-			if rec.State != task.Reviewing {
-				return nil
-			}
-		}
+	r := &taskRun{a: a, ctx: ctx, final: final, log: log, rec: rec, feedback: feedback}
+	return r.loop(firstStep(rec, len(feedback)))
+}
 
-		// Every pass, including the first and one after a fix, reviews a PR that merges
-		// cleanly into its latest base (D133).
-		var ready bool
-		if rec, ready, err = a.resolveConflicts(ctx, final, rec, log); err != nil || !ready {
-			return err
-		}
-		review, reviewErr := a.review(ctx, rec, log)
-		if rec, err = a.update(final, key, existing(func(cur *task.Record) {
-			applyReview(cur, review, reviewErr, a.Now())
-			if reviewErr != nil {
-				applyStop(ctx, cur, "review", log, a.Now())
-			}
-			addUsage(&cur.Usage, review.Usage)
-			// Every fix is reviewed; the developer is asked only once fix_rounds fixes
-			// still leave findings (D78).
-			if cur.State == task.Working && cur.ChangeRequestsSinceDecision() > a.fixRounds() {
-				escalateReview(cur, a.fixRounds(), a.Now())
-			}
-		})); err != nil {
-			return err
-		}
-		if rec.State != task.Working {
-			// A clean review hands the task to the gate, so this is the run's last
-			// chance to answer comments that arrived while it worked (D123).
-			if reviewErr == nil && review.Clean && rec.State == task.Reviewing {
-				if feedback, rec, err = a.beforeHandover(ctx, final, rec, rounds, log); err != nil || len(feedback) == 0 {
-					return err
-				}
-				continue
-			}
-			return nil
-		}
-		findings = rec.LatestReview()
+// step is one phase of a run. Each step's method returns the step that follows it.
+type step int
+
+const (
+	stepImplement    step = iota // an implementer turn that plans, implements, or fixes findings
+	stepAnswer                   // an implementer turn that answers waiting PR comments
+	stepPickUpReview             // verify a PR head the last run left unreviewed
+	stepReview                   // resolve merge conflicts, then review the PR head
+	stepHandover                 // read comments that arrived during the run
+	stepDone
+)
+
+// firstStep is where a run starts once any conflict repair is done: waiting comments
+// first, then a verified PR head that has no review, and otherwise an implementer turn.
+func firstStep(rec *task.Record, waiting int) step {
+	switch {
+	case waiting > 0:
+		return stepAnswer
+	case rec.ReviewPending():
+		return stepPickUpReview
 	}
+	return stepImplement
+}
+
+// taskRun is the state one RunTask carries between steps. ctx stops the agents;
+// final writes results to the task file even after ctx is cancelled.
+type taskRun struct {
+	a          App
+	ctx, final context.Context
+	log        io.Writer
+	rec        *task.Record
+	findings   *task.Review // the latest review's findings, for the next fix turn
+	feedback   []PRComment  // the comments the next stepAnswer answers
+	rounds     int          // how many times this run has answered comments
+}
+
+func (r *taskRun) loop(next step) error {
+	for next != stepDone {
+		var err error
+		switch next {
+		case stepImplement:
+			next, err = r.implement()
+		case stepAnswer:
+			next, err = r.answer()
+		case stepPickUpReview:
+			next, err = r.pickUpReview()
+		case stepReview:
+			next, err = r.review()
+		case stepHandover:
+			next, err = r.handover()
+		default:
+			return fmt.Errorf("unknown run step %d", next)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// implement runs an implementer turn with the open findings, if any. A posted plan
+// goes straight on to an implementation turn; a PR goes to review.
+func (r *taskRun) implement() (step, error) {
+	a := r.a
+	during := "implementation"
+	if a.needsPlan(r.rec) {
+		during = "planning"
+	}
+	res := a.runTurn(r.ctx, r.rec, turnRequest{findings: r.findings}, a.verifiedPR(r.log), r.log)
+	rec, err := a.finishTurn(r.ctx, r.final, r.rec.Key, during, res, func(cur *task.Record) {
+		applyTurn(cur, res.turn, res.pr, res.err, a.Now())
+	}, r.log)
+	if err != nil {
+		return stepDone, err
+	}
+	r.rec = rec
+	if res.err == nil && res.turn.Outcome.Status == agent.Planned {
+		if r.rec, err = a.postPlan(r.ctx, r.final, rec, res.turn.Outcome.Documents, r.log); err != nil || r.rec.State != task.Working {
+			return stepDone, err
+		}
+		return stepImplement, nil
+	}
+	if rec.State != task.Reviewing {
+		return stepDone, nil
+	}
+	return stepReview, nil
+}
+
+// answer runs an implementer turn on the waiting comments. A turn that pushed a
+// change goes to the reviewer like any other change.
+func (r *taskRun) answer() (step, error) {
+	r.rounds++
+	comments := r.feedback
+	r.feedback = nil
+	rec, err := r.a.answerFeedback(r.ctx, r.final, r.rec, comments, r.log)
+	if err != nil {
+		return stepDone, err
+	}
+	r.rec = rec
+	switch {
+	case rec.State != task.Reviewing && rec.State != task.ReadyForHuman:
+		// Blocked, failed, or stopped. The comments stay unanswered, so the next run
+		// asks for them again (D122).
+		return stepDone, nil
+	case !rec.ReviewPending():
+		// A turn that pushed nothing leaves the code its review already covers, so
+		// there is nothing to review and the task goes back to the developer.
+		return stepHandover, nil
+	}
+	return stepReview, nil
+}
+
+// pickUpReview takes up a verified PR whose head has no review. A PR that is no longer
+// open can't be reviewed, so the implementer takes over.
+func (r *taskRun) pickUpReview() (step, error) {
+	a := r.a
+	pr, err := a.verifyPR(r.ctx, r.rec, agent.Outcome{PRNumber: r.rec.Delegation.PR})
+	if err != nil {
+		fmt.Fprintf(r.log, "foreman: can't review PR #%d (%v); implementing instead\n", r.rec.Delegation.PR, err)
+		return stepImplement, nil
+	}
+	rec, err := a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
+		applyPRHead(cur, pr)
+	}))
+	if err != nil {
+		return stepDone, err
+	}
+	r.rec = rec
+	fmt.Fprintf(r.log, "foreman: PR #%d head %s has no review yet; reviewing\n", pr.Key.Number, short(pr.HeadSHA))
+	return stepReview, nil
+}
+
+// review reviews the PR head. Findings go back to the implementer; a clean review
+// hands over; anything else ends the run.
+func (r *taskRun) review() (step, error) {
+	a := r.a
+	// Every pass, including the first and one after a fix, reviews a PR that merges
+	// cleanly into its latest base (D133).
+	rec, ready, err := a.resolveConflicts(r.ctx, r.final, r.rec, r.log)
+	if err != nil || !ready {
+		return stepDone, err
+	}
+	r.rec = rec
+	review, reviewErr := a.review(r.ctx, rec, r.log)
+	if rec, err = a.update(r.final, rec.Key, existing(func(cur *task.Record) {
+		applyReview(cur, review, reviewErr, a.Now())
+		if reviewErr != nil {
+			applyStop(r.ctx, cur, "review", r.log, a.Now())
+		}
+		addUsage(&cur.Usage, review.Usage)
+		// Every fix is reviewed; the developer is asked only once fix_rounds fixes
+		// still leave findings (D78).
+		if cur.State == task.Working && cur.ChangeRequestsSinceDecision() > a.fixRounds() {
+			escalateReview(cur, a.fixRounds(), a.Now())
+		}
+	})); err != nil {
+		return stepDone, err
+	}
+	r.rec = rec
+	switch {
+	case rec.State == task.Working:
+		r.findings = rec.LatestReview()
+		return stepImplement, nil
+	case reviewErr == nil && review.Clean && rec.State == task.Reviewing:
+		return stepHandover, nil
+	}
+	return stepDone, nil
+}
+
+// handover is the run's last chance to answer comments that arrived while it
+// worked, before the gate hands the task to the developer (D123).
+func (r *taskRun) handover() (step, error) {
+	feedback, rec, err := r.a.beforeHandover(r.ctx, r.final, r.rec, r.rounds, r.log)
+	if err != nil || len(feedback) == 0 {
+		return stepDone, err
+	}
+	r.rec, r.feedback = rec, feedback
+	return stepAnswer, nil
 }
 
 // errTaskRemoved stops a runner whose task file was deleted while it ran.
@@ -208,18 +276,18 @@ func (a App) reviewRounds() int {
 	return DefaultReviewRounds
 }
 
-// implement runs one implementer turn. It resumes the session with an answered
-// decision, a merge, PR feedback, or a review round when there is one, and otherwise
-// (or when the session is gone) starts a fresh turn whose prompt is rebuilt from the
-// task file.
 // needsPlan is true until every planning document is on the issue. A task that
 // already has a PR, from before planning existed, goes on without one (D90).
 func (a App) needsPlan(rec *task.Record) bool {
 	return !rec.PlanPosted() && rec.Delegation.PR == 0
 }
 
-func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Review, feedback []PRComment, merge *agent.MergeBrief, log io.Writer) (agent.Turn, error) {
+// implement runs one implementer turn. It resumes the session with a conflict repair,
+// an answered decision, or the work in req when there is one, and otherwise (or when
+// the session is gone) starts a fresh turn whose prompt is rebuilt from the task file.
+func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, log io.Writer) (agent.Turn, error) {
 	d := rec.Delegation
+	findings, feedback, merge := req.findings, req.feedback, req.merge
 	adapter, ok := a.Agents[d.Implementer.Agent]
 	if !ok {
 		return agent.Turn{}, fmt.Errorf("agent %s is not configured", d.Implementer.Agent)
@@ -307,20 +375,10 @@ func (a App) answerFeedback(ctx, final context.Context, rec *task.Record, commen
 	d := rec.Delegation
 	headBefore := d.PRHead
 	fmt.Fprintf(log, "foreman: %s\n", feedbackNote(len(comments), d.PR))
-	turn, runErr := a.implement(ctx, rec, nil, comments, nil, log)
-	var pr *PullRequest
-	if runErr == nil && turn.Outcome.Status == agent.PROpened {
-		if pr, runErr = a.verifyPR(ctx, rec, turn.Outcome); runErr == nil {
-			fmt.Fprintf(log, "foreman: verified PR #%d %s at %s\n", pr.Key.Number, pr.URL, short(pr.HeadSHA))
-		}
-	}
-	return a.update(final, rec.Key, existing(func(cur *task.Record) {
-		applyFeedbackTurn(cur, turn, pr, runErr, comments, headBefore, a.Now())
-		if runErr != nil {
-			applyStop(ctx, cur, "answering PR feedback", log, a.Now())
-		}
-		addUsage(&cur.Usage, turn.Usage)
-	}))
+	res := a.runTurn(ctx, rec, turnRequest{feedback: comments}, a.verifiedPR(log), log)
+	return a.finishTurn(ctx, final, rec.Key, "answering PR feedback", res, func(cur *task.Record) {
+		applyFeedbackTurn(cur, res.turn, res.pr, res.err, comments, headBefore, a.Now())
+	}, log)
 }
 
 // applyFeedbackTurn records a turn that answered comments on the pull request. The
@@ -509,8 +567,7 @@ func applyTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error,
 		rec.Delegation.Implementer = turn.Session
 	}
 	if runErr != nil {
-		rec.State = task.Failed
-		rec.LastOutcome = &task.Outcome{Status: "failed", Summary: runErr.Error(), At: now}
+		failTask(rec, runErr.Error(), now)
 		return
 	}
 	// The agent acted on the branch, so the gate's last CI result no longer applies.
@@ -542,13 +599,13 @@ const Cancelled = "cancelled"
 
 // applyStop marks a step that failed because the runner was told to stop. Its error
 // is only the agent being killed, so the outcome says the run was cancelled instead.
-func applyStop(ctx context.Context, rec *task.Record, step string, log io.Writer, now time.Time) {
+func applyStop(ctx context.Context, rec *task.Record, during string, log io.Writer, now time.Time) {
 	if ctx.Err() == nil {
 		return
 	}
-	fmt.Fprintf(log, "foreman: stopped during %s: %v\n", step, context.Cause(ctx))
+	fmt.Fprintf(log, "foreman: stopped during %s: %v\n", during, context.Cause(ctx))
 	rec.State = task.Failed
-	rec.LastOutcome = &task.Outcome{Status: Cancelled, Summary: fmt.Sprintf("run cancelled during %s (%v)", step, context.Cause(ctx)), At: now}
+	rec.LastOutcome = &task.Outcome{Status: Cancelled, Summary: fmt.Sprintf("run cancelled during %s (%v)", during, context.Cause(ctx)), At: now}
 }
 
 // postPlan puts each planning document on the issue as its own comment, editing the
@@ -568,8 +625,7 @@ func (a App) postPlan(ctx, final context.Context, rec *task.Record, docs map[tas
 		var updateErr error
 		if rec, updateErr = a.update(final, rec.Key, existing(func(cur *task.Record) {
 			if err != nil {
-				cur.State = task.Failed
-				cur.LastOutcome = &task.Outcome{Status: "failed", Summary: fmt.Sprintf("posting the %s on the issue failed: %v", doc.Title(), err), At: a.Now()}
+				failTask(cur, fmt.Sprintf("posting the %s on the issue failed: %v", doc.Title(), err), a.Now())
 				applyStop(ctx, cur, "planning", log, a.Now())
 				return
 			}
@@ -615,8 +671,7 @@ func short(sha string) string {
 // implementer; a clean review leaves it REVIEWING for the readiness gate (gate.go).
 func applyReview(rec *task.Record, r agent.ReviewOutcome, reviewErr error, now time.Time) {
 	if reviewErr != nil {
-		rec.State = task.Failed
-		rec.LastOutcome = &task.Outcome{Status: "failed", Summary: fmt.Sprintf("%s review failed: %v", rec.Delegation.Reviewer, reviewErr), At: now}
+		failTask(rec, fmt.Sprintf("%s review failed: %v", rec.Delegation.Reviewer, reviewErr), now)
 		return
 	}
 	rec.Reviews = append(rec.Reviews, task.Review{

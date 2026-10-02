@@ -135,6 +135,23 @@ FAILED, or READY_FOR_HUMAN (D59).
   runner timestamps its own lines. A writer in the launcher would need a pipe, which
   dies with the launcher (D58). Agents run in their own process group, so stopping a
   runner stops the tools its agent started (D59).
+- **The runner is a step loop.** `RunTask` claims the task, runs any pending conflict
+  repair, reads waiting comments, and hands a `taskRun` to its loop (D142).
+  `firstStep` picks the first step from the record alone. Each step is one method that
+  returns the next:
+
+  | Step | Does | Next |
+  |---|---|---|
+  | `stepAnswer` | a turn on the waiting comments | stopped or blocked: done. Head unchanged: handover. Else review |
+  | `stepPickUpReview` | re-verify the PR, record its head | PR not open: implement. Else review |
+  | `stepImplement` | a plan, implement, or fix turn | plan posted: implement. Not REVIEWING: done. Else review |
+  | `stepReview` | conflict check, review, escalate | findings: implement. Clean: handover. Else done |
+  | `stepHandover` | read comments that arrived during the run | comments: answer. Else done |
+
+  Every implementer turn goes through `runTurn` (turn, then the PR check) and
+  `finishTurn` (one write through the uncancelled context, the cancel outcome, and
+  usage). Each caller passes its own mapping: `applyTurn`, `applyFeedbackTurn`, or the
+  conflict repair's. The code is in `internal/app/run.go` and `internal/app/turn.go`.
 - **INBOX is work to start.** The list offers issues foreman has never delegated plus
   delegated ones in FAILED or REVIEWED. Everything else an agent holds stays in
   DELEGATED WORK, so the same issue is never delegated twice (D124).

@@ -2,8 +2,9 @@
 
 ## Current stage
 
-Stage 27 (an `agent:model:step` log line for each agent turn, issue #25) is complete.
-Completed runs are needed to measure the effect of the model and budget choices.
+Stage 28 (the first refactor stage: the task runner as named steps, for issue #26) is
+complete. Completed runs are needed to measure the effect of the model and budget
+choices. The ranked refactor candidates below are the next code-quality stages.
 
 ## Completed
 
@@ -685,6 +686,44 @@ request. Each fix is its own commit with a decision.
   (D141).
 - Verified with `go vet ./...`, `go test ./...`, a binary build, and `scripts/e2e.sh`.
 
+### Stage 28 (complete): the task runner as named steps for issue #26
+
+- `RunTask` runs a loop of named steps (`stepImplement`, `stepAnswer`,
+  `stepPickUpReview`, `stepReview`, `stepHandover`) on a `taskRun`. `firstStep` picks
+  the first step from the record and the waiting comments.
+- `runTurn` and `finishTurn` in `internal/app/turn.go` replace four copies of the
+  turn, verify, and record sequence. `implement` takes a `turnRequest`. `failTask`
+  replaces six hand-written FAILED transitions.
+- No change to CLI output, exit codes, the task file, prompts, or log text (D142).
+- New tests cover a merge turn whose PR can't be verified, a cancelled feedback turn,
+  a deleted plan comment, a failed plan post, `failTask`, and `firstStep`.
+- Verified with `gofmt -l .`, `go vet ./...`, `go test ./...`, a binary build, and
+  `scripts/e2e.sh`.
+
+## Refactor candidates
+
+The stage 28 review of every Go package, ranked by how much each change would help.
+Findings 1 to 4 were fixed in stage 28 (D142).
+
+1. `internal/app/run.go` `RunTask`: phases implied by flags. Fixed.
+2. The turn, verify, and record sequence copied four times. Fixed.
+3. `implement` took positional `nil` arguments, and its doc sat on `needsPlan`. Fixed.
+4. FAILED transitions written by hand. Fixed with `failTask`.
+5. `cmd/foreman/main.go` `run` (about 226 lines) parses, loads config, wires every
+   adapter, and dispatches every command in one switch. Splitting wiring from dispatch
+   would let tests cover the wiring without the binary.
+6. `internal/app/gate.go` `gate` (about 115 lines) mixes GitHub reads, state
+   transitions, and note building. Each check could be its own function returning the
+   change to apply.
+7. `internal/app/start.go` `Start` (about 97 lines) holds the guards, worktree setup,
+   and launch in one function.
+8. `internal/store/markdown.go` `toRecord` (about 101 lines) and `fromRecord` (about 69
+   lines) map every field in one block, which is hard to scan.
+9. `internal/render/render.go` `Show` (about 115 lines) and `internal/tui/tui.go` `Run`
+   (about 98 lines) could split into one helper per section or event.
+10. `internal/agent/prompt.go` `ImplementationPrompt` (about 95 lines). Section
+    builders would let tests check one section at a time.
+
 ## Known limitations
 
 - The gate runs only when `inbox` or `status` runs, or while the dashboard is open
@@ -828,7 +867,9 @@ what it replaced. Current summary:
 - D139 (amends D129). The PR description holds Problem, Fix, Risk, and optional
   Review notes.
 - D140. The reviewer judges the PR against its description alone.
+- D142. The runner is a loop of named steps over one shared turn pipeline.
 
 ## Next stage
 
-Compare completed task usage and outcomes before changing the models or budgets.
+Compare completed task usage and outcomes before changing the models or budgets. For
+code quality, take refactor candidate 5 (`cmd/foreman` wiring) next.

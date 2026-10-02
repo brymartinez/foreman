@@ -168,8 +168,7 @@ func (a App) reap(ctx context.Context, recs []*task.Record, dead []deadRunner) e
 				failRepair(cur, summary, a.Now())
 				return cur, nil
 			}
-			cur.State = task.Failed
-			cur.LastOutcome = &task.Outcome{Status: "failed", Summary: summary, At: a.Now()}
+			failTask(cur, summary, a.Now())
 			return cur, nil
 		})
 		if err != nil {

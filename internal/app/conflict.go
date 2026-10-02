@@ -58,24 +58,23 @@ func (a App) conflict(ctx context.Context, rec *task.Record, pr PullRequest) (*t
 func (a App) repairConflict(ctx, final context.Context, rec *task.Record, log io.Writer) (*task.Record, error) {
 	d, attempt := rec.Delegation, rec.Delegation.LastConflict()
 	fmt.Fprintf(log, "foreman: PR #%d conflicts with %s at %s; asking %s to merge it\n", d.PR, strings.TrimPrefix(d.BaseRef, "origin/"), short(attempt.Base), d.Implementer.Agent)
-	turn, err := a.implement(ctx, rec, nil, nil, nil, log)
-	var pr *PullRequest
-	if err == nil && turn.Outcome.Status == agent.PROpened {
-		if pr, err = a.checkRepair(ctx, rec, turn.Outcome); err == nil {
+	check := func(ctx context.Context, rec *task.Record, o agent.Outcome) (*PullRequest, error) {
+		pr, err := a.checkRepair(ctx, rec, o)
+		if err == nil {
 			fmt.Fprintf(log, "foreman: PR #%d now includes %s at %s\n", pr.Key.Number, short(attempt.Base), short(pr.HeadSHA))
 		}
+		return pr, err
 	}
-	return a.update(final, rec.Key, existing(func(cur *task.Record) {
+	res := a.runTurn(ctx, rec, turnRequest{}, check, log)
+	return a.finishTurn(ctx, final, rec.Key, "merge conflict repair", res, func(cur *task.Record) {
 		cur.Delegation.ConflictPending = false
-		if err != nil && ctx.Err() != nil {
+		if res.err != nil && ctx.Err() != nil {
 			// A cancelled run is FAILED like any other, and the attempt stays spent.
-			applyTurn(cur, turn, nil, err, a.Now())
-			applyStop(ctx, cur, "merge conflict repair", log, a.Now())
+			applyTurn(cur, res.turn, nil, res.err, a.Now())
 		} else {
-			applyConflictTurn(cur, turn, pr, err, a.Now())
+			applyConflictTurn(cur, res.turn, res.pr, res.err, a.Now())
 		}
-		addUsage(&cur.Usage, turn.Usage)
-	}))
+	}, log)
 }
 
 func (a App) checkRepair(ctx context.Context, rec *task.Record, o agent.Outcome) (*PullRequest, error) {
