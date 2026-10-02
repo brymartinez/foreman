@@ -2,8 +2,7 @@
 
 ## Current stage
 
-Stage 24 (test-first, readable behavior tests in delegated work for issue #19) is
-complete.
+Stage 25 (a shorter default PR description for issue #21) is complete.
 Completed runs are needed to measure the effect of the model and budget choices.
 
 ## Completed
@@ -658,6 +657,16 @@ request. Each fix is its own commit with a decision.
   planning prompt asks the plan to name each test's behavior. Conflict repair and
   merge-before-review turns get neither (D138).
 - Verified with `go vet ./...`, `go test ./...`, a binary build, and `scripts/e2e.sh`.
+
+### Stage 25 (complete): a shorter default PR description for issue #21
+
+- `defaults/stages/pr.md` asks for `## Problem`, `## Fix`, and `## Risk`, then
+  `Closes #N`. `## Review notes` appears only for a decision, plan deviation, or
+  limitation a reviewer needs (D139).
+- The body drops the test report, reviewer test steps, and planning comment links. The
+  validation gate before a PR opens stays.
+- Installed stage files and existing PRs do not change.
+- Verified with `go vet ./...`, `go test ./...`, and a binary build.
 
 ## Known limitations
 
