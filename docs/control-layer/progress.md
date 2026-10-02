@@ -722,6 +722,8 @@ request. Each fix is its own commit with a decision.
 - `a` toggles auto mode. The choice is saved in `~/.local/share/foreman/state.json`.
   The header shows `auto on N/M` or `auto off`.
 - A failed auto start is shown and not retried until the dashboard is reopened.
+- Auto starts in one repository go one at a time, and auto mode waits while the task
+  files cannot be read (D145).
 - `InboxItem.CreatedAt` comes from the searches and `GetItem`. `config --show` prints
   the auto agent and limit.
 - New tests cover eligibility, order, slot counting, the toggle, the header, the

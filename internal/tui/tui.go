@@ -298,6 +298,7 @@ func readLocal(ctx context.Context, s Source, m *Model) {
 	recs, err := s.Tasks(ctx)
 	if err != nil {
 		m.Message = "! " + err.Error()
+		m.TasksFailed()
 		return
 	}
 	m.SetTasks(recs)

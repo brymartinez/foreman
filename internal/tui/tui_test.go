@@ -341,7 +341,7 @@ func TestAutoStartAfterARefreshCountsTowardPending(t *testing.T) {
 	m.SetAuto(Auto{Enabled: true, Agent: task.Claude, Max: 3})
 	results := make(chan result, 8)
 	src := autoSource{}
-	launched := settle(context.Background(), src, &m, refreshed(assigned("a/b", 1, 0), assigned("a/b", 2, 1)), results)
+	launched := settle(context.Background(), src, &m, refreshed(assigned("a/b", 1, 0), assigned("c/d", 2, 1)), results)
 	if launched != 2 {
 		t.Fatalf("a refresh launched %d auto starts; want 2 counted as pending", launched)
 	}
@@ -381,5 +381,22 @@ func TestAutoStartFailureShowsTheError(t *testing.T) {
 	}
 	if n := settle(context.Background(), src, &m, refresh, results); n != 0 {
 		t.Fatalf("the next refresh retried the failed start: launched %d", n)
+	}
+}
+
+func TestAutoStartWaitsWhenTheTaskReadFails(t *testing.T) {
+	m := Model{Width: 100, Height: 30, Refreshing: true}
+	m.SetAuto(Auto{Enabled: true, Agent: task.Claude, Max: 1})
+	results := make(chan result, 8)
+	src := autoSource{}
+	if n := settle(context.Background(), src, &m, refreshed(assigned("a/b", 1, 0), assigned("c/d", 2, 1)), results); n != 1 {
+		t.Fatalf("launched %d; want one start for a limit of 1", n)
+	}
+	broken := autoSource{stubSource: stubSource{err: errors.New("tasks dir unreadable")}}
+	if n := settle(context.Background(), broken, &m, receive(t, results), results); n != 0 {
+		t.Fatalf("launched %d after the task read failed; the first run may still be WORKING", n)
+	}
+	if n := launchAuto(context.Background(), broken, &m, results); n != 0 {
+		t.Fatalf("a local tick launched %d with the task read still failing", n)
 	}
 }

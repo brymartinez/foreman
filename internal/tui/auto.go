@@ -56,7 +56,7 @@ func (m *Model) active() int {
 // refresh, so an issue already in the task list is skipped even when the inbox
 // still shows it as never delegated.
 func (m *Model) AutoStarts() []app.StartRequest {
-	if !m.AutoOn {
+	if !m.AutoOn || m.tasksStale {
 		return nil
 	}
 	free := m.AutoMax - m.active()
@@ -83,14 +83,31 @@ func (m *Model) AutoStarts() []app.StartRequest {
 		}
 		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.Key.Repo, b.Key.Repo), cmp.Compare(a.Key.Number, b.Key.Number))
 	})
+	// Starts in one repository share its managed checkout, which App.Start clones
+	// when it is missing, so they go one at a time.
+	busy := map[task.Repo]bool{}
+	for k := range m.starting {
+		busy[k.Repo] = true
+	}
 	var reqs []app.StartRequest
-	for _, it := range picks[:min(free, len(picks))] {
+	for _, it := range picks {
+		if len(reqs) == free {
+			break
+		}
+		if busy[it.Key.Repo] {
+			continue
+		}
+		busy[it.Key.Repo] = true
 		m.tried = mark(m.tried, it.Key)
 		m.starting = mark(m.starting, it.Key)
 		reqs = append(reqs, app.StartRequest{Repo: it.Key.Repo, Issue: it.Key.Number, Agent: m.AutoAgent})
 	}
 	return reqs
 }
+
+// TasksFailed records that the last task read failed. The task list on screen may
+// then miss a run that just started, so auto mode cannot count its slots.
+func (m *Model) TasksFailed() { m.tasksStale = true }
 
 // Done frees the slot a start or resume held once its result comes back.
 func (m *Model) Done(key task.Key) {

@@ -151,7 +151,8 @@ assigned to you that foreman has never delegated, oldest first, with `auto.agent
 no context file. It looks after the first refresh, after each successful refresh, and
 when a run leaves WORKING or REVIEWING. Mentions, FAILED tasks, and REVIEWED tasks
 never start on their own. At most `auto.max_concurrent` runs are active at once, and
-runs you start by hand count toward that limit. You can still start an issue by hand
+runs you start by hand count toward that limit. Issues in one repository start one
+at a time, because they share its checkout. You can still start an issue by hand
 when the limit is full. The header shows `auto on 1/3` (active runs and the limit) or
 `auto off`.
 

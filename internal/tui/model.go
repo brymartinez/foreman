@@ -91,6 +91,7 @@ type Model struct {
 	manualTask   bool              // cursor movement stops following the latest delegation
 	tried        map[task.Key]bool // issues started this session, by hand or automatically
 	starting     map[task.Key]bool // starts and resumes in flight, manual or automatic
+	tasksStale   bool              // the last task read failed
 }
 
 // Selected is the highlighted delegated task, or nil when nothing is delegated.
@@ -115,7 +116,7 @@ func (m *Model) SetTasks(recs []*task.Record) {
 	if cur := m.Selected(); cur != nil {
 		selected = cur.Key
 	}
-	m.Tasks = recs
+	m.Tasks, m.tasksStale = recs, false
 	if !m.manualTask {
 		m.TaskCursor = newestTask(recs)
 	} else {

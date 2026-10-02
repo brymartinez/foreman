@@ -2305,3 +2305,19 @@ Entry format:
   hold the webhook secret.
 - **Deferred.** Resuming earlier delegated work automatically, which must tell work
   that can resume from runs stopped for cost.
+
+## D145 (amends D144). Auto starts go one per repository and wait on a good task read
+
+- Date: 2026-10-03. Issue midsoln/foreman#30, review round 1 of PR #34.
+- **Context.** `App.Start` clones a repository's managed checkout when it is missing.
+  Two auto starts in one repository raced on that clone, and the loser was marked
+  tried, so it did not start again that session. Separately, a failed `Source.Tasks`
+  read kept the old task list. A start that had just come back then held no slot, and
+  auto mode could go past `auto.max_concurrent`.
+- **Decision.** `AutoStarts` skips a repository while any start or resume for it,
+  manual or automatic, is in flight, and picks at most one issue per repository in a
+  pass. The next one starts when that result comes back. A failed task read marks the
+  task list stale, and `AutoStarts` returns nothing until a read succeeds.
+- **Rejected.** A lock around checkout setup in `internal/app`. It fixes only the
+  clone, while worktree creation and fetches in the same repository can still race,
+  and it changes the manual path.
