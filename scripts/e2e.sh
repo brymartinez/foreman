@@ -9,7 +9,8 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/foreman-e2e.XXXXXX")
-trap '[ -n "${E2E_KEEP:-}" ] && echo "kept $work" || rm -rf "$work"' EXIT
+listeners=
+trap '[ -z "$listeners" ] || kill $listeners 2>/dev/null; [ -n "${E2E_KEEP:-}" ] && echo "kept $work" || rm -rf "$work"' EXIT
 failures=0
 
 go build -o "$work/foreman" "$root/cmd/foreman"
@@ -70,6 +71,8 @@ codex:
   reasoning_effort: medium
   plan_reasoning_effort: xhigh
   review_reasoning_effort: medium
+notifications:
+  enabled: false
 EOF
 	mkdir -p "$sandbox/tasks" "$sandbox/stages"
 	cp "$root"/defaults/stages/*.md "$sandbox/stages/"
@@ -256,11 +259,48 @@ echo '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens"
 echo '{"verdict":"clean","summary":"looks right","findings":[]}' >"$last"
 EOF
 
-	# Notifications go through osascript on macOS and notify-send on Linux.
-	for n in osascript notify-send; do
-		printf '#!/usr/bin/env bash\necho "%s $*" >>"$E2E_STATE/notifications.log"\n' "$n" >"$sandbox/bin/$n"
-	done
 	chmod +x "$sandbox/bin/"*
+}
+
+# webhook starts a stand-in Discord webhook and points webhook_url at it. It
+# appends each delivered body to $state/notifications.log and answers with the
+# status in $state/webhook-status, 204 by default.
+webhook() {
+	python3 - "$state" <<'PY' &
+import http.server, os, sys
+state = sys.argv[1]
+class Hook(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        try:
+            status = int(open(os.path.join(state, "webhook-status")).read())
+        except (OSError, ValueError):
+            status = 204
+        if status < 300:
+            with open(os.path.join(state, "notifications.log"), "ab") as f:
+                f.write(body + b"\n")
+        self.send_response(status)
+        self.end_headers()
+    def log_message(self, *args):
+        pass
+srv = http.server.HTTPServer(("127.0.0.1", 0), Hook)
+with open(os.path.join(state, "webhook-port.tmp"), "w") as f:
+    f.write(str(srv.server_port))
+os.rename(os.path.join(state, "webhook-port.tmp"), os.path.join(state, "webhook-port"))
+srv.serve_forever()
+PY
+	listeners="$listeners $!"
+	local i=0
+	while [ ! -f "$state/webhook-port" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+	notifications_config "  webhook_url: http://127.0.0.1:$(cat "$state/webhook-port")/api/webhooks/1/e2e-secret"
+}
+
+# notifications_config <yaml line> replaces the notifications block, which setup
+# writes last in the config.
+notifications_config() {
+	sed -i.bak '/^notifications:/,$d' "$sandbox/config.yaml"
+	printf 'notifications:\n%s\n' "$1" >>"$sandbox/config.yaml"
+	chmod 600 "$sandbox/config.yaml"
 }
 
 issue() { # issue <number> <title> [labels-json]
@@ -301,8 +341,9 @@ scenario_runner() {
 }
 
 scenario_notify() {
-	echo "notify: the developer hears about ready work and stopped runners"
+	echo "notify: the developer hears about ready work and stopped runners on Discord"
 	setup notify
+	webhook
 	echo '[{"name":"test","bucket":"pending","link":"https://ci/1"}]' >"$state/checks.json"
 	foreman start 42 --agent claude >/dev/null
 	check "the runner reaches a clean review" wait_status "CI pending"
@@ -311,6 +352,8 @@ scenario_notify() {
 	foreman status >/dev/null
 	foreman status >/dev/null
 	check "ready work notifies once" bash -c "[ \$(grep -c 'Ready for human review' '$state/notifications.log') = 1 ]"
+	check "the post carries the state, the task, and the PR link" contains "$state/notifications.log" 'acme/widgets#42 (READY_FOR_HUMAN)\nhttps://github.com/acme/widgets/pull/'
+	check "the post cannot mention anyone" contains "$state/notifications.log" '"allowed_mentions":{"parse":[]}'
 
 	issue 43 "Fix pagination"
 	E2E_AGENT_SLEEP=30.017 foreman start 43 --agent claude >/dev/null
@@ -327,6 +370,32 @@ scenario_notify() {
 	foreman status >/dev/null
 	check "a killed runner is reaped and notifies" grep -q 'Run failed.*acme/widgets#44' "$state/notifications.log"
 	pkill -f "sleep 30.017" || true
+
+	echo 500 >"$state/webhook-status"
+	issue 45 "Fix caching"
+	foreman start 45 --agent claude >/dev/null
+	local i=0
+	while ! grep -qF 'acme/widgets#45' "$sandbox/logs/notifications.log" 2>/dev/null && [ $i -lt 100 ]; do
+		foreman status >/dev/null
+		sleep 0.2
+		i=$((i + 1))
+	done
+	foreman show 45 >"$sandbox/show-45.txt"
+	check "a failing webhook leaves the task ready" contains "$sandbox/show-45.txt" "READY_FOR_HUMAN"
+	check "and logs the delivery error" grep -q 'acme/widgets#45 Ready for human review: Discord returned 500' "$sandbox/logs/notifications.log"
+	check "no log holds the webhook URL" bash -c "! grep -rqF e2e-secret '$sandbox/logs'"
+	foreman config --show >"$sandbox/show-config.txt"
+	check "config --show reports the webhook as set" contains "$sandbox/show-config.txt" "Notification webhook: set"
+	check "config --show hides the webhook URL" bash -c "! grep -qF e2e-secret '$sandbox/show-config.txt'"
+
+	chmod 644 "$sandbox/config.yaml"
+	check "a config readable by others warns" bash -c "cd '$FOREMAN_CWD' && '$work/foreman' status 2>'$sandbox/perm-err.txt' >/dev/null && grep -qF 'chmod 600 $sandbox/config.yaml' '$sandbox/perm-err.txt'"
+	notifications_config "  enabled: true"
+	check "a missing webhook URL warns and status still works" bash -c "cd '$FOREMAN_CWD' && '$work/foreman' status 2>'$sandbox/setup-err.txt' >/dev/null && grep -qF 'notifications.webhook_url is not set' '$sandbox/setup-err.txt'"
+	# wait reaps the listener, so bash prints no "Terminated" line for it.
+	kill $listeners 2>/dev/null || true
+	wait $listeners 2>/dev/null || true
+	listeners=
 }
 
 scenario_logs() {
