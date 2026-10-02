@@ -2170,3 +2170,45 @@ Entry format:
     write and network access. Codex's read-only sandbox also blocks Go builds. The
     reviewer's checks are therefore limited to reading code and git commands, and the
     prompt says so. `ReviewTools` is unchanged.
+
+## D141. The runner is a loop of named steps over one shared turn pipeline
+
+- Date: 2026-10-02. Issue midsoln/foreman#26.
+- **Context.** `App.RunTask` was a 144-line loop. Its phases were implied by the
+  `reviewNext` and `answered` flags, three `continue`s, and the `feedback` and
+  `rounds` counters. The sequence "run a turn, verify the PR, record the result,
+  record a cancel, add usage" was written out four times: in `RunTask`,
+  `answerFeedback`, `resolveConflicts`, and `repairConflict`. The FAILED transition
+  with a `failed` outcome was written by hand at six sites. The issue asks for a review
+  of every Go package and one focused refactor of the runner, with no change to CLI
+  output, exit codes, the task file, or agent behavior.
+- **Decision.** Keep the refactor inside `internal/app`, with no new port, package, or
+  dependency.
+  - `RunTask` claims the task, repairs a pending conflict, reads waiting comments, and
+    runs `taskRun.loop`. A `step` enum names the five phases. `firstStep(rec, waiting)`
+    is a pure function: waiting comments answer, a verified unreviewed head is
+    reviewed, anything else implements. Each step is one `taskRun` method that returns
+    the next step. The transitions match the old loop exactly.
+  - `turn.go` holds the shared pipeline. `runTurn` runs `implement` and, on
+    `pr_opened`, a `prCheck`: `verifiedPR` for normal turns, `checkRepair` for a
+    conflict repair. Each check logs its own line. `finishTurn` writes through `final`,
+    calls the caller's mapping, records a cancel with `applyStop`, and adds usage.
+  - `implement` takes a `turnRequest` (findings, feedback, or merge) in place of three
+    positional arguments, and its doc comment moves onto it from `needsPlan`.
+  - `failTask(rec, summary, now)` sets FAILED with a `failed` outcome. The cancelled
+    outcomes, `failRepair`, and the agent's own `failed` status keep their own code,
+    because their status or state differs.
+  - The "opened a PR without posting a plan" log line moves into `runTurn`. Only a
+    planning turn can trigger it, because every other turn has a PR, so its output is
+    unchanged.
+  - Rejected: a `map[step]func` table, which adds indirection for five steps; a
+    separate runner package behind a new interface, which would need the store,
+    GitHub, and agents passed through it while the fakes already test `RunTask`.
+  - New tests pin the failure paths before the change: a merge turn whose PR closed,
+    a cancelled feedback turn, a plan comment deleted on GitHub, and a failed plan
+    post. A table test covers `firstStep`.
+- **Consequence.** A change to how a turn is recorded is made in `finishTurn` once.
+  The full review ranked later refactors, recorded in `progress.md`: the `run`
+  function in `cmd/foreman/main.go`, `gate`, `Start`, the store's record mapping,
+  `render.Show` and `tui.Run`, and `agent.ImplementationPrompt`. None is built here.
+
