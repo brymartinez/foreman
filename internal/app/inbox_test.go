@@ -191,7 +191,20 @@ type fakeGitHub struct {
 	prComments     map[int][]PRComment // the PR conversation, by PR number
 	prCommentErr   error
 	prCommentReads int
+	baseHeads      map[string]string // branch heads on GitHub, by branch name
+	baseHeadErr    error
 	mu             sync.Mutex
+}
+
+func (f *fakeGitHub) BranchHead(_ context.Context, _ task.Repo, branch string) (string, error) {
+	if f.baseHeadErr != nil {
+		return "", f.baseHeadErr
+	}
+	sha, ok := f.baseHeads[branch]
+	if !ok {
+		return "", fmt.Errorf("gh: no branch %s", branch)
+	}
+	return sha, nil
 }
 
 func (f *fakeGitHub) PullRequestComments(_ context.Context, pr task.Key) ([]PRComment, error) {

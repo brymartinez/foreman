@@ -68,3 +68,28 @@ func TestChangeRequestsSinceDecision(t *testing.T) {
 		t.Fatalf("rounds since answer = %d, want 1", got)
 	}
 }
+
+func TestConflictAttempted(t *testing.T) {
+	d := &Delegation{ConflictAttempts: []ConflictAttempt{{Head: "h1", Base: "b0"}, {Head: "h1", Base: "b1"}}}
+	if d.LastConflict() != (ConflictAttempt{Head: "h1", Base: "b1"}) {
+		t.Errorf("last = %+v", d.LastConflict())
+	}
+	for _, c := range []struct {
+		head, base string
+		want       bool
+	}{
+		{"h1", "b1", true},
+		{"h1", "b0", true},
+		{"h2", "b1", false},
+		{"h1", "b2", false},
+		{"", "b1", false},
+		{"h1", "", false},
+	} {
+		if got := d.ConflictAttempted(c.head, c.base); got != c.want {
+			t.Errorf("ConflictAttempted(%q, %q) = %v", c.head, c.base, got)
+		}
+	}
+	if (&Delegation{}).ConflictAttempted("", "") || (&Delegation{}).LastConflict() != (ConflictAttempt{}) {
+		t.Error("an empty record attempted nothing")
+	}
+}

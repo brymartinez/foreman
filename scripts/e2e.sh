@@ -123,6 +123,9 @@ case "$1 $2" in
 "api repos/"*)
 	# A pull request's conversation: the comments, the inline comments, and the reviews.
 	case "$2" in
+	*/git/ref/heads/*)
+		git --git-dir="$E2E_ORIGIN" rev-parse "${2#*/git/ref/heads/}"
+		exit 0 ;;
 	*/issues/*/comments | */pulls/*/comments | */pulls/*/reviews)
 		f="$s/conv-$(echo "$2" | tr '/' '-').json"
 		if [ -f "$f" ]; then cat "$f"; else echo '[[]]'; fi
@@ -158,6 +161,20 @@ if [[ " $* " == *" --resume "* ]]; then
 		echo "claude resume" >>"$E2E_STATE/agents.log"
 		printf '%s' "$2" >"$E2E_STATE/resume-prompt.txt"
 		[[ "$2" == *"planned, blocked, or failed"* ]] && planning=1
+		# Repairing a merge conflict: merge the base, or fail when told to.
+		if [[ "$2" == *"now has merge conflicts"* ]]; then
+			echo "claude conflict" >>"$E2E_STATE/agents.log"
+			if [ -f "$E2E_STATE/conflict-fail" ]; then
+				echo '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"failed","summary":"the merge breaks the tests","prNumber":null,"prUrl":null,"validation":[],"questions":[]}}'
+				exit 0
+			fi
+			git fetch -q origin main
+			git -c user.email=e2e@example.com -c user.name=e2e merge -q --no-edit origin/main
+			b=$(git branch --show-current); i=${b#*/}; pr=$((900 + ${i%%-*}))
+			printf '{"number":%s,"url":"https://github.com/acme/widgets/pull/%s","state":"OPEN","headRefName":"%s","headRefOid":"%s","baseRefName":"main","isCrossRepository":false,"mergeable":"MERGEABLE"}\n' "$pr" "$pr" "$b" "$(git rev-parse HEAD)" >"$E2E_STATE/pr-$pr.json"
+			printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"pr_opened","summary":"merged main","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s","validation":[{"command":"go test ./...","passed":true}],"questions":[]}}\n' "$pr" "$pr"
+			exit 0
+		fi
 		# Answering PR feedback: reply where the comment is and change no code.
 		if [[ "$2" == *"you have not answered"* ]]; then
 			echo "claude feedback" >>"$E2E_STATE/agents.log"
@@ -513,7 +530,48 @@ scenario_feedback() {
 	check "show lists the answered comment" contains "$sandbox/show.txt" "answered"
 }
 
-scenarios=${*:-runner notify logs inbox inbox_lifecycle rereview respond cancel feedback tui}
+# conflicts marks PR #942 as conflicting with its base.
+conflicts() {
+	sed -i.bak 's/,"mergeable":"[A-Z]*"//; s/"isCrossRepository":false/"isCrossRepository":false,"mergeable":"CONFLICTING"/' "$state/pr-942.json"
+}
+
+scenario_conflict() {
+	echo "conflict: a handed-over PR that conflicts with main is repaired once"
+	setup conflict
+	echo '[{"name":"test","bucket":"pass","link":"https://ci/1"}]' >"$state/checks.json"
+	foreman start 42 --agent claude >/dev/null
+	check "the run reaches the developer" wait_status "READY_FOR_HUMAN"
+	(
+		cd "$sandbox/checkout"
+		echo "package widgets // main moved" >main.go
+		git add main.go && git commit -qm "main moves on" && git push -q origin main
+	)
+
+	conflicts
+	foreman status >"$sandbox/status.txt"
+	check "the refresh starts a repair" contains "$sandbox/status.txt" "WORKING"
+	foreman status >/dev/null
+	check "the repair is reviewed and handed back" wait_status "READY_FOR_HUMAN" 15
+	check "the implementer repaired it once" test "$(turns 'claude conflict')" = 1
+	check "in its own session" test "$(turns 'claude implement')" = 1
+	check "the reviewer reviewed the merge" test "$(turns 'codex review')" = 2
+	local wt
+	wt=$(ls -d "$sandbox"/worktrees/*/*)
+	check "the branch now includes main" git -C "$wt" merge-base --is-ancestor "$(git --git-dir="$sandbox/origin.git" rev-parse main)" HEAD
+
+	touch "$state/conflict-fail"
+	conflicts
+	foreman status >/dev/null
+	check "a failed repair needs a decision" wait_status "NEEDS_DECISION" 15
+	foreman status >/dev/null
+	foreman status >/dev/null
+	check "the same heads are not tried again" test "$(turns 'claude conflict')" = 2
+	foreman show 42 >"$sandbox/show.txt"
+	check "show names the blocker" contains "$sandbox/show.txt" "the merge breaks the tests"
+	check "the worktree is kept" test -d "$wt"
+}
+
+scenarios=${*:-runner notify logs inbox inbox_lifecycle rereview respond cancel feedback conflict tui}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"

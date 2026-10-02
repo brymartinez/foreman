@@ -2,7 +2,8 @@
 
 ## Current stage
 
-Stage 20 (the dashboard show view for issue #11) is complete. Completed runs are needed to measure the effect of the model and budget choices.
+Stage 22 (the dashboard show view for issue #11) is complete.
+Completed runs are needed to measure the effect of the model and budget choices.
 
 ## Completed
 
@@ -600,10 +601,29 @@ request. Each fix is its own commit with a decision.
 - Verified the combined tree with `go test ./...`, `go vet ./...`, a binary build,
   and all `scripts/e2e.sh` scenarios with normal process access.
 
-### Stage 20 (complete): the dashboard show view for issue #11
+### Stage 20 (complete): concise planning comments and PR descriptions for issue #13
+
+- `defaults/stages/plan.md` asks each planning document to open with a short summary
+  and to cut repeated background. `pr.md` caps the body at about 25 lines and links the
+  planning comments. `implement.md` rule 20 asks writing to lead with the result (D129).
+- Installed stage files, existing comments, and existing PRs do not change.
+- Verified with `go vet ./...`, `go test ./...`, a binary build, and `scripts/e2e.sh`.
+
+### Stage 21 (complete): merge conflict repair on handed-over PRs for issue #17
+
+- The gate reads `mergeable` for each open PR. A READY_FOR_HUMAN PR that GitHub reports
+  as CONFLICTING goes back to its implementer once per PR head and base head (D130).
+- The runner resumes the implementer to merge the base, checks with git that the new
+  head includes the base head and that every reported check passed, and reviews it. A
+  failed repair is NEEDS_DECISION, including a runner that cannot start or dies
+  (D132). Every attempted pair stays spent (D131).
+- Verified with `go vet ./...`, `go test ./...`, a binary build, and `scripts/e2e.sh`,
+  which has a new `conflict` scenario.
+
+### Stage 22 (complete): the dashboard show view for issue #11
 
 - With the lower pane open, `s` switches between the log and the `foreman show` text
-  for the selected task, with either list focused (D129). The heading reads
+  for the selected task, with either list focused (D133). The heading reads
   `SHOW · repo#N · state`, plus the line range when the text does not fit.
 - Show lines wrap at the terminal width. The log scroll keys scroll the show view, which
   opens at its top. Returning to the log follows its tail.
@@ -626,6 +646,9 @@ request. Each fix is its own commit with a decision.
   costs one extra round, bounded by the per-run cap (D120, D123).
 - PR feedback has been checked against the stand-in `gh` and fixtures, not a live PR.
 - The release workflow has not run: the repo has no GitHub remote yet.
+- Conflict repair is checked against the stand-in `gh` and fixtures, not a live
+  conflicting PR. GitHub reports UNKNOWN until it has computed mergeability, so a
+  repair can start one refresh late.
 
 ## Architectural decisions
 
@@ -736,6 +759,9 @@ what it replaced. Current summary:
   offers only work the developer can move. D125. The cleaned log renders Codex items.
   D126. Waiting PR feedback stays reachable under the mention filter and an agent switch.
   D127. A resume with no comments to answer runs no turn.
+- D130. A handed-over PR that conflicts with its base is repaired once per head pair.
+  D131 (amends D130). Every attempted pair stays spent; failed checks fail a repair.
+  D132 (amends D130). A repair runner that fails to start or dies needs a decision.
 
 - D117. Fresh implementation session after planning. D118. Models and reasoning
   effort are selected per stage. D128. Merge fresh sessions with the PR feedback loop.

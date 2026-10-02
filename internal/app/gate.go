@@ -119,6 +119,16 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 				}
 			}
 		}
+		// Comments come first: a task they moved to REVIEWED is repaired once it is
+		// handed over again.
+		if repaired, conflictNote, err := a.conflict(ctx, updated, pr); err != nil {
+			warnings = append(warnings, err)
+		} else {
+			updated = repaired
+			if conflictNote != "" {
+				notes[r.Key] = append(notes[r.Key], conflictNote)
+			}
+		}
 		recs[i] = updated
 	}
 	return notes, checked, warnings, nil
