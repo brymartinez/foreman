@@ -51,7 +51,7 @@ func TestReconcile(t *testing.T) {
 		item(7, "open", t0, task.Tracked),
 		item(8, "open", t1, task.ReviewRequested),
 	}
-	// Incomplete searches: an item's absence from them says nothing (D15).
+	// Incomplete searches: an item's absence from them says nothing.
 	report, dirty := Reconcile(items, recs, nil, false, now)
 
 	if got := entryNumbers(report.New); !slices.Equal(got, []int{8}) {

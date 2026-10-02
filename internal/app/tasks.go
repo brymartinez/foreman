@@ -38,7 +38,7 @@ func (a App) Status(ctx context.Context) ([]*task.Record, []error, error) {
 
 // Tasks returns the same work as Status, from the task files alone. It skips the
 // readiness gate, so it makes no GitHub call and the dashboard can re-read it every
-// second (D95).
+// second.
 func (a App) Tasks(ctx context.Context) ([]*task.Record, error) {
 	recs, err := a.listReaped(ctx)
 	if err != nil {
@@ -93,7 +93,7 @@ func (a App) Find(ctx context.Context, repo task.Repo, number int) (*task.Record
 
 // listReaped lists tasks and reaps the ones it takes no GitHub call to judge: a task
 // with a PR is left to a caller that has read it. It makes no call itself, so the
-// dashboard can call it every second (D95).
+// dashboard can call it every second.
 func (a App) listReaped(ctx context.Context) ([]*task.Record, error) {
 	recs, err := a.Store.List(ctx)
 	if err != nil {
@@ -120,9 +120,9 @@ type deadRunner struct {
 
 // reapable drops the dead runners whose task the gate did not read this pass. A task
 // with a PR is only safe to fail once the gate has seen that PR: a PR the developer
-// closed ends the task instead of failing it (D107), and a GitHub call that fails
+// closed ends the task instead of failing it, and a GitHub call that fails
 // leaves foreman unable to tell the two apart. A failure notification cannot be taken
-// back, so an unread task keeps its state and the next refresh judges it (D113).
+// back, so an unread task keeps its state and the next refresh judges it.
 func reapable(recs []*task.Record, dead []deadRunner, checked map[task.Key]bool) []deadRunner {
 	var out []deadRunner
 	for _, dr := range dead {
@@ -139,7 +139,7 @@ func reapable(recs []*task.Record, dead []deadRunner, checked map[task.Key]bool)
 //
 // It is separate from reap because the two happen either side of the readiness gate.
 // The gate reads each task's PR first, so a dead runner on a PR the developer closed
-// ends the task instead of failing it (D107), and a failure notification cannot be
+// ends the task instead of failing it, and a failure notification cannot be
 // taken back once it is sent. Reading the pids first also keeps a runner the gate
 // launches in the same pass out of the set.
 func (a App) deadRunners(recs []*task.Record) []deadRunner {
@@ -154,7 +154,7 @@ func (a App) deadRunners(recs []*task.Record) []deadRunner {
 }
 
 // reap marks the tasks deadRunners found as FAILED, unless they have moved on since. A
-// runner that died during a merge conflict repair leaves a decision instead (D132).
+// runner that died during a merge conflict repair leaves a decision instead.
 func (a App) reap(ctx context.Context, recs []*task.Record, dead []deadRunner) error {
 	for _, dr := range dead {
 		updated, err := a.update(ctx, recs[dr.index].Key, func(cur *task.Record) (*task.Record, error) {
@@ -184,7 +184,7 @@ func running(s task.State) bool { return s == task.Working || s == task.Reviewin
 
 // liveRunner reports a task whose runner process is still going. That runner owns the
 // worktree and the task file until it exits, whatever state the task is in: a
-// PR_CLOSED task keeps its pid until the stop succeeds, so it can have one too (D107).
+// PR_CLOSED task keeps its pid until the stop succeeds, so it can have one too.
 func (a App) liveRunner(r *task.Record) bool {
 	d := r.Delegation
 	return d != nil && d.RunnerPID > 0 && a.Runners.Alive(d.RunnerPID)

@@ -199,7 +199,7 @@ func ready(w io.Writer, rec *task.Record) {
 }
 
 // ciLine shows GitHub's check results. Failing checks are listed with their links,
-// because judging them is the developer's call (D46).
+// because judging them is the developer's call.
 func ciLine(w io.Writer, c *task.CIStatus) {
 	switch {
 	case c == nil:
@@ -574,7 +574,7 @@ func StageSources(w io.Writer, reports []StageReport, home, repoRoot string) {
 
 const missingGlobalHint = "Foreman won't run until every global stage file exists. Run `make config` in the foreman repository, or copy its defaults/stages/*.md into the stages directory."
 
-// GlobalMissing reports a stage whose required global file isn't there (D73).
+// GlobalMissing reports a stage whose required global file isn't there.
 func (r StageReport) GlobalMissing() bool {
 	return r.Err == nil && r.Instructions.GlobalPath == ""
 }

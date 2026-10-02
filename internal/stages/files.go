@@ -47,7 +47,7 @@ func (f Files) Resolve(repoRoot string, stage task.Stage) (task.StageInstruction
 }
 
 // RequireGlobal fails unless every stage has a global file. The global files carry the
-// agents' working rules, so foreman does not run without them (D73).
+// agents' working rules, so foreman does not run without them.
 func (f Files) RequireGlobal() error {
 	var missing []string
 	for _, st := range task.Stages {
@@ -90,7 +90,7 @@ func read(path string) (string, string, error) {
 }
 
 // RepoRoot is the top of the git working tree containing dir, or "" when dir is not
-// inside one. `foreman config` uses it; tasks use their worktree instead (D48).
+// inside one. `foreman config` uses it; tasks use their worktree instead.
 func RepoRoot(ctx context.Context, dir string) (string, error) {
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--show-toplevel")

@@ -112,7 +112,7 @@ func inboxPane(m Model) pane {
 		r := row{lines: []string{fmt.Sprintf("%s#%d  %s", k.Repo, k.Number, e.Item.Title)}}
 		if e.Delegated {
 			// INBOX only ever offers delegated work the developer can move, so its state
-			// says which key is waiting: start again, or answer the PR (D124).
+			// says which key is waiting: start again, or answer the PR.
 			detail = render.JoinFacts(string(e.State), detail)
 			r.accent, r.accentLine, r.color = string(e.State), 1, taskColor(e.State)
 		}
@@ -462,7 +462,7 @@ func colored(s, color string) string { return color + s + fgDefault }
 
 // highlight draws word in color inside line, which is already truncated and padded.
 // The escapes go in after all of the width arithmetic, so they are never counted as
-// columns (D101). A word a truncation cut is not there, and the line stays plain.
+// columns. A word a truncation cut is not there, and the line stays plain.
 func highlight(line, word, color string) string {
 	if word == "" || color == "" {
 		return line

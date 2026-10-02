@@ -68,7 +68,7 @@ codex exec -s workspace-write -c sandbox_workspace_write.network_access=true -o 
   "Run exactly: gh api user --jq .login ; reply with only its stdout, or FAILED." </dev/null >/dev/null 2>&1
 check "codex sandbox can use gh credentials" "$(tr -d '[:space:]' <x5.txt)" "$(gh api user --jq .login)"
 # The probe lives under $TMPDIR, which workspace-write can write by default; real clones
-# don't. Excluding the temp dirs makes these checks see what a real worktree sees (D112).
+# don't. Excluding the temp dirs makes these checks see what a real worktree sees.
 notmp=(-c sandbox_workspace_write.exclude_slash_tmp=true -c sandbox_workspace_write.exclude_tmpdir_env_var=true)
 roots="sandbox_workspace_write.writable_roots=[\"$(git rev-parse --path-format=absolute --git-common-dir)\"]"
 commit_prompt() { echo "Create $1 containing hi, then run: git add $1 && git commit -q -m probe. Reply OK or the git error."; }

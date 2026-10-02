@@ -74,7 +74,7 @@ func ParseReview(raw []byte) (ReviewOutcome, error) {
 // ReviewBrief holds only what the reviewer may judge the change by: the PR, its
 // description and comments, and earlier review rounds. It has no field for the issue,
 // PRD, context, decisions, plan, or the implementer's validation, so none can reach
-// the prompt (D140).
+// the prompt.
 type ReviewBrief struct {
 	Key    task.Key
 	PR     int
@@ -88,8 +88,8 @@ type ReviewBrief struct {
 	StageInstructions string
 	// Previous rounds, so the reviewer can check fixes and not repeat settled points.
 	Previous []task.Review
-	// Passes is how many times the reviewer reads the whole change (review_rounds,
-	// D77). Zero omits the section.
+	// Passes is how many times the reviewer reads the whole change (review_rounds).
+	// Zero omits the section.
 	Passes int
 }
 

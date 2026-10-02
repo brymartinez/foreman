@@ -13,7 +13,7 @@ import (
 
 // InboxSelection is the user's choice from the current inbox refresh. Resume means
 // the task already has a run waiting on PR feedback, so it continues instead of
-// starting (D121).
+// starting.
 type InboxSelection struct {
 	Key         task.Key
 	Agent       task.Agent
@@ -26,7 +26,7 @@ type InboxSelection struct {
 // items. An item foreman has never delegated is offered unless only a tracked re-fetch
 // found it. One it has delegated is offered only when the run has stopped and is the
 // developer's to move: FAILED, which starts again, and REVIEWED, which resumes. Work an
-// agent still holds stays in DELEGATED WORK (D124).
+// agent still holds stays in DELEGATED WORK.
 func Delegable(report InboxReport) []InboxEntry {
 	var choices []InboxEntry
 	for _, entry := range report.Current {

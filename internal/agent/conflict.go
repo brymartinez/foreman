@@ -6,7 +6,7 @@ import (
 )
 
 // Conflict is a merge conflict between the task's pull request and its base branch,
-// which the implementer repairs after foreman handed the PR over (D130).
+// which the implementer repairs after foreman handed the PR over.
 type Conflict struct {
 	PR       int
 	Base     string // the base branch name, e.g. main

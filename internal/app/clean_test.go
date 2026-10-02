@@ -63,7 +63,7 @@ func TestCleanRefusesATaskWhoseRunnerIsStillGoing(t *testing.T) {
 	f := newFixture()
 	key := reviewed(t, f)
 	// The gate ended the task but its runner would not stop, so it keeps its pid and
-	// is still working in the worktree (D107).
+	// is still working in the worktree.
 	f.store.recs[key].State = task.PRClosed
 	f.store.recs[key].Delegation.RunnerPID = 77
 	f.runners.alive[77] = true

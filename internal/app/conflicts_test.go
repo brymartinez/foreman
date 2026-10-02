@@ -76,7 +76,7 @@ func TestFreshMergeTurnWhenSessionIsGone(t *testing.T) {
 func TestConflictAfterCleanReviewStillReviewsNewHead(t *testing.T) {
 	f := newFixture()
 	key := reviewed(t, f)
-	// New commits after the clean review send the PR back for review (D63).
+	// New commits after the clean review send the PR back for review.
 	setHead(f, "beef002")
 	setCI(f, task.CIStatus{State: task.CIPassing})
 	f.gh.items = []InboxItem{item(825, "open", t0, task.Assigned)}

@@ -34,7 +34,7 @@ type Config struct {
 	// Path is the resolved config file used by config show/edit.
 	Path string `yaml:"-"`
 	// StagesDir holds the global stage instructions: stages/ next to the config file,
-	// so ~/.config/foreman/stages by default. It is a convention, not a setting (D48).
+	// so ~/.config/foreman/stages by default. It is a convention, not a setting.
 	StagesDir string `yaml:"-"`
 }
 
@@ -57,7 +57,7 @@ type Notifications struct {
 	WebhookURL string `yaml:"webhook_url"`
 }
 
-// Cleanup controls what happens to a task's worktree once the task is DONE (D42).
+// Cleanup controls what happens to a task's worktree once the task is DONE.
 type Cleanup struct {
 	// OnDone removes DONE tasks' worktrees when inbox runs. Off means only `foreman clean`.
 	OnDone bool `yaml:"on_done"`

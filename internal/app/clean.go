@@ -24,7 +24,7 @@ type CleanResult struct {
 
 // Clean removes the worktrees of finished tasks. A branch is deleted only when its PR
 // is merged and DeleteMergedBranches is on; otherwise it stays, so `start` can pick
-// the work up again. A worktree with uncommitted changes is kept and reported (D41).
+// the work up again. A worktree with uncommitted changes is kept and reported.
 func (a App) Clean(ctx context.Context, req CleanRequest) ([]CleanResult, error) {
 	var recs []*task.Record
 	if req.Issue > 0 {
@@ -37,7 +37,7 @@ func (a App) Clean(ctx context.Context, req CleanRequest) ([]CleanResult, error)
 		case !finished(rec.State):
 			return nil, fmt.Errorf("%s is %s; only DONE, FAILED, or PR_CLOSED tasks are cleaned", ref, rec.State)
 		case a.liveRunner(rec):
-			// A PR_CLOSED task keeps its pid until the stop succeeds (D107), and the
+			// A PR_CLOSED task keeps its pid until the stop succeeds, and the
 			// runner is still working in the worktree this would remove.
 			return nil, fmt.Errorf("%s is still running (pid %d); cancel it first", ref, rec.Delegation.RunnerPID)
 		case !hasWorktree(rec):

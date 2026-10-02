@@ -22,7 +22,7 @@ type Claude struct {
 	Model string
 	// PlanModel replaces Model while writing or revising the plan.
 	PlanModel string
-	// ReviewModel replaces Model for reviews; "" keeps Model (D85).
+	// ReviewModel replaces Model for reviews; "" keeps Model.
 	ReviewModel  string
 	Exec         Exec
 	NewSessionID func() string
@@ -30,7 +30,7 @@ type Claude struct {
 
 // ImplementTools are pre-approved for the implementer. Headless Claude denies any tool
 // not pre-approved, so they cover building, testing, pushing, and opening a PR, plus
-// web lookups to match Codex's network access (D8, D82).
+// web lookups to match Codex's network access.
 var ImplementTools = []string{"Bash", "WebFetch", "WebSearch"}
 
 func (Claude) Name() task.Agent { return task.Claude }

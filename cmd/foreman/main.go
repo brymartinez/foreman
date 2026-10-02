@@ -35,7 +35,7 @@ import (
 
 // localRefresh is how often the dashboard re-reads the task files and the selected
 // log. It is cheap, so it is fixed; the GitHub refresh runs the searches, the
-// readiness gate, and the cleanup, so its interval is the `refresh` setting (D95).
+// readiness gate, and the cleanup, so its interval is the `refresh` setting.
 const localRefresh = time.Second
 
 // version is set at release time with -ldflags "-X main.version=v1.2.3".

@@ -12,7 +12,7 @@ import (
 )
 
 // maxMergeAttempts is how many merge turns run before a PR that still conflicts goes
-// to the developer (D133).
+// to the developer.
 const maxMergeAttempts = 2
 
 // resolveConflicts runs right before every review pass. It checks the PR against its

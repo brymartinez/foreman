@@ -201,7 +201,7 @@ func claudeLine(at, payload, kind string) string {
 }
 
 // codexEvent covers every `codex exec --json` event the clean log reports. The item
-// object carries the substance of a run, and its own type says what it holds (D125).
+// object carries the substance of a run, and its own type says what it holds.
 type codexEvent struct {
 	ThreadID string `json:"thread_id"`
 	Message  string `json:"message"`

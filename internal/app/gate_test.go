@@ -456,7 +456,7 @@ func TestGateReopenedPRReturnsToTheActiveList(t *testing.T) {
 		{"clean review of the head GitHub reports", func(*task.Review) {}, task.ReadyForHuman},
 		{"review requested changes", func(r *task.Review) { r.Clean = false }, task.Reviewing},
 		{"clean review of an earlier head", func(r *task.Review) { r.Head = "older01" }, task.Reviewing},
-		// A review from before heads were recorded (D63) cannot be shown to cover the
+		// A review from before heads were recorded cannot be shown to cover the
 		// reopened PR, so it must not hand the task to the developer.
 		{"clean review with no recorded head", func(r *task.Review) { r.Head = "" }, task.Reviewing},
 	} {

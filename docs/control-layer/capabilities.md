@@ -82,8 +82,7 @@ Headless mode is `codex exec <prompt>`.
   `-c 'sandbox_workspace_write.writable_roots=["<clone>/.git"]'` fixes it, for both
   `exec` and `exec resume`. `exec resume` has no `--add-dir` flag. The earlier note said
   no flag was needed, but the probe's clone was under `$TMPDIR`, which workspace-write
-  can write by default. The probe now excludes `/tmp` and `$TMPDIR` for these checks
-  (D112).
+  can write by default. The probe now excludes `/tmp` and `$TMPDIR` for these checks.
 - **Review.** `codex exec review --base <branch>` is a built-in review command and accepts
   `--output-schema`. Foreman doesn't use it. It uses plain `codex exec` with its own
   review prompt, so both reviewers get the same inputs and return the same schema.
@@ -104,13 +103,13 @@ The user is authenticated through the keyring.
   UNKNOWN. GitHub computes it lazily, so UNKNOWN is common right after a push to either
   branch. `gh pr view --json` also lists `baseRefName`.
   `gh api repos/<owner>/<repo>/git/ref/heads/<branch> --jq .object.sha` prints a
-  branch's head commit (D130). The field list was read from gh 2.101.0; a conflicting
+  branch's head commit. The field list was read from gh 2.101.0; a conflicting
   PR was not probed live.
 - **CI.** `gh pr checks <n> --json name,state,bucket` gives each check a `bucket` of pass,
   fail, pending, skipping, or cancel. `--required` limits it to required checks.
   According to `gh pr checks --help`, gh exits 8 while checks are pending. When a PR has
   no checks, gh errors with "no checks reported on the '<branch>' branch". Foreman
-  ignores the exit code whenever JSON came back (D36). This was not probed live on a
+  ignores the exit code whenever JSON came back. This was not probed live on a
   real PR.
 - **Creating PRs.** `gh pr create --title --body --head` can run from inside the worktree.
 - **Issue comments.** `gh api --method POST repos/<owner>/<repo>/issues/<n>/comments -f body=<text>`
@@ -128,7 +127,7 @@ The user is authenticated through the keyring.
   per page, so the parser unwraps `[][]comment`. A reply inside an inline thread is
   `--method POST repos/<owner>/<repo>/pulls/<n>/comments/<id>/replies`. Verified against
   the REST reference and unit tests over recorded responses, not probed live, because a
-  probe would comment on a real pull request (D119).
+  probe would comment on a real pull request.
 
 ## git worktree
 
@@ -138,20 +137,20 @@ checked out at the expected path, foreman reuses it. Git refuses to check out a 
 two worktrees at once, which prevents two agents from writing to the same checkout.
 `git merge-base --is-ancestor <a> <b>` exits 0 when `a` is in `b`'s history, 1 when it
 is not, and another code on an error such as an unknown commit. Foreman uses it to check
-a conflict repair after `git fetch origin` (D130).
+a conflict repair after `git fetch origin`.
 
 `git merge-tree --write-tree --name-only --no-messages <branch> <base>` (git 2.38 or
 newer) merges in memory and touches neither the index nor the working tree. It exits 0
 for a clean merge and prints the tree id. It exits 1 for a conflict and prints the tree
 id, then one conflicting path per line. Any other exit is an error, such as a missing
-ref. Verified by `internal/worktree/git_test.go` against git 2.50 (D133).
+ref. Verified by `internal/worktree/git_test.go` against git 2.50.
 
 ## Assumptions in the design doc that the tooling doesn't support as written
 
 1. **"The agent asks me mid-run."** A headless turn can't stop and wait for input. What
    works instead is that the agent ends its turn with `status: blocked` and its
    `questions`. Foreman stores them, and `respond` resumes the same session with the
-   answers (D65). From the user's side this behaves the same, and both CLIs support it.
+   answers. From the user's side this behaves the same, and both CLIs support it.
 2. **`AgentAdapter.getStatus`.** Neither CLI can report on a turn that's still running.
    Foreman gets status from its own records instead: the task file, whether the runner
    process is alive, and the runner's log. `getStatus` was removed from the interface.
@@ -160,7 +159,7 @@ ref. Verified by `internal/worktree/git_test.go` against git 2.50 (D133).
    and an authenticated `git ls-remote` both work inside the Codex sandbox, because gh
    and git reach the keyring normally. The probe checks this. The agent reports the PR
    in its outcome (`pr_opened`, `prNumber`, `prUrl`), and foreman confirms with `gh`
-   that the PR exists (D7).
+   that the PR exists.
 4. **Unattended permissions.** Neither `auto` nor the default permission mode lets
    Claude run shell commands headless. The adapter has to pass an explicit
    `--allowedTools` list. The default list must cover the repo's test, build, and lint

@@ -14,7 +14,7 @@ import (
 // conflict is the gate's look at a handed-over PR that GitHub reports as conflicting
 // with its base. It sends the implementer back to merge the base, once per PR head and
 // base head, so a conflict the agent could not fix does not start a run on every
-// refresh (D130). Unknown mergeability waits for a later refresh.
+// refresh. Unknown mergeability waits for a later refresh.
 func (a App) conflict(ctx context.Context, rec *task.Record, pr PullRequest) (*task.Record, string, error) {
 	d := rec.Delegation
 	if pr.State != "open" || pr.Mergeable != Conflicting || rec.State != task.ReadyForHuman || !a.handsOver(rec) || pr.HeadSHA == "" {
@@ -96,7 +96,7 @@ func (a App) checkRepair(ctx context.Context, rec *task.Record, o agent.Outcome)
 	if !merged {
 		return nil, fmt.Errorf("PR #%d head %s does not include base commit %s", d.PR, short(pr.HeadSHA), short(attempt.Base))
 	}
-	// A merge the agent's own checks fail on is not a repair (D131).
+	// A merge the agent's own checks fail on is not a repair.
 	var failed []string
 	for _, c := range o.Validation {
 		if !c.Passed {
@@ -137,7 +137,7 @@ func applyConflictTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, err e
 
 // failRepair hands a repair that did not finish to the developer, with the reason and
 // a question on how to go on. It also covers a runner that could not start or died
-// mid-repair, so a spent attempt never ends FAILED with its repair still pending (D132).
+// mid-repair, so a spent attempt never ends FAILED with its repair still pending.
 func failRepair(rec *task.Record, reason string, now time.Time) {
 	d := rec.Delegation
 	d.ConflictPending = false

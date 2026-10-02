@@ -15,7 +15,7 @@ type InboxEntry struct {
 	Item    InboxItem
 	Changes []string
 	// Delegated says foreman has a run for this item, and State is that run's state.
-	// Together they are what keeps work already in hand out of INBOX (D124).
+	// Together they are what keeps work already in hand out of INBOX.
 	Delegated bool
 	State     task.State
 }
@@ -29,7 +29,7 @@ type InboxReport struct {
 	// It is used by the interactive picker; the report sections retain their diff semantics.
 	Current       []InboxEntry
 	NeedsDecision []*task.Record
-	// Reviewed holds the tasks whose PR has comments the agent has not answered (D119).
+	// Reviewed holds the tasks whose PR has comments the agent has not answered.
 	Reviewed       []*task.Record
 	Ready          []*task.Record
 	WaitingChanges map[task.Key][]string
@@ -54,7 +54,7 @@ type App struct {
 	ImplementerBudgetUSD float64
 	ReviewerBudgetUSD    float64
 	Notifier             Notifier
-	// CleanOnDone removes a DONE task's worktree when inbox runs (D42).
+	// CleanOnDone removes a DONE task's worktree when inbox runs.
 	CleanOnDone bool
 	// DeleteMergedBranches deletes the local branch with the worktree once its PR is merged.
 	DeleteMergedBranches bool
@@ -144,7 +144,7 @@ const goneNote = "no longer on GitHub or no longer accessible; foreman stopped c
 // snapshots still record every reason, so a lost reason is still reported and the
 // items come back the moment the setting does. Delegated work waiting on the
 // developer is not an inbox find, so it is left alone, and a delegated FAILED or
-// REVIEWED task is how the developer restarts or resumes it (D126). The note for an item that left
+// REVIEWED task is how the developer restarts or resumes it. The note for an item that left
 // GitHub is filtered where it is built, because it carries no reasons of its own.
 func hideMentionOnly(r *InboxReport, stored map[task.Key][]task.InboxReason) {
 	keep := func(entries []InboxEntry) []InboxEntry {
@@ -215,8 +215,7 @@ func mergeObserved(cur, seen *task.Record) *task.Record {
 // keepsState reports a task the inbox leaves in the state it found. A runner owns the
 // task it is driving, and the gate has already recorded why a PR_CLOSED task ended: a
 // closed issue must not turn that into DONE, which would clean away the worktree and
-// branch the developer was promised, and stop the gate watching for the PR to reopen
-// (D107).
+// branch the developer was promised, and stop the gate watching for the PR to reopen.
 func keepsState(s task.State) bool { return running(s) || s == task.PRClosed }
 
 // fetchTracked refreshes missing delegated work and undelegated items whose last
@@ -355,7 +354,7 @@ func Reconcile(items []InboxItem, recs []*task.Record, notes map[task.Key][]stri
 }
 
 // entryFor is one item in the current refresh, carrying the state of the run foreman
-// has for it. INBOX reads that state to leave work already in hand alone (D124).
+// has for it. INBOX reads that state to leave work already in hand alone.
 func entryFor(rec *task.Record, it InboxItem, changes []string) InboxEntry {
 	return InboxEntry{Item: it, Changes: changes, Delegated: rec.Delegation != nil, State: rec.State}
 }

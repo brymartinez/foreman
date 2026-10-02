@@ -14,10 +14,10 @@ import (
 	"github.com/brymartinez/foreman/internal/task"
 )
 
-// DefaultFixRounds caps the fix and re-review cycles per developer decision (D11, D77).
+// DefaultFixRounds caps the fix and re-review cycles per developer decision.
 const DefaultFixRounds = 3
 
-// DefaultReviewRounds is how many passes the reviewer makes over a PR (D77).
+// DefaultReviewRounds is how many passes the reviewer makes over a PR.
 const DefaultReviewRounds = 3
 
 // RunTask is the body of the detached runner. It drives implement → verify PR →
@@ -42,13 +42,13 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 	}))
 
 	if rec.Delegation.ConflictPending {
-		// The gate found the handed-over PR conflicting with its base (D130). A repair
+		// The gate found the handed-over PR conflicting with its base. A repair
 		// that worked leaves a new head to review; anything else is the developer's.
 		if rec, err = a.repairConflict(ctx, final, rec, log); err != nil || rec.State != task.Reviewing {
 			return err
 		}
 	}
-	// A resumed task answers the comments on its PR first (D122).
+	// A resumed task answers the comments on its PR first.
 	feedback, rec, done, err := a.unanswered(ctx, final, rec, log)
 	if err != nil || done {
 		return err
@@ -159,7 +159,7 @@ func (r *taskRun) answer() (step, error) {
 	switch {
 	case rec.State != task.Reviewing && rec.State != task.ReadyForHuman:
 		// Blocked, failed, or stopped. The comments stay unanswered, so the next run
-		// asks for them again (D122).
+		// asks for them again.
 		return stepDone, nil
 	case !rec.ReviewPending():
 		// A turn that pushed nothing leaves the code its review already covers, so
@@ -194,7 +194,7 @@ func (r *taskRun) pickUpReview() (step, error) {
 func (r *taskRun) review() (step, error) {
 	a := r.a
 	// Every pass, including the first and one after a fix, reviews a PR that merges
-	// cleanly into its latest base (D133).
+	// cleanly into its latest base.
 	rec, ready, err := a.resolveConflicts(r.ctx, r.final, r.rec, r.log)
 	if err != nil || !ready {
 		return stepDone, err
@@ -208,7 +208,7 @@ func (r *taskRun) review() (step, error) {
 		}
 		addUsage(&cur.Usage, review.Usage)
 		// Every fix is reviewed; the developer is asked only once fix_rounds fixes
-		// still leave findings (D78).
+		// still leave findings.
 		if cur.State == task.Working && cur.ChangeRequestsSinceDecision() > a.fixRounds() {
 			escalateReview(cur, a.fixRounds(), a.Now())
 		}
@@ -227,7 +227,7 @@ func (r *taskRun) review() (step, error) {
 }
 
 // handover is the run's last chance to answer comments that arrived while it
-// worked, before the gate hands the task to the developer (D123).
+// worked, before the gate hands the task to the developer.
 func (r *taskRun) handover() (step, error) {
 	feedback, rec, err := r.a.beforeHandover(r.ctx, r.final, r.rec, r.rounds, r.log)
 	if err != nil || len(feedback) == 0 {
@@ -243,7 +243,7 @@ var errTaskRemoved = errors.New("the task file was removed; stopping")
 // errPRClosed stops a runner whose PR was closed while it ran. The gate records
 // PR_CLOSED before it stops the runner, so the stop that follows is foreman's doing,
 // not a failure of the agent's, and recording it would tell the developer their run
-// failed when they closed the PR themselves (D107).
+// failed when they closed the PR themselves.
 var errPRClosed = errors.New("the task's PR was closed; stopping")
 
 // existing adapts a change to a task the runner owns. A task without a file or a
@@ -277,7 +277,7 @@ func (a App) reviewRounds() int {
 }
 
 // needsPlan is true until every planning document is on the issue. A task that
-// already has a PR, from before planning existed, goes on without one (D90).
+// already has a PR, from before planning existed, goes on without one.
 func (a App) needsPlan(rec *task.Record) bool {
 	return !rec.PlanPosted() && rec.Delegation.PR == 0
 }
@@ -340,7 +340,7 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 	}
 	brief.Merge = merge
 	brief.PR, brief.Feedback, brief.Conflict = d.PR, feedbackItems(feedback), conflict
-	// The repo layer comes from the worktree: the committed .foreman/ on the base (D48).
+	// The repo layer comes from the worktree: the committed .foreman/ on the base.
 	implement, err := a.Stages.Resolve(d.Worktree, task.StageImplement)
 	if err != nil {
 		return agent.Turn{}, err
@@ -370,7 +370,7 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 }
 
 // answerFeedback runs one turn that answers the comments it is given. The PR head
-// before the turn is what tells a reply-only turn from one that changed code (D122).
+// before the turn is what tells a reply-only turn from one that changed code.
 func (a App) answerFeedback(ctx, final context.Context, rec *task.Record, comments []PRComment, log io.Writer) (*task.Record, error) {
 	d := rec.Delegation
 	headBefore := d.PRHead
@@ -386,7 +386,7 @@ func (a App) answerFeedback(ctx, final context.Context, rec *task.Record, commen
 // failed or asked a question leaves them for the next one. A turn that pushed nothing
 // leaves the code its review already covers, so the task goes straight back to the
 // developer with its CI result; a turn that pushed goes through the review and CI flow
-// like any other change (D122).
+// like any other change.
 func applyFeedbackTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error, comments []PRComment, headBefore string, now time.Time) {
 	ci := rec.CI
 	applyTurn(rec, turn, pr, runErr, now)
@@ -400,7 +400,7 @@ func applyFeedbackTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runEr
 	rec.CI = ci
 	d := rec.Delegation
 	// The same bar the gate applies: a clean review of this head and CI that finished.
-	// Without both, the task stays under review and the gate hands it over (D122).
+	// Without both, the task stays under review and the gate hands it over.
 	if reviewCovers(rec, pr.HeadSHA) && ci != nil && ci.State != task.CIPending {
 		rec.State = task.ReadyForHuman
 		rec.LastOutcome = &task.Outcome{Status: "feedback_answered",
@@ -416,7 +416,7 @@ func (a App) review(ctx context.Context, rec *task.Record, log io.Writer) (agent
 		return agent.ReviewOutcome{}, fmt.Errorf("reviewer %s is not configured", d.Reviewer)
 	}
 	// The PR description is the reviewer's only statement of requirements, so a review
-	// without one cannot pass (D140).
+	// without one cannot pass.
 	pr, err := a.GitHub.GetPullRequest(ctx, task.Key{Repo: rec.Repo, Number: d.PR})
 	if err != nil {
 		return agent.ReviewOutcome{}, fmt.Errorf("review PR #%d: %w", d.PR, err)
@@ -520,7 +520,7 @@ func (a App) brief(ctx context.Context, rec *task.Record) (agent.TaskBrief, erro
 // verifyPR checks the agent's pr_opened claim against GitHub: the PR must be open,
 // in this repo, from the task branch into the task's base. Without a number, the
 // open PR for the branch is looked up. The task's own PR may target another base,
-// because a maintainer can retarget it; the conflict check then follows it (D134).
+// because a maintainer can retarget it; the conflict check then follows it.
 func (a App) verifyPR(ctx context.Context, rec *task.Record, o agent.Outcome) (*PullRequest, error) {
 	d := rec.Delegation
 	var pr PullRequest
@@ -604,7 +604,7 @@ func applyStop(ctx context.Context, rec *task.Record, during string, log io.Writ
 
 // postPlan puts each planning document on the issue as its own comment, editing the
 // comment from an earlier plan when there is one. Each comment is recorded as soon as
-// it is posted. A failed post fails the task; restarting it plans again (D90).
+// it is posted. A failed post fails the task; restarting it plans again.
 func (a App) postPlan(ctx, final context.Context, rec *task.Record, docs map[task.PlanDoc]string, log io.Writer) (*task.Record, error) {
 	for _, doc := range task.PlanDocs {
 		var id int64

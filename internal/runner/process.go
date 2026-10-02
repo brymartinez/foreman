@@ -1,5 +1,5 @@
 // Package runner launches the detached per-task process (`foreman __run owner/repo#N`)
-// and checks whether one is still alive. There is no daemon (D5).
+// and checks whether one is still alive. There is no daemon.
 package runner
 
 import (
@@ -71,7 +71,7 @@ func (Processes) Alive(pid int) bool {
 }
 
 // Stop sends the runner SIGTERM, which cancels its context and so stops the agent's
-// process group (D59). It notes the request in the task log, then waits for the
+// process group. It notes the request in the task log, then waits for the
 // runner to exit. false means it is still running when the wait ends.
 func (p Processes) Stop(key task.Key, pid int) (bool, error) {
 	if !p.Alive(pid) {

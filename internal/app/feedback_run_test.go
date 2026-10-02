@@ -98,7 +98,7 @@ func TestFailedFeedbackTurnKeepsTheCommentsWaiting(t *testing.T) {
 }
 
 // A comment deleted between the refresh and the resume leaves nothing to answer, and
-// the clean review still covers the head, so no agent turn runs (D127).
+// the clean review still covers the head, so no agent turn runs.
 func TestResumeWithTheCommentGoneHandsBackWithoutATurn(t *testing.T) {
 	f := newFixture()
 	key := waiting(t, f)
@@ -131,7 +131,7 @@ func TestResumeWithUnreadableCommentsStaysReviewed(t *testing.T) {
 	}
 }
 
-// Restarting failed feedback with the other agent hands it the comments first (D126).
+// Restarting failed feedback with the other agent hands it the comments first.
 func TestRestartWithAnotherAgentAnswersTheWaitingComments(t *testing.T) {
 	f := newFixture()
 	key := waiting(t, f)

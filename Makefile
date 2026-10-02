@@ -1,6 +1,6 @@
 # make setup builds foreman, installs it, and copies the default stage instructions.
 BIN_DIR ?= $(HOME)/.local/bin
-# Foreman reads global stage files from stages/ next to its config file (D48).
+# Foreman reads global stage files from stages/ next to its config file.
 CONFIG_DIR ?= $(if $(FOREMAN_CONFIG),$(dir $(FOREMAN_CONFIG)),$(HOME)/.config/foreman)
 STAGES_DIR := $(CONFIG_DIR:/=)/stages
 

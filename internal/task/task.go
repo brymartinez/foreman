@@ -294,10 +294,10 @@ type Record struct {
 	Validation []Check
 	// Reviews are the competing agent's review rounds, oldest first.
 	Reviews []Review
-	// Plan holds the planning documents posted on the issue, in PlanDocs order (D90).
+	// Plan holds the planning documents posted on the issue, in PlanDocs order.
 	Plan []PlanComment
 	// Feedback is every comment on the task's PR foreman has read, and whether the
-	// agent has answered it (D119).
+	// agent has answered it.
 	Feedback []Feedback
 	// CI is the readiness gate's last look at the PR's checks on GitHub. Any implementer
 	// turn clears it.
@@ -306,7 +306,7 @@ type Record struct {
 	Body string
 }
 
-// PlanDoc is one planning document the implementer writes before any code (D90).
+// PlanDoc is one planning document the implementer writes before any code.
 type PlanDoc string
 
 const (
@@ -386,7 +386,7 @@ type Review struct {
 	Summary  string
 	Findings []Finding
 	At       time.Time
-	Head     string // the PR head commit reviewed; empty on records from before D63
+	Head     string // the PR head commit reviewed; empty on records from before heads were recorded
 }
 
 // LatestReview is the most recent review round, or nil.
@@ -398,8 +398,8 @@ func (r *Record) LatestReview() *Review {
 }
 
 // ChangeRequestsSinceDecision counts review rounds that requested changes since the
-// developer last answered a question. The round cap (D11) limits fix rounds, so
-// clean re-reviews (after a CI fix) don't use it up (D40); answering resets it.
+// developer last answered a question. The round cap limits fix rounds, so
+// clean re-reviews (after a CI fix) don't use it up; answering resets it.
 func (r *Record) ChangeRequestsSinceDecision() int {
 	var last time.Time
 	for _, d := range r.Decisions {
@@ -422,7 +422,7 @@ const (
 	CIPending CIState = "pending"
 	CIPassing CIState = "passing"
 	CIFailing CIState = "failing"
-	// CINone means the PR has no checks at all. The gate treats it as passing (D37).
+	// CINone means the PR has no checks at all. The gate treats it as passing.
 	CINone CIState = "none"
 )
 
@@ -453,7 +453,7 @@ func (r *Record) CommitsSinceReview() bool {
 
 // ReviewPending reports whether the verified PR head has not been reviewed, so a run
 // continues with the review instead of implementing again: after a crash during a
-// review, or after new commits on a PR that had a clean review (D63).
+// review, or after new commits on a PR that had a clean review.
 func (r *Record) ReviewPending() bool {
 	d := r.Delegation
 	if d == nil || d.PR == 0 || d.PRHead == "" || len(r.Undelivered()) > 0 {

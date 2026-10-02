@@ -15,14 +15,14 @@ import (
 )
 
 // Codex drives `codex exec`. The workspace-write sandbox blocks network by default;
-// the agent needs it to push and open the PR (D7), so it is enabled explicitly. It also
+// the agent needs it to push and open the PR, so it is enabled explicitly. It also
 // can't write outside the worktree, where a linked worktree keeps its git data, so that
-// directory is added as a writable root (D112).
+// directory is added as a writable root.
 type Codex struct {
 	Bin       string
 	Model     string
 	PlanModel string
-	// ReviewModel replaces Model for reviews; "" keeps Model (D85).
+	// ReviewModel replaces Model for reviews; "" keeps Model.
 	ReviewModel           string
 	ReasoningEffort       string
 	PlanReasoningEffort   string
@@ -62,7 +62,7 @@ func (c Codex) Resume(ctx context.Context, s task.Session, in StartInput) (Turn,
 // gitWriteArgs makes the repository's git directory writable in the sandbox. A linked
 // worktree's index, refs, and objects live in the main clone's .git, outside the
 // worktree, so without it `git commit` fails. `exec resume` has no --add-dir flag, so
-// both commands set it through -c (D112).
+// both commands set it through -c.
 func gitWriteArgs(worktree string) []string {
 	dir := gitCommonDir(worktree)
 	if dir == "" {
@@ -234,8 +234,7 @@ func (e *codexEvents) consume(r io.Reader) {
 					ReasoningOutputTokens int64 `json:"reasoning_output_tokens"`
 				} `json:"usage"`
 			}
-			// The cleaned log renders this event itself, so the adapter only counts it
-			// (D125).
+			// The cleaned log renders this event itself, so the adapter only counts it.
 			if json.Unmarshal(line, &done) == nil {
 				e.usage.CodexInputTokens += done.Usage.InputTokens
 				e.usage.CodexCachedTokens += done.Usage.CachedInputTokens

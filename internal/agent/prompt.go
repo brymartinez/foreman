@@ -10,7 +10,7 @@ import (
 // ReplyMarker opens every reply the agent posts on a pull request. The agent answers
 // through the developer's own gh login, so the author cannot tell its replies from the
 // developer's comments, and a comment the developer writes has to count. Markdown
-// hides the marker, and foreman drops any comment that carries it (D120).
+// hides the marker, and foreman drops any comment that carries it.
 const ReplyMarker = "<!-- foreman:reply -->"
 
 type TaskBrief struct {
@@ -20,10 +20,10 @@ type TaskBrief struct {
 	IssueBody string
 	Context   string // contents of the --context Markdown file, if any
 	// StageInstructions is the developer's instructions for the stage this prompt is
-	// for (implement, review), global then repo. Callers set only that stage's (D47).
+	// for (implement, review), global then repo. Callers set only that stage's.
 	StageInstructions string
 	// PRInstructions is the developer's pr stage, for writing the PR description. The
-	// implementer writes the PR in the same turn, so it rides along (D49).
+	// implementer writes the PR in the same turn, so it rides along.
 	PRInstructions string
 	Branch         string
 	BaseBranch     string
@@ -33,7 +33,7 @@ type TaskBrief struct {
 	// OpenFindings are the latest review's findings when a fresh turn replaces a
 	// session that could not be resumed.
 	OpenFindings []task.Finding
-	// Planning makes the turn write the planning documents instead of code (D90).
+	// Planning makes the turn write the planning documents instead of code.
 	// PlanInstructions is the developer's plan stage for it.
 	Planning         bool
 	PlanInstructions string
@@ -42,10 +42,10 @@ type TaskBrief struct {
 	// PRD is the posted PRD's text, for the reviewer, who has no network.
 	PRD string
 	// PR is the task's pull request, and Feedback the comments on it still waiting for
-	// an answer when a fresh turn replaces a session that could not be resumed (D120).
+	// an answer when a fresh turn replaces a session that could not be resumed.
 	PR       int
 	Feedback []FeedbackItem
-	// Conflict is set when the turn repairs a merge conflict on the PR (D130).
+	// Conflict is set when the turn repairs a merge conflict on the PR.
 	Conflict *Conflict
 	// Merge is set when the PR conflicts with its base and a fresh turn has to merge it.
 	Merge *MergeBrief
@@ -173,13 +173,13 @@ Do not change, commit, or push anything in this turn. If writing the documents n
 }
 
 // planningTestRule makes the plan list the tests the implementer writes first, so the
-// reviewer can check them against the plan (D138).
+// reviewer can check them against the plan.
 func planningTestRule(s *strings.Builder) {
 	s.WriteString("For new or changed behavior, the implementation plan names each test by its readable name and the behavior it checks. The implementer writes each of those tests first and sees it fail before writing the code.\n\n")
 }
 
 // testFirstSection is foreman's own test rule. It lives in the prompt, not in the
-// stage files, because those are user-owned and absent from many repositories (D138).
+// stage files, because those are user-owned and absent from many repositories.
 // A conflict repair or merge turn adds no behavior, so it does not get the section.
 func testFirstSection(s *strings.Builder) {
 	s.WriteString(`## Tests
@@ -230,7 +230,7 @@ func answeredDecisions(ds []task.Decision) []task.Decision {
 
 // ResumeMessage continues the session that asked the questions, with every answer.
 // open is the latest review when it requested changes, so the answer can say how to
-// handle findings the implementer may not have seen (D78). planning is set when the
+// handle findings the implementer may not have seen. planning is set when the
 // questions came from the planning turn, which still ends with the documents.
 func ResumeMessage(ds []task.Decision, open *task.Review, planning bool) string {
 	var s strings.Builder
@@ -256,7 +256,7 @@ func ResumeMessage(ds []task.Decision, open *task.Review, planning bool) string 
 }
 
 // MergeMessage resumes the implementer's session when its PR conflicts with the
-// latest base branch. The merge is reviewed like any other change (D133).
+// latest base branch. The merge is reviewed like any other change.
 func MergeMessage(branch, base string, files []string) string {
 	var s strings.Builder
 	mergeRules(&s, branch, base, files)

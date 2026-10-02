@@ -93,19 +93,19 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			Worktree:    wt.Path,
 			ContextFile: req.ContextFile,
 		}
-		// The same branch has the same PR, so a restart can pick up at its review (D63).
+		// The same branch has the same PR, so a restart can pick up at its review.
 		// Another implementer starts over: its reviewer wrote the existing PR. A
 		// PR_CLOSED task's PR cannot be picked up, and keeping its number would have
-		// the readiness gate end this run on its next refresh (D107). Comments still
+		// the readiness gate end this run on its next refresh. Comments still
 		// waiting on the PR keep it for any agent, because the run reads them through
-		// that number and the new agent has to answer them first (D126).
+		// that number and the new agent has to answer them first.
 		sameAgent := prev != nil && prev.Implementer.Agent == req.Agent
 		if was != task.PRClosed && prev != nil && prev.Branch == wt.Branch && (sameAgent || len(cur.UnhandledFeedback()) > 0) {
 			cur.Delegation.PR, cur.Delegation.PRURL, cur.Delegation.PRHead = prev.PR, prev.PRURL, prev.PRHead
 			// The same PR keeps its conflict repair: a spent one is not repeated, and one a
-			// dead runner left pending is finished by this run (D130).
+			// dead runner left pending is finished by this run.
 			cur.Delegation.ConflictAttempts, cur.Delegation.ConflictPending = prev.ConflictAttempts, prev.ConflictPending
-			// A kept PR keeps the base it targets, which a retarget may have changed (D134).
+			// A kept PR keeps the base it targets, which a retarget may have changed.
 			if prev.BaseRef != "" {
 				cur.Delegation.BaseRef = prev.BaseRef
 			}
@@ -184,7 +184,7 @@ func (a App) startable(rec *task.Record) error {
 		return fmt.Errorf("%s is waiting for your decision; use foreman respond %d", ref, rec.Number)
 	case task.Reviewed:
 		// Starting would rebuild the delegation and lose the session that wrote the PR
-		// the comments are on, so the task continues instead (D121).
+		// the comments are on, so the task continues instead.
 		return fmt.Errorf("%s has PR feedback to answer; use foreman resume %d", ref, rec.Number)
 	}
 	return fmt.Errorf("%s is %s", ref, rec.State)

@@ -234,7 +234,7 @@ func TestCodexStageModelsAndEffortOnStartResumeAndReview(t *testing.T) {
 }
 
 // A linked worktree's git data lives in the main clone, outside the sandbox's
-// workspace, so both Start and Resume must make it writable or commits fail (D112).
+// workspace, so both Start and Resume must make it writable or commits fail.
 func TestCodexCanWriteTheWorktreesGitDir(t *testing.T) {
 	dir := t.TempDir()
 	clone, wt := filepath.Join(dir, "clone"), filepath.Join(dir, "wt")
@@ -315,7 +315,7 @@ func TestImplementationPromptCarriesDurableContext(t *testing.T) {
 	if strings.Contains(ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 1}}), "## Implementation context") {
 		t.Error("context section rendered without context")
 	}
-	// Workflow rules live in the stage files, which the developer can edit (D92).
+	// Workflow rules live in the stage files, which the developer can edit.
 	for _, rule := range []string{"gh issue view", "Commit work in progress", "earlier turn"} {
 		if strings.Contains(p, rule) {
 			t.Errorf("prompt hard-codes the stage-file rule %q", rule)

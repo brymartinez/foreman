@@ -13,10 +13,10 @@ import (
 // advances each task from what GitHub reports now: a merged PR is DONE, one closed
 // without merging is PR_CLOSED, and a clean review with finished CI is
 // READY_FOR_HUMAN. CI belongs to the repo's owners, so foreman only reads GitHub's
-// check results and hands failures to the developer instead of fixing them (D46).
+// check results and hands failures to the developer instead of fixing them.
 // It returns what changed, per task, and the tasks whose PR state it read. A caller
 // that fails a dead runner must check the second map first: reaping a task this pass
-// could not read would record a PR the developer closed as a failed run (D113).
+// could not read would record a PR the developer closed as a failed run.
 func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]string, map[task.Key]bool, []error, error) {
 	notes := map[task.Key][]string{}
 	checked := map[task.Key]bool{}
@@ -106,7 +106,7 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			notes[r.Key] = append(notes[r.Key], note)
 		}
 		// A pull request the agents are done with is the developer's to comment on, so
-		// this is where feedback arrives (D119, D121). It runs after advance, so a task
+		// this is where feedback arrives. It runs after advance, so a task
 		// handed over by this same refresh is checked in the same pass.
 		if pr.State == "open" && a.handsOver(updated) {
 			withFeedback, feedbackNote, err := a.feedback(ctx, updated)
@@ -153,7 +153,7 @@ func watched(r *task.Record) bool {
 // as it now stands with the inbox note for the change. The state is written before the
 // runner is stopped, because a runner that finds its task already PR_CLOSED records
 // nothing: stopping it first would have it save the stop as a FAILED run and notify
-// the developer about a failure that did not happen (D107).
+// the developer about a failure that did not happen.
 func (a App) endClosed(ctx context.Context, r *task.Record) (*task.Record, string, error) {
 	var note string
 	updated, err := a.update(ctx, r.Key, func(cur *task.Record) (*task.Record, error) {
@@ -221,7 +221,7 @@ func closePR(rec *task.Record, now time.Time) string {
 // review it already has decides where: a clean review of this head with finished CI
 // hands the task to the developer, and anything else leaves it under review, which is
 // where the gate picks it up again. The review must name the head GitHub reports now.
-// A review from before heads were recorded (D63) has none, and cannot be shown to
+// A review from before heads were recorded has none, and cannot be shown to
 // cover the reopened PR, so it does not hand anything over.
 func reopen(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) string {
 	d := rec.Delegation
@@ -278,7 +278,7 @@ func advance(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) 
 		// A READY task's PR is the developer's; the checklist flags new commits.
 		d.PRHead = pr.HeadSHA
 		if rec.State == task.Reviewing && rec.CommitsSinceReview() {
-			// Commits landed after the clean review: review them before handing over (D63).
+			// Commits landed after the clean review: review them before handing over.
 			rec.State, rec.CI = task.Working, nil
 			return outcome("re_review", fmt.Sprintf("PR #%d has new commits since its clean review; %s is reviewing them", d.PR, d.Reviewer))
 		}

@@ -293,7 +293,7 @@ func TestStartRefuses(t *testing.T) {
 			rec.Key = task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
 			f.store.recs[rec.Key] = rec
 		},
-		// The gate leaves a PR_CLOSED task its pid until the stop succeeds (D107), and
+		// The gate leaves a PR_CLOSED task its pid until the stop succeeds, and
 		// that runner is still working in the worktree a second one would share.
 		"PR_CLOSED with a live runner": func(f *fixture, r *StartRequest) {
 			rec := seen(825, task.PRClosed, "open", t0)
@@ -366,7 +366,7 @@ func TestRestartWithAnotherAgentStartsOverWithNoCommentsWaiting(t *testing.T) {
 		t.Fatal(err)
 	}
 	if rec.Delegation.PR != 0 {
-		t.Errorf("pr = %d; another implementer starts over (D63)", rec.Delegation.PR)
+		t.Errorf("pr = %d; another implementer starts over", rec.Delegation.PR)
 	}
 }
 

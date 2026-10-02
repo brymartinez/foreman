@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// Stage is a workflow step that can carry the developer's own instructions (D47).
+// Stage is a workflow step that can carry the developer's own instructions.
 type Stage string
 
 const (

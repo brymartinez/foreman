@@ -9,7 +9,7 @@ import (
 
 // Resume continues a REVIEWED task so its agent answers the comments on its pull
 // request. Unlike Start it rebuilds nothing: the branch, worktree, PR, and session all
-// stay, because answering a comment is the same run going on (D121). The runner picks
+// stay, because answering a comment is the same run going on. The runner picks
 // the comments up from the task file.
 func (a App) Resume(ctx context.Context, key task.Key) (*task.Record, error) {
 	rec, err := a.Store.Get(ctx, key)

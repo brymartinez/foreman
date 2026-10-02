@@ -1,6 +1,6 @@
 // Package app orchestrates the task lifecycle. It depends only on these interfaces;
 // gh, git, the Markdown store, the agent CLIs, and process spawning live behind them.
-// Ports grow with the stage that first needs them (D17).
+// Ports grow with the stage that first needs them.
 package app
 
 import (
@@ -52,7 +52,7 @@ type PullRequest struct {
 	// Mergeable is mergeable, conflicting, or unknown. GitHub computes it lazily, so
 	// unknown is common right after a push to either branch.
 	Mergeable string
-	// Body is the PR description. The reviewer checks the change against it alone (D140).
+	// Body is the PR description. The reviewer checks the change against it alone.
 	Body string
 }
 
@@ -62,7 +62,7 @@ const (
 )
 
 // PRComment is one comment on a pull request. Path, Line, and InReplyTo are set for
-// an inline review comment, and are what tell the agent where to reply (D119).
+// an inline review comment, and are what tell the agent where to reply.
 type PRComment struct {
 	Kind      task.CommentKind
 	ID        int64
@@ -105,13 +105,13 @@ type GitHubClient interface {
 	CIStatus(ctx context.Context, pr task.Key) (task.CIStatus, error)
 	// PostIssueComment adds a comment to the issue, or edits comment id when id > 0.
 	// Editing a comment that no longer exists returns ErrGone. It is foreman's only
-	// write to GitHub (D90).
+	// write to GitHub.
 	PostIssueComment(ctx context.Context, issue task.Key, id int64, body string) (IssueComment, error)
 	// GetIssueComment reads one comment. A missing comment returns ErrGone.
 	GetIssueComment(ctx context.Context, repo task.Repo, id int64) (IssueComment, error)
 	// PullRequestComments reads every comment on a pull request: the conversation
 	// comments, the inline review comments and their replies, and the body of each
-	// submitted review. A review with no body is left out (D119).
+	// submitted review. A review with no body is left out.
 	PullRequestComments(ctx context.Context, pr task.Key) ([]PRComment, error)
 	// BranchHead returns the commit a branch points at on GitHub.
 	BranchHead(ctx context.Context, repo task.Repo, branch string) (string, error)
@@ -181,12 +181,12 @@ type AgentAdapter interface {
 }
 
 // StageInstructionResolver loads the developer's instructions for a workflow stage:
-// the global layer, then repoRoot/.foreman. Missing files resolve to empty (D47).
+// the global layer, then repoRoot/.foreman. Missing files resolve to empty.
 type StageInstructionResolver interface {
 	Resolve(repoRoot string, stage task.Stage) (task.StageInstructions, error)
 }
 
-// Runners launches and observes the detached per-task runner process (D5).
+// Runners launches and observes the detached per-task runner process.
 type Runners interface {
 	Spawn(key task.Key) (pid int, logPath string, err error)
 	Alive(pid int) bool

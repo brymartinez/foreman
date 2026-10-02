@@ -25,7 +25,7 @@ type StartInput struct {
 }
 
 // Steps name the work a turn does in its log line. Feedback and merge turns run
-// with the implementation model but keep their own names (D141).
+// with the implementation model but keep their own names.
 const (
 	StepPlan      = "plan"
 	StepImplement = "implement"

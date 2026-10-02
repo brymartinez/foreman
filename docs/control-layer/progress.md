@@ -9,7 +9,7 @@ choices. The ranked refactor candidates below are the next code-quality stages.
 ## Refactor candidates
 
 The stage 28 review of every Go package, ranked by how much each change would help.
-Findings 1 to 4 were fixed in stage 28 (D142).
+Findings 1 to 4 were fixed in stage 28.
 
 1. `internal/app/run.go` `RunTask`: phases implied by flags. Fixed.
 2. The turn, verify, and record sequence copied four times. Fixed.
@@ -32,18 +32,18 @@ Findings 1 to 4 were fixed in stage 28 (D142).
 
 ## Known limitations
 
-- The gate runs only when `inbox` or `status` runs, or while the dashboard is open
-  (D95), because the design rules out daemons (D5). Nothing runs between commands
+- The gate runs only when `inbox` or `status` runs, or while the dashboard is open,
+  because the design rules out daemons. Nothing runs between commands
   except a task's own runner. Notifications come from the runner and from those
   commands.
 - `gh pr checks` handling is verified against gh's documented behavior and fixtures,
-  not a live PR, because the user declined the live probe (D36).
-- Validation results are self-reported by the agent (D32). CI is the independent
+  not a live PR, because the user declined the live probe.
+- Validation results are self-reported by the agent. CI is the independent
   check, and foreman gates on it.
 - A search that returns 1000 results is flagged, and lost reasons aren't judged
-  while one is truncated (D64).
+  while one is truncated.
 - An agent that leaves the reply marker off reads its own reply as new feedback. That
-  costs one extra round, bounded by the per-run cap (D120, D123).
+  costs one extra round, bounded by the per-run cap.
 - PR feedback has been checked against the stand-in `gh` and fixtures, not a live PR.
 - The release workflow has not run: the repo has no GitHub remote yet.
 - Conflict repair is checked against the stand-in `gh` and fixtures, not a live
