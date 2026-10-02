@@ -2268,3 +2268,40 @@ Entry format:
   `cancel` also move tasks and have no log writer. Keeping `Notify(title, body)` and
   formatting in `app`, because Discord then gets no state or link as fields. Retries,
   which the issue leaves out of scope.
+
+## D144. The open dashboard starts assigned INBOX issues on its own
+
+- Date: 2026-10-03. Issue midsoln/foreman#30.
+- **Context.** Every INBOX issue waited for the developer to select it and pick an
+  agent, so idle capacity went unused while the dashboard sat open.
+- **Decision.** The dashboard has an auto mode, on by default.
+  - The policy is `Model.AutoStarts` in `internal/tui/auto.go`, a pure method like
+    the rest of the model. `Run` launches its requests through the same `start`
+    goroutine and `pending` count as a manual start, so quitting waits for them.
+    `internal/app` gains only `InboxItem.CreatedAt`, read from `createdAt` in the
+    searches and `created_at` in `GetItem`.
+  - An issue qualifies when it is open, the assignee search found it, and it has no
+    delegation. Mentions alone, FAILED, REVIEWED, and pull requests never qualify.
+  - Order is creation time ascending, then repo, then number. An item with no
+    creation time sorts last.
+  - Slots in use are tasks in WORKING or REVIEWING plus starts and resumes still in
+    flight, manual or automatic. An in-flight key stays counted until its result
+    comes back, and `settle` re-reads the task files before the next pick, so a run
+    that just landed is never missed.
+  - Auto mode looks after a successful refresh, after a finished start, cancel, or
+    resume, on each 1 second local read, and when `a` turns it on. A failed refresh
+    starts nothing.
+  - Each issue starts at most once per dashboard session, by hand or automatically.
+    A failed start is not retried until the dashboard is reopened. Its error, prefixed
+    `auto:`, stays on the message line while other auto starts in the burst succeed.
+  - `auto.agent` (default `claude`) and `auto.max_concurrent` (default 3, minimum 1)
+    are config keys. `Load` rejects bad values and names the key.
+  - The on or off choice lives in `~/.local/share/foreman/state.json`, written through
+    a temp file and a rename with mode 0600. A missing file or key means on. An
+    unreadable file leaves auto mode on and the dashboard shows the error.
+- **Rejected.** The policy in `internal/app`, because `App` holds no session state and
+  the issue ties auto mode to the open dashboard. Saving the toggle into
+  `config.yaml`, because marshaling drops the developer's comments and the file may
+  hold the webhook secret.
+- **Deferred.** Resuming earlier delegated work automatically, which must tell work
+  that can resume from runs stopped for cost.
