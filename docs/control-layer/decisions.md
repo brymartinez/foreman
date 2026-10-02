@@ -1938,3 +1938,31 @@ Entry format:
 - **Consequence.** New installs and new runs get the shorter style. `make setup` does
   not overwrite installed copies in `~/.config/foreman/stages/`, so existing users copy
   the new defaults by hand. Existing comments and PRs stay as they are.
+
+
+## D130. Repair a merge conflict on a handed-over PR once per head pair
+
+- Date: 2026-10-02. Issue midsoln/foreman#17.
+- **Context.** A READY_FOR_HUMAN PR can start conflicting with its base after handoff.
+  Nothing read mergeability, so the developer found out at merge time. Issue #12 covers
+  conflicts before the competing review and is out of scope here.
+- **Decision.** The gate asks `gh pr view` for `mergeable`. When an open
+  READY_FOR_HUMAN PR with no live runner and no comments waiting reports CONFLICTING,
+  the gate reads the base head with `gh api repos/<repo>/git/ref/heads/<base>`. In one
+  locked update it records the PR head and base head on the delegation
+  (`conflict_head`, `conflict_base`), sets `conflict_pending`, and moves the task to
+  WORKING. Then it launches the runner. UNKNOWN or MERGEABLE starts nothing. The
+  runner resumes the implementer session with `agent.ConflictMessage`: fetch the base,
+  merge it (no rebase, no force push), resolve, validate, push. A lost session gets a
+  fresh turn whose prompt carries the same rules. Foreman accepts the repair only if
+  the PR is the same one, its head moved, and `git merge-base --is-ancestor` finds the
+  recorded base head in the new head after `git fetch origin`. A verified repair goes
+  to REVIEWING and through the normal review, CI, and handoff. Anything else ends in
+  NEEDS_DECISION: a `blocked` turn keeps its questions, and a failed turn, a runner
+  error, or a failed check adds one question (A: merge again, B: I fixed it). A
+  cancelled repair stays FAILED. The pair is never tried again automatically. A
+  `start` that keeps the PR also keeps the pair, and a repair a dead runner left
+  pending runs in the restarted run.
+- **Consequence.** One agent run per conflicting (PR head, base head). A new commit on
+  either branch allows one more attempt. The branch and worktree are never removed
+  by a repair.

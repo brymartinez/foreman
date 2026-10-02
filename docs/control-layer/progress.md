@@ -2,7 +2,7 @@
 
 ## Current stage
 
-Stage 20 (concise planning comments and PR descriptions for issue #13) is complete.
+Stage 21 (merge conflict repair on handed-over PRs for issue #17) is complete.
 Completed runs are needed to measure the effect of the model and budget choices.
 
 ## Completed
@@ -609,6 +609,15 @@ request. Each fix is its own commit with a decision.
 - Installed stage files, existing comments, and existing PRs do not change.
 - Verified with `go vet ./...`, `go test ./...`, a binary build, and `scripts/e2e.sh`.
 
+### Stage 21 (complete): merge conflict repair on handed-over PRs for issue #17
+
+- The gate reads `mergeable` for each open PR. A READY_FOR_HUMAN PR that GitHub reports
+  as CONFLICTING goes back to its implementer once per PR head and base head (D130).
+- The runner resumes the implementer to merge the base, checks with git that the new
+  head includes the base head, and reviews it. A failed repair is NEEDS_DECISION.
+- Verified with `go vet ./...`, `go test ./...`, a binary build, and `scripts/e2e.sh`,
+  which has a new `conflict` scenario.
+
 ## Known limitations
 
 - The gate runs only when `inbox` or `status` runs, or while the dashboard is open
@@ -625,6 +634,9 @@ request. Each fix is its own commit with a decision.
   costs one extra round, bounded by the per-run cap (D120, D123).
 - PR feedback has been checked against the stand-in `gh` and fixtures, not a live PR.
 - The release workflow has not run: the repo has no GitHub remote yet.
+- Conflict repair is checked against the stand-in `gh` and fixtures, not a live
+  conflicting PR. GitHub reports UNKNOWN until it has computed mergeability, so a
+  repair can start one refresh late.
 
 ## Architectural decisions
 
@@ -735,6 +747,7 @@ what it replaced. Current summary:
   offers only work the developer can move. D125. The cleaned log renders Codex items.
   D126. Waiting PR feedback stays reachable under the mention filter and an agent switch.
   D127. A resume with no comments to answer runs no turn.
+- D130. A handed-over PR that conflicts with its base is repaired once per head pair.
 
 - D117. Fresh implementation session after planning. D118. Models and reasoning
   effort are selected per stage. D128. Merge fresh sessions with the PR feedback loop.

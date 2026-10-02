@@ -102,8 +102,9 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		sameAgent := prev != nil && prev.Implementer.Agent == req.Agent
 		if was != task.PRClosed && prev != nil && prev.Branch == wt.Branch && (sameAgent || len(cur.UnhandledFeedback()) > 0) {
 			cur.Delegation.PR, cur.Delegation.PRURL, cur.Delegation.PRHead = prev.PR, prev.PRURL, prev.PRHead
-			// The same PR keeps its spent repair, so a restart does not repeat it (D130).
-			cur.Delegation.ConflictHead, cur.Delegation.ConflictBase = prev.ConflictHead, prev.ConflictBase
+			// The same PR keeps its conflict repair: a spent one is not repeated, and one a
+			// dead runner left pending is finished by this run (D130).
+			cur.Delegation.ConflictHead, cur.Delegation.ConflictBase, cur.Delegation.ConflictPending = prev.ConflictHead, prev.ConflictBase, prev.ConflictPending
 		}
 		cur.LastOutcome = &task.Outcome{Status: "started", Summary: fmt.Sprintf("dispatched to %s", req.Agent), At: now}
 		return cur, nil

@@ -170,17 +170,19 @@ func TestGateRepairsAgainAfterBaseMoves(t *testing.T) {
 	}
 }
 
-func TestStartKeepsASpentRepair(t *testing.T) {
-	f := newFixture()
-	key := repairing(t, f)
-	rec := f.store.recs[key]
-	rec.State, rec.Delegation.RunnerPID = task.Failed, 0
-	if _, err := f.app.Start(context.Background(), startReq(t)); err != nil {
-		t.Fatal(err)
-	}
-	d := f.store.recs[key].Delegation
-	if !d.ConflictAttempted("c0ffee1", "ba5e001") || d.ConflictPending {
-		t.Errorf("delegation = %+v", d)
+func TestStartKeepsTheRepair(t *testing.T) {
+	for _, pending := range []bool{false, true} {
+		f := newFixture()
+		key := repairing(t, f)
+		rec := f.store.recs[key]
+		rec.State, rec.Delegation.RunnerPID, rec.Delegation.ConflictPending = task.Failed, 0, pending
+		if _, err := f.app.Start(context.Background(), startReq(t)); err != nil {
+			t.Fatal(err)
+		}
+		d := f.store.recs[key].Delegation
+		if !d.ConflictAttempted("c0ffee1", "ba5e001") || d.ConflictPending != pending {
+			t.Errorf("pending %v: delegation = %+v", pending, d)
+		}
 	}
 }
 
