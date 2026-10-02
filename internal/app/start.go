@@ -105,6 +105,10 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			// The same PR keeps its conflict repair: a spent one is not repeated, and one a
 			// dead runner left pending is finished by this run (D130).
 			cur.Delegation.ConflictAttempts, cur.Delegation.ConflictPending = prev.ConflictAttempts, prev.ConflictPending
+			// A kept PR keeps the base it targets, which a retarget may have changed (D134).
+			if prev.BaseRef != "" {
+				cur.Delegation.BaseRef = prev.BaseRef
+			}
 		}
 		cur.LastOutcome = &task.Outcome{Status: "started", Summary: fmt.Sprintf("dispatched to %s", req.Agent), At: now}
 		return cur, nil

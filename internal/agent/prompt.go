@@ -47,6 +47,14 @@ type TaskBrief struct {
 	Feedback []FeedbackItem
 	// Conflict is set when the turn repairs a merge conflict on the PR (D130).
 	Conflict *Conflict
+	// Merge is set when the PR conflicts with its base and a fresh turn has to merge it.
+	Merge *MergeBrief
+}
+
+// MergeBrief is the base branch a PR conflicts with and the files that conflict.
+type MergeBrief struct {
+	Base  string
+	Files []string
 }
 
 // ImplementationPrompt is the execution contract handed to the implementation agent.
@@ -63,7 +71,7 @@ func ImplementationPrompt(b TaskBrief) string {
 	s.WriteString(body + "\n\n")
 
 	stageSection(&s, b.StageInstructions)
-	if !b.Planning && b.Conflict == nil {
+	if !b.Planning && b.Conflict == nil && b.Merge == nil {
 		testFirstSection(&s)
 	}
 	if b.Planning {
@@ -97,6 +105,11 @@ func ImplementationPrompt(b TaskBrief) string {
 		fmt.Fprintf(&s, "## Merge conflict\n\nYour pull request #%d is open and was handed to the developer. It now has merge conflicts with %s. This turn only repairs them.\n\n", c.PR, c.Base)
 		conflictRules(&s, *c)
 		s.WriteString("\n")
+	}
+
+	if b.Merge != nil {
+		s.WriteString("## Merge conflicts\n\n")
+		mergeRules(&s, b.Branch, b.Merge.Base, b.Merge.Files)
 	}
 
 	if len(b.OpenFindings) > 0 {
@@ -160,14 +173,14 @@ Do not change, commit, or push anything in this turn. If writing the documents n
 }
 
 // planningTestRule makes the plan list the tests the implementer writes first, so the
-// reviewer can check them against the plan (D133).
+// reviewer can check them against the plan (D137).
 func planningTestRule(s *strings.Builder) {
 	s.WriteString("For new or changed behavior, the implementation plan names each test by its readable name and the behavior it checks. The implementer writes each of those tests first and sees it fail before writing the code.\n\n")
 }
 
 // testFirstSection is foreman's own test rule. It lives in the prompt, not in the
-// stage files, because those are user-owned and absent from many repositories (D133).
-// A conflict repair turn adds no behavior, so it does not get the section.
+// stage files, because those are user-owned and absent from many repositories (D137).
+// A conflict repair or merge turn adds no behavior, so it does not get the section.
 func testFirstSection(s *strings.Builder) {
 	s.WriteString(`## Tests
 
@@ -240,6 +253,36 @@ func ResumeMessage(ds []task.Decision, open *task.Review, planning bool) string 
 	}
 	fmt.Fprintf(&s, "Continue the task with these decisions under the same instructions as before. End with the same JSON outcome: %s.\n", outcomes)
 	return s.String()
+}
+
+// MergeMessage resumes the implementer's session when its PR conflicts with the
+// latest base branch. The merge is reviewed like any other change (D133).
+func MergeMessage(branch, base string, files []string) string {
+	var s strings.Builder
+	mergeRules(&s, branch, base, files)
+	s.WriteString("End with the same JSON outcome: pr_opened, blocked, or failed.\n")
+	return s.String()
+}
+
+// mergeRules tells the implementer how to bring the base into an open PR. A rebase or
+// force-push would rewrite a branch the developer and reviewers already see, and an
+// aborted merge would lose the state the developer needs to finish it by hand.
+func mergeRules(s *strings.Builder, branch, base string, files []string) {
+	fmt.Fprintf(s, "Your pull request from %s conflicts with the latest origin/%s in these files:\n\n", branch, base)
+	for _, f := range files {
+		fmt.Fprintf(s, "- %s\n", f)
+	}
+	fmt.Fprintf(s, `
+Resolve the conflicts before anything else. A reviewer checks the result.
+
+- Run `+"`git fetch origin %s`"+`, then `+"`git merge origin/%s`"+` on %s. If a merge is already in progress (`+"`git status`"+` shows it), finish that one instead.
+- Never rebase, and never force-push. The pull request is open, so its history stays as it is.
+- Resolve each file so both sides' changes keep working. Run the project's checks, commit the merge, and push with `+"`git push origin %s`"+`.
+- End with "pr_opened" and the pull request number.
+- If you can't resolve a file safely, do not run `+"`git merge --abort`"+`. Leave the merge in progress in the worktree and end with "blocked". The question names every unresolved file, says the merge is in progress in the worktree, and offers the option "I resolved the files; verify, commit, push".
+- If the developer answers that they resolved the files, check that no conflict markers remain, run the checks, commit the merge, and push.
+
+`, base, base, branch, branch)
 }
 
 // stageSection passes the developer's stage instructions through as written. The

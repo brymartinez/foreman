@@ -565,3 +565,10 @@ func TestConflictRepairPromptOmitsTheTestFirstSection(t *testing.T) {
 		t.Errorf("a conflict repair prompt carries the test section:\n%s", p)
 	}
 }
+
+func TestMergeBeforeReviewPromptOmitsTheTestFirstSection(t *testing.T) {
+	p := ImplementationPrompt(TaskBrief{Branch: "feat/1-x", BaseBranch: "main", Merge: &MergeBrief{Base: "main", Files: []string{"retry.go"}}})
+	if strings.Contains(p, "## Tests") {
+		t.Errorf("a merge-before-review prompt carries the test section:\n%s", p)
+	}
+}

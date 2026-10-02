@@ -140,6 +140,12 @@ two worktrees at once, which prevents two agents from writing to the same checko
 is not, and another code on an error such as an unknown commit. Foreman uses it to check
 a conflict repair after `git fetch origin` (D130).
 
+`git merge-tree --write-tree --name-only --no-messages <branch> <base>` (git 2.38 or
+newer) merges in memory and touches neither the index nor the working tree. It exits 0
+for a clean merge and prints the tree id. It exits 1 for a conflict and prints the tree
+id, then one conflicting path per line. Any other exit is an error, such as a missing
+ref. Verified by `internal/worktree/git_test.go` against git 2.50 (D133).
+
 ## Assumptions in the design doc that the tooling doesn't support as written
 
 1. **"The agent asks me mid-run."** A headless turn can't stop and wait for input. What

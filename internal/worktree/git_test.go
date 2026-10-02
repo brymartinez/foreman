@@ -142,6 +142,106 @@ func TestRemove(t *testing.T) {
 	}
 }
 
+// prWorktree builds a bare origin with main and a pushed task branch, and a worktree on
+// the branch. seed is a clone that can push new commits to either.
+func prWorktree(t *testing.T) (wt, seed string) {
+	t.Helper()
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin.git")
+	seed, wt = filepath.Join(root, "seed"), filepath.Join(root, "wt")
+	run(t, root, "init", "-q", "--bare", "-b", "main", origin)
+	run(t, root, "clone", "-q", origin, seed)
+	write(t, seed, "a.txt", "base\n")
+	write(t, seed, "b.txt", "base\n")
+	run(t, seed, "add", ".")
+	run(t, seed, "commit", "-q", "-m", "base")
+	run(t, seed, "push", "-q", "origin", "main")
+	run(t, seed, "checkout", "-q", "-b", "agent/1-x")
+	write(t, seed, "a.txt", "branch\n")
+	write(t, seed, "b.txt", "branch\n")
+	run(t, seed, "commit", "-q", "-am", "branch")
+	run(t, seed, "push", "-q", "origin", "agent/1-x")
+	run(t, seed, "checkout", "-q", "main")
+	run(t, root, "clone", "-q", "-b", "agent/1-x", origin, wt)
+	return wt, seed
+}
+
+func write(t *testing.T, dir, name, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func advanceMain(t *testing.T, seed string, files map[string]string) {
+	t.Helper()
+	for name, body := range files {
+		write(t, seed, name, body)
+	}
+	run(t, seed, "add", ".")
+	run(t, seed, "commit", "-q", "-m", "main moves")
+	run(t, seed, "push", "-q", "origin", "main")
+}
+
+var check = app.MergeCheck{Branch: "agent/1-x", Base: "main"}
+
+func TestMergeConflictsListsConflictingFiles(t *testing.T) {
+	wt, seed := prWorktree(t)
+	advanceMain(t, seed, map[string]string{"b.txt": "main\n", "a.txt": "main\n", "c.txt": "new\n"})
+	c := check
+	c.Dir = wt
+	got, err := (Git{}).MergeConflicts(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "a.txt,b.txt" {
+		t.Errorf("conflicts = %v, want [a.txt b.txt]", got)
+	}
+}
+
+func TestMergeConflictsCleanWhenBaseAdvances(t *testing.T) {
+	wt, seed := prWorktree(t)
+	advanceMain(t, seed, map[string]string{"c.txt": "new\n"})
+	head := run(t, wt, "rev-parse", "HEAD")
+	c := check
+	c.Dir = wt
+	got, err := (Git{}).MergeConflicts(context.Background(), c)
+	if err != nil || got != nil {
+		t.Fatalf("conflicts = %v, %v; want none", got, err)
+	}
+	if after := run(t, wt, "rev-parse", "HEAD"); after != head {
+		t.Errorf("HEAD moved from %s to %s", head, after)
+	}
+	if status := run(t, wt, "status", "--porcelain"); status != "" {
+		t.Errorf("worktree changed:\n%s", status)
+	}
+}
+
+func TestMergeConflictsFetchesLatestBase(t *testing.T) {
+	wt, seed := prWorktree(t)
+	c := check
+	c.Dir = wt
+	if got, err := (Git{}).MergeConflicts(context.Background(), c); err != nil || got != nil {
+		t.Fatalf("before main moved: %v, %v", got, err)
+	}
+	advanceMain(t, seed, map[string]string{"a.txt": "main\n"})
+	got, err := (Git{}).MergeConflicts(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "a.txt" {
+		t.Errorf("conflicts = %v, want [a.txt] from the fetched main", got)
+	}
+}
+
+func TestMergeConflictsErrorsOnMissingBranch(t *testing.T) {
+	wt, _ := prWorktree(t)
+	c := app.MergeCheck{Dir: wt, Branch: "agent/gone", Base: "main"}
+	if _, err := (Git{}).MergeConflicts(context.Background(), c); err == nil {
+		t.Fatal("want an error for a branch origin doesn't have")
+	}
+}
+
 func TestContains(t *testing.T) {
 	clone, originHead := repoWithOrigin(t)
 	ctx := context.Background()
