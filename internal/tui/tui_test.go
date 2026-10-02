@@ -400,3 +400,25 @@ func TestAutoStartWaitsWhenTheTaskReadFails(t *testing.T) {
 		t.Fatalf("a local tick launched %d with the task read still failing", n)
 	}
 }
+
+func TestAutoStartAfterARefreshCountsARunStartedElsewhere(t *testing.T) {
+	m := Model{Width: 100, Height: 30, Refreshing: true}
+	m.SetAuto(Auto{Enabled: true, Agent: task.Claude, Max: 1})
+	// Another foreman command started a/b#10 while the refresh ran.
+	src := autoSource{stubSource: stubSource{recs: []*task.Record{record(10, task.Working)}}}
+	results := make(chan result, 8)
+	if n := settle(context.Background(), src, &m, refreshed(assigned("c/d", 1, 0)), results); n != 0 {
+		t.Fatalf("a refresh launched %d with the only slot taken by a run the dashboard had not read", n)
+	}
+}
+
+func TestTurningAutoOnCountsARunStartedElsewhere(t *testing.T) {
+	m := Model{Width: 100, Height: 30}
+	m.SetAuto(Auto{Max: 1})
+	m.SetInbox([]app.InboxEntry{assigned("c/d", 1, 0)})
+	src := autoSource{stubSource: stubSource{recs: []*task.Record{record(10, task.Working)}}}
+	m.Key(rune_('a'))
+	if n := launchAutoFresh(context.Background(), src, &m, make(chan result, 8)); n != 0 {
+		t.Fatalf("turning auto on launched %d with the only slot taken by a run the dashboard had not read", n)
+	}
+}

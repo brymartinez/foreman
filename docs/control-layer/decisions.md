@@ -2321,3 +2321,15 @@ Entry format:
 - **Rejected.** A lock around checkout setup in `internal/app`. It fixes only the
   clone, while worktree creation and fetches in the same repository can still race,
   and it changes the manual path.
+
+## D146 (amends D144). Auto mode re-reads the task files before every pick
+
+- Date: 2026-10-03. Issue midsoln/foreman#30, review round 2 of PR #34.
+- **Context.** After a successful refresh, and when `a` turned auto mode on, auto mode
+  counted slots from the task list of the last local read. A run that another foreman
+  command started in that gap was missing, so auto mode could go past
+  `auto.max_concurrent`.
+- **Decision.** `launchAutoFresh` calls `readLocal` before `AutoStarts` after a
+  successful refresh, after a finished start, cancel, or resume, and when `a` turns
+  auto mode on. The 1 second tick already reads first. With auto mode off, no extra
+  read is made.

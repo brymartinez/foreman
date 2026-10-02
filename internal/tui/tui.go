@@ -149,7 +149,7 @@ func Run(ctx context.Context, o Options) (err error) {
 						m.Message = "! save auto mode: " + err.Error()
 					}
 				}
-				pending += launchAuto(ctx, o.Source, &m, results)
+				pending += launchAutoFresh(ctx, o.Source, &m, results)
 			}
 			if m.Selected() != before || (!wasOpen && m.LogOpen) {
 				// The heading names the new task, so the body must not still hold the
@@ -182,19 +182,26 @@ func finish(ctx context.Context, out io.Writer, m *Model, results <-chan result,
 }
 
 // settle applies a background result and returns how many auto starts it launched.
-// A finished start re-reads the task files before auto mode counts slots, so the
-// run it recorded is counted. A failed refresh starts nothing.
+// A failed refresh starts nothing.
 func settle(ctx context.Context, s Source, m *Model, r result, results chan<- result) int {
 	if r.finished {
 		m.Done(r.key)
 	}
 	apply(m, r)
-	switch {
-	case r.finished:
-		readLocal(ctx, s, m)
-	case r.report == nil || r.err != nil:
+	if !r.finished && (r.report == nil || r.err != nil) {
 		return 0
 	}
+	return launchAutoFresh(ctx, s, m, results)
+}
+
+// launchAutoFresh re-reads the task files before auto mode counts slots. A start
+// that just came back, or a run another foreman command started during a refresh,
+// is then counted, so auto mode never goes past its limit on a stale task list.
+func launchAutoFresh(ctx context.Context, s Source, m *Model, results chan<- result) int {
+	if !m.AutoOn {
+		return 0
+	}
+	readLocal(ctx, s, m)
 	return launchAuto(ctx, s, m, results)
 }
 
