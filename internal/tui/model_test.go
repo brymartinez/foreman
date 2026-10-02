@@ -768,3 +768,21 @@ func TestShowScrollsUpAfterTheTextShrinks(t *testing.T) {
 		t.Errorf("page up after a resize left ShowTop at %d; want %d (limit %d)", m.ShowTop, want, limit)
 	}
 }
+
+func TestSetTasksClearsTypedTextWhenTheQuestionIsAnsweredElsewhere(t *testing.T) {
+	m := prompting()
+	press(&m, rune_('B'), Key{Kind: KeyDown})
+	m.SetTasks([]*task.Record{answered(m.Selected(), "A. Retry")})
+	if m.Mode != AnsweringDecision || m.Input != "" || m.DecisionTop != 0 {
+		t.Fatalf("mode %v input %q top %d; want the next question with no carried-over text", m.Mode, m.Input, m.DecisionTop)
+	}
+	if !strings.Contains(m.Message, "answered elsewhere") {
+		t.Errorf("message = %q; want it to say why the text was cleared", m.Message)
+	}
+	m.SetTasks([]*task.Record{m.Selected()})
+	press(&m, rune_('A'))
+	m.SetTasks([]*task.Record{m.Selected()})
+	if m.Input != "A" {
+		t.Errorf("a refresh with the same question cleared the text: %q", m.Input)
+	}
+}

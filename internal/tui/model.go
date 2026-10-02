@@ -3,6 +3,7 @@ package tui
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -100,6 +101,7 @@ type Model struct {
 	starting     map[task.Key]bool // starts and resumes in flight, manual or automatic
 	tasksStale   bool              // the last task read failed
 	answering    bool              // an answer is being recorded
+	question     int               // the index in Decisions of the question the prompt shows
 }
 
 // Selected is the highlighted delegated task, or nil when nothing is delegated.
@@ -145,9 +147,21 @@ func (m *Model) SetTasks(recs []*task.Record) {
 	case m.Mode == AnsweringDecision && !m.LogOpen:
 		// The cursor moved to another task, which closed the pane.
 		m.Mode, m.Input = Browsing, ""
+	case m.Mode == AnsweringDecision && pendingIndex(cur) != m.question:
+		// The shown question was answered while the prompt was open. Text typed for it
+		// must not be recorded as the answer to the next one.
+		if !m.answering {
+			m.Message = fmt.Sprintf("%s#%d: that question was answered elsewhere; this is the next one", cur.Repo, cur.Number)
+		}
+		m.Input, m.DecisionTop, m.question = "", 0, pendingIndex(cur)
 	case m.Mode == Browsing && m.LogOpen && !m.answering && asks(cur):
 		m.openDecision()
 	}
+}
+
+// pendingIndex is the index in rec.Decisions of the oldest unanswered question, or -1.
+func pendingIndex(rec *task.Record) int {
+	return slices.IndexFunc(rec.Decisions, func(d task.Decision) bool { return d.Answer == "" })
 }
 
 // asks reports whether rec has a question the developer can answer now.
@@ -404,6 +418,7 @@ func (m *Model) openDecision() {
 	m.Mode, m.Input = AnsweringDecision, ""
 	m.LogOpen, m.ShowOpen = true, false
 	m.DecisionTop = 0
+	m.question = pendingIndex(m.Selected())
 	m.manualTask = true
 }
 
@@ -458,7 +473,7 @@ func (m *Model) Answered(rec *task.Record) {
 	}
 	if asks(rec) {
 		if m.Mode == AnsweringDecision {
-			m.Input, m.DecisionTop = "", 0
+			m.Input, m.DecisionTop, m.question = "", 0, pendingIndex(rec)
 		}
 		return
 	}
