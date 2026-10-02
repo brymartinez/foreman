@@ -269,3 +269,19 @@ func TestBlockedMergeQuestionNamesEveryFile(t *testing.T) {
 		t.Fatalf("question context lacks the files or worktree:\n%s", c)
 	}
 }
+
+func TestMergeTurnWithAnUnverifiablePRFailsTheTask(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	f.claude.turn = prTurn("sid-1")
+	f.wt.conflicts = [][]string{{"retry.go"}}
+	// The PR is closed while the implementer merges, so its pr_opened can't be verified.
+	f.claude.onResume = func() { setPR(f, "closed") }
+	got := run(t, f, key)
+	if got.State != task.Failed || got.LastOutcome.Status != "failed" || got.LastOutcome.Summary != "PR #912 is closed, not open" {
+		t.Fatalf("state %s outcome %+v", got.State, got.LastOutcome)
+	}
+	if got.Delegation.Implementer.ID != "sid-1" || len(f.codex.reviewed) != 0 || len(got.Reviews) != 0 {
+		t.Errorf("session %q reviews %d; the session must be kept and nothing reviewed", got.Delegation.Implementer.ID, len(f.codex.reviewed))
+	}
+}

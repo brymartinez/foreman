@@ -219,3 +219,28 @@ func TestFeedbackRoundsAreCappedPerRun(t *testing.T) {
 		t.Fatalf("state = %s unanswered = %d; the rest waits for the developer", rec.State, len(rec.UnhandledFeedback()))
 	}
 }
+
+func TestCancelledFeedbackTurnIsRecordedAsCancelled(t *testing.T) {
+	f := newFixture()
+	key := waiting(t, f)
+	if _, err := f.app.Resume(context.Background(), key); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancelCause(context.Background())
+	f.claude.onResume = func() { cancel(errors.New("terminated signal received")) }
+	f.claude.resumeErr = errors.New("claude printed no result (signal: terminated)")
+	var log strings.Builder
+	if err := f.app.RunTask(ctx, key, 4243, &log); err != nil {
+		t.Fatal(err)
+	}
+	rec := f.store.recs[key]
+	if rec.State != task.Failed || rec.LastOutcome.Status != Cancelled || rec.LastOutcome.Summary != "run cancelled during answering PR feedback (terminated signal received)" {
+		t.Fatalf("state %s outcome %+v", rec.State, rec.LastOutcome)
+	}
+	if n := len(rec.UnhandledFeedback()); n != 1 {
+		t.Errorf("%d comments waiting, want 1 kept for the next run", n)
+	}
+	if !strings.Contains(log.String(), "foreman: stopped during answering PR feedback: terminated signal received") {
+		t.Errorf("log = %q", log.String())
+	}
+}

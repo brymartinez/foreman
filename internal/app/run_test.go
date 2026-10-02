@@ -584,3 +584,40 @@ func TestCodexPlansAndClaudeReviewsWithoutThePRD(t *testing.T) {
 		t.Errorf("claude's review must carry the PR description, not the PRD: %q", f.claude.reviewed)
 	}
 }
+
+func TestPlanIsPostedAgainWhenItsCommentWasDeleted(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	// An earlier plan's analysis comment that the developer has since deleted.
+	f.store.recs[key].SetPlanComment(task.PlanComment{Doc: task.Analysis, CommentID: 77, URL: "https://github.com/x/issues/825#issuecomment-77"})
+	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2")}
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	c := got.PlanComment(task.Analysis)
+	if !got.PlanPosted() || c == nil || c.CommentID == 77 || f.gh.edits != 0 {
+		t.Fatalf("plan %+v edits %d; want the analysis posted as a new comment", got.Plan, f.gh.edits)
+	}
+	if _, ok := f.gh.comments[c.CommentID]; !ok {
+		t.Errorf("comment %d was not posted", c.CommentID)
+	}
+}
+
+func TestFailedPlanPostNamesTheDocument(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	f.gh.postErr = errors.New("gh: HTTP 502")
+	f.claude.turns = []agent.Turn{plannedTurn("sid-1")}
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	want := "posting the Analysis on the issue failed: gh: HTTP 502"
+	if got.State != task.Failed || got.LastOutcome.Status != "failed" || got.LastOutcome.Summary != want || len(got.Plan) != 0 {
+		t.Fatalf("state %s outcome %+v plan %+v", got.State, got.LastOutcome, got.Plan)
+	}
+	if f.claude.starts != 1 {
+		t.Errorf("starts = %d; a failed post must not start the implementation", f.claude.starts)
+	}
+}
