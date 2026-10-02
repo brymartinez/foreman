@@ -2,8 +2,7 @@
 
 ## Current stage
 
-Stage 24 (test-first, readable behavior tests in delegated work for issue #19) is
-complete.
+Stage 25 (adversarial reviews against the PR description for issue #22) is complete.
 Completed runs are needed to measure the effect of the model and budget choices.
 
 ## Completed
@@ -659,6 +658,15 @@ request. Each fix is its own commit with a decision.
   merge-before-review turns get neither (D138).
 - Verified with `go vet ./...`, `go test ./...`, a binary build, and `scripts/e2e.sh`.
 
+### Stage 25 (complete): adversarial reviews for issue #22
+
+- The reviewer gets the PR description as its only requirements, plus the PR comments
+  as non-authoritative history. It no longer sees the issue, PRD, context, decisions,
+  or the implementer's validation. A blank or unreadable description stops the review.
+  The prompt asks for counterexamples and verified defects, and a re-review lists the
+  earlier findings in full (D139).
+- Verified with `go vet ./...`, `go test ./...`, a binary build, and `scripts/e2e.sh`.
+
 ## Known limitations
 
 - The gate runs only when `inbox` or `status` runs, or while the dashboard is open
@@ -799,6 +807,7 @@ what it replaced. Current summary:
   D135. Always list the conflicts in a blocked merge question. D136. Merge issue
   #17's conflict repair with issue #12's check.
 - D138. The prompt carries a built-in test-first, readable-test rule.
+- D139. The reviewer judges the PR against its description alone.
 
 ## Next stage
 

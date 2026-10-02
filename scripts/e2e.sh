@@ -172,7 +172,7 @@ if [[ " $* " == *" --resume "* ]]; then
 			git add widgets.go
 			git -c user.email=e2e@example.com -c user.name=e2e commit -q --no-edit
 			git push -q origin "$b"
-			printf '{"number":%s,"url":"https://github.com/acme/widgets/pull/%s","state":"OPEN","headRefName":"%s","headRefOid":"%s","baseRefName":"main","isCrossRepository":false}\n' "$pr" "$pr" "$b" "$(git rev-parse HEAD)" >"$E2E_STATE/pr-$pr.json"
+			printf '{"number":%s,"url":"https://github.com/acme/widgets/pull/%s","state":"OPEN","headRefName":"%s","headRefOid":"%s","baseRefName":"main","isCrossRepository":false,"body":"Retry 5xx only.\\n\\nCloses #42"}\n' "$pr" "$pr" "$b" "$(git rev-parse HEAD)" >"$E2E_STATE/pr-$pr.json"
 			printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"pr_opened","summary":"merged main","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s","validation":[{"command":"go test ./...","passed":true}],"questions":[]}}\n' "$pr" "$pr"
 			exit 0
 		fi
@@ -187,7 +187,7 @@ if [[ " $* " == *" --resume "* ]]; then
 			git -c user.email=e2e@example.com -c user.name=e2e merge -q --no-edit origin/main
 			b=$(git branch --show-current); i=${b#*/}; pr=$((900 + ${i%%-*}))
 			git push -q origin "$b"
-			printf '{"number":%s,"url":"https://github.com/acme/widgets/pull/%s","state":"OPEN","headRefName":"%s","headRefOid":"%s","baseRefName":"main","isCrossRepository":false,"mergeable":"MERGEABLE"}\n' "$pr" "$pr" "$b" "$(git rev-parse HEAD)" >"$E2E_STATE/pr-$pr.json"
+			printf '{"number":%s,"url":"https://github.com/acme/widgets/pull/%s","state":"OPEN","headRefName":"%s","headRefOid":"%s","baseRefName":"main","isCrossRepository":false,"mergeable":"MERGEABLE","body":"Retry 5xx only.\\n\\nCloses #42"}\n' "$pr" "$pr" "$b" "$(git rev-parse HEAD)" >"$E2E_STATE/pr-$pr.json"
 			printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"pr_opened","summary":"merged main","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s","validation":[{"command":"go test ./...","passed":true}],"questions":[]}}\n' "$pr" "$pr"
 			exit 0
 		fi
@@ -236,7 +236,7 @@ if [ -f "$E2E_STATE/main-moves" ]; then
 fi
 issue=${branch#*/}
 pr=$((900 + ${issue%%-*}))
-printf '{"number":%s,"url":"https://github.com/acme/widgets/pull/%s","state":"OPEN","headRefName":"%s","headRefOid":"%s","baseRefName":"main","isCrossRepository":false}\n' "$pr" "$pr" "$branch" "$(git rev-parse HEAD)" >"$E2E_STATE/pr-$pr.json"
+printf '{"number":%s,"url":"https://github.com/acme/widgets/pull/%s","state":"OPEN","headRefName":"%s","headRefOid":"%s","baseRefName":"main","isCrossRepository":false,"body":"Retry 5xx only.\\n\\nCloses #42"}\n' "$pr" "$pr" "$branch" "$(git rev-parse HEAD)" >"$E2E_STATE/pr-$pr.json"
 echo "claude stderr progress" >&2
 echo '{"type":"system","subtype":"init","session_id":"s1"}'
 echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"go test ./...","description":"Run the tests"}}]}}'
@@ -247,7 +247,7 @@ EOF
 	cat >"$sandbox/bin/codex" <<'EOF'
 #!/usr/bin/env bash
 for arg in "$@"; do case "$arg" in gpt-6-luna|gpt-6-sol) echo "codex model=$arg" >>"$E2E_STATE/models.log" ;; model_reasoning_effort=*) echo "codex $arg" >>"$E2E_STATE/models.log" ;; esac; done
-if [[ " $* " == *" --ephemeral "* ]]; then echo "codex review"; else echo "codex implement"; fi >>"$E2E_STATE/agents.log"
+if [[ " $* " == *" --ephemeral "* ]]; then echo "codex review"; printf '%s' "${@: -1}" >"$E2E_STATE/review-prompt.txt"; else echo "codex implement"; fi >>"$E2E_STATE/agents.log"
 last=
 while [ $# -gt 0 ]; do [ "$1" = -o ] && last=$2; shift; done
 echo '{"type":"thread.started","thread_id":"t1"}'
@@ -290,6 +290,9 @@ scenario_runner() {
 	check "implementation uses its Claude model" contains "$state/models.log" "claude model=opus"
 	check "review uses its Codex model" contains "$state/models.log" "codex model=gpt-6-sol"
 	check "review uses medium Codex effort" contains "$state/models.log" 'codex model_reasoning_effort="medium"'
+	check "the review carries the PR description" contains "$state/review-prompt.txt" "> Retry 5xx only."
+	check "the review leaves out the issue body" bash -c "! grep -qF 'do it' '$state/review-prompt.txt'"
+	check "the review leaves out the PRD" bash -c "! grep -qF 'R1. Retry 5xx responses.' '$state/review-prompt.txt'"
 	check "show lists the plan" bash -c "cd '$FOREMAN_CWD' && '$work/foreman' show 42 | grep -qF 'Plan          Analysis https://github.com/acme/widgets/issues/42#issuecomment-3001'"
 	rm "$sandbox/stages/pr.md"
 	check "a missing stage file stops foreman" bash -c "cd '$FOREMAN_CWD' && ! '$work/foreman' status 2>'$sandbox/err.txt' && grep -qF 'stages/pr.md' '$sandbox/err.txt'"

@@ -2110,3 +2110,39 @@ Entry format:
 - **Consequence.** Every delegated turn in any repo, with Claude or Codex, carries the
   rule. An agent that ignores it is caught at review or by the developer at
   READY_FOR_HUMAN.
+
+## D139 (amends D10, D33, and D90). The reviewer judges the PR against its description
+
+- Date: 2026-10-02. Issue midsoln/foreman#22.
+- **Context.** The review prompt carried the issue, the context file, the developer's
+  decisions, the PRD, and the implementer's validation claims. These steered the
+  reviewer toward the implementer's plan. The issue asks for an independent review
+  with the PR description as the only stated requirements.
+- **Decision.** `App.review` reads the PR with `GetPullRequest` and builds
+  `agent.ReviewBrief` from the PR alone: its number, description, comments, branch,
+  base, earlier review rounds, and `review_rounds`. `ReviewBrief` no longer embeds
+  `TaskBrief`, so it has no field for the issue, PRD, context, decisions, plan, or
+  validation. `PullRequest` gains `Body`, read through `gh pr view --json body`.
+  - A blank description or a failed PR read returns an error before the reviewer
+    runs. The existing review error path marks the task FAILED and records no review.
+  - The PR's comments come in the prompt as feedback history, because the reviewer has
+    no network. A failed comment read does not stop the review; the prompt says the
+    comments could not be loaded. Comments with an empty body are left out.
+  - The prompt says the description is the only requirements, not to follow its
+    links, and that claims in it, in comments, or in commit messages are not evidence.
+    A `## Review stance` section asks for a fresh look, counterexamples, regressions,
+    missing cases, focused checks when feasible, and only verified defects.
+  - Earlier rounds list each finding with severity, file, line, summary, and detail.
+    A re-review checks each fix, then the whole change, and does not repeat resolved
+    findings. `## Review passes` is unchanged.
+  - The developer's review stage text keeps its place. Its header now says that a
+    mention of the issue, PRD, or decisions means the PR description, and that the
+    built-in review rules win. This covers older user stage files, which `make config`
+    never overwrites. `defaults/stages/review.md` drops the issue, PRD, and decisions
+    rules and adds the stance and re-review rules.
+  - The comments reuse `agent.FeedbackItem` and its `where`, `author`, and `quote`
+    helpers, not a new type.
+- **Consequence.** A developer's answer to an escalated review ("leave the code as
+  is") no longer reaches the reviewer. If the reviewer still finds the defect, the
+  fix loop runs again until `fix_rounds` escalates. The Claude reviewer's tools are
+  unchanged, so its "focused checks" are limited to reading and git commands.
