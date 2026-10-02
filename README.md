@@ -484,7 +484,8 @@ exclude list is then ignored. With an empty include list, the exclude list hides
 repositories. The filter applies to fresh inbox results and tracked-task refreshes,
 including `foreman inbox --non-interactive`. Press `v` in the dashboard or the
 interactive inbox to see every repository for the rest of the session; `mentions`
-still applies. `foreman status` and the dashboard's delegated work list every task
+still applies. Auto mode pauses while the dashboard shows every repository, so it only
+starts work from your configured repositories. `foreman status` and the dashboard's delegated work list every task
 whatever its repository.
 
 ## Permissions

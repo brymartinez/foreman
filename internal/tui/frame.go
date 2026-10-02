@@ -70,7 +70,9 @@ func tooSmall(width, height int) []string {
 
 func header(m Model) string {
 	parts := []string{fmt.Sprintf("foreman · %d delegated · %d in the inbox", len(m.Tasks), len(m.Inbox))}
-	if m.AutoOn {
+	if m.AutoOn && m.inboxAllRepos {
+		parts = append(parts, "auto paused")
+	} else if m.AutoOn {
 		parts = append(parts, fmt.Sprintf("auto on %d/%d", m.active(), m.AutoMax))
 	} else {
 		parts = append(parts, "auto off")

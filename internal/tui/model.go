@@ -90,6 +90,10 @@ type Model struct {
 	// AllRepos shows the inbox from every repository instead of the configured
 	// lists. It lasts for this session only.
 	AllRepos bool
+	// inboxAllRepos says Inbox came from the all repositories view. Auto mode waits
+	// while it does, so peeking at every repository never starts work outside the
+	// configured lists.
+	inboxAllRepos bool
 
 	pending      app.StartRequest  // the delegation being collected
 	cancelTarget task.Key          // the task named when cancellation was requested

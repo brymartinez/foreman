@@ -239,6 +239,7 @@ func apply(m *Model, r result) {
 		m.RefreshedAt = time.Now()
 		if r.err == nil {
 			m.SetInbox(app.Delegable(*r.report))
+			m.inboxAllRepos = r.allRepos
 			m.Warnings = r.report.Warnings
 		}
 	}
