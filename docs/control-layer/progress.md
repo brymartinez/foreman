@@ -2,7 +2,7 @@
 
 ## Current stage
 
-Stage 23 (test-first, readable behavior tests in delegated work for issue #19) is
+Stage 24 (test-first, readable behavior tests in delegated work for issue #19) is
 complete.
 Completed runs are needed to measure the effect of the model and budget choices.
 
@@ -641,12 +641,22 @@ request. Each fix is its own commit with a decision.
   D133 to D135. Verified with `go vet ./...`, `go test ./...`, a binary build, and
   all `scripts/e2e.sh` scenarios, including both `conflicts` and `conflict`.
 
-### Stage 23 (complete): test-first, readable behavior tests for issue #19
+### Stage 23 (complete): the dashboard show view for issue #11
+
+- With the lower pane open, `s` switches between the log and the `foreman show` text
+  for the selected task, with either list focused (D137). The heading reads
+  `SHOW · repo#N · state`, plus the line range when the text does not fit.
+- Show lines wrap at the terminal width. The log scroll keys scroll the show view, which
+  opens at its top. Returning to the log follows its tail.
+- Verified with `go vet ./...`, `go test ./...`, `go build -o dist/foreman
+  ./cmd/foreman`, and `scripts/e2e.sh`.
+
+### Stage 24 (complete): test-first, readable behavior tests for issue #19
 
 - Every implementation prompt has a built-in `## Tests` section: test first, see it
   fail, implement, rerun, commit only passing tests, and name tests by behavior. The
   planning prompt asks the plan to name each test's behavior. Conflict repair and
-  merge-before-review turns get neither (D137).
+  merge-before-review turns get neither (D138).
 - Verified with `go vet ./...`, `go test ./...`, a binary build, and `scripts/e2e.sh`.
 
 ## Known limitations
@@ -788,7 +798,7 @@ what it replaced. Current summary:
   D134. Follow a retargeted PR's base, and name the files in a blocked merge question.
   D135. Always list the conflicts in a blocked merge question. D136. Merge issue
   #17's conflict repair with issue #12's check.
-- D137. The prompt carries a built-in test-first, readable-test rule.
+- D138. The prompt carries a built-in test-first, readable-test rule.
 
 ## Next stage
 

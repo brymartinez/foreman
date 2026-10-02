@@ -2,6 +2,7 @@ package tui
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -417,5 +418,124 @@ func TestInboxRowShowsADelegatedState(t *testing.T) {
 	}
 	if strings.Contains(out, "  · assigned to you") {
 		t.Errorf("an undelegated row gained a separator:\n%s", out)
+	}
+}
+
+// visibleShow is the show lines the pane draws, without their padding.
+func visibleShow(m *Model) []string {
+	lay, _ := layoutFor(m.Width, m.Height, true)
+	var out []string
+	for _, l := range logPane(*m, lay.logHeight)[1:] {
+		if l = strings.TrimRight(l, " "); l != "" {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// showModel opens the show view on a task with failing checks and review findings.
+func showModel(width, height int) Model {
+	m := model()
+	m.Width, m.Height = width, height
+	rec := m.Selected()
+	rec.State = task.Failed
+	rec.Title = "配車の再試行を追加する and a long English tail that wraps"
+	rec.CI = &task.CIStatus{State: task.CIFailing, Failing: []task.CheckRun{{Name: "test", Link: "https://example.com/runs/1234567890/job/0987654321"}}}
+	rec.LastOutcome = &task.Outcome{Status: "failed", Summary: "go test ./... failed in internal/tui"}
+	rec.Reviews = []task.Review{{Round: 1, Reviewer: task.Codex, Findings: []task.Finding{{Severity: "blocking", File: "internal/tui/frame.go", Line: 9, Summary: "the pane drops text"}}}}
+	m.Log = []string{"a log line"}
+	press(&m, rune_('l'), Key{Kind: KeyEnter}, rune_('s'))
+	return m
+}
+
+func TestShowPaneMatchesRender(t *testing.T) {
+	for _, state := range []task.State{task.Working, task.NeedsDecision, task.Failed, task.Reviewed, task.ReadyForHuman} {
+		m := showModel(200, 200)
+		m.Selected().State = state
+		var b strings.Builder
+		render.Show(&b, m.Selected())
+		want := strings.Split(strings.TrimRight(b.String(), "\n"), "\n")
+		lay, _ := layoutFor(m.Width, m.Height, true)
+		got := logPane(m, lay.logHeight)[1:]
+		for i, w := range want {
+			if strings.TrimRight(got[i], " ") != strings.TrimRight(w, " ") {
+				t.Errorf("%s: line %d = %q; want %q", state, i, got[i], w)
+			}
+		}
+	}
+}
+
+func TestShowUpdatesOnSetTasks(t *testing.T) {
+	m := showModel(200, 200)
+	next := *m.Selected()
+	next.LastOutcome = &task.Outcome{Status: "failed", Summary: "a newer outcome"}
+	m.SetTasks([]*task.Record{&next, m.Tasks[1], m.Tasks[2]})
+	if got := screen(m); !strings.Contains(got, "a newer outcome") {
+		t.Errorf("the show view kept the old record:\n%s", got)
+	}
+}
+
+func TestShowHeading(t *testing.T) {
+	m := showModel(100, 30)
+	if got := plain(Frame(m)); !slices.ContainsFunc(got, func(l string) bool { return strings.HasPrefix(l, "SHOW · a/b#10 · FAILED") }) {
+		t.Errorf("no show heading:\n%s", strings.Join(got, "\n"))
+	}
+	m = showModel(minWidth, minHeight)
+	if got := screen(m); !strings.Contains(got, "SHOW · a/b#10 · FAILED · lines 1-") {
+		t.Errorf("a show view that does not fit has no line range:\n%s", got)
+	}
+}
+
+func TestLogHeadingUnchanged(t *testing.T) {
+	m := showModel(100, 30)
+	press(&m, rune_('s'))
+	got := screen(m)
+	if !strings.Contains(got, "LOG · a/b#10 · /logs/b.log") || strings.Contains(got, "SHOW ·") {
+		t.Errorf("the log view lost its heading:\n%s", got)
+	}
+}
+
+func TestShowFrameFitsSize(t *testing.T) {
+	for _, size := range [][2]int{{minWidth, minHeight}, {100, 30}, {200, 60}} {
+		m := showModel(size[0], size[1])
+		for range 20 {
+			lines := Frame(m)
+			if len(lines) != m.Height {
+				t.Errorf("%dx%d: %d lines", m.Width, m.Height, len(lines))
+			}
+			for i, l := range plain(lines) {
+				if n := textWidth(l); n > m.Width {
+					t.Errorf("%dx%d: line %d is %d columns: %q", m.Width, m.Height, i, n, l)
+				}
+			}
+			press(&m, rune_('d'))
+		}
+	}
+}
+
+func TestShowWrapsInsteadOfTruncating(t *testing.T) {
+	m := showModel(minWidth, minHeight)
+	got := strings.Join(m.showLines(), "")
+	for _, want := range []string{"https://example.com/runs/1234567890/job/0987654321", "a long English tail that wraps"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the wrapped show text lost %q", want)
+		}
+	}
+	if strings.Contains(got, "…") {
+		t.Error("the show text was truncated")
+	}
+}
+
+func TestFooterMentionsShow(t *testing.T) {
+	for _, width := range []int{minWidth, 100, 200} {
+		for _, focus := range []Pane{InboxPane, TaskPane} {
+			m := showModel(width, 30)
+			m.Focus = focus
+			got := plain(Frame(m))
+			footer := got[len(got)-1]
+			if !strings.Contains(footer, "s show/log") || strings.Contains(footer, "…") {
+				t.Errorf("width %d focus %d: footer %q", width, focus, footer)
+			}
+		}
 	}
 }

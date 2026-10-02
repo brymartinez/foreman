@@ -2074,7 +2074,24 @@ Entry format:
 - **Consequence.** A conflict found before a review and one found after the handoff
   both reach the implementer, and both are reviewed.
 
-## D137. Foreman's prompt carries a test-first, readable-test rule
+
+## D137. The dashboard lower pane switches to the show view
+
+- Date: 2026-10-01. Issue midsoln/foreman#11.
+- **Context.** After a failure the developer had to leave the dashboard and run
+  `foreman show <issue>` to see the outcome, failing checks, and review findings.
+- **Decision.** With the lower pane open, `s` switches it between the log and the text
+  `render.Show` writes for the selected record. It works with either list focused.
+  The text is rendered on each frame from the record in memory, so it needs no new
+  port and follows every reread of the task file. Lines are cut at the pane width by
+  display column, not at spaces, because show rows are paths and URLs. The show view
+  opens at its top; returning to the log follows its tail. The pane opens on the log,
+  and closing it or picking another task returns it to the log. Enter on an open pane
+  keeps the current view. The existing scroll keys scroll whichever view is open.
+- **Consequence.** The developer reads a task's whole state without leaving the
+  dashboard. At 60x12 the pane shows one line at a time, but every line is reachable.
+
+## D138. Foreman's prompt carries a test-first, readable-test rule
 
 - Date: 2026-10-02. Issue midsoln/foreman#19.
 - **Context.** The only test rule lived in `defaults/stages/implement.md`: "Add or update

@@ -1,6 +1,9 @@
 package tui
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestTextWidthCountsColumnsNotRunes(t *testing.T) {
 	for _, tc := range []struct {
@@ -51,5 +54,31 @@ func TestPadFillsToTheColumnCount(t *testing.T) {
 	}
 	if got := pad("配車配車", 4); got != "配車配車" {
 		t.Errorf("pad widened a line that was already full: %q", got)
+	}
+}
+
+func TestWrapLine(t *testing.T) {
+	for _, tc := range []struct {
+		s     string
+		width int
+		want  []string
+	}{
+		{"foreman", 3, []string{"for", "ema", "n"}},
+		{"foreman", 7, []string{"foreman"}},
+		{"  indented line", 6, []string{"  inde", "nted l", "ine"}},
+		{"a配車", 2, []string{"a", "配", "車"}}, // 配 would straddle the edge, so it moves down
+		{"ée", 1, []string{"é", "e"}},       // the combining acute stays on its e
+		{"", 10, []string{""}},
+		{"abc", 1, []string{"a", "b", "c"}},
+		{"配", 1, []string{"配"}}, // a rune wider than the line still gets a line
+		{"abc", 0, []string{"abc"}},
+	} {
+		got := wrapLine(tc.s, tc.width)
+		if strings.Join(got, "|") != strings.Join(tc.want, "|") {
+			t.Errorf("wrapLine(%q, %d) = %q; want %q", tc.s, tc.width, got, tc.want)
+		}
+		if strings.Join(got, "") != tc.s {
+			t.Errorf("wrapLine(%q, %d) lost text: %q", tc.s, tc.width, got)
+		}
 	}
 }

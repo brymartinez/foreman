@@ -173,13 +173,13 @@ Do not change, commit, or push anything in this turn. If writing the documents n
 }
 
 // planningTestRule makes the plan list the tests the implementer writes first, so the
-// reviewer can check them against the plan (D137).
+// reviewer can check them against the plan (D138).
 func planningTestRule(s *strings.Builder) {
 	s.WriteString("For new or changed behavior, the implementation plan names each test by its readable name and the behavior it checks. The implementer writes each of those tests first and sees it fail before writing the code.\n\n")
 }
 
 // testFirstSection is foreman's own test rule. It lives in the prompt, not in the
-// stage files, because those are user-owned and absent from many repositories (D137).
+// stage files, because those are user-owned and absent from many repositories (D138).
 // A conflict repair or merge turn adds no behavior, so it does not get the section.
 func testFirstSection(s *strings.Builder) {
 	s.WriteString(`## Tests
