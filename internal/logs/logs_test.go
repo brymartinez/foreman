@@ -155,3 +155,29 @@ func TestCleanCutsALongCodexLine(t *testing.T) {
 		t.Errorf("line not cut: %d runes, %q", len([]rune(got)), got)
 	}
 }
+
+func TestTurnLineReachesCleanRawAndTailViews(t *testing.T) {
+	var log bytes.Buffer
+	w := &Writer{W: &log}
+	_, _ = w.Write([]byte("codex:gpt-6-sol:review\n"))
+	line := strings.TrimSuffix(log.String(), "\n")
+	if !strings.HasSuffix(line, " codex:gpt-6-sol:review") {
+		t.Fatalf("raw log = %q", log.String())
+	}
+	for _, raw := range []bool{false, true} {
+		var out bytes.Buffer
+		if err := Show(context.Background(), &out, strings.NewReader(log.String()), raw, false, 0); err != nil {
+			t.Fatal(err)
+		}
+		if out.String() != line+"\n" {
+			t.Errorf("Show raw=%v = %q, want %q", raw, out.String(), line+"\n")
+		}
+		got, err := Tail(bytes.NewReader(log.Bytes()), 10, raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 || got[0] != line {
+			t.Errorf("Tail raw=%v = %q, want [%q]", raw, got, line)
+		}
+	}
+}

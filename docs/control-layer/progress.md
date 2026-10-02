@@ -2,7 +2,7 @@
 
 ## Current stage
 
-Stage 26 (adversarial reviews against the PR description for issue #22) is complete.
+Stage 27 (an `agent:model:step` log line for each agent turn, issue #25) is complete.
 Completed runs are needed to measure the effect of the model and budget choices.
 
 ## Completed
@@ -675,6 +675,14 @@ request. Each fix is its own commit with a decision.
   or the implementer's validation. A blank or unreadable description stops the review.
   The prompt asks for counterexamples and verified defects, and a re-review lists the
   earlier findings in full (D140).
+- Verified with `go vet ./...`, `go test ./...`, a binary build, and `scripts/e2e.sh`.
+
+### Stage 27 (complete): the model and step for each agent turn, issue #25
+
+- Each plan, implement, review, feedback, and merge turn logs `agent:model:step`, for
+  example `codex:gpt-6-sol:review`. The model is the one the adapter passes to the CLI,
+  or `default` when none is set. Resumed and repeated turns each log their own line
+  (D141).
 - Verified with `go vet ./...`, `go test ./...`, a binary build, and `scripts/e2e.sh`.
 
 ## Known limitations

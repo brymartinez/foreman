@@ -2170,3 +2170,26 @@ Entry format:
     write and network access. Codex's read-only sandbox also blocks Go builds. The
     reviewer's checks are therefore limited to reading code and git commands, and the
     prompt says so. `ReviewTools` is unchanged.
+
+## D141. Each agent turn opens with an `agent:model:step` log line
+
+- Date: 2026-10-02. Issue midsoln/foreman#25.
+- **Context.** Task logs did not say which model ran a turn or where one turn began.
+  Models are chosen per stage inside the adapters (`PlanModel`, `ReviewModel`), so a
+  wrong model choice could only be found by reading config.
+- **Decision.** `agent.StartInput` gains `Step`. `App.implement` sets it, and
+  `App.review` sets `review`. The adapters call `logTurn` after their plan and review
+  overrides, so the logged model is the `--model` or `-m` value passed to the CLI.
+  - Steps: `plan`, `implement`, `review`, `feedback`, `merge`. A fix turn after review
+    findings, an answer to a decision, and PR creation are `implement`. The merge gate
+    and conflict repair are both `merge`. Feedback and merge keep their names though
+    they use the implementation model.
+  - An unset model logs `default`, the CLI's own choice.
+  - Each adapter call writes its own line. A resume that finds its session gone and
+    then starts fresh writes two lines.
+  - An empty `Step` writes nothing, so callers that set none keep their old logs.
+  - The line is plain text. `logs.cleanLine` passes it through, so it shows in
+    `foreman logs`, `--raw`, and the dashboard pane with no change to `internal/logs`.
+- **Rejected.** Resolving the model in the app would need a port change and a second
+  copy of the override logic. Reading the model from Claude's `system init` event
+  reports what the CLI used, not what foreman chose, and Codex has no such event.
