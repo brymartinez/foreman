@@ -2,7 +2,7 @@
 
 ## Current stage
 
-Stage 30 (dashboard auto mode for issue #30) is complete. Completed runs are needed to
+Stage 31 (answering decisions in the dashboard for issue #31) is complete. Completed runs are needed to
 measure the effect of the model and budget choices. The ranked refactor candidates
 below are the next code-quality stages.
 
