@@ -200,6 +200,7 @@ func newFixture() fixture {
 			prs: map[int]PullRequest{912: {
 				Key: task.Key{Repo: "ridezoomo/armada-backend", Number: 912}, URL: "https://github.com/ridezoomo/armada-backend/pull/912",
 				State: "open", HeadRefName: "feat/825-provider-retries", BaseRefName: "main", HeadSHA: "c0ffee1",
+				Body: "Retry 5xx only.\n\nCloses #825",
 			}},
 		},
 		wt:      &fakeWorktrees{},
@@ -473,7 +474,7 @@ func TestStatusReapsDeadRunner(t *testing.T) {
 
 func TestRunTaskVerifiesReportedPR(t *testing.T) {
 	good := func() PullRequest {
-		return PullRequest{Key: task.Key{Repo: "ridezoomo/armada-backend", Number: 913}, URL: "u913", State: "open", HeadRefName: "feat/825-provider-retries", BaseRefName: "main"}
+		return PullRequest{Key: task.Key{Repo: "ridezoomo/armada-backend", Number: 913}, URL: "u913", State: "open", HeadRefName: "feat/825-provider-retries", BaseRefName: "main", Body: "Retry 5xx only."}
 	}
 	cases := []struct {
 		name     string

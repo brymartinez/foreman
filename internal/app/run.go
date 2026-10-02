@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -351,30 +352,34 @@ func (a App) review(ctx context.Context, rec *task.Record, log io.Writer) (agent
 	if !ok {
 		return agent.ReviewOutcome{}, fmt.Errorf("reviewer %s is not configured", d.Reviewer)
 	}
-	brief, err := a.brief(ctx, rec)
+	// The PR description is the reviewer's only statement of requirements, so a review
+	// without one cannot pass (D139).
+	pr, err := a.GitHub.GetPullRequest(ctx, task.Key{Repo: rec.Repo, Number: d.PR})
 	if err != nil {
-		return agent.ReviewOutcome{}, err
+		return agent.ReviewOutcome{}, fmt.Errorf("review PR #%d: %w", d.PR, err)
+	}
+	if strings.TrimSpace(pr.Body) == "" {
+		return agent.ReviewOutcome{}, fmt.Errorf("review PR #%d: the pull request description is empty", d.PR)
 	}
 	instructions, err := a.Stages.Resolve(d.Worktree, task.StageReview)
 	if err != nil {
 		return agent.ReviewOutcome{}, err
 	}
-	brief.StageInstructions = instructions.Content()
-	// The reviewer has no network, so the PRD it checks against comes in the prompt.
-	if c := rec.PlanComment(task.PRD); c != nil {
-		if got, err := a.GitHub.GetIssueComment(ctx, rec.Repo, c.CommentID); err == nil {
-			brief.PRD = got.Body
-		} else {
-			fmt.Fprintf(log, "foreman: reviewing without the PRD: %v\n", err)
-		}
+	brief := agent.ReviewBrief{Key: rec.Key, PR: d.PR, PRBody: pr.Body, Branch: d.Branch, BaseBranch: strings.TrimPrefix(d.BaseRef, "origin/"),
+		StageInstructions: instructions.Content(), Previous: rec.Reviews, Passes: a.reviewRounds()}
+	// Comments are history, not requirements, so the review goes on without them.
+	if comments, err := a.GitHub.PullRequestComments(ctx, task.Key{Repo: rec.Repo, Number: d.PR}); err != nil {
+		brief.CommentsErr = err.Error()
+		fmt.Fprintf(log, "foreman: reviewing without the PR comments: %v\n", err)
+	} else {
+		brief.Comments = feedbackItems(slices.DeleteFunc(comments, func(c PRComment) bool { return strings.TrimSpace(c.Body) == "" }))
 	}
 	fmt.Fprintf(log, "foreman: %s reviewing PR #%d (round %d)\n", reviewer.Name(), d.PR, len(rec.Reviews)+1)
 	return reviewer.Review(ctx, agent.StartInput{
 		Worktree:     d.Worktree,
 		Log:          log,
 		MaxBudgetUSD: a.ReviewerBudgetUSD,
-		Prompt: agent.ReviewPrompt(agent.ReviewBrief{TaskBrief: brief, PR: d.PR, Validation: rec.Validation, Previous: rec.Reviews,
-			Passes: a.reviewRounds()}),
+		Prompt:       agent.ReviewPrompt(brief),
 	})
 }
 
@@ -427,7 +432,7 @@ func (a App) notify(key task.Key, rec *task.Record) {
 	_ = a.Notifier.Notify(fmt.Sprintf("Foreman %s#%d", key.Repo, key.Number), body)
 }
 
-// brief gathers the durable task context both prompts are built from.
+// brief gathers the durable task context the implementation prompt is built from.
 func (a App) brief(ctx context.Context, rec *task.Record) (agent.TaskBrief, error) {
 	d := rec.Delegation
 	issue, err := a.GitHub.GetIssue(ctx, rec.Key)
