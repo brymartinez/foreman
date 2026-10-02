@@ -148,6 +148,40 @@ func TestPullRequests(t *testing.T) {
 	}
 }
 
+func TestPullRequestMergeable(t *testing.T) {
+	for raw, want := range map[string]string{"MERGEABLE": "mergeable", "CONFLICTING": "conflicting", "UNKNOWN": "unknown", "": "unknown", "OTHER": "unknown"} {
+		c := Client{Run: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+			if !strings.Contains(strings.Join(args, " "), "mergeable") {
+				t.Errorf("gh call does not ask for mergeable: %v", args)
+			}
+			return []byte(fmt.Sprintf(`{"number":5,"state":"OPEN","mergeable":%q}`, raw)), nil
+		}}
+		pr, err := c.GetPullRequest(context.Background(), task.Key{Repo: "a/b", Number: 5})
+		if err != nil || pr.Mergeable != want {
+			t.Errorf("%q: mergeable = %q, %v; want %q", raw, pr.Mergeable, err, want)
+		}
+	}
+}
+
+func TestBranchHead(t *testing.T) {
+	var got string
+	c := Client{Run: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		got = strings.Join(args, " ")
+		return []byte("abc123\n"), nil
+	}}
+	sha, err := c.BranchHead(context.Background(), "a/b", "release/1.2")
+	if err != nil || sha != "abc123" {
+		t.Fatalf("sha = %q, %v", sha, err)
+	}
+	if got != "api repos/a/b/git/ref/heads/release/1.2 --jq .object.sha" {
+		t.Errorf("gh call = %q", got)
+	}
+	empty := Client{Run: func(context.Context, string, ...string) ([]byte, error) { return []byte("\n"), nil }}
+	if _, err := empty.BranchHead(context.Background(), "a/b", "main"); err == nil {
+		t.Error("an empty answer must be an error")
+	}
+}
+
 func TestCIStatus(t *testing.T) {
 	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 912}
 	for _, tc := range []struct {

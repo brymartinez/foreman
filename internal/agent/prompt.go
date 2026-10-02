@@ -45,6 +45,8 @@ type TaskBrief struct {
 	// an answer when a fresh turn replaces a session that could not be resumed (D120).
 	PR       int
 	Feedback []FeedbackItem
+	// Conflict is set when the turn repairs a merge conflict on the PR (D130).
+	Conflict *Conflict
 	// Merge is set when the PR conflicts with its base and a fresh turn has to merge it.
 	Merge *MergeBrief
 }
@@ -94,6 +96,12 @@ func ImplementationPrompt(b TaskBrief) string {
 		fmt.Fprintf(&s, "## Pull request feedback\n\nThese comments on pull request #%d are waiting for an answer.\n\n", b.PR)
 		feedbackRules(&s, b.Key.Repo, b.PR)
 		writeFeedback(&s, b.Key.Repo, b.PR, b.Feedback)
+	}
+
+	if c := b.Conflict; c != nil {
+		fmt.Fprintf(&s, "## Merge conflict\n\nYour pull request #%d is open and was handed to the developer. It now has merge conflicts with %s. This turn only repairs them.\n\n", c.PR, c.Base)
+		conflictRules(&s, *c)
+		s.WriteString("\n")
 	}
 
 	if b.Merge != nil {
@@ -219,7 +227,7 @@ func ResumeMessage(ds []task.Decision, open *task.Review, planning bool) string 
 }
 
 // MergeMessage resumes the implementer's session when its PR conflicts with the
-// latest base branch. The merge is reviewed like any other change (D129).
+// latest base branch. The merge is reviewed like any other change (D133).
 func MergeMessage(branch, base string, files []string) string {
 	var s strings.Builder
 	mergeRules(&s, branch, base, files)

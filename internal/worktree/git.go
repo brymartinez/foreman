@@ -120,6 +120,24 @@ func (Git) MergeConflicts(ctx context.Context, check app.MergeCheck) ([]string, 
 	return files, nil
 }
 
+func (Git) Contains(ctx context.Context, dir, ancestor, descendant string) (bool, error) {
+	if _, err := git(ctx, dir, "fetch", "origin"); err != nil {
+		return false, err
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "merge-base", "--is-ancestor", ancestor, descendant)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	var exit *exec.ExitError
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.As(err, &exit) && exit.ExitCode() == 1:
+		return false, nil
+	}
+	return false, fmt.Errorf("git merge-base --is-ancestor: %w: %s", err, strings.TrimSpace(stderr.String()))
+}
+
 type entry struct{ path, branch string }
 
 func parsePorcelain(out []byte) []entry {

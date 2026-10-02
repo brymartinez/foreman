@@ -141,36 +141,38 @@ func (m Markdown) List(_ context.Context) ([]*task.Record, error) {
 }
 
 type frontmatter struct {
-	Repo                string             `yaml:"repo"`
-	Number              int                `yaml:"number"`
-	Kind                task.Kind          `yaml:"kind"`
-	Title               string             `yaml:"title"`
-	URL                 string             `yaml:"url"`
-	State               task.State         `yaml:"state"`
-	ImplementationAgent task.Agent         `yaml:"implementation_agent,omitempty"`
-	StartedAt           *time.Time         `yaml:"started_at,omitempty"`
-	SessionID           string             `yaml:"session_id,omitempty"`
-	ReviewAgent         task.Agent         `yaml:"review_agent,omitempty"`
-	Branch              string             `yaml:"branch,omitempty"`
-	BaseRef             string             `yaml:"base_ref,omitempty"`
-	Worktree            string             `yaml:"worktree,omitempty"`
-	WorktreeRemovedAt   *time.Time         `yaml:"worktree_removed_at,omitempty"`
-	ContextFile         string             `yaml:"context_file,omitempty"`
-	RunnerPID           int                `yaml:"runner_pid,omitempty"`
-	RunnerLog           string             `yaml:"runner_log,omitempty"`
-	PR                  int                `yaml:"pr,omitempty"`
-	PRURL               string             `yaml:"pr_url,omitempty"`
-	PRHead              string             `yaml:"pr_head,omitempty"`
-	GitHub              *snapshot          `yaml:"github,omitempty"`
-	LastGitHubSync      *time.Time         `yaml:"last_github_sync,omitempty"`
-	Decisions           []decisionFM       `yaml:"decisions,omitempty"`
-	LastOutcome         *outcomeFM         `yaml:"last_outcome,omitempty"`
-	Usage               usageFM            `yaml:"usage,omitempty"`
-	Validation          []task.Check       `yaml:"validation,omitempty"`
-	Reviews             []reviewFM         `yaml:"reviews,omitempty"`
-	Plan                []task.PlanComment `yaml:"plan,omitempty"`
-	Feedback            []feedbackFM       `yaml:"feedback,omitempty"`
-	CI                  *ciFM              `yaml:"ci,omitempty"`
+	Repo                string                 `yaml:"repo"`
+	Number              int                    `yaml:"number"`
+	Kind                task.Kind              `yaml:"kind"`
+	Title               string                 `yaml:"title"`
+	URL                 string                 `yaml:"url"`
+	State               task.State             `yaml:"state"`
+	ImplementationAgent task.Agent             `yaml:"implementation_agent,omitempty"`
+	StartedAt           *time.Time             `yaml:"started_at,omitempty"`
+	SessionID           string                 `yaml:"session_id,omitempty"`
+	ReviewAgent         task.Agent             `yaml:"review_agent,omitempty"`
+	Branch              string                 `yaml:"branch,omitempty"`
+	BaseRef             string                 `yaml:"base_ref,omitempty"`
+	Worktree            string                 `yaml:"worktree,omitempty"`
+	WorktreeRemovedAt   *time.Time             `yaml:"worktree_removed_at,omitempty"`
+	ContextFile         string                 `yaml:"context_file,omitempty"`
+	RunnerPID           int                    `yaml:"runner_pid,omitempty"`
+	RunnerLog           string                 `yaml:"runner_log,omitempty"`
+	PR                  int                    `yaml:"pr,omitempty"`
+	PRURL               string                 `yaml:"pr_url,omitempty"`
+	PRHead              string                 `yaml:"pr_head,omitempty"`
+	ConflictAttempts    []task.ConflictAttempt `yaml:"conflict_attempts,omitempty"`
+	ConflictPending     bool                   `yaml:"conflict_pending,omitempty"`
+	GitHub              *snapshot              `yaml:"github,omitempty"`
+	LastGitHubSync      *time.Time             `yaml:"last_github_sync,omitempty"`
+	Decisions           []decisionFM           `yaml:"decisions,omitempty"`
+	LastOutcome         *outcomeFM             `yaml:"last_outcome,omitempty"`
+	Usage               usageFM                `yaml:"usage,omitempty"`
+	Validation          []task.Check           `yaml:"validation,omitempty"`
+	Reviews             []reviewFM             `yaml:"reviews,omitempty"`
+	Plan                []task.PlanComment     `yaml:"plan,omitempty"`
+	Feedback            []feedbackFM           `yaml:"feedback,omitempty"`
+	CI                  *ciFM                  `yaml:"ci,omitempty"`
 }
 
 type feedbackFM struct {
@@ -299,17 +301,19 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 			return nil, fmt.Errorf("implementation_agent: %w", err)
 		}
 		rec.Delegation = &task.Delegation{
-			Implementer: task.Session{Agent: impl, ID: fm.SessionID},
-			Reviewer:    impl.Reviewer(),
-			Branch:      fm.Branch,
-			BaseRef:     fm.BaseRef,
-			Worktree:    fm.Worktree,
-			ContextFile: fm.ContextFile,
-			RunnerPID:   fm.RunnerPID,
-			RunnerLog:   fm.RunnerLog,
-			PR:          fm.PR,
-			PRURL:       fm.PRURL,
-			PRHead:      fm.PRHead,
+			Implementer:      task.Session{Agent: impl, ID: fm.SessionID},
+			Reviewer:         impl.Reviewer(),
+			Branch:           fm.Branch,
+			BaseRef:          fm.BaseRef,
+			Worktree:         fm.Worktree,
+			ContextFile:      fm.ContextFile,
+			RunnerPID:        fm.RunnerPID,
+			RunnerLog:        fm.RunnerLog,
+			PR:               fm.PR,
+			PRURL:            fm.PRURL,
+			PRHead:           fm.PRHead,
+			ConflictAttempts: fm.ConflictAttempts,
+			ConflictPending:  fm.ConflictPending,
 		}
 		if fm.StartedAt != nil {
 			rec.Delegation.StartedAt = *fm.StartedAt
@@ -403,6 +407,7 @@ func fromRecord(rec *task.Record) frontmatter {
 			fm.WorktreeRemovedAt = &t
 		}
 		fm.RunnerPID, fm.RunnerLog, fm.PR, fm.PRURL, fm.PRHead = d.RunnerPID, d.RunnerLog, d.PR, d.PRURL, d.PRHead
+		fm.ConflictAttempts, fm.ConflictPending = d.ConflictAttempts, d.ConflictPending
 	}
 	if s := rec.GitHub; s != nil {
 		fm.GitHub = &snapshot{UpdatedAt: s.UpdatedAt, State: s.State, Reasons: s.Reasons}

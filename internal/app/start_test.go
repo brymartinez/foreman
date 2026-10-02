@@ -18,9 +18,18 @@ type fakeWorktrees struct {
 	reqs      []WorktreeRequest
 	removed   []WorktreeRemoval
 	removeErr error
+	// contains answers Contains; nil reports every ancestor as merged.
+	contains  func(dir, ancestor, descendant string) (bool, error)
 	checks    []MergeCheck
 	conflicts [][]string // consumed one per check; clean once empty
 	checkErr  error
+}
+
+func (f *fakeWorktrees) Contains(_ context.Context, dir, ancestor, descendant string) (bool, error) {
+	if f.contains == nil {
+		return true, nil
+	}
+	return f.contains(dir, ancestor, descendant)
 }
 
 func (f *fakeWorktrees) MergeConflicts(_ context.Context, c MergeCheck) ([]string, error) {
@@ -75,15 +84,19 @@ func (f *fakeStages) Resolve(repoRoot string, s task.Stage) (task.StageInstructi
 }
 
 type fakeRunners struct {
-	spawned []task.Key
-	alive   map[int]bool
-	stopped []int
-	onStop  func(pid int) // plays the runner recording its stop
-	stuck   bool
+	spawned  []task.Key
+	alive    map[int]bool
+	stopped  []int
+	onStop   func(pid int) // plays the runner recording its stop
+	stuck    bool
+	spawnErr error
 }
 
 func (f *fakeRunners) Spawn(k task.Key) (int, string, error) {
 	f.spawned = append(f.spawned, k)
+	if f.spawnErr != nil {
+		return 0, "", f.spawnErr
+	}
 	return 4242, "/logs/" + string(k.Repo) + ".log", nil
 }
 func (f *fakeRunners) Alive(pid int) bool { return f.alive[pid] }

@@ -34,6 +34,8 @@ func delegated() *task.Record {
 			PR:                912,
 			PRURL:             "https://github.com/ridezoomo/armada-backend/pull/912",
 			PRHead:            "beef002",
+			ConflictAttempts:  []task.ConflictAttempt{{Head: "beef000", Base: "ba5e000"}, {Head: "beef001", Base: "ba5e001"}},
+			ConflictPending:   true,
 		},
 		Validation: []task.Check{{Command: "go test ./...", Passed: true}, {Command: "golangci-lint run", Passed: false}},
 		Plan: []task.PlanComment{
@@ -93,6 +95,29 @@ func TestRoundTrip(t *testing.T) {
 	got.Decisions[0].AnsweredAt, got.Decisions[0].DeliveredAt = want.Decisions[0].AnsweredAt, want.Decisions[0].DeliveredAt
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("round trip mismatch\n got: %+v\nwant: %+v", got, want)
+	}
+}
+
+func TestOldFileLoadsWithoutConflictFields(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	old := "---\nrepo: a/b\nnumber: 3\nkind: issue\nstate: READY_FOR_HUMAN\nimplementation_agent: claude\nbranch: feat/3-x\npr: 7\npr_head: c0ffee1\n---\n"
+	if err := os.WriteFile(filepath.Join(s.Dir, "a-b-3.md"), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, task.Key{Repo: "a/b", Number: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := got.Delegation
+	if d.ConflictAttempts != nil || d.ConflictPending || d.ConflictAttempted("c0ffee1", "") {
+		t.Fatalf("delegation = %+v", d)
+	}
+	if err := s.Save(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(s.Dir, "a-b-3.md"))
+	if strings.Contains(string(raw), "conflict_") {
+		t.Errorf("saved empty conflict fields:\n%s", raw)
 	}
 }
 

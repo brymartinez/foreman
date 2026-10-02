@@ -153,7 +153,8 @@ func (a App) deadRunners(recs []*task.Record) []deadRunner {
 	return dead
 }
 
-// reap marks the tasks deadRunners found as FAILED, unless they have moved on since.
+// reap marks the tasks deadRunners found as FAILED, unless they have moved on since. A
+// runner that died during a merge conflict repair leaves a decision instead (D132).
 func (a App) reap(ctx context.Context, recs []*task.Record, dead []deadRunner) error {
 	for _, dr := range dead {
 		updated, err := a.update(ctx, recs[dr.index].Key, func(cur *task.Record) (*task.Record, error) {
@@ -161,9 +162,14 @@ func (a App) reap(ctx context.Context, recs []*task.Record, dead []deadRunner) e
 			if !running(cur.State) || d == nil || d.RunnerPID != dr.pid {
 				return cur, nil
 			}
-			cur.State = task.Failed
-			cur.LastOutcome = &task.Outcome{Status: "failed", Summary: fmt.Sprintf("runner (pid %d) exited without recording an outcome; see %s", d.RunnerPID, d.RunnerLog), At: a.Now()}
+			summary := fmt.Sprintf("runner (pid %d) exited without recording an outcome; see %s", d.RunnerPID, d.RunnerLog)
 			d.RunnerPID = 0
+			if d.ConflictPending {
+				failRepair(cur, summary, a.Now())
+				return cur, nil
+			}
+			cur.State = task.Failed
+			cur.LastOutcome = &task.Outcome{Status: "failed", Summary: summary, At: a.Now()}
 			return cur, nil
 		})
 		if err != nil {

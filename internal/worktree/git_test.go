@@ -241,3 +241,32 @@ func TestMergeConflictsErrorsOnMissingBranch(t *testing.T) {
 		t.Fatal("want an error for a branch origin doesn't have")
 	}
 }
+
+func TestContains(t *testing.T) {
+	clone, originHead := repoWithOrigin(t)
+	ctx := context.Background()
+	req := app.WorktreeRequest{RepoDir: clone, Path: filepath.Join(t.TempDir(), "825-a"), Branch: "agent/825-a", BaseRef: "origin/main"}
+	if err := (Git{}).Ensure(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := (Git{}).Contains(ctx, req.Path, originHead, "HEAD"); err != nil || !ok {
+		t.Fatalf("branch made from the base: %v, %v", ok, err)
+	}
+
+	// A commit pushed to origin from elsewhere, which the worktree has not fetched yet.
+	run(t, clone, "checkout", "-q", "-b", "side")
+	run(t, clone, "commit", "-q", "--allow-empty", "-m", "side")
+	run(t, clone, "push", "-q", "origin", "side")
+	side := run(t, clone, "rev-parse", "HEAD")
+	if ok, err := (Git{}).Contains(ctx, req.Path, side, "HEAD"); err != nil || ok {
+		t.Fatalf("unmerged commit: %v, %v", ok, err)
+	}
+
+	run(t, req.Path, "merge", "-q", "--no-edit", "origin/side")
+	if ok, err := (Git{}).Contains(ctx, req.Path, side, "HEAD"); err != nil || !ok {
+		t.Fatalf("merged commit: %v, %v", ok, err)
+	}
+	if _, err := (Git{}).Contains(ctx, req.Path, "0123456789012345678901234567890123456789", "HEAD"); err == nil {
+		t.Error("a commit git does not have must be an error")
+	}
+}

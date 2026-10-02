@@ -100,6 +100,12 @@ The user is authenticated through the keyring.
 - **Pull requests.** `gh pr view <n> --json` exposes `state`, `reviewDecision`,
   `latestReviews`, `statusCheckRollup`, `headRefName`, `mergedAt`, and
   `closingIssuesReferences`.
+- **Mergeability.** `gh pr view <n> --json mergeable` gives MERGEABLE, CONFLICTING, or
+  UNKNOWN. GitHub computes it lazily, so UNKNOWN is common right after a push to either
+  branch. `gh pr view --json` also lists `baseRefName`.
+  `gh api repos/<owner>/<repo>/git/ref/heads/<branch> --jq .object.sha` prints a
+  branch's head commit (D130). The field list was read from gh 2.101.0; a conflicting
+  PR was not probed live.
 - **CI.** `gh pr checks <n> --json name,state,bucket` gives each check a `bucket` of pass,
   fail, pending, skipping, or cancel. `--required` limits it to required checks.
   According to `gh pr checks --help`, gh exits 8 while checks are pending. When a PR has
@@ -130,12 +136,15 @@ The user is authenticated through the keyring.
 `git worktree list --porcelain` makes the operation idempotent: if the branch is already
 checked out at the expected path, foreman reuses it. Git refuses to check out a branch in
 two worktrees at once, which prevents two agents from writing to the same checkout.
+`git merge-base --is-ancestor <a> <b>` exits 0 when `a` is in `b`'s history, 1 when it
+is not, and another code on an error such as an unknown commit. Foreman uses it to check
+a conflict repair after `git fetch origin` (D130).
 
 `git merge-tree --write-tree --name-only --no-messages <branch> <base>` (git 2.38 or
 newer) merges in memory and touches neither the index nor the working tree. It exits 0
 for a clean merge and prints the tree id. It exits 1 for a conflict and prints the tree
 id, then one conflicting path per line. Any other exit is an error, such as a missing
-ref. Verified by `internal/worktree/git_test.go` against git 2.50 (D129).
+ref. Verified by `internal/worktree/git_test.go` against git 2.50 (D133).
 
 ## Assumptions in the design doc that the tooling doesn't support as written
 
