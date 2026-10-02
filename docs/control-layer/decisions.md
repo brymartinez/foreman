@@ -2111,7 +2111,25 @@ Entry format:
   rule. An agent that ignores it is caught at review or by the developer at
   READY_FOR_HUMAN.
 
-## D139 (amends D10, D33, and D90). The reviewer judges the PR against its description
+## D139 (amends D129). The PR description holds Problem, Fix, and Risk
+
+- Date: 2026-10-02. Issue midsoln/foreman#21.
+- **Context.** D129 left `defaults/stages/pr.md` with six body parts: what was wrong,
+  the fix, how to test, risk, plan links, and `Closes #N`. Reviewers still found the
+  body slow to scan. The test report and the plan links repeat what the linked issue
+  holds.
+- **Decision.** Edit `defaults/stages/pr.md` only. The body has `## Problem`, `## Fix`,
+  and `## Risk`, then `Closes #N`. An optional `## Review notes` after Risk lists a
+  decision, plan deviation, or limitation only when a reviewer needs it. Fix is kept
+  short by judgment, with no bullet count. The body leaves out test commands, results,
+  reviewer steps, and planning comment links. Later developer answers go under Review
+  notes. Rule 6 drops "what the tests showed". The validation gate in rule 1 stays.
+  No Go change.
+- **Consequence.** New installs and new runs get the shorter format. `make setup` does
+  not overwrite installed stage files, so existing users copy the new default by hand.
+  Existing PRs stay as they are.
+
+## D140 (amends D10, D33, and D90). The reviewer judges the PR against its description
 
 - Date: 2026-10-02. Issue midsoln/foreman#22.
 - **Context.** The review prompt carried the issue, the context file, the developer's

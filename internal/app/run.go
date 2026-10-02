@@ -353,7 +353,7 @@ func (a App) review(ctx context.Context, rec *task.Record, log io.Writer) (agent
 		return agent.ReviewOutcome{}, fmt.Errorf("reviewer %s is not configured", d.Reviewer)
 	}
 	// The PR description is the reviewer's only statement of requirements, so a review
-	// without one cannot pass (D139).
+	// without one cannot pass (D140).
 	pr, err := a.GitHub.GetPullRequest(ctx, task.Key{Repo: rec.Repo, Number: d.PR})
 	if err != nil {
 		return agent.ReviewOutcome{}, fmt.Errorf("review PR #%d: %w", d.PR, err)

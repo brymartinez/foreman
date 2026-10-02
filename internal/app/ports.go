@@ -52,7 +52,7 @@ type PullRequest struct {
 	// Mergeable is mergeable, conflicting, or unknown. GitHub computes it lazily, so
 	// unknown is common right after a push to either branch.
 	Mergeable string
-	// Body is the PR description. The reviewer checks the change against it alone (D139).
+	// Body is the PR description. The reviewer checks the change against it alone (D140).
 	Body string
 }
 

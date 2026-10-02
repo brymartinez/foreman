@@ -62,7 +62,7 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
                                   rebase or force-push, push); recheck; after two
                                   turns still conflicting -> NEEDS_DECISION, exit
                     review = reviewer.Review(disposable read-only session,
-                                             PR description + PR comments + git diff + earlier rounds, D139)
+                                             PR description + PR comments + git diff + earlier rounds, D140)
                     clean    -> record review and the head it covered; read the PR's comments,
                 and answer anything new before handing over (D123); stay REVIEWING, exit
                     findings -> WORKING; implementer.Resume(session, findings); agent pushes
@@ -144,7 +144,7 @@ FAILED, or READY_FOR_HUMAN (D59).
 - **Fresh reviewer.** The reviewer session is disposable
   (`--no-session-persistence` / `--ephemeral`). Its prompt carries the PR description as
   the only requirements, the PR comments as history, and earlier review rounds, and
-  points at `git diff <base>...HEAD`. A blank description stops the review (D139). It never sees the
+  points at `git diff <base>...HEAD`. A blank description stops the review (D140). It never sees the
   implementer's session. Repo instructions load on their own because the reviewer runs
   in the worktree.
 - **Stage models.** The chosen implementer uses its plan model until the four plan

@@ -74,7 +74,7 @@ func ParseReview(raw []byte) (ReviewOutcome, error) {
 // ReviewBrief holds only what the reviewer may judge the change by: the PR, its
 // description and comments, and earlier review rounds. It has no field for the issue,
 // PRD, context, decisions, plan, or the implementer's validation, so none can reach
-// the prompt (D139).
+// the prompt (D140).
 type ReviewBrief struct {
 	Key    task.Key
 	PR     int

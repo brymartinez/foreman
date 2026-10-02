@@ -116,7 +116,7 @@ func TestReviewLoopEscalatesAfterRoundCapAndResumesOnAnswer(t *testing.T) {
 		t.Errorf("answer not delivered: %q", f.claude.resumed[resumedBefore:])
 	}
 	// The reviewer judges the change by the PR description alone, not the developer's
-	// answers to the implementer (D139).
+	// answers to the implementer (D140).
 	if strings.Contains(f.codex.reviewed[len(f.codex.reviewed)-1], "Leave the code as is") {
 		t.Error("reviewer was shown the developer's decision")
 	}
