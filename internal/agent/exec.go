@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -16,9 +17,33 @@ type StartInput struct {
 	Worktree string
 	Prompt   string
 	Stage    task.Stage
+	// Step names the work for the turn's agent:model:step log line; "" logs no line.
+	Step string
 	// Log receives the agent's stderr and progress events; the runner points it at the task log.
 	Log          io.Writer
 	MaxBudgetUSD float64
+}
+
+// Steps name the work a turn does in its log line. Feedback and merge turns run
+// with the implementation model but keep their own names (D141).
+const (
+	StepPlan      = "plan"
+	StepImplement = "implement"
+	StepReview    = "review"
+	StepFeedback  = "feedback"
+	StepMerge     = "merge"
+)
+
+// logTurn writes the agent:model:step line that opens a turn. An empty model means
+// the CLI default.
+func logTurn(w io.Writer, a task.Agent, model, step string) {
+	if step == "" {
+		return
+	}
+	if model == "" {
+		model = "default"
+	}
+	fmt.Fprintf(logOrDiscard(w), "%s:%s:%s\n", a, model, step)
 }
 
 // ErrNoSession means the CLI never produced a session: nothing ran. For Resume it

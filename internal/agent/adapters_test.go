@@ -531,3 +531,140 @@ func TestMergeBeforeReviewPromptOmitsTheTestFirstSection(t *testing.T) {
 		t.Errorf("a merge-before-review prompt carries the test section:\n%s", p)
 	}
 }
+
+// turnLines returns the log lines in the agent:model:step form.
+func turnLines(log string) []string {
+	var lines []string
+	for _, l := range strings.Split(log, "\n") {
+		if strings.HasPrefix(l, "claude:") && !strings.HasPrefix(l, "claude: ") || strings.HasPrefix(l, "codex:") {
+			lines = append(lines, l)
+		}
+	}
+	return lines
+}
+
+func TestClaudeLogsAgentModelAndStep(t *testing.T) {
+	var commands []Command
+	exec := func(_ context.Context, cmd Command) error {
+		commands = append(commands, cmd)
+		result := prOpened
+		if slices.Contains(cmd.Args, "--no-session-persistence") {
+			result = reviewJSON
+		}
+		fmt.Fprintf(cmd.Stdout, `{"type":"result","subtype":"success","structured_output":%s}`, result)
+		return nil
+	}
+	var log bytes.Buffer
+	c := Claude{Bin: "claude", Model: "opus", PlanModel: "sonnet", ReviewModel: "opus", Exec: exec, NewSessionID: func() string { return "sid-1" }}
+	for _, in := range []StartInput{
+		{Worktree: "/wt", Log: &log, Stage: task.StagePlan, Step: StepPlan},
+		{Worktree: "/wt", Log: &log, Stage: task.StageImplement, Step: StepImplement},
+		{Worktree: "/wt", Log: &log, Stage: task.StageImplement, Step: StepFeedback},
+		{Worktree: "/wt", Log: &log, Stage: task.StageImplement, Step: StepMerge},
+	} {
+		if _, err := c.Start(context.Background(), in, func(task.Session) {}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := c.Review(context.Background(), StartInput{Worktree: "/wt", Log: &log, Step: StepReview}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"claude:sonnet:plan", "claude:opus:implement", "claude:opus:feedback", "claude:opus:merge", "claude:opus:review"}
+	got := turnLines(log.String())
+	if !slices.Equal(got, want) {
+		t.Fatalf("turn lines = %q, want %q", got, want)
+	}
+	for i, line := range got {
+		if model := strings.Split(line, ":")[1]; model != argValue(commands[i].Args, "--model") {
+			t.Errorf("line %q names model %q, argv has %q", line, model, argValue(commands[i].Args, "--model"))
+		}
+	}
+}
+
+func TestClaudeResumeLogsItsOwnLine(t *testing.T) {
+	exec := func(_ context.Context, cmd Command) error {
+		fmt.Fprintf(cmd.Stdout, `{"type":"result","subtype":"success","structured_output":%s}`, prOpened)
+		return nil
+	}
+	var log bytes.Buffer
+	c := Claude{Bin: "claude", Model: "opus", Exec: exec}
+	in := StartInput{Worktree: "/wt", Log: &log, Stage: task.StageImplement, Step: StepFeedback}
+	for range 2 {
+		if _, err := c.Resume(context.Background(), task.Session{Agent: task.Claude, ID: "sid-1"}, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, want := turnLines(log.String()), []string{"claude:opus:feedback", "claude:opus:feedback"}; !slices.Equal(got, want) {
+		t.Errorf("turn lines = %q, want %q", got, want)
+	}
+}
+
+func TestCodexLogsAgentModelAndStep(t *testing.T) {
+	var commands []Command
+	exec := func(_ context.Context, cmd Command) error {
+		commands = append(commands, cmd)
+		fmt.Fprintln(cmd.Stdout, `{"type":"thread.started","thread_id":"th-1"}`)
+		result := prOpened
+		if slices.Contains(cmd.Args, "--ephemeral") {
+			result = reviewJSON
+		}
+		return os.WriteFile(argValue(cmd.Args, "-o"), []byte(result), 0o600)
+	}
+	var log bytes.Buffer
+	c := Codex{Bin: "codex", Model: "gpt-6-sol", PlanModel: "gpt-6-luna", ReviewModel: "gpt-6-sol", Exec: exec}
+	if _, err := c.Start(context.Background(), StartInput{Worktree: "/wt", Log: &log, Stage: task.StagePlan, Step: StepPlan}, func(task.Session) {}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Start(context.Background(), StartInput{Worktree: "/wt", Log: &log, Stage: task.StageImplement, Step: StepImplement}, func(task.Session) {}); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range []string{StepFeedback, StepMerge} {
+		in := StartInput{Worktree: "/wt", Log: &log, Stage: task.StageImplement, Step: step}
+		if _, err := c.Resume(context.Background(), task.Session{Agent: task.Codex, ID: "th-1"}, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := c.Review(context.Background(), StartInput{Worktree: "/wt", Log: &log, Step: StepReview}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"codex:gpt-6-luna:plan", "codex:gpt-6-sol:implement", "codex:gpt-6-sol:feedback", "codex:gpt-6-sol:merge", "codex:gpt-6-sol:review"}
+	got := turnLines(log.String())
+	if !slices.Equal(got, want) {
+		t.Fatalf("turn lines = %q, want %q", got, want)
+	}
+	for i, line := range got {
+		if model := strings.Split(line, ":")[1]; model != argValue(commands[i].Args, "-m") {
+			t.Errorf("line %q names model %q, argv has %q", line, model, argValue(commands[i].Args, "-m"))
+		}
+	}
+}
+
+func TestTurnLogShowsDefaultForEmptyModel(t *testing.T) {
+	exec := func(_ context.Context, cmd Command) error {
+		fmt.Fprintf(cmd.Stdout, `{"type":"result","subtype":"success","structured_output":%s}`, prOpened)
+		return nil
+	}
+	var log bytes.Buffer
+	c := Claude{Bin: "claude", Exec: exec, NewSessionID: func() string { return "sid-1" }}
+	if _, err := c.Start(context.Background(), StartInput{Worktree: "/wt", Log: &log, Step: StepImplement}, func(task.Session) {}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := turnLines(log.String()), []string{"claude:default:implement"}; !slices.Equal(got, want) {
+		t.Errorf("turn lines = %q, want %q", got, want)
+	}
+}
+
+func TestTurnLogOmittedWithoutStep(t *testing.T) {
+	exec := func(_ context.Context, cmd Command) error {
+		fmt.Fprintf(cmd.Stdout, `{"type":"result","subtype":"success","structured_output":%s}`, prOpened)
+		return nil
+	}
+	var log bytes.Buffer
+	c := Claude{Bin: "claude", Model: "opus", Exec: exec, NewSessionID: func() string { return "sid-1" }}
+	if _, err := c.Start(context.Background(), StartInput{Worktree: "/wt", Log: &log}, func(task.Session) {}); err != nil {
+		t.Fatal(err)
+	}
+	if got := turnLines(log.String()); len(got) != 0 {
+		t.Errorf("turn lines = %q, want none", got)
+	}
+}
