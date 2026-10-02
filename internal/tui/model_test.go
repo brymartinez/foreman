@@ -553,3 +553,13 @@ func TestShowScrollsUpAfterTheTextShrinks(t *testing.T) {
 		t.Errorf("page up after a resize left ShowTop at %d; want %d (limit %d)", m.ShowTop, want, limit)
 	}
 }
+
+func TestBrowseViewKeyTogglesView(t *testing.T) {
+	var m Model
+	if a := press(&m, rune_('v')); a.Kind != ActionToggleView || !m.AllRepos {
+		t.Fatalf("first v = %+v, all repos %t; want the all view and a refresh", a, m.AllRepos)
+	}
+	if a := press(&m, rune_('v')); a.Kind != ActionToggleView || m.AllRepos {
+		t.Fatalf("second v = %+v, all repos %t; want the configured view and a refresh", a, m.AllRepos)
+	}
+}

@@ -23,8 +23,8 @@ type stubSource struct {
 	err    error
 }
 
-func (s stubSource) Inbox(context.Context) (app.InboxReport, error) { return s.report, s.err }
-func (s stubSource) Tasks(context.Context) ([]*task.Record, error)  { return s.recs, s.err }
+func (s stubSource) InboxView(context.Context, bool) (app.InboxReport, error) { return s.report, s.err }
+func (s stubSource) Tasks(context.Context) ([]*task.Record, error)            { return s.recs, s.err }
 func (s stubSource) Start(context.Context, app.StartRequest) (*task.Record, error) {
 	return s.rec, s.err
 }
@@ -59,6 +59,19 @@ func TestApplyKeepsTheInboxWhenARefreshFails(t *testing.T) {
 	}
 	if m.Refreshing || !strings.Contains(m.Message, "rate limited") {
 		t.Errorf("refreshing=%v message=%q", m.Refreshing, m.Message)
+	}
+}
+
+func TestApplyDropsAReportFetchedForTheOtherView(t *testing.T) {
+	m := Model{Width: 100, Height: 30, Refreshing: true, AllRepos: true}
+	m.SetInbox([]app.InboxEntry{entry("a/b", 1, "Open")})
+	stale := app.InboxReport{Current: []app.InboxEntry{entry("c/d", 2, "Filtered")}}
+	apply(&m, result{report: &stale, allRepos: false})
+	if len(m.Inbox) != 1 || m.Inbox[0].Item.Key.Repo != "a/b" {
+		t.Errorf("a report from the configured view replaced the all view's inbox: %+v", m.Inbox)
+	}
+	if m.Refreshing || !m.RefreshedAt.IsZero() {
+		t.Errorf("refreshing=%v at=%v; want the refresh ended without counting as fresh", m.Refreshing, m.RefreshedAt)
 	}
 }
 
