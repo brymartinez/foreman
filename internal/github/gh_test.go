@@ -346,3 +346,36 @@ func TestPullRequestCommentsReportsAFailedThread(t *testing.T) {
 		t.Fatal("a failed thread must not look like an empty conversation")
 	}
 }
+
+func TestSearchParsesCreatedAt(t *testing.T) {
+	run := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if !slices.Contains(args, "--assignee=@me") {
+			return []byte("[]"), nil
+		}
+		if !slices.ContainsFunc(args, func(a string) bool { return strings.HasPrefix(a, "--json=") && strings.Contains(a, "createdAt") }) {
+			t.Errorf("search does not request createdAt: %q", args)
+		}
+		return []byte(`[{"number":7,"title":"t","url":"u","state":"OPEN","createdAt":"2026-09-01T08:00:00Z","updatedAt":"2026-09-24T10:00:00Z","repository":{"nameWithOwner":"a/b"}}]`), nil
+	}
+	search, err := Client{Run: run}.InboxItems(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC)
+	if len(search.Items) != 1 || !search.Items[0].CreatedAt.Equal(want) {
+		t.Fatalf("items = %+v, want created at %s", search.Items, want)
+	}
+}
+
+func TestGetItemParsesCreatedAt(t *testing.T) {
+	run := func(context.Context, string, ...string) ([]byte, error) {
+		return []byte(`{"number":7,"title":"t","html_url":"u","state":"open","created_at":"2026-09-01T08:00:00Z","updated_at":"2026-09-24T10:00:00Z"}`), nil
+	}
+	item, err := Client{Run: run}.GetItem(context.Background(), task.Key{Repo: "a/b", Number: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC); !item.CreatedAt.Equal(want) {
+		t.Fatalf("created at = %s, want %s", item.CreatedAt, want)
+	}
+}
