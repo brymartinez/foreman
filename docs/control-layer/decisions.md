@@ -2268,3 +2268,84 @@ Entry format:
   `cancel` also move tasks and have no log writer. Keeping `Notify(title, body)` and
   formatting in `app`, because Discord then gets no state or link as fields. Retries,
   which the issue leaves out of scope.
+
+## D144. The open dashboard starts assigned INBOX issues on its own
+
+- Date: 2026-10-03. Issue midsoln/foreman#30.
+- **Context.** Every INBOX issue waited for the developer to select it and pick an
+  agent, so idle capacity went unused while the dashboard sat open.
+- **Decision.** The dashboard has an auto mode, on by default.
+  - The policy is `Model.AutoStarts` in `internal/tui/auto.go`, a pure method like
+    the rest of the model. `Run` launches its requests through the same `start`
+    goroutine and `pending` count as a manual start, so quitting waits for them.
+    `internal/app` gains only `InboxItem.CreatedAt`, read from `createdAt` in the
+    searches and `created_at` in `GetItem`.
+  - An issue qualifies when it is open, the assignee search found it, and it has no
+    delegation. Mentions alone, FAILED, REVIEWED, and pull requests never qualify.
+  - Order is creation time ascending, then repo, then number. An item with no
+    creation time sorts last.
+  - Slots in use are tasks in WORKING or REVIEWING plus starts and resumes still in
+    flight, manual or automatic. An in-flight key stays counted until its result
+    comes back, and `settle` re-reads the task files before the next pick, so a run
+    that just landed is never missed.
+  - Auto mode looks after a successful refresh, after a finished start, cancel, or
+    resume, on each 1 second local read, and when `a` turns it on. A failed refresh
+    starts nothing.
+  - Each issue starts at most once per dashboard session, by hand or automatically.
+    A failed start is not retried until the dashboard is reopened. Its error, prefixed
+    `auto:`, stays on the message line while other auto starts in the burst succeed.
+  - `auto.agent` (default `claude`) and `auto.max_concurrent` (default 3, minimum 1)
+    are config keys. `Load` rejects bad values and names the key.
+  - The on or off choice lives in `~/.local/share/foreman/state.json`, written through
+    a temp file and a rename with mode 0600. A missing file or key means on. An
+    unreadable file leaves auto mode on and the dashboard shows the error.
+- **Rejected.** The policy in `internal/app`, because `App` holds no session state and
+  the issue ties auto mode to the open dashboard. Saving the toggle into
+  `config.yaml`, because marshaling drops the developer's comments and the file may
+  hold the webhook secret.
+- **Deferred.** Resuming earlier delegated work automatically, which must tell work
+  that can resume from runs stopped for cost.
+
+## D145 (amends D144). Auto starts go one per repository and wait on a good task read
+
+- Date: 2026-10-03. Issue midsoln/foreman#30, review round 1 of PR #34.
+- **Context.** `App.Start` clones a repository's managed checkout when it is missing.
+  Two auto starts in one repository raced on that clone, and the loser was marked
+  tried, so it did not start again that session. Separately, a failed `Source.Tasks`
+  read kept the old task list. A start that had just come back then held no slot, and
+  auto mode could go past `auto.max_concurrent`.
+- **Decision.** `AutoStarts` skips a repository while any start or resume for it,
+  manual or automatic, is in flight, and picks at most one issue per repository in a
+  pass. The next one starts when that result comes back. A failed task read marks the
+  task list stale, and `AutoStarts` returns nothing until a read succeeds.
+- **Rejected.** A lock around checkout setup in `internal/app`. It fixes only the
+  clone, while worktree creation and fetches in the same repository can still race,
+  and it changes the manual path.
+
+## D146 (amends D144). Auto mode re-reads the task files before every pick
+
+- Date: 2026-10-03. Issue midsoln/foreman#30, review round 2 of PR #34.
+- **Context.** After a successful refresh, and when `a` turned auto mode on, auto mode
+  counted slots from the task list of the last local read. A run that another foreman
+  command started in that gap was missing, so auto mode could go past
+  `auto.max_concurrent`.
+- **Decision.** `launchAutoFresh` calls `readLocal` before `AutoStarts` after a
+  successful refresh, after a finished start, cancel, or resume, and when `a` turns
+  auto mode on. The 1 second tick already reads first. With auto mode off, no extra
+  read is made.
+
+## D147 (amends D144). Auto starts ask App.Start to refuse delegated issues
+
+- Date: 2026-10-03. Issue midsoln/foreman#30, review round 3 of PR #34.
+- **Context.** Auto mode reads "never delegated" from the last refresh. Between
+  refreshes another foreman command can start the issue, and the task can reach a
+  state `App.Tasks` leaves out, such as PR_CLOSED. The dashboard then sees no task and
+  started the issue again.
+- **Decision.** `StartRequest.NewOnly` makes `App.Start` return `ErrDelegated` when
+  the stored record has a delegation, in any state. It checks on the first read and
+  again inside the locked `update`, so a concurrent `foreman start` is caught too.
+  Auto starts set it. Manual starts do not, so FAILED and PR_CLOSED restarts keep
+  working by hand. The refused issue shows `! auto: ...` and stays tried.
+- **Rejected.** Adding a full task read to the `Source` port for the dashboard. The
+  record could still change between that read and the start, while the check under
+  the task lock cannot.

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -17,7 +18,13 @@ type StartRequest struct {
 	// applies to a task's first start; a stored branch is always reused.
 	BranchType task.BranchType
 	Dir        string // explicit source checkout; empty uses the managed repository checkout
+	// NewOnly refuses an issue foreman has delegated before, in any state. The
+	// dashboard's auto mode sets it, because its inbox can be a refresh old.
+	NewOnly bool
 }
+
+// ErrDelegated is a NewOnly start for an issue that already has a delegation.
+var ErrDelegated = errors.New("already delegated")
 
 // Start prepares the worktree and task file, then launches the detached runner.
 // Rerunning it for a FAILED task, or one whose runner died, resumes from durable state.
@@ -32,6 +39,9 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		return nil, err
 	}
 	if err := a.startable(existing); err != nil {
+		return nil, err
+	}
+	if err := newOnly(req, existing); err != nil {
 		return nil, err
 	}
 	if _, ok := a.Agents[req.Agent]; !ok {
@@ -75,6 +85,11 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			cur = &task.Record{Key: key, State: task.Discovered, Body: fmt.Sprintf("# #%d %s\n\n## Notes\n\n", key.Number, issue.Title)}
 		}
 		if err := a.startable(cur); err != nil {
+			return nil, err
+		}
+		// Checked again under the task lock: another command may have started the
+		// issue while this one prepared the worktree.
+		if err := newOnly(req, cur); err != nil {
 			return nil, err
 		}
 		was := cur.State
@@ -164,6 +179,13 @@ func (a App) launch(ctx context.Context, key task.Key) (*task.Record, error) {
 		}
 		return cur, nil
 	})
+}
+
+func newOnly(req StartRequest, rec *task.Record) error {
+	if req.NewOnly && rec != nil && rec.Delegation != nil {
+		return fmt.Errorf("%s#%d is %s: %w", rec.Repo, rec.Number, rec.State, ErrDelegated)
+	}
+	return nil
 }
 
 func (a App) startable(rec *task.Record) error {

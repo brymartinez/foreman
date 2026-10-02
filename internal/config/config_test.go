@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/brymartinez/foreman/internal/task"
 )
 
 func TestLoadPrecedence(t *testing.T) {
@@ -207,5 +209,83 @@ func TestWebhookProblemsFlagsReadableFile(t *testing.T) {
 func TestWebhookProblemsAcceptsOwnerOnlyFile(t *testing.T) {
 	if got := webhookConfig(t, true, "https://discord.com/api/webhooks/1/token", 0o600).WebhookProblems(); len(got) != 0 {
 		t.Errorf("problems = %q, want none", got)
+	}
+}
+
+func autoConfig(t *testing.T, body string) (Config, error) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("FOREMAN_CONFIG", path)
+	t.Setenv("FOREMAN_TASKS_DIR", "")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return Load()
+}
+
+func TestAutoDefaults(t *testing.T) {
+	cfg, err := autoConfig(t, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Auto.Agent != task.Claude || cfg.Auto.MaxConcurrent != 3 {
+		t.Fatalf("auto defaults = %+v, want claude and 3", cfg.Auto)
+	}
+	cfg, err = autoConfig(t, "auto:\n  agent: codex\n  max_concurrent: 5\n")
+	if err != nil || cfg.Auto.Agent != task.Codex || cfg.Auto.MaxConcurrent != 5 {
+		t.Fatalf("auto from file = %+v, err %v", cfg.Auto, err)
+	}
+}
+
+func TestAutoRejectsUnknownAgent(t *testing.T) {
+	_, err := autoConfig(t, "auto:\n  agent: gemini\n")
+	if err == nil || !strings.Contains(err.Error(), "auto.agent") {
+		t.Fatalf("an unknown auto agent was accepted: %v", err)
+	}
+}
+
+func TestAutoRejectsZeroMax(t *testing.T) {
+	_, err := autoConfig(t, "auto:\n  max_concurrent: 0\n")
+	if err == nil || !strings.Contains(err.Error(), "auto.max_concurrent") {
+		t.Fatalf("a zero auto limit was accepted: %v", err)
+	}
+}
+
+func TestAutoStateDefaultsToOn(t *testing.T) {
+	on, err := LoadAutoEnabled(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil || !on {
+		t.Fatalf("a missing state file = %t, %v; want on", on, err)
+	}
+	path := filepath.Join(t.TempDir(), "state.json")
+	os.WriteFile(path, []byte("{}"), 0o600)
+	if on, err := LoadAutoEnabled(path); err != nil || !on {
+		t.Fatalf("a state file without auto = %t, %v; want on", on, err)
+	}
+}
+
+func TestSaveAutoEnabledRoundTrips(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "state.json")
+	if err := SaveAutoEnabled(path, false); err != nil {
+		t.Fatal(err)
+	}
+	if on, err := LoadAutoEnabled(path); err != nil || on {
+		t.Fatalf("saved off read back as %t, %v", on, err)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("state file mode = %v, %v; want 0600", info.Mode().Perm(), err)
+	}
+	if err := SaveAutoEnabled(path, true); err != nil {
+		t.Fatal(err)
+	}
+	if on, err := LoadAutoEnabled(path); err != nil || !on {
+		t.Fatalf("saved on read back as %t, %v", on, err)
+	}
+}
+
+func TestCorruptAutoStateIsAnError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	os.WriteFile(path, []byte("{not json"), 0o600)
+	if _, err := LoadAutoEnabled(path); err == nil {
+		t.Fatal("a corrupt state file loaded without an error")
 	}
 }

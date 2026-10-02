@@ -55,3 +55,11 @@ func TestConfigShowsMissingWebhookWarning(t *testing.T) {
 		t.Errorf("config output lacks the setup warning:\n%s", out.String())
 	}
 }
+
+func TestConfigShowPrintsAutoStart(t *testing.T) {
+	var out strings.Builder
+	Config(&out, config.Config{Auto: config.Auto{Agent: task.Codex, MaxConcurrent: 5}})
+	if want := "Auto start: codex, up to 5 runs"; !strings.Contains(out.String(), want) {
+		t.Errorf("missing %q in:\n%s", want, out.String())
+	}
+}

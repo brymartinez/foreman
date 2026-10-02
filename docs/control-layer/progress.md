@@ -2,8 +2,7 @@
 
 ## Current stage
 
-Stage 29 (Discord webhook alerts in place of desktop notifications, for issue #32) is
-complete. Completed runs are needed to measure the effect of the model and budget
+Stage 30 (dashboard auto mode for issue #30) is complete. Completed runs are needed to measure the effect of the model and budget
 choices. The ranked refactor candidates below are the next code-quality stages.
 
 ## Completed
@@ -714,6 +713,22 @@ request. Each fix is its own commit with a decision.
   failures, the config warnings, and `config --show`. The e2e notify scenario uses a
   stand-in webhook for delivery, a 500 response, the permission warning, and a missing
   URL.
+
+### Stage 30 (complete): dashboard auto mode for issue #30
+
+- The open dashboard starts open, assigned, never delegated INBOX issues with
+  `auto.agent`, oldest first, while fewer than `auto.max_concurrent` runs are active
+  (D144). Manual runs count toward the limit and stay available when it is full.
+- `a` toggles auto mode. The choice is saved in `~/.local/share/foreman/state.json`.
+  The header shows `auto on N/M` or `auto off`.
+- A failed auto start is shown and not retried until the dashboard is reopened.
+- Auto starts in one repository go one at a time, and auto mode waits while the task
+  files cannot be read (D145).
+- `InboxItem.CreatedAt` comes from the searches and `GetItem`. `config --show` prints
+  the auto agent and limit.
+- New tests cover eligibility, order, slot counting, the toggle, the header, the
+  saved state, config validation, `createdAt` parsing, and the loop's `settle`.
+- Automatic resumption of delegated work is deferred.
 
 ## Refactor candidates
 

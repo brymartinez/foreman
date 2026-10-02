@@ -2,6 +2,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -30,6 +31,7 @@ type Config struct {
 	Claude        Claude        `yaml:"claude"`
 	Codex         Codex         `yaml:"codex"`
 	Cleanup       Cleanup       `yaml:"cleanup"`
+	Auto          Auto          `yaml:"auto"`
 	IgnoredRepos  []task.Repo   `yaml:"ignore_repositories"`
 	// Path is the resolved config file used by config show/edit.
 	Path string `yaml:"-"`
@@ -63,6 +65,14 @@ type Cleanup struct {
 	OnDone bool `yaml:"on_done"`
 	// DeleteMergedBranch deletes the local branch too, when its PR is merged.
 	DeleteMergedBranch bool `yaml:"delete_merged_branch"`
+}
+
+// Auto sets what the dashboard's auto mode starts. Whether auto mode is on is
+// saved in the state file, not here, so toggling it never rewrites this file.
+type Auto struct {
+	Agent task.Agent `yaml:"agent"`
+	// MaxConcurrent caps active runs, manual ones included, before auto mode waits.
+	MaxConcurrent int `yaml:"max_concurrent"`
 }
 
 type Claude struct {
@@ -104,6 +114,7 @@ func Load() (Config, error) {
 		Cleanup:         Cleanup{OnDone: true, DeleteMergedBranch: true},
 		Budgets:         Budgets{ImplementerUSD: 3, ReviewerUSD: 1},
 		Notifications:   Notifications{Enabled: true},
+		Auto:            Auto{Agent: task.Claude, MaxConcurrent: 3},
 	}
 	path, err := FilePath()
 	if err != nil {
@@ -129,6 +140,12 @@ func Load() (Config, error) {
 	if cfg.Refresh < MinRefresh {
 		return Config{}, fmt.Errorf("%s: refresh is %d seconds; the minimum is %d", path, cfg.Refresh, MinRefresh)
 	}
+	if _, err := task.ParseAgent(string(cfg.Auto.Agent)); err != nil {
+		return Config{}, fmt.Errorf("%s: auto.agent: %w", path, err)
+	}
+	if cfg.Auto.MaxConcurrent < 1 {
+		return Config{}, fmt.Errorf("%s: auto.max_concurrent is %d; the minimum is 1", path, cfg.Auto.MaxConcurrent)
+	}
 	for i, repo := range cfg.IgnoredRepos {
 		parsed, err := task.ParseRepo(string(repo))
 		if err != nil {
@@ -150,6 +167,64 @@ func FilePath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".config", "foreman", "config.yaml"), nil
+}
+
+// StatePath is the file holding choices the dashboard saves between launches.
+func StatePath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".local", "share", "foreman", "state.json"), nil
+}
+
+type state struct {
+	Auto *bool `json:"auto,omitempty"`
+}
+
+// LoadAutoEnabled reads the saved auto mode choice. Auto mode is on until the
+// developer turns it off, so a missing file or key means on.
+func LoadAutoEnabled(path string) (bool, error) {
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return true, nil
+	}
+	if err != nil {
+		return true, err
+	}
+	var s state
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return true, fmt.Errorf("%s: %w", path, err)
+	}
+	if s.Auto == nil {
+		return true, nil
+	}
+	return *s.Auto, nil
+}
+
+// SaveAutoEnabled writes the auto mode choice through a temp file and a rename,
+// so a crash mid-write never leaves a corrupt state file.
+func SaveAutoEnabled(path string, on bool) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(state{Auto: &on})
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".state-*.json")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(append(raw, '\n')); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 // Materialize writes the resolved configuration only when the config file is

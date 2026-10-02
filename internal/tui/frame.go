@@ -70,6 +70,11 @@ func tooSmall(width, height int) []string {
 
 func header(m Model) string {
 	parts := []string{fmt.Sprintf("foreman · %d delegated · %d in the inbox", len(m.Tasks), len(m.Inbox))}
+	if m.AutoOn {
+		parts = append(parts, fmt.Sprintf("auto on %d/%d", m.active(), m.AutoMax))
+	} else {
+		parts = append(parts, "auto off")
+	}
 	switch {
 	case m.Refreshing:
 		parts = append(parts, "refreshing…")
@@ -402,12 +407,12 @@ func footer(m Model) string {
 }
 
 const (
-	hintsLong     = "j/k move · h/l pane · enter select · c cancel · r refresh · q quit"
+	hintsLong     = "j/k move · h/l pane · enter select · c cancel · a auto · r refresh · q quit"
 	hintsShort    = "j/k move · h/l pane · enter · c cancel · q quit"
 	hintsLogLong  = "j/k task · u/d log page · ctrl-u/d half page · g/G ends · s show/log · esc close · h/l pane"
 	hintsLogShort = "j/k task · u/d log · g/G ends · s show/log · esc close"
 	// hintsOpen are for INBOX focus while the pane is open, where s still switches it.
-	hintsOpenLong  = "j/k move · h/l pane · enter select · s show/log · esc close · c cancel · r refresh · q quit"
+	hintsOpenLong  = "j/k move · h/l pane · enter select · s show/log · esc close · c cancel · a auto · r refresh · q quit"
 	hintsOpenShort = "j/k move · h/l pane · enter · s show/log · c cancel · q quit"
 )
 
