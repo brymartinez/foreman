@@ -49,7 +49,7 @@ func TestInboxRefreshLifecycle(t *testing.T) {
 			t.Fatalf("warnings: %v", report.Warnings)
 		}
 		var out strings.Builder
-		_, err = ChooseInbox(bufio.NewReader(strings.NewReader("q\n")), &out, report)
+		_, err = ChooseInbox(bufio.NewReader(strings.NewReader("q\n")), &out, report, nil)
 		if err != nil || !strings.Contains(out.String(), "#4") || strings.Contains(out.String(), "#1") || strings.Contains(out.String(), "#2") || strings.Contains(out.String(), "#3") {
 			t.Fatalf("picker: %s, %v", out.String(), err)
 		}

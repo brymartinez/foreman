@@ -158,7 +158,8 @@ func run(argv []string) int {
 			break
 		}
 		render.InboxActivity(os.Stdout, report)
-		selection, err := app.ChooseInbox(stdin, os.Stdout, report)
+		reload := func(allRepos bool) (app.InboxReport, error) { return a.InboxView(ctx, allRepos) }
+		selection, err := app.ChooseInbox(stdin, os.Stdout, report, reload)
 		if err != nil {
 			return fail(err)
 		}
