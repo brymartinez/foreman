@@ -17,11 +17,16 @@ type Auto struct {
 	Max int
 	// Save keeps the choice for the next launch. Run calls it on each toggle.
 	Save func(bool) error
+	// LoadErr is why the saved choice could not be read. The dashboard shows it once.
+	LoadErr error
 }
 
 // SetAuto applies the launch settings.
 func (m *Model) SetAuto(a Auto) {
 	m.AutoOn, m.AutoAgent, m.AutoMax = a.Enabled, a.Agent, a.Max
+	if a.LoadErr != nil {
+		m.Message = fmt.Sprintf("! read auto mode: %v; auto mode is on", a.LoadErr)
+	}
 }
 
 // eligible is an open issue assigned to the developer that foreman has never
@@ -83,9 +88,6 @@ func (m *Model) AutoStarts() []app.StartRequest {
 		m.tried = mark(m.tried, it.Key)
 		m.starting = mark(m.starting, it.Key)
 		reqs = append(reqs, app.StartRequest{Repo: it.Key.Repo, Issue: it.Key.Number, Agent: m.AutoAgent})
-	}
-	if len(reqs) > 0 {
-		m.Message = fmt.Sprintf("auto: starting %d %s with %s…", len(reqs), plural(len(reqs), "issue", "issues"), m.AutoAgent)
 	}
 	return reqs
 }

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -204,5 +205,24 @@ func TestHeaderShowsAutoStateAndSlots(t *testing.T) {
 	m.AutoOn = false
 	if got := plain(Frame(m))[0]; !strings.Contains(got, "auto off") {
 		t.Errorf("header = %q; want auto off", got)
+	}
+}
+
+func TestAutoSkipsAnIssueStartedByHand(t *testing.T) {
+	m := autoModel(3, assigned("a/b", 1, 0))
+	m.AutoOn = false
+	press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter})
+	m.Done(key(1)) // the run finished and left the task list before the next refresh
+	m.AutoOn = true
+	if got := m.AutoStarts(); len(got) != 0 {
+		t.Fatalf("auto started %v, which was started by hand this session", got)
+	}
+}
+
+func TestAnUnreadableAutoStateIsShownAndLeavesAutoOn(t *testing.T) {
+	var m Model
+	m.SetAuto(Auto{Enabled: true, Agent: task.Claude, Max: 3, LoadErr: errors.New("state.json: bad json")})
+	if !m.AutoOn || !strings.Contains(m.Message, "state.json: bad json") {
+		t.Fatalf("on %t, message %q; want auto on and the read error shown", m.AutoOn, m.Message)
 	}
 }

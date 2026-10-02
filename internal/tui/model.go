@@ -89,7 +89,7 @@ type Model struct {
 	pending      app.StartRequest  // the delegation being collected
 	cancelTarget task.Key          // the task named when cancellation was requested
 	manualTask   bool              // cursor movement stops following the latest delegation
-	tried        map[task.Key]bool // issues auto mode has started this session
+	tried        map[task.Key]bool // issues started this session, by hand or automatically
 	starting     map[task.Key]bool // starts and resumes in flight, manual or automatic
 }
 
@@ -411,7 +411,8 @@ func (m *Model) typeContext(k Key) Action {
 		m.Mode, m.Input = Browsing, ""
 		m.manualTask = false
 		m.Message = fmt.Sprintf("Starting %s#%d with %s…", req.Repo, req.Issue, req.Agent)
-		m.starting = mark(m.starting, task.Key{Repo: req.Repo, Number: req.Issue})
+		k := task.Key{Repo: req.Repo, Number: req.Issue}
+		m.tried, m.starting = mark(m.tried, k), mark(m.starting, k)
 		return Action{Kind: ActionStart, Start: req}
 	}
 	return Action{}

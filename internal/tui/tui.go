@@ -30,6 +30,7 @@ type Options struct {
 	GitHubEvery time.Duration
 	// LocalEvery is how often the task files and the selected log are re-read.
 	LocalEvery time.Duration
+	Auto       Auto
 }
 
 // result is one finished background call. The event loop owns the model, so a
@@ -41,6 +42,10 @@ type result struct {
 	// finished marks a Start or Cancel coming back, which quitting waits for. A
 	// refresh does not write anything, so it is safe to abandon.
 	finished bool
+	// key is the issue a start or resume was for, so its auto mode slot can be freed.
+	key task.Key
+	// auto marks a start auto mode made rather than the developer.
+	auto bool
 }
 
 // Run draws the dashboard on o.Out until the user quits or ctx ends. It puts the
@@ -67,6 +72,7 @@ func Run(ctx context.Context, o Options) (err error) {
 	// header carries the loading state, so there is no first message to go stale.
 	var m Model
 	m.Width, m.Height = size(o.Out)
+	m.SetAuto(o.Auto)
 
 	keys := make(chan Key, 64)
 	go readKeys(ctx, o.In, keys, escapeWait)
@@ -108,13 +114,15 @@ func Run(ctx context.Context, o Options) (err error) {
 			fmt.Fprint(o.Out, clear)
 		case <-local.C:
 			readLocal(ctx, o.Source, &m)
+			// A run that left WORKING frees its slot here, without waiting for GitHub.
+			pending += launchAuto(ctx, o.Source, &m, results)
 		case <-remote.C:
 			refresh()
 		case r := <-results:
 			if r.finished {
 				pending--
 			}
-			apply(&m, r)
+			pending += settle(ctx, o.Source, &m, r, results)
 		case k := <-keys:
 			before := m.Selected()
 			wasOpen := m.LogOpen
@@ -126,7 +134,7 @@ func Run(ctx context.Context, o Options) (err error) {
 			case ActionStart:
 				req := a.Start
 				pending++
-				go func() { results <- start(ctx, o.Source, req) }()
+				go func() { results <- start(ctx, o.Source, req, false) }()
 			case ActionCancel:
 				rec := a.Cancel
 				pending++
@@ -135,6 +143,13 @@ func Run(ctx context.Context, o Options) (err error) {
 				key := a.Resume
 				pending++
 				go func() { results <- resume(ctx, o.Source, key) }()
+			case ActionAuto:
+				if o.Auto.Save != nil {
+					if err := o.Auto.Save(m.AutoOn); err != nil {
+						m.Message = "! save auto mode: " + err.Error()
+					}
+				}
+				pending += launchAuto(ctx, o.Source, &m, results)
 			}
 			if m.Selected() != before || (!wasOpen && m.LogOpen) {
 				// The heading names the new task, so the body must not still hold the
@@ -158,11 +173,39 @@ func finish(ctx context.Context, out io.Writer, m *Model, results <-chan result,
 		case r := <-results:
 			if r.finished {
 				pending--
+				m.Done(r.key)
 			}
 			apply(m, r)
 		}
 	}
 	return nil
+}
+
+// settle applies a background result and returns how many auto starts it launched.
+// A finished start re-reads the task files before auto mode counts slots, so the
+// run it recorded is counted. A failed refresh starts nothing.
+func settle(ctx context.Context, s Source, m *Model, r result, results chan<- result) int {
+	if r.finished {
+		m.Done(r.key)
+	}
+	apply(m, r)
+	switch {
+	case r.finished:
+		readLocal(ctx, s, m)
+	case r.report == nil || r.err != nil:
+		return 0
+	}
+	return launchAuto(ctx, s, m, results)
+}
+
+// launchAuto starts what auto mode picks, each in its own goroutine like a manual
+// start, and returns how many it launched so quitting waits for them.
+func launchAuto(ctx context.Context, s Source, m *Model, results chan<- result) int {
+	reqs := m.AutoStarts()
+	for _, req := range reqs {
+		go func() { results <- start(ctx, s, req, true) }()
+	}
+	return len(reqs)
 }
 
 func apply(m *Model, r result) {
@@ -177,12 +220,31 @@ func apply(m *Model, r result) {
 	switch {
 	case r.err != nil:
 		m.Message = "! " + r.err.Error()
+	case r.auto && !strings.HasPrefix(r.message, "!") && strings.HasPrefix(m.Message, "!"):
+		// Auto starts land in bursts. A failed one stays on screen while the rest
+		// succeed; the task list shows those.
 	case r.message != "":
 		m.Message = r.message
 	}
 }
 
-func start(ctx context.Context, s Source, req app.StartRequest) result {
+func start(ctx context.Context, s Source, req app.StartRequest, auto bool) result {
+	r := startResult(ctx, s, req)
+	r.key, r.auto, r.finished = task.Key{Repo: req.Repo, Number: req.Issue}, auto, true
+	if !auto {
+		return r
+	}
+	if r.err != nil {
+		r.err = fmt.Errorf("auto: %w", r.err)
+	} else if msg, ok := strings.CutPrefix(r.message, "! "); ok {
+		r.message = "! auto: " + msg
+	} else {
+		r.message = "auto: " + r.message
+	}
+	return r
+}
+
+func startResult(ctx context.Context, s Source, req app.StartRequest) result {
 	if req.ContextFile != "" {
 		// The runner a later `foreman respond` spawns reads this path from its own
 		// working directory, so store it absolute, as `inbox` and `start` do.
@@ -206,6 +268,12 @@ func start(ctx context.Context, s Source, req app.StartRequest) result {
 // start, it is counted as pending, because App.Resume records WORKING before it spawns
 // the runner.
 func resume(ctx context.Context, s Source, key task.Key) result {
+	r := resumeResult(ctx, s, key)
+	r.key = key
+	return r
+}
+
+func resumeResult(ctx context.Context, s Source, key task.Key) result {
 	rec, err := s.Resume(ctx, key)
 	if err != nil {
 		return result{err: fmt.Errorf("resume %s#%d: %w", key.Repo, key.Number, err), finished: true}
