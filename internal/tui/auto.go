@@ -56,7 +56,7 @@ func (m *Model) active() int {
 // refresh, so an issue already in the task list is skipped even when the inbox
 // still shows it as never delegated.
 func (m *Model) AutoStarts() []app.StartRequest {
-	if !m.AutoOn || m.tasksStale || m.inboxAllRepos {
+	if !m.AutoOn || m.tasksStale || m.AllRepos {
 		return nil
 	}
 	free := m.AutoMax - m.active()

@@ -276,7 +276,7 @@ func TestAutoWaitsWhileTheTaskListCannotBeRead(t *testing.T) {
 	}
 }
 
-func TestAutoStartsNothingWhileTheInboxHoldsTheAllView(t *testing.T) {
+func TestAutoStartsNothingInTheAllView(t *testing.T) {
 	m := autoModel(3)
 	m.AllRepos = true
 	all := app.InboxReport{Current: []app.InboxEntry{assigned("a/b", 1, 0)}}
@@ -288,7 +288,7 @@ func TestAutoStartsNothingWhileTheInboxHoldsTheAllView(t *testing.T) {
 		t.Errorf("header = %q; want auto paused", got)
 	}
 
-	// Back in the configured view, the all view's items stay until a refresh replaces them.
+	// Back in the configured view, nothing starts until its refresh fills the inbox.
 	press(&m, rune_('v'))
 	if got := m.AutoStarts(); len(got) != 0 {
 		t.Fatalf("auto starts = %v; want none before the configured view's refresh", startedKeys(got))

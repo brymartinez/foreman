@@ -150,3 +150,26 @@ func TestStatusAndTasksListDelegatedWorkOutsideFilter(t *testing.T) {
 		t.Errorf("tasks = %v, err = %v; want the task outside the include list", tasks, err)
 	}
 }
+
+func TestInboxLeavesWaitingTasksOutsideTheFilterOutOfTheReport(t *testing.T) {
+	for _, state := range []task.State{task.NeedsDecision, task.Reviewed, task.ReadyForHuman} {
+		rec, store := trackedIn("acme/two")
+		rec.State = state
+		rec.Delegation = &task.Delegation{Implementer: task.Session{Agent: task.Claude}}
+		a := App{Store: store, GitHub: &fakeGitHub{}, Runners: &fakeRunners{}, IncludedRepositories: []task.Repo{"acme/one"}, Now: func() time.Time { return now }}
+		report, err := a.Inbox(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := len(report.NeedsDecision) + len(report.Reviewed) + len(report.Ready); n != 0 {
+			t.Errorf("%s task outside the include list is in the configured report: %+v", state, report)
+		}
+		all, err := a.InboxView(context.Background(), true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := len(all.NeedsDecision) + len(all.Reviewed) + len(all.Ready); n != 1 {
+			t.Errorf("%s task outside the include list is missing from the all view report: %+v", state, all)
+		}
+	}
+}

@@ -554,6 +554,18 @@ func TestShowScrollsUpAfterTheTextShrinks(t *testing.T) {
 	}
 }
 
+func TestViewKeyClearsTheOtherViewsRows(t *testing.T) {
+	m := Model{Width: 100, Height: 30}
+	m.SetInbox([]app.InboxEntry{entry("a/b", 1, "Outside the filter")})
+	press(&m, rune_('v'))
+	if len(m.Inbox) != 0 {
+		t.Fatalf("inbox = %+v; want no rows until the new view's refresh", m.Inbox)
+	}
+	if a := press(&m, Key{Kind: KeyEnter}); a.Kind != ActionNone || m.Mode != Browsing {
+		t.Errorf("enter after v = %+v, mode %v; want nothing to start", a, m.Mode)
+	}
+}
+
 func TestBrowseViewKeyTogglesView(t *testing.T) {
 	var m Model
 	if a := press(&m, rune_('v')); a.Kind != ActionToggleView || !m.AllRepos {

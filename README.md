@@ -482,7 +482,8 @@ GitHub whenever you ask.
 `acme/widgets`. A nonempty include list limits the inbox to those repositories and the
 exclude list is then ignored. With an empty include list, the exclude list hides its
 repositories. The filter applies to fresh inbox results and tracked-task refreshes,
-including `foreman inbox --non-interactive`. Press `v` in the dashboard or the
+including `foreman inbox --non-interactive`, and to the waiting tasks the inbox
+reports. Press `v` in the dashboard or the
 interactive inbox to see every repository for the rest of the session; `mentions`
 still applies. Auto mode pauses while the dashboard shows every repository, so it only
 starts work from your configured repositories. `foreman status` and the dashboard's delegated work list every task

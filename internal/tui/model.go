@@ -88,12 +88,9 @@ type Model struct {
 	AutoMax   int
 
 	// AllRepos shows the inbox from every repository instead of the configured
-	// lists. It lasts for this session only.
+	// lists. It lasts for this session only. Auto mode waits while it is on, so
+	// looking at every repository never starts work outside the configured lists.
 	AllRepos bool
-	// inboxAllRepos says Inbox came from the all repositories view. Auto mode waits
-	// while it does, so peeking at every repository never starts work outside the
-	// configured lists.
-	inboxAllRepos bool
 
 	pending      app.StartRequest  // the delegation being collected
 	cancelTarget task.Key          // the task named when cancellation was requested
@@ -219,6 +216,9 @@ func (m *Model) browse(k Key) Action {
 		return m.toggleAuto()
 	case k.Kind == KeyRune && k.Rune == 'v':
 		m.AllRepos = !m.AllRepos
+		// The rows belong to the view just left, so none stays selectable until the
+		// new view's refresh fills the pane.
+		m.SetInbox(nil)
 		return Action{Kind: ActionToggleView}
 	case k.Kind == KeyTab:
 		m.Focus = (m.Focus + 1) % 2

@@ -75,8 +75,9 @@ func (a App) Inbox(ctx context.Context) (InboxReport, error) {
 
 // InboxView fetches GitHub state, reports what changed since the last run, and
 // records the new state as seen. Only records that changed are rewritten. allRepos
-// ignores the include and exclude lists. Items outside the view are dropped before
-// Reconcile, so no record is written for them.
+// ignores the include and exclude lists. Items and records outside the view are
+// dropped before Reconcile, so no record is written for them and no waiting task
+// from them is reported.
 func (a App) InboxView(ctx context.Context, allRepos bool) (InboxReport, error) {
 	recs, err := a.Store.List(ctx)
 	if err != nil {
@@ -104,7 +105,7 @@ func (a App) InboxView(ctx context.Context, allRepos bool) (InboxReport, error) 
 	}
 	// Taken before Reconcile, which calls observe and rewrites these in place.
 	stored := storedReasons(recs)
-	report, dirty := Reconcile(append(items, tracked...), recs, notes, len(search.Truncated) == 0, a.Now())
+	report, dirty := Reconcile(append(items, tracked...), a.visibleRecords(recs, allRepos), notes, len(search.Truncated) == 0, a.Now())
 	report.Truncated = search.Truncated
 	report.Warnings = append(warnings, refreshWarnings...)
 	for _, seen := range dirty {
@@ -285,6 +286,16 @@ func (a App) visibleItems(items []InboxItem, allRepos bool) []InboxItem {
 		}
 	}
 	return filtered
+}
+
+func (a App) visibleRecords(recs []*task.Record, allRepos bool) []*task.Record {
+	visible := make([]*task.Record, 0, len(recs))
+	for _, r := range recs {
+		if a.repoVisible(r.Repo, allRepos) {
+			visible = append(visible, r)
+		}
+	}
+	return visible
 }
 
 // repoVisible says whether the inbox shows repo. A nonempty include list decides

@@ -318,12 +318,13 @@ the same commit. The commit message records why it changed.
   needs the developer.
 - **Repository filter.** A nonempty `include_repositories` shows only those
   repositories and overrides `exclude_repositories`; otherwise the exclude list hides
-  its repositories. `App.InboxView` drops filtered items before `Reconcile`, so the
-  configured view writes no records for them, and `fetchTracked` skips tracked items
-  outside the view. `v` in the dashboard and the picker passes `allRepos`, which
+  its repositories. `App.InboxView` drops filtered items and stored records before
+  `Reconcile`, so the configured view writes no records for them and reports no waiting
+  task from them, and `fetchTracked` skips tracked items outside the view. `v` in the dashboard and the picker passes `allRepos`, which
   bypasses both lists for the session; the searches, involvement reasons, and
-  `mentions` are the same in either view. Auto mode starts nothing while INBOX holds
-  the all view, so a look outside the filter never spends a run there. `status` and
+  `mentions` are the same in either view. In the dashboard, `v` empties INBOX until the
+  new view's refresh lands, so no row from the old view stays selectable. Auto mode
+  starts nothing in the all view, so a look outside the filter never spends a run there. `status` and
   DELEGATED WORK read the task store, so tasks in any repository stay reachable.
 - **Lookup failures warn and retry** next refresh without blocking other items. A 404
   or 410 on an undelegated item is reported once and then no longer checked.
