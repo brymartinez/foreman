@@ -34,6 +34,9 @@ func (s stubSource) Cancel(context.Context, *task.Record) (*task.Record, error) 
 func (s stubSource) Resume(context.Context, task.Key) (*task.Record, error) {
 	return s.rec, s.err
 }
+func (s stubSource) Respond(context.Context, task.Key, string) (*task.Record, error) {
+	return s.rec, s.err
+}
 
 func TestApplyFillsTheInboxFromARefresh(t *testing.T) {
 	report := app.InboxReport{Current: []app.InboxEntry{
@@ -197,7 +200,7 @@ func TestAScrolledBackLogHoldsItsLinesAsTheLogGrows(t *testing.T) {
 
 // visibleLog is the log lines the pane draws, without their padding.
 func visibleLog(m *Model) []string {
-	lay, _ := layoutFor(m.Width, m.Height, true)
+	lay, _ := layoutFor(m.Width, m.Height, true, false)
 	var out []string
 	for _, l := range logPane(*m, lay.logHeight)[1:] {
 		if l = strings.TrimSpace(l); l != "" {

@@ -148,7 +148,7 @@ func TestFrameMarksTheFocusedPane(t *testing.T) {
 	}
 	m.Key(Key{Kind: KeyEnter})
 	logFocused := Frame(m)
-	lay, _ := layoutFor(m.Width, m.Height, true)
+	lay, _ := layoutFor(m.Width, m.Height, true, false)
 	logHeading := logFocused[lay.topHeight+2]
 	if strings.Contains(logHeading, focusMark) || strings.Count(strings.Join(logFocused, ""), focusMark) != 1 {
 		t.Errorf("log is not a focusable pane: %q", logHeading)
@@ -315,7 +315,7 @@ func TestFrameKeepsWideTextInsideItsPane(t *testing.T) {
 	}
 	// Every inbox line is exactly the pane's column count, so the task pane beside it
 	// starts where the layout puts it.
-	lay, _ := layoutFor(m.Width, m.Height, true)
+	lay, _ := layoutFor(m.Width, m.Height, true, false)
 	for i, l := range plain(paneLines(inboxPane(m), lay.leftWidth, lay.topHeight, true, 0)) {
 		if n := textWidth(l); n != lay.leftWidth {
 			t.Errorf("inbox line %d is %d columns; want %d: %q", i, n, lay.leftWidth, l)
@@ -423,7 +423,7 @@ func TestInboxRowShowsADelegatedState(t *testing.T) {
 
 // visibleShow is the show lines the pane draws, without their padding.
 func visibleShow(m *Model) []string {
-	lay, _ := layoutFor(m.Width, m.Height, true)
+	lay, _ := layoutFor(m.Width, m.Height, true, false)
 	var out []string
 	for _, l := range logPane(*m, lay.logHeight)[1:] {
 		if l = strings.TrimRight(l, " "); l != "" {
@@ -455,7 +455,7 @@ func TestShowPaneMatchesRender(t *testing.T) {
 		var b strings.Builder
 		render.Show(&b, m.Selected())
 		want := strings.Split(strings.TrimRight(b.String(), "\n"), "\n")
-		lay, _ := layoutFor(m.Width, m.Height, true)
+		lay, _ := layoutFor(m.Width, m.Height, true, false)
 		got := logPane(m, lay.logHeight)[1:]
 		for i, w := range want {
 			if strings.TrimRight(got[i], " ") != strings.TrimRight(w, " ") {

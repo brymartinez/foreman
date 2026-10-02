@@ -32,7 +32,7 @@ const (
 // columns. It is pure, so the layout is tested without a terminal. Text is truncated
 // before any escape sequence is added, so the width arithmetic never counts escapes.
 func Frame(m Model) []string {
-	lay, ok := layoutFor(m.Width, m.Height, m.LogOpen)
+	lay, ok := layoutFor(m.Width, m.Height, m.LogOpen, m.Mode == AnsweringDecision)
 	if !ok {
 		return tooSmall(m.Width, m.Height)
 	}

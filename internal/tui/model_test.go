@@ -218,21 +218,236 @@ func TestEscapeAbandonsDelegation(t *testing.T) {
 	}
 }
 
-func TestEnterOnNeedsDecisionPointsAtRespond(t *testing.T) {
+// asking is a NEEDS_DECISION task with two questions waiting.
+func asking(n int) *task.Record {
+	rec := record(n, task.NeedsDecision)
+	rec.Decisions = []task.Decision{
+		{Question: task.Question{Issue: "Retry 4xx?", Context: "The client retries 5xx only.", Options: []task.Option{{Label: "A", Description: "Retry"}, {Label: "B", Description: "Fail fast"}}, Recommendation: "A", ImpactIfWrong: "Duplicate writes."}},
+		{Question: task.Question{Issue: "Log the body?", Options: []task.Option{{Label: "A", Description: "Yes"}, {Label: "B", Description: "No"}}, Recommendation: "B"}},
+	}
+	return rec
+}
+
+// answered returns rec with its oldest pending question answered.
+func answered(rec *task.Record, answer string) *task.Record {
+	next := *rec
+	next.Decisions = slices.Clone(rec.Decisions)
+	for i := range next.Decisions {
+		if next.Decisions[i].Answer == "" {
+			next.Decisions[i].Answer = answer
+			break
+		}
+	}
+	if next.Pending() == nil {
+		next.State = task.Working
+	}
+	return &next
+}
+
+// prompting opens the decision prompt on a task with two questions waiting.
+func prompting() Model {
+	m := model()
+	m.SetTasks([]*task.Record{asking(10)})
+	m.Focus = TaskPane
+	press(&m, Key{Kind: KeyEnter})
+	return m
+}
+
+func TestEnterOnNeedsDecisionOpensPrompt(t *testing.T) {
+	m := prompting()
+	if m.Mode != AnsweringDecision || !m.LogOpen || m.ShowOpen {
+		t.Fatalf("enter left mode %v log %t show %t; want the decision prompt in the lower pane", m.Mode, m.LogOpen, m.ShowOpen)
+	}
+	if strings.Contains(m.Message, "foreman respond") {
+		t.Errorf("message still points at foreman respond: %q", m.Message)
+	}
+}
+
+func TestEnterOnNeedsDecisionWithNothingPendingOpensLog(t *testing.T) {
 	m := model()
 	m.SetTasks([]*task.Record{record(10, task.NeedsDecision)})
 	m.Focus = TaskPane
-	if got := press(&m, Key{Kind: KeyEnter}); got.Kind != ActionNone {
-		t.Fatalf("action = %+v", got)
+	press(&m, Key{Kind: KeyEnter})
+	if m.Mode != Browsing || !m.LogOpen {
+		t.Fatalf("mode %v log %t; want the log with no question to answer", m.Mode, m.LogOpen)
 	}
-	// The command leads, so truncating the message to a narrow terminal cannot eat
-	// the part the developer has to type.
-	if !strings.HasPrefix(m.Message, "foreman respond a/b#10") {
-		t.Errorf("message = %q", m.Message)
+}
+
+func TestPromptTypingEditsInputAndKeysAreText(t *testing.T) {
+	m := prompting()
+	if got := press(&m, rune_('q'), rune_('j'), rune_('s'), rune_('c'), Key{Kind: KeyTab}, rune_('x'), Key{Kind: KeyBackspace}); got.Kind != ActionNone {
+		t.Fatalf("typing returned %+v", got)
 	}
-	m.Width, m.Height = minWidth, 30
-	if !strings.Contains(screen(m), "foreman respond a/b#10") {
-		t.Errorf("a %d-column frame clipped the command:\n%s", minWidth, screen(m))
+	if m.Input != "qjsc" || m.Mode != AnsweringDecision || m.ShowOpen || m.Focus != TaskPane {
+		t.Fatalf("input %q mode %v show %t focus %v; want runes typed as text", m.Input, m.Mode, m.ShowOpen, m.Focus)
+	}
+	if got := press(&m, Key{Kind: KeyCtrlC}); got.Kind != ActionQuit {
+		t.Errorf("ctrl-c returned %+v; want quit", got)
+	}
+}
+
+func TestPromptEnterReturnsRespondAction(t *testing.T) {
+	m := prompting()
+	got := press(&m, rune_('B'), Key{Kind: KeyEnter})
+	if got.Kind != ActionRespond || got.Respond != m.Selected().Key || got.Answer != "B" {
+		t.Fatalf("enter returned %+v; want a respond action for a/b#10 with B", got)
+	}
+	if !m.starting[m.Selected().Key] {
+		t.Error("an answer in flight does not hold the task's slot")
+	}
+	if again := press(&m, Key{Kind: KeyEnter}); again.Kind != ActionNone {
+		t.Errorf("a second enter while recording returned %+v", again)
+	}
+
+	m = prompting()
+	if got := press(&m, Key{Kind: KeyEnter}); got.Kind != ActionRespond || got.Answer != "" {
+		t.Errorf("empty enter returned %+v; want an empty answer so Respond picks the recommendation", got)
+	}
+}
+
+func TestPromptScrollKeysMoveDecisionTop(t *testing.T) {
+	m := prompting()
+	m.Height = minHeight + 2
+	limit := m.decisionLimit()
+	if limit == 0 {
+		t.Fatal("the question fits the pane; the test needs it to scroll")
+	}
+	press(&m, Key{Kind: KeyDown})
+	if m.DecisionTop != 1 {
+		t.Fatalf("down moved to %d; want 1", m.DecisionTop)
+	}
+	press(&m, Key{Kind: KeyPageDown})
+	if m.DecisionTop != 1+m.decisionPage() {
+		t.Fatalf("page down moved to %d; want %d", m.DecisionTop, 1+m.decisionPage())
+	}
+	for range limit {
+		press(&m, Key{Kind: KeyPageDown})
+	}
+	press(&m, Key{Kind: KeyDown})
+	if m.DecisionTop != limit {
+		t.Fatalf("page down reached %d; want the limit %d", m.DecisionTop, limit)
+	}
+	for range limit {
+		press(&m, Key{Kind: KeyPageUp})
+	}
+	press(&m, Key{Kind: KeyUp})
+	if m.DecisionTop != 0 {
+		t.Fatalf("page up reached %d; want 0", m.DecisionTop)
+	}
+}
+
+func TestAnsweredWithMorePendingKeepsPrompt(t *testing.T) {
+	m := prompting()
+	press(&m, rune_('A'), Key{Kind: KeyDown}, Key{Kind: KeyEnter})
+	next := answered(m.Selected(), "A. Retry")
+	m.Answered(next)
+	if m.Mode != AnsweringDecision || m.Input != "" || m.DecisionTop != 0 {
+		t.Fatalf("mode %v input %q top %d; want a fresh prompt", m.Mode, m.Input, m.DecisionTop)
+	}
+	if m.Selected().Pending().Question.Issue != "Log the body?" {
+		t.Errorf("the prompt shows %q; want the next question", m.Selected().Pending().Question.Issue)
+	}
+	if got := press(&m, Key{Kind: KeyEnter}); got.Kind != ActionRespond {
+		t.Errorf("enter after an answer returned %+v; want the next answer", got)
+	}
+}
+
+func TestAnsweredLastAnswerShowsLog(t *testing.T) {
+	m := prompting()
+	m.Answered(answered(m.Selected(), "A. Retry"))
+	press(&m, Key{Kind: KeyEnter})
+	m.LogOffset = 3
+	m.Answered(answered(m.Selected(), "B. No"))
+	if m.Mode != Browsing || !m.LogOpen || m.ShowOpen || m.LogOffset != 0 {
+		t.Fatalf("mode %v log %t show %t offset %d; want the log following its tail", m.Mode, m.LogOpen, m.ShowOpen, m.LogOffset)
+	}
+	if m.Selected().State != task.Working {
+		t.Errorf("the task list still shows %s", m.Selected().State)
+	}
+}
+
+func TestAnswerFailedKeepsPromptAndText(t *testing.T) {
+	m := prompting()
+	press(&m, rune_('Z'), Key{Kind: KeyEnter})
+	m.AnswerFailed()
+	if m.Mode != AnsweringDecision || m.Input != "Z" {
+		t.Fatalf("mode %v input %q; want the prompt and the typed text kept", m.Mode, m.Input)
+	}
+	if got := press(&m, Key{Kind: KeyEnter}); got.Kind != ActionRespond {
+		t.Errorf("enter after a failure returned %+v; want another try", got)
+	}
+}
+
+func TestEscClosesPromptAndKeepsAnswers(t *testing.T) {
+	m := prompting()
+	m.Answered(answered(m.Selected(), "A. Retry"))
+	press(&m, rune_('x'), Key{Kind: KeyEscape})
+	if m.Mode != Browsing || m.LogOpen || m.Input != "" {
+		t.Fatalf("esc left mode %v log %t input %q", m.Mode, m.LogOpen, m.Input)
+	}
+	if m.Selected().Decisions[0].Answer != "A. Retry" {
+		t.Errorf("esc lost the recorded answer: %+v", m.Selected().Decisions[0])
+	}
+	press(&m, Key{Kind: KeyEnter})
+	if m.Mode != AnsweringDecision || m.Selected().Pending().Question.Issue != "Log the body?" {
+		t.Errorf("reopening shows mode %v on %q; want the next unanswered question", m.Mode, m.Selected().Pending().Question.Issue)
+	}
+}
+
+func TestSetTasksSwitchesOpenLogToPrompt(t *testing.T) {
+	m := model()
+	m.Focus = TaskPane
+	press(&m, Key{Kind: KeyEnter}, rune_('s'))
+	rec := asking(m.Selected().Number)
+	m.SetTasks([]*task.Record{rec, record(11, task.Reviewing), record(12, task.Failed)})
+	if m.Mode != AnsweringDecision || !m.LogOpen || m.ShowOpen {
+		t.Fatalf("mode %v log %t show %t; want the prompt in place of the open pane", m.Mode, m.LogOpen, m.ShowOpen)
+	}
+}
+
+func TestSetTasksLeavesAClosedPaneClosed(t *testing.T) {
+	m := model()
+	m.SetTasks([]*task.Record{asking(10)})
+	if m.Mode != Browsing || m.LogOpen {
+		t.Fatalf("mode %v log %t; a closed pane must stay closed", m.Mode, m.LogOpen)
+	}
+}
+
+func TestSetTasksWaitsWhileCollectingInput(t *testing.T) {
+	m := model()
+	m.Focus = TaskPane
+	press(&m, Key{Kind: KeyEnter}, rune_('h'), Key{Kind: KeyEnter}, rune_('1'))
+	if m.Mode != TypingContext {
+		t.Fatalf("setup left mode %v", m.Mode)
+	}
+	recs := []*task.Record{asking(m.Selected().Number), record(11, task.Reviewing), record(12, task.Failed)}
+	m.SetTasks(recs)
+	if m.Mode != TypingContext {
+		t.Fatalf("a decision took over the footer while it collected a context file: %v", m.Mode)
+	}
+	press(&m, Key{Kind: KeyEscape})
+	m.SetTasks(recs)
+	if m.Mode != AnsweringDecision {
+		t.Errorf("mode %v after the footer was freed; want the prompt", m.Mode)
+	}
+}
+
+func TestSetTasksClosesPromptWhenTaskNoLongerWaiting(t *testing.T) {
+	m := prompting()
+	press(&m, rune_('x'))
+	m.SetTasks([]*task.Record{record(10, task.Working)})
+	if m.Mode != Browsing || !m.LogOpen || m.Input != "" {
+		t.Fatalf("mode %v log %t input %q; want the log for the task answered elsewhere", m.Mode, m.LogOpen, m.Input)
+	}
+}
+
+func TestPromptKeepsItsTaskWhenANewerDelegationArrives(t *testing.T) {
+	m := prompting()
+	newer := record(11, task.Working)
+	newer.Delegation.StartedAt = time.Now()
+	m.SetTasks([]*task.Record{m.Selected(), newer})
+	if m.Mode != AnsweringDecision || m.Selected().Number != 10 {
+		t.Fatalf("mode %v on #%d; a new delegation must not take the prompt away", m.Mode, m.Selected().Number)
 	}
 }
 
