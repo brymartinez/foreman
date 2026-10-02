@@ -195,6 +195,35 @@ type Runners interface {
 	Stop(key task.Key, pid int) (bool, error)
 }
 
+// Alert is one announcement to the developer: a task moved into a state that needs
+// them. URL is the PR when the task has one, else the issue, and may be empty.
+type Alert struct {
+	State     task.State
+	Cancelled bool // a FAILED run that was stopped rather than failing on its own
+	Key       task.Key
+	URL       string
+}
+
+// Label is the alert's human text.
+func (a Alert) Label() string {
+	switch a.State {
+	case task.NeedsDecision:
+		return "Needs your decision"
+	case task.Failed:
+		if a.Cancelled {
+			return "Run cancelled"
+		}
+		return "Run failed"
+	case task.ReadyForHuman:
+		return "Ready for human review"
+	case task.Reviewed:
+		return "PR feedback to answer"
+	}
+	return string(a.State)
+}
+
+// Notifier delivers alerts. Delivery is best effort: the notifier records its own
+// failures, and the caller ignores the error.
 type Notifier interface {
-	Notify(title, body string) error
+	Notify(Alert) error
 }

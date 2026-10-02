@@ -39,3 +39,19 @@ func TestConfigShowsStageModelsAndEffort(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigHidesWebhookURL(t *testing.T) {
+	var out strings.Builder
+	Config(&out, config.Config{Notifications: config.Notifications{Enabled: true, WebhookURL: "https://discord.com/api/webhooks/1/secret-token"}})
+	if strings.Contains(out.String(), "secret-token") || !strings.Contains(out.String(), "Notification webhook: set\n") {
+		t.Errorf("config output shows the URL or lacks the webhook status:\n%s", out.String())
+	}
+}
+
+func TestConfigShowsMissingWebhookWarning(t *testing.T) {
+	var out strings.Builder
+	Config(&out, config.Config{Path: "/tmp/foreman.yaml", Notifications: config.Notifications{Enabled: true}})
+	if !strings.Contains(out.String(), "Notification webhook: not set\n! notifications are enabled but notifications.webhook_url is not set in /tmp/foreman.yaml") {
+		t.Errorf("config output lacks the setup warning:\n%s", out.String())
+	}
+}

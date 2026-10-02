@@ -53,6 +53,8 @@ type Budgets struct {
 
 type Notifications struct {
 	Enabled bool `yaml:"enabled"`
+	// WebhookURL is the Discord webhook alerts post to. It is a secret.
+	WebhookURL string `yaml:"webhook_url"`
 }
 
 // Cleanup controls what happens to a task's worktree once the task is DONE (D42).
@@ -169,6 +171,23 @@ func Materialize(path string, cfg Config) error {
 		return err
 	}
 	return os.WriteFile(path, raw, 0o600)
+}
+
+// WebhookProblems returns the setup warnings for notifications: enabled without a
+// webhook URL, or a URL kept in a file that other users can read. Neither stops
+// foreman, and neither names the URL.
+func (c Config) WebhookProblems() []string {
+	n := c.Notifications
+	switch {
+	case !n.Enabled:
+		return nil
+	case n.WebhookURL == "":
+		return []string{fmt.Sprintf("notifications are enabled but notifications.webhook_url is not set in %s; add a Discord webhook URL or set notifications.enabled: false", c.Path)}
+	}
+	if info, err := os.Stat(c.Path); err == nil && info.Mode().Perm()&0o077 != 0 {
+		return []string{fmt.Sprintf("%s holds the Discord webhook URL and is readable by other users; run chmod 600 %s", c.Path, c.Path)}
+	}
+	return nil
 }
 
 func expandHome(p, home string) string {

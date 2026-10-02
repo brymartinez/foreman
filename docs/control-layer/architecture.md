@@ -122,8 +122,8 @@ foreman clean [<issue>] -> the same cleanup on demand; <issue> may also be FAILE
 
 Nothing runs in the background except the runner working on a task. The readiness and
 liveness checks happen whenever the user runs a command. Every task write goes through
-`App.update`, which sends a desktop notification when a task enters NEEDS_DECISION,
-FAILED, or READY_FOR_HUMAN (D59).
+`App.update`, which posts an alert to the Discord webhook when a task enters
+NEEDS_DECISION, FAILED, READY_FOR_HUMAN, or REVIEWED (D59, D143).
 
 ## Why each piece is shaped this way
 

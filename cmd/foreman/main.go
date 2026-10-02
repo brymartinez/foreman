@@ -76,6 +76,13 @@ func run(argv []string) int {
 	if err != nil {
 		return fail(err)
 	}
+	// The detached runner has no one to read its stderr, and config --show prints
+	// these warnings itself.
+	if cmd.Name != cli.Run && !(cmd.Name == cli.Config && cmd.ConfigShow) {
+		for _, problem := range cfg.WebhookProblems() {
+			fmt.Fprintf(os.Stderr, "foreman: %s\n", problem)
+		}
+	}
 	// config stays usable so a missing stage file can be diagnosed.
 	if cmd.Name != cli.Config {
 		if err := (stages.Files{GlobalDir: cfg.StagesDir}).RequireGlobal(); err != nil {
@@ -102,7 +109,7 @@ func run(argv []string) int {
 		FixRounds:            cfg.FixRounds,
 		ImplementerBudgetUSD: cfg.Budgets.ImplementerUSD,
 		ReviewerBudgetUSD:    cfg.Budgets.ReviewerUSD,
-		Notifier:             notification(cfg.Notifications.Enabled),
+		Notifier:             notification(cfg),
 		CleanOnDone:          cfg.Cleanup.OnDone,
 		DeleteMergedBranches: cfg.Cleanup.DeleteMergedBranch,
 		IgnoredRepositories:  cfg.IgnoredRepos,
@@ -273,11 +280,12 @@ func run(argv []string) int {
 	return 0
 }
 
-func notification(enabled bool) app.Notifier {
-	if enabled {
-		return notifications.Native{}
+func notification(cfg config.Config) app.Notifier {
+	n := cfg.Notifications
+	if !n.Enabled || n.WebhookURL == "" {
+		return nil
 	}
-	return nil
+	return notifications.Discord{WebhookURL: n.WebhookURL, LogPath: filepath.Join(cfg.LogDir, "notifications.log")}
 }
 
 func showLogs(ctx context.Context, path string, raw, follow bool) error {

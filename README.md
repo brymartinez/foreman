@@ -285,9 +285,15 @@ product choice or conflicting requirements, the agent stops and returns one or m
 questions. The task becomes `NEEDS_DECISION`, and the agent process ends. Nothing waits in
 a terminal.
 
-Foreman sends a desktop notification (macOS Notification Center, or `notify-send` on
-Linux) when a task needs a decision, fails, or becomes ready. The inbox and `status`
-show the same thing the next time you run them.
+Foreman posts to a Discord webhook when a task needs a decision, fails or is cancelled,
+becomes ready for review, or gets PR feedback. Each post names the alert, the task
+(`owner/repo#N`) and its state, and links the PR, or the issue when there is no PR yet.
+Set the webhook URL in `notifications.webhook_url` (see Configuration). The URL is a
+secret: keep the config file `chmod 600`. Foreman warns when the URL is missing or the
+file is readable by other users, and `config --show` prints only whether it is set.
+Delivery is best effort. A failed post never changes a task, and Foreman appends the
+error to `notifications.log` in the log directory. The inbox and `status` show the same
+thing the next time you run them.
 
 ```
 NEEDS DECISION
@@ -404,7 +410,8 @@ budgets:                             # Claude only: Codex reports no cost, so it
   implementer_usd: 3.00              # Claude maximum per implementation turn
   reviewer_usd: 1.00                 # Claude maximum per review turn
 notifications:
-  enabled: true                      # decision, failure, and readiness alerts
+  enabled: true                      # decision, failure, readiness, and feedback alerts
+  webhook_url: ""                    # Discord webhook URL; a secret, keep this file chmod 600
 claude:
   command: claude
   model: claude-opus-5               # implementation and PR; "" uses the CLI default
