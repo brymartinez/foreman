@@ -377,7 +377,7 @@ func (c Client) RepoAt(ctx context.Context, dir string) (app.RepoInfo, error) {
 	return app.RepoInfo{Repo: repo, DefaultBranch: r.DefaultBranchRef.Name}, nil
 }
 
-const prFields = "number,url,state,headRefName,headRefOid,baseRefName,isCrossRepository,mergeable"
+const prFields = "number,url,state,headRefName,headRefOid,baseRefName,isCrossRepository,mergeable,body"
 
 type prJSON struct {
 	Number            int    `json:"number"`
@@ -388,6 +388,7 @@ type prJSON struct {
 	BaseRefName       string `json:"baseRefName"`
 	IsCrossRepository bool   `json:"isCrossRepository"`
 	Mergeable         string `json:"mergeable"`
+	Body              string `json:"body"`
 }
 
 func (p prJSON) toPR(repo task.Repo) app.PullRequest {
@@ -400,6 +401,7 @@ func (p prJSON) toPR(repo task.Repo) app.PullRequest {
 		HeadSHA:           p.HeadRefOid,
 		IsCrossRepository: p.IsCrossRepository,
 		Mergeable:         mergeable(p.Mergeable),
+		Body:              p.Body,
 	}
 }
 
