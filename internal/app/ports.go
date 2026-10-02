@@ -154,6 +154,17 @@ type WorktreeManager interface {
 	// Contains fetches origin into the worktree at dir, then reports whether ancestor
 	// is an ancestor of descendant, or the same commit.
 	Contains(ctx context.Context, dir, ancestor, descendant string) (bool, error)
+	// MergeConflicts fetches Base and Branch from origin and lists the files that
+	// conflict when origin/Base merges into origin/Branch. None means a clean merge. It
+	// changes neither the branch nor the worktree.
+	MergeConflicts(ctx context.Context, check MergeCheck) ([]string, error)
+}
+
+// MergeCheck names the worktree to fetch in, the PR's head branch, and its base branch.
+type MergeCheck struct {
+	Dir    string
+	Branch string
+	Base   string
 }
 
 type AgentAdapter interface {

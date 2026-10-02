@@ -58,7 +58,7 @@ func (a App) conflict(ctx context.Context, rec *task.Record, pr PullRequest) (*t
 func (a App) repairConflict(ctx, final context.Context, rec *task.Record, log io.Writer) (*task.Record, error) {
 	d, attempt := rec.Delegation, rec.Delegation.LastConflict()
 	fmt.Fprintf(log, "foreman: PR #%d conflicts with %s at %s; asking %s to merge it\n", d.PR, strings.TrimPrefix(d.BaseRef, "origin/"), short(attempt.Base), d.Implementer.Agent)
-	turn, err := a.implement(ctx, rec, nil, nil, log)
+	turn, err := a.implement(ctx, rec, nil, nil, nil, log)
 	var pr *PullRequest
 	if err == nil && turn.Outcome.Status == agent.PROpened {
 		if pr, err = a.checkRepair(ctx, rec, turn.Outcome); err == nil {

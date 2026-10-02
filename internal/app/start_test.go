@@ -19,7 +19,10 @@ type fakeWorktrees struct {
 	removed   []WorktreeRemoval
 	removeErr error
 	// contains answers Contains; nil reports every ancestor as merged.
-	contains func(dir, ancestor, descendant string) (bool, error)
+	contains  func(dir, ancestor, descendant string) (bool, error)
+	checks    []MergeCheck
+	conflicts [][]string // consumed one per check; clean once empty
+	checkErr  error
 }
 
 func (f *fakeWorktrees) Contains(_ context.Context, dir, ancestor, descendant string) (bool, error) {
@@ -27,6 +30,19 @@ func (f *fakeWorktrees) Contains(_ context.Context, dir, ancestor, descendant st
 		return true, nil
 	}
 	return f.contains(dir, ancestor, descendant)
+}
+
+func (f *fakeWorktrees) MergeConflicts(_ context.Context, c MergeCheck) ([]string, error) {
+	f.checks = append(f.checks, c)
+	if f.checkErr != nil {
+		return nil, f.checkErr
+	}
+	if len(f.conflicts) == 0 {
+		return nil, nil
+	}
+	files := f.conflicts[0]
+	f.conflicts = f.conflicts[1:]
+	return files, nil
 }
 
 type fakeRepositories struct {

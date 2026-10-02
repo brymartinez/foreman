@@ -187,3 +187,27 @@ func TestImplementationPromptCarriesFeedbackForAFreshTurn(t *testing.T) {
 		}
 	}
 }
+
+func TestMergeMessage(t *testing.T) {
+	got := MergeMessage("feat/7-retries", "main", []string{"go.mod", "retry.go"})
+	for _, want := range []string{"- go.mod\n", "- retry.go\n", "`git merge origin/main` on feat/7-retries", "Never rebase", "never force-push",
+		"do not run `git merge --abort`", "Leave the merge in progress", `end with "blocked"`, "I resolved the files; verify, commit, push", "pr_opened"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("merge message missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestImplementationPromptMergeSection(t *testing.T) {
+	b := TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}, Branch: "feat/7-retries", BaseBranch: "main"}
+	if got := ImplementationPrompt(b); strings.Contains(got, "## Merge conflicts") {
+		t.Errorf("merge section without a merge:\n%s", got)
+	}
+	b.Merge = &MergeBrief{Base: "main", Files: []string{"retry.go"}}
+	got := ImplementationPrompt(b)
+	for _, want := range []string{"## Merge conflicts", "- retry.go\n", "`git merge origin/main`", "Never rebase"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("prompt missing %q:\n%s", want, got)
+		}
+	}
+}
