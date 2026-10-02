@@ -135,3 +135,18 @@ func TestInboxViewAllRefreshesTrackedInExcludedRepo(t *testing.T) {
 		t.Fatalf("fetched %v, want the tracked item in the excluded repository", gh.fetched)
 	}
 }
+
+func TestStatusAndTasksListDelegatedWorkOutsideFilter(t *testing.T) {
+	rec, store := trackedIn("acme/other")
+	rec.State = task.Failed
+	rec.Delegation = &task.Delegation{Implementer: task.Session{Agent: task.Claude}}
+	a := App{Store: store, GitHub: &fakeGitHub{}, Runners: &fakeRunners{}, IncludedRepositories: []task.Repo{"acme/one"}, Now: func() time.Time { return now }}
+	status, _, err := a.Status(context.Background())
+	if err != nil || len(status) != 1 || status[0].Key != rec.Key {
+		t.Errorf("status = %v, err = %v; want the task outside the include list", status, err)
+	}
+	tasks, err := a.Tasks(context.Background())
+	if err != nil || len(tasks) != 1 || tasks[0].Key != rec.Key {
+		t.Errorf("tasks = %v, err = %v; want the task outside the include list", tasks, err)
+	}
+}

@@ -2,9 +2,9 @@
 
 ## Current stage
 
-Stage 30 (dashboard auto mode for issue #30) is complete. Completed runs are needed to
-measure the effect of the model and budget choices. The ranked refactor candidates
-below are the next code-quality stages.
+Stage 29 (repository include filter and the `v` view toggle for issue #29) is
+complete. Completed runs are needed to measure the effect of the model and budget
+choices. The ranked refactor candidates below are the next code-quality stages.
 
 ## Refactor candidates
 
