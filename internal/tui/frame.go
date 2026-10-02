@@ -309,6 +309,9 @@ func paneLines(p pane, width, height int, focused bool, cursor int) []string {
 
 // logPane renders the log heading and the visible slice of the selected task's log.
 func logPane(m Model, height int) []string {
+	if m.Mode == AnsweringDecision {
+		return decisionPane(m, height)
+	}
 	if m.ShowOpen {
 		return showPane(m, height)
 	}
@@ -376,6 +379,60 @@ func showPane(m Model, height int) []string {
 	return out
 }
 
+// decisionPane renders the selected task's pending question from DecisionTop down, as
+// foreman respond prints it, with the answer line always last.
+func decisionPane(m Model, height int) []string {
+	rec := m.Selected()
+	if rec == nil || rec.Pending() == nil {
+		// SetTasks leaves the prompt once nothing is pending, so this lasts one frame.
+		return showPane(m, height)
+	}
+	lines := m.decisionLines()
+	visible := m.decisionPage()
+	top := min(m.DecisionTop, max(len(lines)-visible, 0))
+	end := min(top+visible, len(lines))
+	title := fmt.Sprintf("DECISION · %s#%d", rec.Repo, rec.Number)
+	if i, n := questionNumber(rec); n > 1 {
+		title += fmt.Sprintf(" · question %d of %d", i, n)
+	}
+	if len(lines) > visible {
+		title += fmt.Sprintf(" · lines %d-%d of %d", top+1, end, len(lines))
+	}
+	var out []string
+	if height >= 3 {
+		out = append(out, colored(pad(truncate(title, m.Width), m.Width), cyan))
+	}
+	for _, l := range lines[top:end] {
+		out = append(out, pad(truncate(l, m.Width), m.Width))
+	}
+	for len(out) < height-1 {
+		out = append(out, strings.Repeat(" ", m.Width))
+	}
+	return append(out, pad(lastColumns("> "+printable(m.Input)+"█", m.Width), m.Width))
+}
+
+// questionNumber is which question of the current batch is asked, and the batch size.
+// Answers the runner has not delivered yet belong to the batch, so the count holds
+// across Esc and a reopen.
+func questionNumber(rec *task.Record) (int, int) {
+	answered := 0
+	for _, d := range rec.Decisions {
+		if d.Answer != "" && d.DeliveredAt.IsZero() {
+			answered++
+		}
+	}
+	return answered + 1, answered + rec.PendingCount()
+}
+
+// lastColumns keeps the end of s, where the cursor is, when s is wider than width.
+func lastColumns(s string, width int) string {
+	r := []rune(s)
+	for len(r) > 0 && textWidth(string(r)) > width {
+		r = r[1:]
+	}
+	return string(r)
+}
+
 func footer(m Model) string {
 	switch m.Mode {
 	case ChoosingAgent:
@@ -387,6 +444,8 @@ func footer(m Model) string {
 			return "Nothing to cancel. [y/n]"
 		}
 		return fmt.Sprintf("Cancel %s#%d and stop its agent? [y/n]", m.cancelTarget.Repo, m.cancelTarget.Number)
+	case AnsweringDecision:
+		return answerHints(m)
 	}
 	if m.LogOpen && m.Focus == TaskPane {
 		if textWidth(hintsLogLong) > m.Width {
@@ -406,11 +465,29 @@ func footer(m Model) string {
 	return hintsLong
 }
 
+// answerHints say what Enter does on an empty answer, as foreman respond's prompt does.
+func answerHints(m Model) string {
+	long, short := hintsAnswerLong, hintsAnswerShort
+	if rec := m.Selected(); rec != nil && rec.Pending() != nil {
+		if o, ok := rec.Pending().Question.Recommended(); ok {
+			label := printable(strings.TrimSpace(o.Label))
+			long = fmt.Sprintf("type an option label or an answer · enter for %s · up/down scroll · esc close", label)
+			short = fmt.Sprintf("label or answer · enter for %s · up/down · esc close", label)
+		}
+	}
+	if textWidth(long) > m.Width {
+		return short
+	}
+	return long
+}
+
 const (
-	hintsLong     = "j/k move · h/l pane · enter select · c cancel · a auto · r refresh · q quit"
-	hintsShort    = "j/k move · h/l pane · enter · c cancel · q quit"
-	hintsLogLong  = "j/k task · u/d log page · ctrl-u/d half page · g/G ends · s show/log · esc close · h/l pane"
-	hintsLogShort = "j/k task · u/d log · g/G ends · s show/log · esc close"
+	hintsAnswerLong  = "type an option label or an answer · enter to record · up/down scroll · esc close"
+	hintsAnswerShort = "label or answer · enter · up/down · esc close"
+	hintsLong        = "j/k move · h/l pane · enter select · c cancel · a auto · r refresh · q quit"
+	hintsShort       = "j/k move · h/l pane · enter · c cancel · q quit"
+	hintsLogLong     = "j/k task · u/d log page · ctrl-u/d half page · g/G ends · s show/log · esc close · h/l pane"
+	hintsLogShort    = "j/k task · u/d log · g/G ends · s show/log · esc close"
 	// hintsOpen are for INBOX focus while the pane is open, where s still switches it.
 	hintsOpenLong  = "j/k move · h/l pane · enter select · s show/log · esc close · c cancel · a auto · r refresh · q quit"
 	hintsOpenShort = "j/k move · h/l pane · enter · s show/log · c cancel · q quit"
