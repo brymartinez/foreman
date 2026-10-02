@@ -225,7 +225,7 @@ func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Rev
 	resume := ""
 	var conflict *agent.Conflict
 	if d.ConflictPending {
-		conflict = &agent.Conflict{PR: d.PR, Base: strings.TrimPrefix(d.BaseRef, "origin/"), BaseHead: d.ConflictBase}
+		conflict = &agent.Conflict{PR: d.PR, Base: strings.TrimPrefix(d.BaseRef, "origin/"), BaseHead: d.LastConflict().Base}
 		resume = agent.ConflictMessage(*conflict)
 	} else if decs := rec.Undelivered(); len(decs) > 0 {
 		var open *task.Review

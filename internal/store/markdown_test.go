@@ -34,8 +34,7 @@ func delegated() *task.Record {
 			PR:                912,
 			PRURL:             "https://github.com/ridezoomo/armada-backend/pull/912",
 			PRHead:            "beef002",
-			ConflictHead:      "beef001",
-			ConflictBase:      "ba5e001",
+			ConflictAttempts:  []task.ConflictAttempt{{Head: "beef000", Base: "ba5e000"}, {Head: "beef001", Base: "ba5e001"}},
 			ConflictPending:   true,
 		},
 		Validation: []task.Check{{Command: "go test ./...", Passed: true}, {Command: "golangci-lint run", Passed: false}},
@@ -110,7 +109,7 @@ func TestOldFileLoadsWithoutConflictFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := got.Delegation
-	if d.ConflictHead != "" || d.ConflictBase != "" || d.ConflictPending || d.ConflictAttempted("c0ffee1", "") {
+	if d.ConflictAttempts != nil || d.ConflictPending || d.ConflictAttempted("c0ffee1", "") {
 		t.Fatalf("delegation = %+v", d)
 	}
 	if err := s.Save(ctx, got); err != nil {

@@ -46,7 +46,7 @@ func TestGateStartsRepairOnConflict(t *testing.T) {
 	refresh(t, f)
 	got := f.store.recs[key]
 	d := got.Delegation
-	if got.State != task.Working || !d.ConflictPending || d.ConflictHead != "c0ffee1" || d.ConflictBase != "ba5e001" || got.CI != nil {
+	if got.State != task.Working || !d.ConflictPending || d.LastConflict() != (task.ConflictAttempt{Head: "c0ffee1", Base: "ba5e001"}) || got.CI != nil {
 		t.Fatalf("state %s delegation %+v ci %+v", got.State, d, got.CI)
 	}
 	if got.LastOutcome.Status != "conflict_repair" || got.LastOutcome.Summary != "PR #912 conflicts with main; claude is repairing it" {
@@ -68,7 +68,7 @@ func TestGateWaitsOnUnknownMergeability(t *testing.T) {
 		if err != nil || len(warnings) != 0 {
 			t.Fatalf("%s: %v %v", m, warnings, err)
 		}
-		if got := f.store.recs[key]; got.State != task.ReadyForHuman || got.Delegation.ConflictHead != "" || len(f.runners.spawned) != spawned {
+		if got := f.store.recs[key]; got.State != task.ReadyForHuman || got.Delegation.ConflictAttempts != nil || len(f.runners.spawned) != spawned {
 			t.Errorf("%s: state %s delegation %+v", m, got.State, got.Delegation)
 		}
 	}
@@ -98,7 +98,7 @@ func TestGateSkipsNonReadyStates(t *testing.T) {
 		setup(f, f.store.recs[key])
 		refresh(t, f)
 		got := f.store.recs[key]
-		if got.State == task.Working || got.Delegation.ConflictHead != "" || len(f.runners.spawned) != spawned {
+		if got.State == task.Working || got.Delegation.ConflictAttempts != nil || len(f.runners.spawned) != spawned {
 			t.Errorf("%s: state %s delegation %+v spawned %d", name, got.State, got.Delegation, len(f.runners.spawned)-spawned)
 		}
 	}
@@ -113,7 +113,7 @@ func TestGateWarnsWhenTheBaseHeadCannotBeRead(t *testing.T) {
 	if err != nil || len(warnings) != 1 || !strings.Contains(warnings[0].Error(), "base main") {
 		t.Fatalf("warnings %v err %v", warnings, err)
 	}
-	if got := f.store.recs[key]; got.State != task.ReadyForHuman || got.Delegation.ConflictHead != "" {
+	if got := f.store.recs[key]; got.State != task.ReadyForHuman || got.Delegation.ConflictAttempts != nil {
 		t.Errorf("state %s delegation %+v", got.State, got.Delegation)
 	}
 }
@@ -157,7 +157,7 @@ func TestGateRepairsAgainAfterBaseMoves(t *testing.T) {
 	conflicting(f, Conflicting, "ba5e002")
 	refresh(t, f)
 	got := f.store.recs[key]
-	if got.State != task.Working || got.Delegation.ConflictBase != "ba5e002" || len(f.runners.spawned) != spawned+1 {
+	if got.State != task.Working || got.Delegation.LastConflict().Base != "ba5e002" || len(f.runners.spawned) != spawned+1 {
 		t.Fatalf("new base: state %s delegation %+v", got.State, got.Delegation)
 	}
 
@@ -165,8 +165,25 @@ func TestGateRepairsAgainAfterBaseMoves(t *testing.T) {
 	pushHead(f, "c0ffee2")
 	refresh(t, f)
 	got = f.store.recs[key]
-	if got.State != task.Working || got.Delegation.ConflictHead != "c0ffee2" || len(f.runners.spawned) != spawned+2 {
+	if got.State != task.Working || got.Delegation.LastConflict().Head != "c0ffee2" || len(f.runners.spawned) != spawned+2 {
 		t.Fatalf("new head: state %s delegation %+v", got.State, got.Delegation)
+	}
+}
+
+func TestGateNeverRepeatsAnEarlierPair(t *testing.T) {
+	f := newFixture()
+	key := repairing(t, f)
+	handBack(f, key)
+	conflicting(f, Conflicting, "ba5e002")
+	refresh(t, f)
+	spawned := len(f.runners.spawned)
+	// The base goes back to the commit the first attempt was for.
+	handBack(f, key)
+	conflicting(f, Conflicting, "ba5e001")
+	refresh(t, f)
+	got := f.store.recs[key]
+	if got.State != task.ReadyForHuman || len(f.runners.spawned) != spawned || len(got.Delegation.ConflictAttempts) != 2 {
+		t.Errorf("state %s spawned %d more attempts %+v", got.State, len(f.runners.spawned)-spawned, got.Delegation.ConflictAttempts)
 	}
 }
 
@@ -298,11 +315,18 @@ func TestRepairFailedNeedsDecision(t *testing.T) {
 		"head did not move": func(f fixture) {
 			f.claude.turn = prTurn("sid-1")
 		},
+		"validation failed": func(f fixture) {
+			turn := prTurn("sid-1")
+			turn.Outcome.Validation = []task.Check{{Command: "go vet ./...", Passed: true}, {Command: "go test ./...", Passed: false}}
+			f.claude.turn = turn
+			f.claude.onResume = func() { pushHead(f, "merged1") }
+		},
 	}
 	want := map[string]string{
 		"failed outcome":    "not repaired: tests fail after the merge",
 		"runner error":      "not repaired: claude exited 1",
 		"head did not move": "not repaired: PR #912 head is still c0ffee1",
+		"validation failed": "not repaired: validation failed after the merge: go test ./...",
 	}
 	for name, setup := range cases {
 		t.Run(name, func(t *testing.T) {

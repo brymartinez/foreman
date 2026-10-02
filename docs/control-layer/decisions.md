@@ -1966,3 +1966,19 @@ Entry format:
 - **Consequence.** One agent run per conflicting (PR head, base head). A new commit on
   either branch allows one more attempt. The branch and worktree are never removed
   by a repair.
+
+
+## D131 (amends D130). Keep every attempted pair, and fail a repair on failed checks
+
+- Date: 2026-10-02. Issue midsoln/foreman#17, review round 1 of PR #18.
+- **Context.** D130 kept only the last (PR head, base head) pair. A base that moved
+  from A to B and back to A, with the same PR head, made the first pair look new, so
+  the gate tried it a second time. D130 also accepted a repair whose `pr_opened`
+  reported a failed validation command, and sent it to review and handoff.
+- **Decision.** The delegation keeps `conflict_attempts`, a list of every attempted
+  pair, oldest first. The runner repairs the last one. `ConflictAttempted` checks the
+  whole list. `checkRepair` also rejects a repair when any reported validation entry
+  has `passed: false`, so the task goes to NEEDS_DECISION and names the failed commands.
+  `conflict_head` and `conflict_base` from D130 never shipped, so no file carries them.
+- **Consequence.** No pair is tried twice. The list grows by one entry per automatic
+  repair, and each entry needs a new head pair and an agent run.

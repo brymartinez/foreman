@@ -34,8 +34,8 @@ foreman start 825 --agent claude          (run from a checkout of the repo)
 runner (one process per task, exits when the task leaves WORKING/REVIEWING):
   if the gate flagged a merge conflict (D130):
     turn = implementer.Resume(session, merge origin/<base>, resolve, validate, push)
-    pr_opened, same PR, head moved, new head contains the base head -> REVIEWING,
-                    then the review below
+    pr_opened, same PR, head moved, new head contains the base head, every
+                    reported check passed (D131) -> REVIEWING, then the review below
     blocked      -> NEEDS_DECISION with the agent's questions, exit
     anything else -> NEEDS_DECISION, "merge again" or "I fixed it", exit
   if the PR has comments the agent has not answered (D119, resumed from REVIEWED):
@@ -104,7 +104,7 @@ foreman inbox|status  -> runner pid dead while WORKING/REVIEWING -> FAILED
                            any unanswered -> REVIEWED, shown in INBOX (D119)
                            none left      -> READY_FOR_HUMAN
                          and then, per READY_FOR_HUMAN task with an open PR:
-                           mergeable CONFLICTING, (PR head, base head) not tried ->
+                           mergeable CONFLICTING, (PR head, base head) never tried ->
                              record the pair, WORKING, spawn a runner (D130)
                            UNKNOWN or MERGEABLE -> nothing
                         inbox only, cleanup.on_done: DONE task -> git worktree remove

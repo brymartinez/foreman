@@ -123,18 +123,40 @@ type Delegation struct {
 	PRURL             string
 	// PRHead is the PR's head commit when foreman last read it. A review covers one head.
 	PRHead string
-	// ConflictHead and ConflictBase are the PR head and base head of the last automatic
-	// merge conflict repair. A repair runs once per pair. ConflictPending is set until
-	// the runner has run that repair.
-	ConflictHead    string
-	ConflictBase    string
-	ConflictPending bool
+	// ConflictAttempts lists every PR head and base head an automatic merge conflict
+	// repair ran for, oldest first. A repair runs once per pair. ConflictPending is set
+	// until the runner has run the last one.
+	ConflictAttempts []ConflictAttempt
+	ConflictPending  bool
 }
 
-// ConflictAttempted reports whether the automatic repair already ran, or is running,
+// ConflictAttempt is one automatic merge conflict repair: the PR head that conflicted
+// and the base head it conflicted with.
+type ConflictAttempt struct {
+	Head string `yaml:"head"`
+	Base string `yaml:"base"`
+}
+
+// ConflictAttempted reports whether an automatic repair already ran, or is running,
 // for this PR head and base head.
 func (d *Delegation) ConflictAttempted(head, base string) bool {
-	return head != "" && base != "" && d.ConflictHead == head && d.ConflictBase == base
+	if head == "" || base == "" {
+		return false
+	}
+	for _, c := range d.ConflictAttempts {
+		if c.Head == head && c.Base == base {
+			return true
+		}
+	}
+	return false
+}
+
+// LastConflict is the most recent repair attempt, or the zero value.
+func (d *Delegation) LastConflict() ConflictAttempt {
+	if len(d.ConflictAttempts) == 0 {
+		return ConflictAttempt{}
+	}
+	return d.ConflictAttempts[len(d.ConflictAttempts)-1]
 }
 
 // Check is one validation command the implementation agent ran, as it reported it.
