@@ -18,6 +18,15 @@ type fakeWorktrees struct {
 	reqs      []WorktreeRequest
 	removed   []WorktreeRemoval
 	removeErr error
+	// contains answers Contains; nil reports every ancestor as merged.
+	contains func(dir, ancestor, descendant string) (bool, error)
+}
+
+func (f *fakeWorktrees) Contains(_ context.Context, dir, ancestor, descendant string) (bool, error) {
+	if f.contains == nil {
+		return true, nil
+	}
+	return f.contains(dir, ancestor, descendant)
 }
 
 type fakeRepositories struct {

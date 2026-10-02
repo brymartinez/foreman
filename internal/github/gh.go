@@ -377,7 +377,7 @@ func (c Client) RepoAt(ctx context.Context, dir string) (app.RepoInfo, error) {
 	return app.RepoInfo{Repo: repo, DefaultBranch: r.DefaultBranchRef.Name}, nil
 }
 
-const prFields = "number,url,state,headRefName,headRefOid,baseRefName,isCrossRepository"
+const prFields = "number,url,state,headRefName,headRefOid,baseRefName,isCrossRepository,mergeable"
 
 type prJSON struct {
 	Number            int    `json:"number"`
@@ -387,6 +387,7 @@ type prJSON struct {
 	HeadRefOid        string `json:"headRefOid"`
 	BaseRefName       string `json:"baseRefName"`
 	IsCrossRepository bool   `json:"isCrossRepository"`
+	Mergeable         string `json:"mergeable"`
 }
 
 func (p prJSON) toPR(repo task.Repo) app.PullRequest {
@@ -398,7 +399,30 @@ func (p prJSON) toPR(repo task.Repo) app.PullRequest {
 		BaseRefName:       p.BaseRefName,
 		HeadSHA:           p.HeadRefOid,
 		IsCrossRepository: p.IsCrossRepository,
+		Mergeable:         mergeable(p.Mergeable),
 	}
+}
+
+// mergeable maps gh's MERGEABLE, CONFLICTING, and UNKNOWN. Anything else counts as
+// unknown, so only an explicit conflict can start a repair.
+func mergeable(s string) string {
+	switch s := strings.ToLower(s); s {
+	case app.Mergeable, app.Conflicting:
+		return s
+	}
+	return "unknown"
+}
+
+func (c Client) BranchHead(ctx context.Context, repo task.Repo, branch string) (string, error) {
+	out, err := c.Run(ctx, "", "api", fmt.Sprintf("repos/%s/git/ref/heads/%s", repo, branch), "--jq", ".object.sha")
+	if err != nil {
+		return "", err
+	}
+	sha := strings.TrimSpace(string(out))
+	if sha == "" {
+		return "", fmt.Errorf("no commit for branch %s in %s", branch, repo)
+	}
+	return sha, nil
 }
 
 func (c Client) GetPullRequest(ctx context.Context, key task.Key) (app.PullRequest, error) {
