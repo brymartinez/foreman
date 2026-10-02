@@ -2255,7 +2255,8 @@ Entry format:
     warning; `config --show` prints it in its own output.
   - The URL is a secret. `config --show` prints `Notification webhook: set` or `not
     set`. Delivery errors drop the `*url.Error` wrapper, which names the URL, and mask
-    any remaining copy. When the URL is set and the config file has any group or other
+    any remaining copy. A non-2xx error names the numeric status and Go's standard
+    text, not the server's reason phrase, which could echo the URL. When the URL is set and the config file has any group or other
     permission bits, foreman warns and suggests `chmod 600`.
   - The notifier appends each delivery error, with a UTC timestamp, to
     `<log_dir>/notifications.log`. `App.notify` still ignores the error, so task state

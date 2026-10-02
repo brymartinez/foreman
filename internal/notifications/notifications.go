@@ -56,7 +56,8 @@ func (d Discord) post(a app.Alert) error {
 	}
 	resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("Discord returned %s", resp.Status)
+		// resp.Status carries the server's reason phrase, which may echo the URL.
+		return fmt.Errorf("Discord returned %d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
 	}
 	return nil
 }

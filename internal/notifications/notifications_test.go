@@ -1,8 +1,10 @@
 package notifications
 
 import (
+	"bufio"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -112,5 +114,34 @@ func TestDiscordNetworkErrorIsLoggedWithoutURL(t *testing.T) {
 	if !strings.HasPrefix(string(logged), "2026-10-03T09:00:00Z acme/widgets#42 Run failed: ") ||
 		strings.Contains(string(logged), "secret-token") || strings.Contains(string(logged), srv.URL) {
 		t.Errorf("log = %q, want the failure without the URL", logged)
+	}
+}
+
+func TestDiscordStatusReasonIsNotLogged(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	url := "http://" + ln.Addr().String() + "/api/webhooks/1/secret-token"
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		// The reason phrase is the server's own text, so it can echo the request URL.
+		http.ReadRequest(bufio.NewReader(conn))
+		io.WriteString(conn, "HTTP/1.1 502 bad gateway for "+url+"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+	}()
+	d := discord(t, url)
+	err = d.Notify(app.Alert{State: task.Failed, Key: key})
+	if err == nil || strings.Contains(err.Error(), "secret-token") {
+		t.Fatalf("err = %v, want an error without the URL", err)
+	}
+	logged, _ := os.ReadFile(d.LogPath)
+	want := "2026-10-03T09:00:00Z acme/widgets#42 Run failed: Discord returned 502 Bad Gateway\n"
+	if string(logged) != want {
+		t.Errorf("log = %q, want %q", logged, want)
 	}
 }
