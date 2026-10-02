@@ -2131,7 +2131,8 @@ Entry format:
   - The prompt says the description is the only requirements, not to follow its
     links, and that claims in it, in comments, or in commit messages are not evidence.
     A `## Review stance` section asks for a fresh look, counterexamples, regressions,
-    missing cases, focused checks when feasible, and only verified defects.
+    missing cases, focused checks when its tools allow them, and only verified
+    defects. When it can't run a check, it verifies the defect by reading the code.
   - Earlier rounds list each finding with severity, file, line, summary, and detail.
     A re-review checks each fix, then the whole change, and does not repeat resolved
     findings. `## Review passes` is unchanged.
@@ -2144,5 +2145,10 @@ Entry format:
     helpers, not a new type.
 - **Consequence.** A developer's answer to an escalated review ("leave the code as
   is") no longer reaches the reviewer. If the reviewer still finds the defect, the
-  fix loop runs again until `fix_rounds` escalates. The Claude reviewer's tools are
-  unchanged, so its "focused checks" are limited to reading and git commands.
+  fix loop runs again until `fix_rounds` escalates.
+  - Review round 1 of PR #24 asked to let Claude reviewers run test commands. The
+    developer chose to keep both reviewers strictly read-only (D10, D33). Claude's
+    Bash tool has no sandbox, so a test command would run repository code with
+    write and network access. Codex's read-only sandbox also blocks Go builds. The
+    reviewer's checks are therefore limited to reading code and git commands, and the
+    prompt says so. `ReviewTools` is unchanged.

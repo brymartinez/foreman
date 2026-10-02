@@ -108,7 +108,7 @@ func ReviewPrompt(b ReviewBrief) string {
 
 - Start fresh. Form your own view of the change from the description, the diff, and the code.
 - Try to break the change. Look for counterexamples, regressions in callers and shared code, and missing cases: inputs, states, and error paths the description implies but the change does not handle.
-- Run focused checks when feasible, such as the tests that cover the changed code, without editing files.
+- Run focused checks when your tools allow them. You may not be able to run tests or builds. When you can't run a check, verify the defect by reading the code.
 - Report only concrete defects you verified yourself in the code or by a check. Say what input or state breaks and what happens. Drop anything you cannot back with a concrete case.
 
 `)

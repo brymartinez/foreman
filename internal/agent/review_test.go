@@ -71,7 +71,7 @@ func TestReviewPromptLabelsCommentsAsNonAuthoritative(t *testing.T) {
 
 func TestReviewPromptAsksForVerifiedCounterexamples(t *testing.T) {
 	p := ReviewPrompt(reviewBrief())
-	for _, want := range []string{"## Review stance", "fresh", "counterexamples", "regressions", "missing cases", "Run focused checks",
+	for _, want := range []string{"## Review stance", "fresh", "counterexamples", "regressions", "missing cases", "Run focused checks when your tools allow them", "verify the defect by reading the code",
 		"Report only concrete defects you verified yourself", "not evidence"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("review prompt missing %q:\n%s", want, p)

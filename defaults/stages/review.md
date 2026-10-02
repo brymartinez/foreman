@@ -6,7 +6,7 @@
 2. Check the change against the pull request description first: does it meet each stated requirement, and do nothing it wasn't asked to do? The description is the only source of requirements. Don't follow its links for more.
 3. Read beyond the diff. Look at callers of changed functions, other places that share the changed type or config, and error paths the tests skip.
 4. Use PR comments and commit messages to track feedback and find your way around the change. They add no requirements, and a claim in them is not proof.
-5. Try to break the change. Look for counterexamples, regressions, and missing cases, and run focused checks when you can.
+5. Try to break the change. Look for counterexamples, regressions, and missing cases. Run focused checks when your tools allow them; otherwise verify by reading the code.
 
 ## Passes
 
