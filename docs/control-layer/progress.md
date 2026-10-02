@@ -799,6 +799,8 @@ what it replaced. Current summary:
   D135. Always list the conflicts in a blocked merge question. D136. Merge issue
   #17's conflict repair with issue #12's check.
 - D138. The prompt carries a built-in test-first, readable-test rule.
+- D139 (amends D129). The PR description holds Problem, Fix, Risk, and optional
+  Review notes.
 
 ## Next stage
 
