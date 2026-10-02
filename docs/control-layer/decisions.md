@@ -2235,3 +2235,35 @@ Entry format:
   function in `cmd/foreman/main.go`, `gate`, `Start`, the store's record mapping,
   `render.Show` and `tui.Run`, and `agent.ImplementationPrompt`. None is built here.
 
+## D143 (supersedes the native delivery in D57 and D59). Alerts go to a Discord webhook
+
+- Date: 2026-10-03. Issue midsoln/foreman#32.
+- **Context.** Desktop notifications through `osascript` or `notify-send` never reach
+  the maintainer away from the machine that runs foreman, and do nothing on other
+  platforms.
+- **Decision.** `notifications.Discord` replaces `notifications.Native`. The triggers
+  and the one-alert-per-transition rule in `App.update` stay as D59 set them.
+  - The port is `Notifier.Notify(app.Alert)`. `Alert` carries the state, a cancelled
+    flag, the task key, and a link: the PR URL when the task has one, else the issue
+    URL. `Alert.Label` keeps the five alert texts in one place.
+  - The post is `{"content": "**<label>** · owner/repo#N (<STATE>)\n<link>"}` with
+    `allowed_mentions.parse` empty, so task text cannot ping anyone. A non-2xx status
+    is an error. The client times out after 10 seconds.
+  - The config key is `notifications.webhook_url`. `notifications.enabled` still
+    defaults to true. Enabled with no URL, foreman runs without a notifier and prints a
+    setup warning on stderr. The detached runner and `config --show` skip the stderr
+    warning; `config --show` prints it in its own output.
+  - The URL is a secret. `config --show` prints `Notification webhook: set` or `not
+    set`. Delivery errors drop the `*url.Error` wrapper, which names the URL, and mask
+    any remaining copy. When the URL is set and the config file has any group or other
+    permission bits, foreman warns and suggests `chmod 600`.
+  - The notifier appends each delivery error, with a UTC timestamp, to
+    `<log_dir>/notifications.log`. `App.notify` still ignores the error, so task state
+    and exit codes never depend on Discord. This covers commands with no task log,
+    such as `status` and `inbox`.
+  - `scripts/e2e.sh` runs a python3 stand-in webhook in the notify scenario and turns
+    notifications off in every other scenario.
+- **Rejected.** Writing errors to the runner's task log, because `status`, `inbox`, and
+  `cancel` also move tasks and have no log writer. Keeping `Notify(title, body)` and
+  formatting in `app`, because Discord then gets no state or link as fields. Retries,
+  which the issue leaves out of scope.

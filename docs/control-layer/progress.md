@@ -2,7 +2,7 @@
 
 ## Current stage
 
-Stage 28 (the first refactor stage: the task runner as named steps, for issue #26) is
+Stage 29 (Discord webhook alerts in place of desktop notifications, for issue #32) is
 complete. Completed runs are needed to measure the effect of the model and budget
 choices. The ranked refactor candidates below are the next code-quality stages.
 
@@ -699,6 +699,21 @@ request. Each fix is its own commit with a decision.
   a deleted plan comment, a failed plan post, `failTask`, and `firstStep`.
 - Verified with `gofmt -l .`, `go vet ./...`, `go test ./...`, a binary build, and
   `scripts/e2e.sh`.
+
+### Stage 29 (complete): Discord webhook alerts for issue #32
+
+- `notifications.Discord` posts each alert to `notifications.webhook_url`, replacing
+  `osascript` and `notify-send` (D143). The triggers are unchanged.
+- `Notifier.Notify` takes an `app.Alert` with the state, task key, and PR or issue link.
+- Foreman warns on stderr when notifications are enabled with no URL, and when the
+  config file holding the URL is readable by other users. `config --show` prints only
+  whether the URL is set.
+- Delivery errors go to `<log_dir>/notifications.log` without the URL and never change
+  a task.
+- New tests cover the post body, the link choice, mentions, non-2xx and network
+  failures, the config warnings, and `config --show`. The e2e notify scenario uses a
+  stand-in webhook for delivery, a 500 response, the permission warning, and a missing
+  URL.
 
 ## Refactor candidates
 
