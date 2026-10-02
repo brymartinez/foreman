@@ -155,8 +155,7 @@ func (a App) launch(ctx context.Context, key task.Key) (*task.Record, error) {
 			return cur, nil
 		}
 		if spawnErr != nil {
-			cur.State = task.Failed
-			cur.LastOutcome = &task.Outcome{Status: "failed", Summary: "could not launch runner: " + spawnErr.Error(), At: a.Now()}
+			failTask(cur, "could not launch runner: "+spawnErr.Error(), a.Now())
 			return cur, nil
 		}
 		cur.Delegation.RunnerLog = logPath

@@ -25,8 +25,7 @@ func (a App) resolveConflicts(ctx, final context.Context, rec *task.Record, log 
 		base, files, checkErr := a.mergeConflicts(ctx, rec)
 		if checkErr != nil {
 			rec, err = a.update(final, rec.Key, existing(func(cur *task.Record) {
-				cur.State = task.Failed
-				cur.LastOutcome = &task.Outcome{Status: "failed", Summary: "conflict check failed: " + checkErr.Error(), At: a.Now()}
+				failTask(cur, "conflict check failed: "+checkErr.Error(), a.Now())
 				applyStop(ctx, cur, "the conflict check", log, a.Now())
 			}))
 			return rec, false, err
@@ -52,23 +51,13 @@ func (a App) resolveConflicts(ctx, final context.Context, rec *task.Record, log 
 			return rec, false, err
 		}
 		fmt.Fprintf(log, "foreman: PR #%d conflicts with origin/%s in %s; merging\n", d.PR, base, strings.Join(files, ", "))
-		turn, runErr := a.implement(ctx, rec, nil, nil, &agent.MergeBrief{Base: base, Files: files}, log)
-		var pr *PullRequest
-		if runErr == nil && turn.Outcome.Status == agent.PROpened {
-			if pr, runErr = a.verifyPR(ctx, rec, turn.Outcome); runErr == nil {
-				fmt.Fprintf(log, "foreman: verified PR #%d %s at %s\n", pr.Key.Number, pr.URL, short(pr.HeadSHA))
-			}
+		res := a.runTurn(ctx, rec, turnRequest{merge: &agent.MergeBrief{Base: base, Files: files}}, a.verifiedPR(log), log)
+		if res.err == nil && res.turn.Outcome.Status == agent.Blocked {
+			res.turn.Outcome.Questions = withConflicts(res.turn.Outcome.Questions, d.Worktree, base, files)
 		}
-		if runErr == nil && turn.Outcome.Status == agent.Blocked {
-			turn.Outcome.Questions = withConflicts(turn.Outcome.Questions, d.Worktree, base, files)
-		}
-		if rec, err = a.update(final, rec.Key, existing(func(cur *task.Record) {
-			applyTurn(cur, turn, pr, runErr, a.Now())
-			if runErr != nil {
-				applyStop(ctx, cur, "merging the base branch", log, a.Now())
-			}
-			addUsage(&cur.Usage, turn.Usage)
-		})); err != nil || rec.State != task.Reviewing {
+		if rec, err = a.finishTurn(ctx, final, rec.Key, "merging the base branch", res, func(cur *task.Record) {
+			applyTurn(cur, res.turn, res.pr, res.err, a.Now())
+		}, log); err != nil || rec.State != task.Reviewing {
 			return rec, false, err
 		}
 	}

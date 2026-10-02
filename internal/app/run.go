@@ -99,31 +99,18 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 			}
 		}
 		if !answered && !reviewNext {
-			turn, runErr := a.implement(ctx, rec, findings, nil, nil, log)
-			step := "implementation"
+			during := "implementation"
 			if a.needsPlan(rec) {
-				step = "planning"
+				during = "planning"
 			}
-			if step == "planning" && runErr == nil && turn.Outcome.Status == agent.PROpened {
-				fmt.Fprintf(log, "foreman: %s opened a PR without posting a plan\n", rec.Delegation.Implementer.Agent)
-			}
-			var pr *PullRequest
-			if runErr == nil && turn.Outcome.Status == agent.PROpened {
-				if pr, runErr = a.verifyPR(ctx, rec, turn.Outcome); runErr == nil {
-					fmt.Fprintf(log, "foreman: verified PR #%d %s at %s\n", pr.Key.Number, pr.URL, short(pr.HeadSHA))
-				}
-			}
-			if rec, err = a.update(final, key, existing(func(cur *task.Record) {
-				applyTurn(cur, turn, pr, runErr, a.Now())
-				if runErr != nil {
-					applyStop(ctx, cur, step, log, a.Now())
-				}
-				addUsage(&cur.Usage, turn.Usage)
-			})); err != nil {
+			res := a.runTurn(ctx, rec, turnRequest{findings: findings}, a.verifiedPR(log), log)
+			if rec, err = a.finishTurn(ctx, final, key, during, res, func(cur *task.Record) {
+				applyTurn(cur, res.turn, res.pr, res.err, a.Now())
+			}, log); err != nil {
 				return err
 			}
-			if runErr == nil && turn.Outcome.Status == agent.Planned {
-				if rec, err = a.postPlan(ctx, final, rec, turn.Outcome.Documents, log); err != nil || rec.State != task.Working {
+			if res.err == nil && res.turn.Outcome.Status == agent.Planned {
+				if rec, err = a.postPlan(ctx, final, rec, res.turn.Outcome.Documents, log); err != nil || rec.State != task.Working {
 					return err
 				}
 				continue
@@ -208,18 +195,18 @@ func (a App) reviewRounds() int {
 	return DefaultReviewRounds
 }
 
-// implement runs one implementer turn. It resumes the session with an answered
-// decision, a merge, PR feedback, or a review round when there is one, and otherwise
-// (or when the session is gone) starts a fresh turn whose prompt is rebuilt from the
-// task file.
 // needsPlan is true until every planning document is on the issue. A task that
 // already has a PR, from before planning existed, goes on without one (D90).
 func (a App) needsPlan(rec *task.Record) bool {
 	return !rec.PlanPosted() && rec.Delegation.PR == 0
 }
 
-func (a App) implement(ctx context.Context, rec *task.Record, findings *task.Review, feedback []PRComment, merge *agent.MergeBrief, log io.Writer) (agent.Turn, error) {
+// implement runs one implementer turn. It resumes the session with a conflict repair,
+// an answered decision, or the work in req when there is one, and otherwise (or when
+// the session is gone) starts a fresh turn whose prompt is rebuilt from the task file.
+func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, log io.Writer) (agent.Turn, error) {
 	d := rec.Delegation
+	findings, feedback, merge := req.findings, req.feedback, req.merge
 	adapter, ok := a.Agents[d.Implementer.Agent]
 	if !ok {
 		return agent.Turn{}, fmt.Errorf("agent %s is not configured", d.Implementer.Agent)
@@ -302,20 +289,10 @@ func (a App) answerFeedback(ctx, final context.Context, rec *task.Record, commen
 	d := rec.Delegation
 	headBefore := d.PRHead
 	fmt.Fprintf(log, "foreman: %s\n", feedbackNote(len(comments), d.PR))
-	turn, runErr := a.implement(ctx, rec, nil, comments, nil, log)
-	var pr *PullRequest
-	if runErr == nil && turn.Outcome.Status == agent.PROpened {
-		if pr, runErr = a.verifyPR(ctx, rec, turn.Outcome); runErr == nil {
-			fmt.Fprintf(log, "foreman: verified PR #%d %s at %s\n", pr.Key.Number, pr.URL, short(pr.HeadSHA))
-		}
-	}
-	return a.update(final, rec.Key, existing(func(cur *task.Record) {
-		applyFeedbackTurn(cur, turn, pr, runErr, comments, headBefore, a.Now())
-		if runErr != nil {
-			applyStop(ctx, cur, "answering PR feedback", log, a.Now())
-		}
-		addUsage(&cur.Usage, turn.Usage)
-	}))
+	res := a.runTurn(ctx, rec, turnRequest{feedback: comments}, a.verifiedPR(log), log)
+	return a.finishTurn(ctx, final, rec.Key, "answering PR feedback", res, func(cur *task.Record) {
+		applyFeedbackTurn(cur, res.turn, res.pr, res.err, comments, headBefore, a.Now())
+	}, log)
 }
 
 // applyFeedbackTurn records a turn that answered comments on the pull request. The
@@ -503,8 +480,7 @@ func applyTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error,
 		rec.Delegation.Implementer = turn.Session
 	}
 	if runErr != nil {
-		rec.State = task.Failed
-		rec.LastOutcome = &task.Outcome{Status: "failed", Summary: runErr.Error(), At: now}
+		failTask(rec, runErr.Error(), now)
 		return
 	}
 	// The agent acted on the branch, so the gate's last CI result no longer applies.
@@ -536,13 +512,13 @@ const Cancelled = "cancelled"
 
 // applyStop marks a step that failed because the runner was told to stop. Its error
 // is only the agent being killed, so the outcome says the run was cancelled instead.
-func applyStop(ctx context.Context, rec *task.Record, step string, log io.Writer, now time.Time) {
+func applyStop(ctx context.Context, rec *task.Record, during string, log io.Writer, now time.Time) {
 	if ctx.Err() == nil {
 		return
 	}
-	fmt.Fprintf(log, "foreman: stopped during %s: %v\n", step, context.Cause(ctx))
+	fmt.Fprintf(log, "foreman: stopped during %s: %v\n", during, context.Cause(ctx))
 	rec.State = task.Failed
-	rec.LastOutcome = &task.Outcome{Status: Cancelled, Summary: fmt.Sprintf("run cancelled during %s (%v)", step, context.Cause(ctx)), At: now}
+	rec.LastOutcome = &task.Outcome{Status: Cancelled, Summary: fmt.Sprintf("run cancelled during %s (%v)", during, context.Cause(ctx)), At: now}
 }
 
 // postPlan puts each planning document on the issue as its own comment, editing the
@@ -562,8 +538,7 @@ func (a App) postPlan(ctx, final context.Context, rec *task.Record, docs map[tas
 		var updateErr error
 		if rec, updateErr = a.update(final, rec.Key, existing(func(cur *task.Record) {
 			if err != nil {
-				cur.State = task.Failed
-				cur.LastOutcome = &task.Outcome{Status: "failed", Summary: fmt.Sprintf("posting the %s on the issue failed: %v", doc.Title(), err), At: a.Now()}
+				failTask(cur, fmt.Sprintf("posting the %s on the issue failed: %v", doc.Title(), err), a.Now())
 				applyStop(ctx, cur, "planning", log, a.Now())
 				return
 			}
@@ -609,8 +584,7 @@ func short(sha string) string {
 // implementer; a clean review leaves it REVIEWING for the readiness gate (gate.go).
 func applyReview(rec *task.Record, r agent.ReviewOutcome, reviewErr error, now time.Time) {
 	if reviewErr != nil {
-		rec.State = task.Failed
-		rec.LastOutcome = &task.Outcome{Status: "failed", Summary: fmt.Sprintf("%s review failed: %v", rec.Delegation.Reviewer, reviewErr), At: now}
+		failTask(rec, fmt.Sprintf("%s review failed: %v", rec.Delegation.Reviewer, reviewErr), now)
 		return
 	}
 	rec.Reviews = append(rec.Reviews, task.Review{
