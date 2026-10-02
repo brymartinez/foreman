@@ -425,3 +425,103 @@ func TestTurningAutoOnCountsARunStartedElsewhere(t *testing.T) {
 		t.Fatalf("turning auto on launched %d with the only slot taken by a run the dashboard had not read", n)
 	}
 }
+
+// respondingSource records the answer it was given and returns rec.
+type respondingSource struct {
+	stubSource
+	rec  *task.Record
+	err  error
+	seen *[]string
+}
+
+func (r respondingSource) Respond(_ context.Context, key task.Key, raw string) (*task.Record, error) {
+	*r.seen = append(*r.seen, fmt.Sprintf("%s#%d %q", key.Repo, key.Number, raw))
+	return r.rec, r.err
+}
+
+func TestRespondPassesTheTypedAnswerAndReportsTheResult(t *testing.T) {
+	key := task.Key{Repo: "a/b", Number: 10}
+	failed := record(10, task.Failed)
+	failed.LastOutcome = &task.Outcome{Summary: "runner did not start"}
+	for _, tc := range []struct {
+		name string
+		rec  *task.Record
+		err  error
+		want string
+	}{
+		{"more questions waiting", answered(asking(10), "A. Retry"), nil, "Recorded the answer for a/b#10; 1 question still waiting"},
+		{"last answer", answered(answered(asking(10), "A. Retry"), "B. No"), nil, "Resumed a/b#10"},
+		{"runner failed to launch", failed, nil, "! a/b#10 could not resume: runner did not start"},
+		{"respond error", nil, errors.New("no recommended option"), "! answer a/b#10: no recommended option"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var seen []string
+			r := respond(context.Background(), respondingSource{rec: tc.rec, err: tc.err, seen: &seen}, key, "B")
+			if !slices.Equal(seen, []string{`a/b#10 "B"`}) {
+				t.Errorf("Respond calls = %v; want the typed answer for a/b#10", seen)
+			}
+			if !r.finished || r.key != key || !r.respond {
+				t.Errorf("result = %+v; want a finished respond for a/b#10", r)
+			}
+			var m Model
+			apply(&m, r)
+			if !strings.HasPrefix(m.Message, tc.want) {
+				t.Errorf("message = %q; want %q", m.Message, tc.want)
+			}
+		})
+	}
+}
+
+func TestSettleAfterTheLastAnswerOpensTheLog(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run.log")
+	if err := os.WriteFile(path, []byte("agent resumed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := prompting()
+	m.Selected().Delegation.RunnerLog = path
+	press(&m, Key{Kind: KeyEnter})
+	done := answered(answered(m.Selected(), "A. Retry"), "B. No")
+	settle(context.Background(), stubSource{}, &m, result{answered: done, respond: true, finished: true, key: done.Key}, nil)
+	if m.Mode != Browsing || !m.LogOpen {
+		t.Fatalf("mode %v log %t; want the task's log", m.Mode, m.LogOpen)
+	}
+	if !slices.Equal(m.Log, []string{"agent resumed"}) {
+		t.Errorf("log = %q; want it read at once", m.Log)
+	}
+	if m.starting[done.Key] {
+		t.Error("the answer's slot was not freed")
+	}
+}
+
+func TestSettleAfterAFailedAnswerKeepsThePrompt(t *testing.T) {
+	m := prompting()
+	press(&m, rune_('Z'), Key{Kind: KeyEnter})
+	key := m.Selected().Key
+	settle(context.Background(), stubSource{}, &m, result{err: errors.New("answer a/b#10: boom"), respond: true, finished: true, key: key}, nil)
+	if m.Mode != AnsweringDecision || m.Input != "Z" || !strings.HasPrefix(m.Message, "!") {
+		t.Fatalf("mode %v input %q message %q; want the prompt, the text, and the error", m.Mode, m.Input, m.Message)
+	}
+	if got := press(&m, Key{Kind: KeyEnter}); got.Kind != ActionRespond {
+		t.Errorf("enter after the failure returned %+v", got)
+	}
+}
+
+func TestFinishWaitsForAnAnswerInFlight(t *testing.T) {
+	// The last answer records WORKING before App.Respond spawns the runner.
+	results := make(chan result, 1)
+	m := prompting()
+	press(&m, Key{Kind: KeyEnter})
+	done := make(chan error, 1)
+	go func() { done <- finish(context.Background(), io.Discard, &m, results, 1) }()
+	select {
+	case <-done:
+		t.Fatal("finish returned while an answer was still in flight")
+	case <-time.After(50 * time.Millisecond):
+	}
+	results <- respond(context.Background(), respondingSource{rec: answered(asking(10), "A. Retry"), seen: new([]string)}, task.Key{Repo: "a/b", Number: 10}, "")
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("finish never returned after the answer came back")
+	}
+}

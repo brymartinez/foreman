@@ -39,13 +39,16 @@ type result struct {
 	report  *app.InboxReport
 	message string
 	err     error
-	// finished marks a Start or Cancel coming back, which quitting waits for. A
+	// finished marks a Start, Cancel, or answer coming back, which quitting waits for. A
 	// refresh does not write anything, so it is safe to abandon.
 	finished bool
 	// key is the issue a start or resume was for, so its auto mode slot can be freed.
 	key task.Key
 	// auto marks a start auto mode made rather than the developer.
 	auto bool
+	// respond marks an answer coming back; answered is the record it left.
+	respond  bool
+	answered *task.Record
 }
 
 // Run draws the dashboard on o.Out until the user quits or ctx ends. It puts the
@@ -77,9 +80,9 @@ func Run(ctx context.Context, o Options) (err error) {
 	keys := make(chan Key, 64)
 	go readKeys(ctx, o.In, keys, escapeWait)
 	results := make(chan result, 8)
-	// pending counts Start and Cancel calls in flight. Quitting waits for them:
-	// App.Start records WORKING before it spawns the runner, so exiting in that window
-	// would leave a task with no runner that nothing reaps.
+	// pending counts Start, Cancel, and Respond calls in flight. Quitting waits for
+	// them: App.Start records WORKING before it spawns the runner, so exiting in that
+	// window would leave a task with no runner that nothing reaps.
 	pending := 0
 
 	resize := make(chan os.Signal, 1)
@@ -143,6 +146,10 @@ func Run(ctx context.Context, o Options) (err error) {
 				key := a.Resume
 				pending++
 				go func() { results <- resume(ctx, o.Source, key) }()
+			case ActionRespond:
+				key, raw := a.Respond, a.Answer
+				pending++
+				go func() { results <- respond(ctx, o.Source, key, raw) }()
 			case ActionAuto:
 				if o.Auto.Save != nil {
 					if err := o.Auto.Save(m.AutoOn); err != nil {
@@ -188,6 +195,10 @@ func settle(ctx context.Context, s Source, m *Model, r result, results chan<- re
 		m.Done(r.key)
 	}
 	apply(m, r)
+	if r.respond {
+		// The last answer opens the log, so it is read now rather than on the next tick.
+		readLog(m)
+	}
 	if !r.finished && (r.report == nil || r.err != nil) {
 		return 0
 	}
@@ -222,6 +233,13 @@ func apply(m *Model, r result) {
 		if r.err == nil {
 			m.SetInbox(app.Delegable(*r.report))
 			m.Warnings = r.report.Warnings
+		}
+	}
+	if r.respond {
+		if r.err != nil {
+			m.AnswerFailed()
+		} else {
+			m.Answered(r.answered)
 		}
 	}
 	switch {
@@ -289,6 +307,33 @@ func resumeResult(ctx context.Context, s Source, key task.Key) result {
 		return result{message: fmt.Sprintf("! %s#%d could not resume: %s", rec.Repo, rec.Number, rec.LastOutcome.Summary), finished: true}
 	}
 	return result{message: fmt.Sprintf("Resumed %s#%d on PR #%d", rec.Repo, rec.Number, rec.Delegation.PR), finished: true}
+}
+
+// respond records an answer typed in the dashboard through App.Respond, so it is
+// resolved exactly as foreman respond resolves it. It is counted as pending, because
+// the last answer records WORKING before App.Respond spawns the runner.
+func respond(ctx context.Context, s Source, key task.Key, raw string) result {
+	r := respondResult(ctx, s, key, raw)
+	r.key, r.respond, r.finished = key, true, true
+	return r
+}
+
+func respondResult(ctx context.Context, s Source, key task.Key, raw string) result {
+	rec, err := s.Respond(ctx, key, raw)
+	if err != nil {
+		return result{err: fmt.Errorf("answer %s#%d: %w", key.Repo, key.Number, err)}
+	}
+	r := result{answered: rec}
+	switch {
+	case rec.State == task.NeedsDecision:
+		n := rec.PendingCount()
+		r.message = fmt.Sprintf("Recorded the answer for %s#%d; %d %s still waiting", rec.Repo, rec.Number, n, plural(n, "question", "questions"))
+	case rec.State == task.Failed:
+		r.message = fmt.Sprintf("! %s#%d could not resume: %s", rec.Repo, rec.Number, rec.LastOutcome.Summary)
+	default:
+		r.message = fmt.Sprintf("Resumed %s#%d with the answers", rec.Repo, rec.Number)
+	}
+	return r
 }
 
 func stop(ctx context.Context, s Source, rec *task.Record) result {
