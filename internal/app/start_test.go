@@ -122,6 +122,7 @@ type fakeAgent struct {
 	starts    int
 	resumed   []string
 	stages    []task.Stage
+	steps     []string // StartInput.Step of each Start, Resume, and Review
 	resumeErr error
 	reviews   []agent.ReviewOutcome // consumed in order; clean once empty
 	reviewErr error
@@ -141,6 +142,7 @@ func (f *fakeAgent) next() (agent.Turn, error) {
 
 func (f *fakeAgent) Review(_ context.Context, in agent.StartInput) (agent.ReviewOutcome, error) {
 	f.reviewed = append(f.reviewed, in.Prompt)
+	f.steps = append(f.steps, in.Step)
 	if f.reviewErr != nil {
 		return agent.ReviewOutcome{}, f.reviewErr
 	}
@@ -156,6 +158,7 @@ func (f *fakeAgent) Name() task.Agent { return f.name }
 func (f *fakeAgent) Resume(_ context.Context, s task.Session, in agent.StartInput) (agent.Turn, error) {
 	f.resumed = append(f.resumed, s.ID+": "+in.Prompt)
 	f.stages = append(f.stages, in.Stage)
+	f.steps = append(f.steps, in.Step)
 	if f.onResume != nil {
 		f.onResume()
 	}
@@ -168,6 +171,7 @@ func (f *fakeAgent) Resume(_ context.Context, s task.Session, in agent.StartInpu
 func (f *fakeAgent) Start(_ context.Context, in agent.StartInput, onSession func(task.Session)) (agent.Turn, error) {
 	f.starts++
 	f.stages = append(f.stages, in.Stage)
+	f.steps = append(f.steps, in.Step)
 	if f.during != nil {
 		f.during()
 	}
