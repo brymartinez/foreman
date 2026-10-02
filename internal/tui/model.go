@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/brymartinez/foreman/internal/app"
+	"github.com/brymartinez/foreman/internal/render"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -63,6 +65,11 @@ type Model struct {
 	TaskCursor  int
 	// LogOffset is how many lines the log is scrolled back from its tail. Zero follows.
 	LogOffset int
+	// ShowOpen swaps the open pane's log for the selected task's foreman show text.
+	ShowOpen bool
+	// ShowTop is the first wrapped show line in view. Show is read from the top, unlike
+	// the log, which follows its tail.
+	ShowTop int
 
 	Mode  Mode
 	Input string // the context file being typed
@@ -109,7 +116,7 @@ func (m *Model) SetTasks(recs []*task.Record) {
 		// The task the cursor was on is gone, so the pane is about to show another
 		// task's log. Follow its tail rather than keep the old task's scroll offset.
 		m.LogOffset = 0
-		m.LogOpen = false
+		m.LogOpen, m.ShowOpen = false, false
 	}
 }
 
@@ -196,11 +203,13 @@ func (m *Model) browse(k Key) Action {
 	case k.Kind == KeyRight || (k.Kind == KeyRune && k.Rune == 'l'):
 		m.Focus = TaskPane
 	case k.Kind == KeyEscape:
-		m.LogOpen = false
+		m.LogOpen, m.ShowOpen = false, false
 	case k.Kind == KeyUp || (k.Kind == KeyRune && k.Rune == 'k'):
 		m.move(-1)
 	case k.Kind == KeyDown || (k.Kind == KeyRune && k.Rune == 'j'):
 		m.move(1)
+	case m.LogOpen && k.Kind == KeyRune && k.Rune == 's':
+		m.toggleShow()
 	case m.LogOpen && m.Focus == TaskPane && (k.Kind == KeyRune && k.Rune == 'u'):
 		m.scrollLog(m.logPage())
 	case m.LogOpen && m.Focus == TaskPane && (k.Kind == KeyRune && k.Rune == 'd'):
@@ -210,15 +219,15 @@ func (m *Model) browse(k Key) Action {
 	case m.LogOpen && m.Focus == TaskPane && k.Kind == KeyCtrlD:
 		m.scrollLog(-max(m.logPage()/2, 1))
 	case m.LogOpen && m.Focus == TaskPane && k.Kind == KeyRune && k.Rune == 'g':
-		m.scrollLog(len(m.Log))
+		m.scrollTop()
 	case m.LogOpen && m.Focus == TaskPane && k.Kind == KeyRune && k.Rune == 'G':
-		m.LogOffset = 0
+		m.scrollEnd()
 	case m.LogOpen && k.Kind == KeyPageUp:
 		m.scrollLog(m.logPage())
 	case m.LogOpen && k.Kind == KeyPageDown:
 		m.scrollLog(-m.logPage())
 	case m.LogOpen && k.Kind == KeyEnd:
-		m.LogOffset = 0
+		m.scrollEnd()
 	case k.Kind == KeyRune && k.Rune == 'c':
 		return m.startCancel()
 	case k.Kind == KeyEnter:
@@ -236,13 +245,51 @@ func (m *Model) move(by int) {
 	m.TaskCursor = clamp(m.TaskCursor+by, len(m.Tasks))
 	if m.TaskCursor != before {
 		m.manualTask = true
-		m.LogOpen = false
+		m.LogOpen, m.ShowOpen = false, false
 		// A new task brings a new log, so show its tail rather than keep the old offset.
 		m.LogOffset = 0
 	}
 }
 
+// toggleShow swaps the open pane between the log and the show text. Show opens at its
+// top, where the state and last outcome are; the log comes back following its tail.
+func (m *Model) toggleShow() {
+	m.ShowOpen = !m.ShowOpen
+	m.ShowTop, m.LogOffset = 0, 0
+}
+
+// showLines is the selected task's foreman show text, wrapped to the pane width. It is
+// rendered on each call from the record in memory, so it is never older than the last
+// SetTasks and always matches what foreman show prints.
+func (m *Model) showLines() []string {
+	rec := m.Selected()
+	if rec == nil {
+		return nil
+	}
+	var b bytes.Buffer
+	render.Show(&b, rec)
+	var out []string
+	for _, l := range strings.Split(strings.TrimRight(b.String(), "\n"), "\n") {
+		out = append(out, wrapLine(printable(l), m.Width)...)
+	}
+	return out
+}
+
+// showLimit is the last ShowTop that still fills the pane.
+func (m *Model) showLimit() int {
+	return max(len(m.showLines())-m.logPage(), 0)
+}
+
+// scrollLog moves the open view by lines; a positive count goes toward older log lines
+// or toward the top of the show text.
 func (m *Model) scrollLog(by int) {
+	if m.ShowOpen {
+		// A refresh or a resize can shrink the text under a stored ShowTop, so the step
+		// starts from the page the frame draws, not from the stale position.
+		limit := m.showLimit()
+		m.ShowTop = min(max(min(m.ShowTop, limit)-by, 0), limit)
+		return
+	}
 	m.LogOffset += by
 	if limit := len(m.Log) - m.logPage(); m.LogOffset > limit {
 		m.LogOffset = limit
@@ -250,6 +297,22 @@ func (m *Model) scrollLog(by int) {
 	if m.LogOffset < 0 {
 		m.LogOffset = 0
 	}
+}
+
+func (m *Model) scrollTop() {
+	if m.ShowOpen {
+		m.ShowTop = 0
+		return
+	}
+	m.scrollLog(len(m.Log))
+}
+
+func (m *Model) scrollEnd() {
+	if m.ShowOpen {
+		m.ShowTop = m.showLimit()
+		return
+	}
+	m.LogOffset = 0
 }
 
 func (m *Model) logPage() int {

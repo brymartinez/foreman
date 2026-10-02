@@ -2,7 +2,7 @@
 
 ## Current stage
 
-Stage 22 (merge conflict check before each review for issue #12) is complete.
+Stage 23 (the dashboard show view for issue #11) is complete.
 Completed runs are needed to measure the effect of the model and budget choices.
 
 ## Completed
@@ -639,6 +639,16 @@ request. Each fix is its own commit with a decision.
 - Merged main's conflict repair for issue #17 (D136). Issue #12's decisions are
   D133 to D135. Verified with `go vet ./...`, `go test ./...`, a binary build, and
   all `scripts/e2e.sh` scenarios, including both `conflicts` and `conflict`.
+
+### Stage 23 (complete): the dashboard show view for issue #11
+
+- With the lower pane open, `s` switches between the log and the `foreman show` text
+  for the selected task, with either list focused (D137). The heading reads
+  `SHOW · repo#N · state`, plus the line range when the text does not fit.
+- Show lines wrap at the terminal width. The log scroll keys scroll the show view, which
+  opens at its top. Returning to the log follows its tail.
+- Verified with `go vet ./...`, `go test ./...`, `go build -o dist/foreman
+  ./cmd/foreman`, and `scripts/e2e.sh`.
 
 ## Known limitations
 

@@ -304,6 +304,9 @@ func paneLines(p pane, width, height int, focused bool, cursor int) []string {
 
 // logPane renders the log heading and the visible slice of the selected task's log.
 func logPane(m Model, height int) []string {
+	if m.ShowOpen {
+		return showPane(m, height)
+	}
 	title, body := "LOG · no task selected", []string{}
 	switch {
 	case m.Selected() == nil:
@@ -339,6 +342,35 @@ func logPane(m Model, height int) []string {
 	return out
 }
 
+// showPane renders the selected task's foreman show text from ShowTop down.
+func showPane(m Model, height int) []string {
+	title, body := "SHOW · no task selected", []string{"  Delegate an issue, or press tab and pick a task to see its state."}
+	if rec := m.Selected(); rec != nil {
+		title = fmt.Sprintf("SHOW · %s#%d · %s", rec.Repo, rec.Number, rec.State)
+		lines := m.showLines()
+		visible := height - 1
+		// A resize or a shorter record can leave ShowTop past the end, so it is clamped
+		// here rather than trusted.
+		top := min(m.ShowTop, max(len(lines)-visible, 0))
+		end := min(top+visible, len(lines))
+		if len(lines) > visible {
+			title += fmt.Sprintf(" · lines %d-%d of %d", top+1, end, len(lines))
+		}
+		body = lines[top:end]
+	}
+	out := []string{colored(pad(truncate(title, m.Width), m.Width), cyan)}
+	for _, l := range body {
+		if len(out) >= height {
+			break
+		}
+		out = append(out, pad(truncate(l, m.Width), m.Width))
+	}
+	for len(out) < height {
+		out = append(out, strings.Repeat(" ", m.Width))
+	}
+	return out
+}
+
 func footer(m Model) string {
 	switch m.Mode {
 	case ChoosingAgent:
@@ -357,6 +389,12 @@ func footer(m Model) string {
 		}
 		return hintsLogLong
 	}
+	if m.LogOpen {
+		if textWidth(hintsOpenLong) > m.Width {
+			return hintsOpenShort
+		}
+		return hintsOpenLong
+	}
 	if textWidth(hintsLong) > m.Width {
 		return hintsShort
 	}
@@ -366,8 +404,11 @@ func footer(m Model) string {
 const (
 	hintsLong     = "j/k move · h/l pane · enter select · c cancel · r refresh · q quit"
 	hintsShort    = "j/k move · h/l pane · enter · c cancel · q quit"
-	hintsLogLong  = "j/k task · u/d log page · ctrl-u/d half page · g/G ends · esc close · h/l pane"
-	hintsLogShort = "j/k task · u/d log · g/G ends · esc close · h/l pane"
+	hintsLogLong  = "j/k task · u/d log page · ctrl-u/d half page · g/G ends · s show/log · esc close · h/l pane"
+	hintsLogShort = "j/k task · u/d log · g/G ends · s show/log · esc close"
+	// hintsOpen are for INBOX focus while the pane is open, where s still switches it.
+	hintsOpenLong  = "j/k move · h/l pane · enter select · s show/log · esc close · c cancel · r refresh · q quit"
+	hintsOpenShort = "j/k move · h/l pane · enter · s show/log · c cancel · q quit"
 )
 
 // truncate cuts s to at most width columns, ending in an ellipsis when it cut. A wide
