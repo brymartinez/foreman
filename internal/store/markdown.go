@@ -161,6 +161,9 @@ type frontmatter struct {
 	PR                  int                `yaml:"pr,omitempty"`
 	PRURL               string             `yaml:"pr_url,omitempty"`
 	PRHead              string             `yaml:"pr_head,omitempty"`
+	ConflictHead        string             `yaml:"conflict_head,omitempty"`
+	ConflictBase        string             `yaml:"conflict_base,omitempty"`
+	ConflictPending     bool               `yaml:"conflict_pending,omitempty"`
 	GitHub              *snapshot          `yaml:"github,omitempty"`
 	LastGitHubSync      *time.Time         `yaml:"last_github_sync,omitempty"`
 	Decisions           []decisionFM       `yaml:"decisions,omitempty"`
@@ -299,17 +302,20 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 			return nil, fmt.Errorf("implementation_agent: %w", err)
 		}
 		rec.Delegation = &task.Delegation{
-			Implementer: task.Session{Agent: impl, ID: fm.SessionID},
-			Reviewer:    impl.Reviewer(),
-			Branch:      fm.Branch,
-			BaseRef:     fm.BaseRef,
-			Worktree:    fm.Worktree,
-			ContextFile: fm.ContextFile,
-			RunnerPID:   fm.RunnerPID,
-			RunnerLog:   fm.RunnerLog,
-			PR:          fm.PR,
-			PRURL:       fm.PRURL,
-			PRHead:      fm.PRHead,
+			Implementer:     task.Session{Agent: impl, ID: fm.SessionID},
+			Reviewer:        impl.Reviewer(),
+			Branch:          fm.Branch,
+			BaseRef:         fm.BaseRef,
+			Worktree:        fm.Worktree,
+			ContextFile:     fm.ContextFile,
+			RunnerPID:       fm.RunnerPID,
+			RunnerLog:       fm.RunnerLog,
+			PR:              fm.PR,
+			PRURL:           fm.PRURL,
+			PRHead:          fm.PRHead,
+			ConflictHead:    fm.ConflictHead,
+			ConflictBase:    fm.ConflictBase,
+			ConflictPending: fm.ConflictPending,
 		}
 		if fm.StartedAt != nil {
 			rec.Delegation.StartedAt = *fm.StartedAt
@@ -403,6 +409,7 @@ func fromRecord(rec *task.Record) frontmatter {
 			fm.WorktreeRemovedAt = &t
 		}
 		fm.RunnerPID, fm.RunnerLog, fm.PR, fm.PRURL, fm.PRHead = d.RunnerPID, d.RunnerLog, d.PR, d.PRURL, d.PRHead
+		fm.ConflictHead, fm.ConflictBase, fm.ConflictPending = d.ConflictHead, d.ConflictBase, d.ConflictPending
 	}
 	if s := rec.GitHub; s != nil {
 		fm.GitHub = &snapshot{UpdatedAt: s.UpdatedAt, State: s.State, Reasons: s.Reasons}

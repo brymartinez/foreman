@@ -123,6 +123,18 @@ type Delegation struct {
 	PRURL             string
 	// PRHead is the PR's head commit when foreman last read it. A review covers one head.
 	PRHead string
+	// ConflictHead and ConflictBase are the PR head and base head of the last automatic
+	// merge conflict repair. A repair runs once per pair. ConflictPending is set until
+	// the runner has run that repair.
+	ConflictHead    string
+	ConflictBase    string
+	ConflictPending bool
+}
+
+// ConflictAttempted reports whether the automatic repair already ran, or is running,
+// for this PR head and base head.
+func (d *Delegation) ConflictAttempted(head, base string) bool {
+	return head != "" && base != "" && d.ConflictHead == head && d.ConflictBase == base
 }
 
 // Check is one validation command the implementation agent ran, as it reported it.
