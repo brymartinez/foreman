@@ -421,7 +421,7 @@ func helpLines(m Model, height int) []string {
 	return append(out, dimmed(pad(truncate("press any key to close the help", m.Width), m.Width)))
 }
 
-// showPane renders the selected task's foreman show text from ShowTop down.
+// showPane renders the selected task's render.Show text from ShowTop down.
 func showPane(m Model, height int) []string {
 	title, body := "SHOW · no task selected", []string{"  Delegate an issue, or press tab and pick a task to see its state."}
 	if rec := m.Selected(); rec != nil {
@@ -451,7 +451,7 @@ func showPane(m Model, height int) []string {
 }
 
 // decisionPane renders the selected task's pending question from DecisionTop down, as
-// foreman respond prints it, with the answer line always last.
+// render.Blocked prints it, with the answer line always last.
 func decisionPane(m Model, height int) []string {
 	rec := m.Selected()
 	if rec == nil || rec.Pending() == nil {
@@ -558,7 +558,7 @@ func routeHints(m Model) string {
 	}
 }
 
-// answerHints say what Enter does on an empty answer, as foreman respond's prompt does.
+// answerHints say what Enter does on an empty answer, naming the recommended option.
 func answerHints(m Model) string {
 	long, short := hintsAnswerLong, hintsAnswerShort
 	if rec := m.Selected(); rec != nil && rec.Pending() != nil {

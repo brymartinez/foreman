@@ -96,7 +96,7 @@ type Model struct {
 	TaskCursor  int
 	// LogOffset is how many lines the log is scrolled back from its tail. Zero follows.
 	LogOffset int
-	// ShowOpen swaps the open pane's log for the selected task's foreman show text.
+	// ShowOpen swaps the open pane's log for the selected task's recorded state.
 	ShowOpen bool
 	// ShowTop is the first wrapped show line in view. Show is read from the top, unlike
 	// the log, which follows its tail.
@@ -184,7 +184,7 @@ func (m *Model) SetTasks(recs []*task.Record) {
 	}
 	switch {
 	case m.Mode == AnsweringDecision && !asks(cur):
-		// The question was answered elsewhere, such as by foreman respond, or the task
+		// The question was answered elsewhere, such as by another dashboard, or the task
 		// is gone. Its log takes the pane back.
 		m.Mode, m.Input = Browsing, ""
 	case m.Mode == AnsweringDecision && !m.LogOpen:
@@ -378,9 +378,9 @@ func (m *Model) toggleShow() {
 	m.ShowTop, m.LogOffset = 0, 0
 }
 
-// showLines is the selected task's foreman show text, wrapped to the pane width. It is
+// showLines is the selected task's render.Show text, wrapped to the pane width. It is
 // rendered on each call from the record in memory, so it is never older than the last
-// SetTasks and always matches what foreman show prints.
+// SetTasks.
 func (m *Model) showLines() []string {
 	rec := m.Selected()
 	if rec == nil {
@@ -577,7 +577,7 @@ func (m *Model) Answered(rec *task.Record) {
 // answer and press Enter again.
 func (m *Model) AnswerFailed() { m.answering = false }
 
-// decisionLines is the selected task's pending question as foreman respond prints it,
+// decisionLines is the selected task's pending question as render.Blocked prints it,
 // wrapped to the pane width.
 func (m *Model) decisionLines() []string {
 	rec := m.Selected()

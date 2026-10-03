@@ -469,7 +469,7 @@ func TestFind(t *testing.T) {
 	if r, err := a.Find(context.Background(), "ridezoomo/sw-automations", 825); err != nil || r.Repo != "ridezoomo/sw-automations" {
 		t.Errorf("qualified find: %v %v", r, err)
 	}
-	if _, err := a.Find(context.Background(), "", 404); err == nil || !strings.Contains(err.Error(), "foreman inbox") {
+	if _, err := a.Find(context.Background(), "", 404); err == nil || !strings.Contains(err.Error(), "refresh the dashboard") {
 		t.Errorf("missing err = %v", err)
 	}
 }

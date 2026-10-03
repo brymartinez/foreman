@@ -64,7 +64,7 @@ func (a App) Find(ctx context.Context, repo task.Repo, number int) (*task.Record
 	if repo != "" {
 		rec, err := a.Store.Get(ctx, task.Key{Repo: repo, Number: number})
 		if err == nil && rec == nil {
-			return nil, fmt.Errorf("%s#%d is not tracked; run foreman inbox first", repo, number)
+			return nil, fmt.Errorf("%s#%d is not tracked; refresh the dashboard first", repo, number)
 		}
 		return rec, err
 	}
@@ -80,7 +80,7 @@ func (a App) Find(ctx context.Context, repo task.Repo, number int) (*task.Record
 	}
 	switch len(matches) {
 	case 0:
-		return nil, fmt.Errorf("#%d is not tracked; run foreman inbox first", number)
+		return nil, fmt.Errorf("#%d is not tracked; refresh the dashboard first", number)
 	case 1:
 		return matches[0], nil
 	}
@@ -204,7 +204,7 @@ func (a App) Cancel(ctx context.Context, rec *task.Record) (*task.Record, error)
 		return nil, fmt.Errorf("stop runner %d: %w", pid, err)
 	}
 	if !stopped {
-		return nil, fmt.Errorf("runner %d has not exited yet; check again with foreman status", pid)
+		return nil, fmt.Errorf("runner %d has not exited yet; the dashboard checks again on its next refresh", pid)
 	}
 	// A runner that exited without recording its stop still holds its pid.
 	return a.update(ctx, rec.Key, existing(func(cur *task.Record) {

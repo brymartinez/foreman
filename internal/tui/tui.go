@@ -351,8 +351,8 @@ func autoStart(ctx context.Context, s Source, req app.StartRequest, prior *agent
 
 func startResult(ctx context.Context, s Source, req app.StartRequest) result {
 	if req.ContextFile != "" {
-		// The runner a later `foreman respond` spawns reads this path from its own
-		// working directory, so store it absolute, as `inbox` and `start` do.
+		// The runner a later answer spawns reads this path from its own working
+		// directory, so store it absolute.
 		abs, err := filepath.Abs(req.ContextFile)
 		if err != nil {
 			return result{err: fmt.Errorf("context file %s: %w", req.ContextFile, err), finished: true}
@@ -393,7 +393,7 @@ func resumeResult(ctx context.Context, s Source, key task.Key) result {
 }
 
 // respond records an answer typed in the dashboard through App.Respond, so it is
-// resolved exactly as foreman respond resolves it. It is counted as pending, because
+// resolved by the same rules as every answer. It is counted as pending, because
 // the last answer records WORKING before App.Respond spawns the runner.
 func respond(ctx context.Context, s Source, key task.Key, raw string) result {
 	r := respondResult(ctx, s, key, raw)

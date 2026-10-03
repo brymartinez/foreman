@@ -23,7 +23,7 @@ type CleanResult struct {
 }
 
 // Clean removes the worktrees of finished tasks. A branch is deleted only when its PR
-// is merged and DeleteMergedBranches is on; otherwise it stays, so `start` can pick
+// is merged and DeleteMergedBranches is on; otherwise it stays, so a new start can pick
 // the work up again. A worktree with uncommitted changes is kept and reported.
 func (a App) Clean(ctx context.Context, req CleanRequest) ([]CleanResult, error) {
 	var recs []*task.Record
@@ -78,7 +78,7 @@ func (a App) cleanDone(ctx context.Context, recs []*task.Record, notes map[task.
 func cleanNote(res CleanResult) string {
 	switch {
 	case errors.Is(res.Err, ErrWorktreeDirty):
-		return fmt.Sprintf("worktree kept: %v; commit or discard them, then run foreman clean %d", res.Err, res.Rec.Number)
+		return fmt.Sprintf("worktree kept: %v; commit or discard them, and a later refresh removes it", res.Err)
 	case res.Err != nil:
 		return fmt.Sprintf("worktree kept: %v", res.Err)
 	case res.BranchDeleted:

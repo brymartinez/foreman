@@ -90,7 +90,7 @@ func read(path string) (string, string, error) {
 }
 
 // RepoRoot is the top of the git working tree containing dir, or "" when dir is not
-// inside one. `foreman config` uses it; tasks use their worktree instead.
+// inside one. Tasks use their worktree instead.
 func RepoRoot(ctx context.Context, dir string) (string, error) {
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--show-toplevel")
