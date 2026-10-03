@@ -4,6 +4,11 @@
 # reported with a command to replace it, never overwritten.
 set -eu
 
+# quote prints $1 in single quotes for a shell, with each ' written as '\''.
+quote() {
+	printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
 defaults=$1
 stages=$2
 for f in "$defaults"/*.md; do
@@ -15,6 +20,6 @@ for f in "$defaults"/*.md; do
 		echo "kept $dest"
 	else
 		echo "differs $dest"
-		echo "  replace it with: cp '$f' '$dest'"
+		echo "  replace it with: cp $(quote "$f") $(quote "$dest")"
 	fi
 done

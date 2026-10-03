@@ -5,8 +5,8 @@ set -eu
 script="$(cd "$(dirname "$0")" && pwd)/install-stages.sh"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-# The space checks that paths with spaces stay one argument.
-defaults="$tmp/foreman clone/defaults"
+# The space and apostrophe check that the printed cp command quotes paths correctly.
+defaults="$tmp/Bryan's foreman clone/defaults"
 stages="$tmp/stages"
 mkdir -p "$defaults" "$stages"
 failed=0
@@ -30,8 +30,10 @@ echo "$out" | grep -qxF "wrote $stages/missing.md" || fail "a missing stage file
 echo "$out" | grep -qxF "kept $stages/same.md" || fail "an identical stage file is not reported as kept"
 
 echo "$out" | grep -qxF "differs $stages/old.md" || fail "a differing stage file is not reported as differs"
-echo "$out" | grep -qxF "  replace it with: cp '$defaults/old.md' '$stages/old.md'" || fail "a differing stage file has no cp command"
 [ "$(cat "$stages/old.md")" = "my old copy" ] || fail "a differing stage file was overwritten"
+replace=$(echo "$out" | sed -n 's/^  replace it with: //p')
+[ -n "$replace" ] || fail "a differing stage file has no replace command"
+sh -c "$replace" 2>/dev/null && cmp -s "$defaults/old.md" "$stages/old.md" || fail "the printed replace command does not replace the file"
 
 if [ "$failed" -ne 0 ]; then
 	printf 'output was:\n%s\n' "$out" >&2
