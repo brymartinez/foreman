@@ -539,3 +539,25 @@ func TestFooterMentionsShow(t *testing.T) {
 		}
 	}
 }
+
+func TestInboxTitleShowsView(t *testing.T) {
+	m := model()
+	m.Width = minWidth
+	if got := screen(m); !strings.Contains(got, "INBOX · configured repos") {
+		t.Errorf("a %d-column frame does not name the configured view:\n%s", minWidth, got)
+	}
+	m.AllRepos = true
+	if got := screen(m); !strings.Contains(got, "INBOX · all repos") {
+		t.Errorf("a %d-column frame does not name the all view:\n%s", minWidth, got)
+	}
+}
+
+func TestHintsOfferTheViewToggle(t *testing.T) {
+	m := model()
+	for _, width := range []int{minWidth, 200} {
+		m.Width = width
+		if got := footer(m); !strings.Contains(got, "v view") || textWidth(got) > width {
+			t.Errorf("%d-column hints = %q; want v view within the width", width, got)
+		}
+	}
+}

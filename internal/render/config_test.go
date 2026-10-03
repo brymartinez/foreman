@@ -12,10 +12,10 @@ func TestConfigShowsResolvedValues(t *testing.T) {
 	var out strings.Builder
 	Config(&out, config.Config{
 		Path: "/tmp/foreman.yaml", TasksDir: "/vault/tasks", WorktreesDir: "/tmp/worktrees", RepositoriesDir: "/tmp/repositories", LogDir: "/tmp/logs",
-		StagesDir: "/tmp/stages", IgnoredRepos: []task.Repo{"acme/widgets"}, Claude: config.Claude{Command: "claude"}, Codex: config.Codex{Command: "codex"},
+		StagesDir: "/tmp/stages", IncludedRepos: []task.Repo{"acme/tools"}, ExcludedRepos: []task.Repo{"acme/widgets"}, Claude: config.Claude{Command: "claude"}, Codex: config.Codex{Command: "codex"},
 		Cleanup: config.Cleanup{OnDone: true, DeleteMergedBranch: false}, Mentions: true, Refresh: config.DefaultRefresh,
 	})
-	for _, want := range []string{"Config file: /tmp/foreman.yaml", "Ignore repositories: acme/widgets", "Review rounds: 3 passes per review", "Claude plan model: CLI default", "Claude implement model: CLI default", "Claude review model: CLI default", "Codex plan reasoning effort: CLI default", "Codex implement reasoning effort: CLI default", "Codex review reasoning effort: CLI default", "per Claude turn (Codex has no cap)", "Fix rounds: 3 before asking you", "Delete merged branch: false", "Mentions: true", "GitHub refresh: every 60 seconds"} {
+	for _, want := range []string{"Config file: /tmp/foreman.yaml", "Include repositories: acme/tools", "Exclude repositories: acme/widgets", "Review rounds: 3 passes per review", "Claude plan model: CLI default", "Claude implement model: CLI default", "Claude review model: CLI default", "Codex plan reasoning effort: CLI default", "Codex implement reasoning effort: CLI default", "Codex review reasoning effort: CLI default", "per Claude turn (Codex has no cap)", "Fix rounds: 3 before asking you", "Delete merged branch: false", "Mentions: true", "GitHub refresh: every 60 seconds"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("missing %q in:\n%s", want, out.String())
 		}

@@ -49,7 +49,7 @@ func TestInboxRefreshLifecycle(t *testing.T) {
 			t.Fatalf("warnings: %v", report.Warnings)
 		}
 		var out strings.Builder
-		_, err = ChooseInbox(bufio.NewReader(strings.NewReader("q\n")), &out, report)
+		_, err = ChooseInbox(bufio.NewReader(strings.NewReader("q\n")), &out, report, nil)
 		if err != nil || !strings.Contains(out.String(), "#4") || strings.Contains(out.String(), "#1") || strings.Contains(out.String(), "#2") || strings.Contains(out.String(), "#3") {
 			t.Fatalf("picker: %s, %v", out.String(), err)
 		}
@@ -122,7 +122,7 @@ func TestCancelledRefreshIsNotSwallowed(t *testing.T) {
 	cancel()
 	gh := &refreshGitHub{fakeGitHub: &fakeGitHub{}, calls: map[task.Key]int{}}
 	a := App{GitHub: gh}
-	_, _, _, err := a.fetchTracked(ctx, []*task.Record{seen(1, task.Discovered, "open", t0, task.Assigned)}, nil)
+	_, _, _, err := a.fetchTracked(ctx, []*task.Record{seen(1, task.Discovered, "open", t0, task.Assigned)}, nil, false)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation: %v", err)
 	}

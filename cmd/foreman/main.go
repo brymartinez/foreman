@@ -112,7 +112,8 @@ func run(argv []string) int {
 		Notifier:             notification(cfg),
 		CleanOnDone:          cfg.Cleanup.OnDone,
 		DeleteMergedBranches: cfg.Cleanup.DeleteMergedBranch,
-		IgnoredRepositories:  cfg.IgnoredRepos,
+		IncludedRepositories: cfg.IncludedRepos,
+		ExcludedRepositories: cfg.ExcludedRepos,
 		HideMentionOnly:      !cfg.Mentions,
 		Now:                  func() time.Time { return time.Now().Truncate(time.Second) },
 	}
@@ -157,7 +158,8 @@ func run(argv []string) int {
 			break
 		}
 		render.InboxActivity(os.Stdout, report)
-		selection, err := app.ChooseInbox(stdin, os.Stdout, report)
+		reload := func(allRepos bool) (app.InboxReport, error) { return a.InboxView(ctx, allRepos) }
+		selection, err := app.ChooseInbox(stdin, os.Stdout, report, reload)
 		if err != nil {
 			return fail(err)
 		}

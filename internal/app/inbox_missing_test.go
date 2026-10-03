@@ -11,16 +11,16 @@ import (
 
 func TestInboxRefreshesMissingUndelegatedIssue(t *testing.T) {
 	missing := seen(5, task.Discovered, "open", t0, task.Assigned)
-	ignored := seen(6, task.Discovered, "open", t0)
-	ignored.Repo = "ignored/repo"
+	excluded := seen(6, task.Discovered, "open", t0)
+	excluded.Repo = "excluded/repo"
 	store := &fakeStore{recs: map[task.Key]*task.Record{
-		missing.Key: missing,
-		ignored.Key: ignored,
-		key(7):      seen(7, task.Done, "closed", t0),
-		key(8):      seen(8, task.Discovered, "open", t0, task.Assigned),
+		missing.Key:  missing,
+		excluded.Key: excluded,
+		key(7):       seen(7, task.Done, "closed", t0),
+		key(8):       seen(8, task.Discovered, "open", t0, task.Assigned),
 	}}
 	gh := &fakeGitHub{items: []InboxItem{item(8, "open", t0, task.Assigned)}}
-	a := App{Store: store, GitHub: gh, Runners: &fakeRunners{}, IgnoredRepositories: []task.Repo{ignored.Repo}, Now: func() time.Time { return now }}
+	a := App{Store: store, GitHub: gh, Runners: &fakeRunners{}, ExcludedRepositories: []task.Repo{excluded.Repo}, Now: func() time.Time { return now }}
 	report, err := a.Inbox(context.Background())
 	if err != nil {
 		t.Fatal(err)
