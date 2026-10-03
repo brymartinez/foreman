@@ -1,0 +1,38 @@
+# Foreman routing: which agent and models start a new issue from the dashboard.
+#
+# The selector reads the issue and picks the first rule whose `when` fits, or none.
+# A rule's profiles are tried in order; a profile whose agent has no quota left is
+# skipped. No fitting rule, or an unsure selector, uses `default`.
+#
+# A profile sets `agent` and may set `plan_model`, `model`, and, for Codex,
+# `plan_reasoning_effort` and `reasoning_effort`. An omitted field uses the
+# matching claude.* or codex.* setting in config.yaml.
+
+selector:
+  agent: claude
+  # model: "" uses claude.plan_model, else claude.model.
+
+profiles:
+  claude:
+    agent: claude
+    plan_model: sonnet
+    model: opus
+  codex:
+    agent: codex
+    plan_model: gpt-6-luna
+    plan_reasoning_effort: xhigh
+    model: gpt-6-sol
+    reasoning_effort: medium
+
+rules:
+  - when: Broad or ambiguous work, design or architecture changes, or refactors across several packages.
+    profiles: [claude]
+    why: broad or ambiguous design work
+  - when: Narrow, well-specified change with clear steps or acceptance criteria, such as a small bug fix, a typo, or a single function.
+    profiles: [codex]
+    why: narrow, well-specified change
+  - when: Any other work.
+    profiles: [claude, codex]
+    why: general work
+
+default: claude

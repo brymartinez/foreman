@@ -106,9 +106,26 @@ type Usage struct {
 	CodexTurns           int
 }
 
+// Profile is the agent, models, and effort routing chose for a task. It is stored
+// resolved, so editing routing.yaml or config.yaml never changes a running task.
+// Empty fields leave the adapter's own setting in place.
+type Profile struct {
+	Name                string `yaml:"name"`
+	Agent               Agent  `yaml:"agent"`
+	PlanModel           string `yaml:"plan_model,omitempty"`
+	Model               string `yaml:"model,omitempty"`
+	PlanReasoningEffort string `yaml:"plan_reasoning_effort,omitempty"`
+	ReasoningEffort     string `yaml:"reasoning_effort,omitempty"`
+}
+
 // Delegation exists once the user has run start; tracked-only items have none.
 type Delegation struct {
 	Implementer Session
+	// Profile is set when routing chose the implementer; RouteReason says why.
+	// RouteLogged is set once the runner has written the route line to the log.
+	Profile     *Profile
+	RouteReason string
+	RouteLogged bool
 	StartedAt   time.Time
 	Reviewer    Agent
 	Branch      string
