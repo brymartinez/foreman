@@ -172,10 +172,10 @@ Do not change, commit, or push anything in this turn. If writing the documents n
 	planningTestRule(s)
 }
 
-// planningTestRule makes the plan list the tests the implementer writes first, so the
-// reviewer can check them against the plan.
+// planningTestRule keeps the plan test-first. The plan names behavior, not tests, so it
+// stays short and the implementer picks the test names.
 func planningTestRule(s *strings.Builder) {
-	s.WriteString("For new or changed behavior, the implementation plan names each test by its readable name and the behavior it checks. The implementer writes each of those tests first and sees it fail before writing the code.\n\n")
+	s.WriteString("For new or changed behavior, the implementation plan describes the behavior to verify, without naming every test. The implementer writes tests for that behavior first and sees them fail before writing the code.\n\n")
 }
 
 // testFirstSection is foreman's own test rule. It lives in the prompt, not in the

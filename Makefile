@@ -17,14 +17,12 @@ install: build
 	rm -f $(BIN_DIR)/foreman
 	cp dist/foreman $(BIN_DIR)/foreman
 
-# Existing stage files are yours, so config never overwrites them.
+# Existing stage files are yours, so config never overwrites them. It reports each one
+# that differs from its default, with a command to replace it.
 config:
-	mkdir -p $(STAGES_DIR)
-	@for f in defaults/stages/*.md; do \
-		dest=$(STAGES_DIR)/$$(basename $$f); \
-		if [ -e "$$dest" ]; then echo "kept $$dest"; \
-		else cp "$$f" "$$dest" && echo "wrote $$dest"; fi; \
-	done
+	mkdir -p "$(STAGES_DIR)"
+	@sh scripts/install-stages.sh "$(CURDIR)/defaults/stages" "$(STAGES_DIR)"
 
 test:
 	go vet ./... && go test ./...
+	sh scripts/install-stages_test.sh
