@@ -125,6 +125,52 @@ func TestClaudeStreamReachesTheLog(t *testing.T) {
 	}
 }
 
+func TestClaudeStreamStillLogsEveryEvent(t *testing.T) {
+	events := []string{
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"Now I'll read the file."}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read"}]}}`,
+		`{"type":"user","message":{"content":[{"type":"tool_result","content":"package x"}]}}`,
+		fmt.Sprintf(`{"type":"result","subtype":"success","structured_output":%s}`, prOpened),
+	}
+	exec := func(_ context.Context, c Command) error {
+		io.WriteString(c.Stdout, strings.Join(events, "\n")+"\n")
+		return nil
+	}
+	var log bytes.Buffer
+	turn, err := Claude{Bin: "claude", Exec: exec, NewSessionID: func() string { return "sid-1" }}.Start(context.Background(), StartInput{Worktree: "/wt", Log: &log}, func(task.Session) {})
+	if err != nil || turn.Outcome.Status != PROpened {
+		t.Fatalf("turn = %+v, %v", turn, err)
+	}
+	for _, ev := range events {
+		if !strings.Contains(log.String(), ev+"\n") {
+			t.Errorf("log missing %s", ev)
+		}
+	}
+}
+
+func TestCodexStreamStillLogsEveryEvent(t *testing.T) {
+	events := []string{
+		`{"type":"thread.started","thread_id":"th-1"}`,
+		`{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Now I'll read the file."}}`,
+		`{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"cat x.go","exit_code":0}}`,
+		`{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":12}}`,
+	}
+	exec := func(_ context.Context, c Command) error {
+		io.WriteString(c.Stdout, strings.Join(events, "\n")+"\n")
+		return os.WriteFile(argValue(c.Args, "-o"), []byte(prOpened), 0o600)
+	}
+	var log bytes.Buffer
+	turn, err := Codex{Bin: "codex", Exec: exec}.Start(context.Background(), StartInput{Worktree: "/wt", Log: &log}, func(task.Session) {})
+	if err != nil || turn.Outcome.Status != PROpened || turn.Usage.CodexOutputTokens != 12 {
+		t.Fatalf("turn = %+v, %v", turn, err)
+	}
+	for _, ev := range events {
+		if !strings.Contains(log.String(), ev+"\n") {
+			t.Errorf("log missing %s", ev)
+		}
+	}
+}
+
 func TestClaudeStreamWithoutResultHasNoSession(t *testing.T) {
 	exec := func(_ context.Context, c Command) error {
 		io.WriteString(c.Stdout, "{\"type\":\"system\",\"subtype\":\"init\"}\n")
