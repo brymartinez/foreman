@@ -84,7 +84,7 @@ foreman cancel 825    -> SIGTERM the runner, wait up to 30s for it to exit
 foreman               -> the dashboard, until q or ctrl+c:
                          every 1s : app.Tasks re-reads the task files and, when open,
                                     re-tails the selected task's runner log; no GitHub call
-                         every `refresh` seconds (60 by default): app.Inbox, the
+                         every `refresh` seconds (60 by default): app.InboxView, the
                            same as `foreman inbox`
                          enter on an inbox issue -> agent, context file, app.Start
                          enter on a REVIEWED issue -> app.Resume, no prompts
@@ -98,6 +98,8 @@ foreman               -> the dashboard, until q or ctrl+c:
                          esc -> close the log
                          c on a running task     -> confirm, app.Cancel
                          a -> toggle auto mode, saved in state.json (D144)
+                         v -> toggle the inbox between the configured repositories
+                           and all of them, this session only, and refresh
                          auto mode, after each successful refresh, finished start,
                            and 1s tick: app.Start with auto.agent for assigned,
                            never delegated issues, oldest first, while fewer than
@@ -319,6 +321,16 @@ the same commit. The commit message records why it changed.
   REVIEWED. Work an agent holds stays in DELEGATED WORK, so an issue is never delegated
   twice. `mentions: false` hides mention-only items but never a delegated task that
   needs the developer.
+- **Repository filter.** A nonempty `include_repositories` shows only those
+  repositories and overrides `exclude_repositories`; otherwise the exclude list hides
+  its repositories. `App.InboxView` drops filtered items and stored records before
+  `Reconcile`, so the configured view writes no records for them and reports no waiting
+  task from them, and `fetchTracked` skips tracked items outside the view. `v` in the dashboard and the picker passes `allRepos`, which
+  bypasses both lists for the session; the searches, involvement reasons, and
+  `mentions` are the same in either view. In the dashboard, `v` empties INBOX until the
+  new view's refresh lands, so no row from the old view stays selectable. Auto mode
+  starts nothing in the all view, so a look outside the filter never spends a run there. `status` and
+  DELEGATED WORK read the task store, so tasks in any repository stay reachable.
 - **Lookup failures warn and retry** next refresh without blocking other items. A 404
   or 410 on an undelegated item is reported once and then no longer checked.
 - **Delegation from the inbox doesn't need a checkout:** foreman keeps a clone under

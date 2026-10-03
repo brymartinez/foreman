@@ -430,7 +430,7 @@ scenario_inbox() {
 	echo "inbox: first run, filters, and delegation from outside any checkout"
 	setup inbox
 	rm -rf "$sandbox/tasks"
-	printf 'ignore_repositories: [acme/ignored]\n' >>"$sandbox/config.yaml"
+	printf 'exclude_repositories: [acme/ignored]\n' >>"$sandbox/config.yaml"
 	echo "[$(hit acme/widgets 42 'Add retries'),$(hit acme/ignored 7 'Ignore me')]" >"$state/search-issues-assignee.json"
 	echo "[$(hit acme/widgets 950 'Review me')]" >"$state/search-prs-review-requested.json"
 	FOREMAN_CWD=$sandbox
@@ -441,7 +441,7 @@ scenario_inbox() {
 	printf 'y\n1\nclaude\n\n' | foreman inbox >"$sandbox/inbox.txt" 2>&1 || true
 	check "setup creates the tasks directory" test -d "$sandbox/tasks"
 	check "the picker shows repo-qualified items" contains "$sandbox/inbox.txt" "acme/widgets#42"
-	check "ignored repositories are hidden" bash -c "! grep -q 'acme/ignored' '$sandbox/inbox.txt'"
+	check "excluded repositories are hidden" bash -c "! grep -q 'acme/ignored' '$sandbox/inbox.txt'"
 	check "review requests aren't offered for delegation" bash -c "! grep -q 'acme/widgets#950' '$sandbox/inbox.txt'"
 	check "the source checkout is cloned" test -d "$sandbox/repositories/acme-widgets/.git"
 	check "the selection is delegated" wait_status "review ✓"
@@ -449,7 +449,21 @@ scenario_inbox() {
 	echo "[$(hit acme/widgets 42 'Add retries'),$(hit acme/widgets 43 'Fix pagination'),$(hit acme/ignored 7 'Ignore me')]" >"$state/search-issues-assignee.json"
 	foreman inbox --non-interactive </dev/null >"$sandbox/report.txt"
 	check "non-interactive reports new work" contains "$sandbox/report.txt" "acme/widgets#43"
-	check "non-interactive hides ignored repositories" bash -c "! grep -q 'acme/ignored' '$sandbox/report.txt'"
+	check "non-interactive hides excluded repositories" bash -c "! grep -q 'acme/ignored' '$sandbox/report.txt'"
+
+	cp "$sandbox/config.yaml" "$sandbox/config.exclude"
+	printf 'include_repositories: [acme/ignored, acme/other]\n' >>"$sandbox/config.yaml"
+	echo "[$(hit acme/widgets 43 'Fix pagination'),$(hit acme/other 5 'Included'),$(hit acme/ignored 7 'Ignore me')]" >"$state/search-issues-assignee.json"
+	foreman inbox --non-interactive </dev/null >"$sandbox/include.txt"
+	check "the include list shows its repositories" contains "$sandbox/include.txt" "acme/other#5"
+	check "the include list beats the exclude list" contains "$sandbox/include.txt" "acme/ignored#7"
+	check "the include list hides other repositories" bash -c "! grep -q 'acme/widgets#43' '$sandbox/include.txt'"
+	foreman config --show >"$sandbox/show-include.txt"
+	check "config --show lists the included repositories" contains "$sandbox/show-include.txt" "Include repositories: acme/ignored, acme/other"
+	printf 'v\nq\n' | foreman inbox >"$sandbox/view.txt" 2>&1
+	check "the picker names the configured view" contains "$sandbox/view.txt" "INBOX (configured repositories)"
+	check "v in the picker lists every repository" bash -c "sed -n '/INBOX (all repositories)/,\$p' '$sandbox/view.txt' | grep -q 'acme/widgets#43'"
+	cp "$sandbox/config.exclude" "$sandbox/config.yaml"
 
 	echo "[$(hit acme/widgets 43 'Fix pagination')]" >"$state/search-issues-assignee.json"
 	echo "[$(hit acme/widgets 951 'Mention me')]" >"$state/search-prs-mentions.json"
@@ -463,14 +477,14 @@ scenario_inbox() {
 	check "searches ask for gh's maximum" contains "$state/gh.log" "--limit=1000"
 
 	foreman config --show >"$sandbox/show.txt"
-	check "config --show lists the ignored repository" contains "$sandbox/show.txt" "Ignore repositories: acme/ignored"
+	check "config --show lists the excluded repository" contains "$sandbox/show.txt" "Exclude repositories: acme/ignored"
 	check "config --show lists the plan model" contains "$sandbox/show.txt" "Codex plan model: gpt-6-luna"
 	check "config --show lists the plan effort" contains "$sandbox/show.txt" "Codex plan reasoning effort: xhigh"
 	printf '#!/bin/sh\n[ "$1" = -w ] && echo "edited $2" >"%s/edited"\n' "$sandbox" >"$sandbox/bin/editor"
 	chmod +x "$sandbox/bin/editor"
 	check "config --edit runs an editor with arguments" bash -c "cd '$sandbox' && EDITOR='editor -w' VISUAL= '$work/foreman' config --edit && grep -qF '$sandbox/config.yaml' '$sandbox/edited'"
 	cp "$sandbox/config.yaml" "$sandbox/config.good"
-	printf 'ignore_repositories:\n  - "acme/typo\\""\n' >>"$sandbox/config.yaml"
+	printf 'exclude_repositories:\n  - "acme/typo\\""\n' >>"$sandbox/config.yaml"
 	check "an invalid config stops other commands" bash -c "cd '$sandbox' && ! '$work/foreman' status 2>/dev/null"
 	printf '#!/bin/sh\ncp "%s/config.good" "$1"\n' "$sandbox" >"$sandbox/bin/fixer"
 	chmod +x "$sandbox/bin/fixer"

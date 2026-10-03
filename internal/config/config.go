@@ -32,7 +32,10 @@ type Config struct {
 	Codex         Codex         `yaml:"codex"`
 	Cleanup       Cleanup       `yaml:"cleanup"`
 	Auto          Auto          `yaml:"auto"`
-	IgnoredRepos  []task.Repo   `yaml:"ignore_repositories"`
+	// IncludedRepos, when nonempty, limits the inbox to these repositories and
+	// overrides ExcludedRepos.
+	IncludedRepos []task.Repo `yaml:"include_repositories"`
+	ExcludedRepos []task.Repo `yaml:"exclude_repositories"`
 	// Path is the resolved config file used by config show/edit.
 	Path string `yaml:"-"`
 	// StagesDir holds the global stage instructions: stages/ next to the config file,
@@ -146,14 +149,25 @@ func Load() (Config, error) {
 	if cfg.Auto.MaxConcurrent < 1 {
 		return Config{}, fmt.Errorf("%s: auto.max_concurrent is %d; the minimum is 1", path, cfg.Auto.MaxConcurrent)
 	}
-	for i, repo := range cfg.IgnoredRepos {
-		parsed, err := task.ParseRepo(string(repo))
-		if err != nil {
-			return Config{}, fmt.Errorf("ignore_repositories[%d]: %w", i, err)
-		}
-		cfg.IgnoredRepos[i] = parsed
+	if err := parseRepoList("include_repositories", cfg.IncludedRepos); err != nil {
+		return Config{}, err
+	}
+	if err := parseRepoList("exclude_repositories", cfg.ExcludedRepos); err != nil {
+		return Config{}, err
 	}
 	return cfg, nil
+}
+
+// parseRepoList validates each entry of the config list key and stores the parsed form in place.
+func parseRepoList(key string, repos []task.Repo) error {
+	for i, repo := range repos {
+		parsed, err := task.ParseRepo(string(repo))
+		if err != nil {
+			return fmt.Errorf("%s[%d]: %w", key, i, err)
+		}
+		repos[i] = parsed
+	}
+	return nil
 }
 
 // FilePath is the config file: $FOREMAN_CONFIG, or ~/.config/foreman/config.yaml.

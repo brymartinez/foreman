@@ -124,6 +124,7 @@ task's state. The selected row is drawn in reverse video with no color inside it
 | `enter` on a task | open its log below, or the waiting question on a `NEEDS_DECISION` task |
 | `c` | cancel the highlighted delegated task, after a `y`/`n` confirm |
 | `a` | turn auto mode on or off; the choice is kept for the next launch |
+| `v` | switch the inbox between your configured repositories and all of them, for this session |
 | `r` | refresh from GitHub now |
 | `u` `d` with a log open | scroll up or down one page |
 | `ctrl+u` `ctrl+d` with a log open | scroll up or down half a page |
@@ -189,7 +190,7 @@ refetched. Delegated work stays tracked. Missing items are not offered for new
 delegation. A failed item lookup warns without aborting the inbox, keeps its stored
 state, and retries next time. An issue you never delegated that GitHub no longer has,
 or that you can no longer see, is reported once and then not checked again. DONE tasks
-and ignored repositories are excluded. `foreman status` lists every task it can,
+and repositories outside the configured filter are excluded. `foreman status` lists every task it can,
 with any failed PR or CI lookups as warnings underneath.
 
 Local builds show the commit in `foreman version`, for example
@@ -199,7 +200,8 @@ show their stamped version.
 
 The inbox is interactive by default. It shows repo-qualified identities such as
 `acme/widgets#825`, offers the issues for delegation, asks which configured agent should
-implement the chosen one, and accepts an optional context Markdown file. Press `q` to leave without starting work. Use
+implement the chosen one, and accepts an optional context Markdown file. Press `v` to switch between your configured
+repositories and all of them, and `q` to leave without starting work. Use
 `--non-interactive` for scripts and the report-style output. The interactive picker
 shows unchanged current items again on later runs and can be run from any directory.
 When you delegate an item, Foreman clones or reuses its source checkout under
@@ -451,7 +453,8 @@ codex:
   reasoning_effort: ""               # implementation; "" uses the CLI default
   plan_reasoning_effort: ""          # "" uses reasoning_effort
   review_reasoning_effort: ""        # "" uses reasoning_effort
-ignore_repositories: []              # exact owner/name repositories excluded from inbox
+include_repositories: []             # exact owner/name; when set, the inbox shows only these
+exclude_repositories: []             # exact owner/name hidden from the inbox when include is empty
 cleanup:
   on_done: true                   # inbox removes DONE tasks' worktrees
   delete_merged_branch: true      # and the local branch, once the PR is merged
@@ -482,8 +485,16 @@ codex:
 Task files and the open log are re-read every second regardless, and `r` refreshes
 GitHub whenever you ask.
 
-`ignore_repositories` accepts exact repository names such as `acme/widgets`. Ignored
-repositories are excluded from fresh inbox results and tracked-task refreshes.
+`include_repositories` and `exclude_repositories` accept exact repository names such as
+`acme/widgets`. A nonempty include list limits the inbox to those repositories and the
+exclude list is then ignored. With an empty include list, the exclude list hides its
+repositories. The filter applies to fresh inbox results and tracked-task refreshes,
+including `foreman inbox --non-interactive`, and to the waiting tasks the inbox
+reports. Press `v` in the dashboard or the
+interactive inbox to see every repository for the rest of the session; `mentions`
+still applies. Auto mode pauses while the dashboard shows every repository, so it only
+starts work from your configured repositories. `foreman status` and the dashboard's delegated work list every task
+whatever its repository.
 
 ## Permissions
 

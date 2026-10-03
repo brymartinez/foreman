@@ -275,3 +275,27 @@ func TestAutoWaitsWhileTheTaskListCannotBeRead(t *testing.T) {
 		t.Fatalf("after a good read auto started %v; want a/b#1", got)
 	}
 }
+
+func TestAutoStartsNothingInTheAllView(t *testing.T) {
+	m := autoModel(3)
+	m.AllRepos = true
+	all := app.InboxReport{Current: []app.InboxEntry{assigned("a/b", 1, 0)}}
+	apply(&m, result{report: &all, allRepos: true})
+	if got := m.AutoStarts(); len(got) != 0 {
+		t.Fatalf("auto starts = %v; want none from the all repositories view", startedKeys(got))
+	}
+	if got := plain(Frame(m))[0]; !strings.Contains(got, "auto paused") {
+		t.Errorf("header = %q; want auto paused", got)
+	}
+
+	// Back in the configured view, nothing starts until its refresh fills the inbox.
+	press(&m, rune_('v'))
+	if got := m.AutoStarts(); len(got) != 0 {
+		t.Fatalf("auto starts = %v; want none before the configured view's refresh", startedKeys(got))
+	}
+	configured := app.InboxReport{Current: []app.InboxEntry{assigned("a/b", 1, 0)}}
+	apply(&m, result{report: &configured})
+	if got := m.AutoStarts(); len(got) != 1 {
+		t.Errorf("auto starts = %v; want the configured view's issue", startedKeys(got))
+	}
+}

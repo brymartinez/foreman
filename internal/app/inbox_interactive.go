@@ -51,24 +51,17 @@ func CanDelegate(entry InboxEntry) bool {
 
 // ChooseInbox prints the delegable issues in the current refresh and collects one
 // delegation choice. It returns nil when the user quits or reaches EOF. in is shared
-// with any earlier prompt, so no input is buffered away from the next reader.
-func ChooseInbox(in *bufio.Reader, out io.Writer, report InboxReport) (*InboxSelection, error) {
+// with any earlier prompt, so no input is buffered away from the next reader. A
+// non-nil reload lets v switch between the configured repositories and all of them;
+// the choice lasts until ChooseInbox returns.
+func ChooseInbox(in *bufio.Reader, out io.Writer, report InboxReport, reload func(allRepos bool) (InboxReport, error)) (*InboxSelection, error) {
 	choices := Delegable(report)
-	if len(choices) == 0 {
+	if len(choices) == 0 && reload == nil {
 		fmt.Fprintln(out, "No issues to delegate.")
 		return nil, nil
 	}
-
-	fmt.Fprintln(out, "INBOX")
-	for i, entry := range choices {
-		key := entry.Item.Key
-		detail := strings.Join(entry.Changes, ", ")
-		if entry.Delegated {
-			detail = string(entry.State) + " · " + detail
-		}
-		fmt.Fprintf(out, "  %d. %s#%d  %s · %s\n", i+1, key.Repo, key.Number, entry.Item.Title, detail)
-	}
-	fmt.Fprintln(out, "  q. Quit")
+	allRepos := false
+	printChoices(out, choices, reload != nil, allRepos)
 
 	for {
 		fmt.Fprint(out, "\nChoose an item: ")
@@ -76,9 +69,27 @@ func ChooseInbox(in *bufio.Reader, out io.Writer, report InboxReport) (*InboxSel
 		if !ok || strings.EqualFold(line, "q") {
 			return nil, nil
 		}
+		if reload != nil && strings.EqualFold(line, "v") {
+			allRepos = !allRepos
+			report, err := reload(allRepos)
+			if err != nil {
+				return nil, err
+			}
+			choices = Delegable(report)
+			fmt.Fprintln(out)
+			printChoices(out, choices, true, allRepos)
+			continue
+		}
 		n, err := strconv.Atoi(line)
 		if err != nil || n < 1 || n > len(choices) {
-			fmt.Fprintf(out, "Please choose a number from 1 to %d, or q to quit.\n", len(choices))
+			switch {
+			case reload == nil:
+				fmt.Fprintf(out, "Please choose a number from 1 to %d, or q to quit.\n", len(choices))
+			case len(choices) == 0:
+				fmt.Fprintln(out, "Please choose v to change the view, or q to quit.")
+			default:
+				fmt.Fprintf(out, "Please choose a number from 1 to %d, v to change the view, or q to quit.\n", len(choices))
+			}
 			continue
 		}
 
@@ -99,6 +110,35 @@ func ChooseInbox(in *bufio.Reader, out io.Writer, report InboxReport) (*InboxSel
 		}
 		return &InboxSelection{Key: choices[n-1].Item.Key, Agent: agent, ContextFile: contextFile}, nil
 	}
+}
+
+// printChoices lists choices. toggle names the active view and offers v.
+func printChoices(out io.Writer, choices []InboxEntry, toggle, allRepos bool) {
+	switch {
+	case !toggle:
+		fmt.Fprintln(out, "INBOX")
+	case allRepos:
+		fmt.Fprintln(out, "INBOX (all repositories)")
+	default:
+		fmt.Fprintln(out, "INBOX (configured repositories)")
+	}
+	if len(choices) == 0 {
+		fmt.Fprintln(out, "  No issues to delegate.")
+	}
+	for i, entry := range choices {
+		key := entry.Item.Key
+		detail := strings.Join(entry.Changes, ", ")
+		if entry.Delegated {
+			detail = string(entry.State) + " · " + detail
+		}
+		fmt.Fprintf(out, "  %d. %s#%d  %s · %s\n", i+1, key.Repo, key.Number, entry.Item.Title, detail)
+	}
+	if toggle && allRepos {
+		fmt.Fprintln(out, "  v. View configured repositories")
+	} else if toggle {
+		fmt.Fprintln(out, "  v. View all repositories")
+	}
+	fmt.Fprintln(out, "  q. Quit")
 }
 
 func chooseAgent(in *bufio.Reader, out io.Writer) (task.Agent, bool) {

@@ -10,9 +10,10 @@ import (
 // Source is everything the dashboard asks foreman to do. app.App satisfies it, and
 // tests use a stub.
 type Source interface {
-	// Inbox is the GitHub refresh: the searches, the readiness gate, and the
+	// InboxView is the GitHub refresh: the searches, the readiness gate, and the
 	// configured cleanup. It is the expensive call, so the dashboard makes it rarely.
-	Inbox(ctx context.Context) (app.InboxReport, error)
+	// allRepos ignores the configured repository lists.
+	InboxView(ctx context.Context, allRepos bool) (app.InboxReport, error)
 	// Tasks re-reads delegated work from the task files. It makes no GitHub call.
 	Tasks(ctx context.Context) ([]*task.Record, error)
 	Start(ctx context.Context, req app.StartRequest) (*task.Record, error)

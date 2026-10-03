@@ -49,6 +49,13 @@ type result struct {
 	// respond marks an answer coming back; answered is the record it left.
 	respond  bool
 	answered *task.Record
+	// allRepos is the view a refresh fetched.
+	allRepos bool
+}
+
+// staleView reports a refresh fetched for the view the developer has since left.
+func (r result) staleView(m *Model) bool {
+	return r.report != nil && r.allRepos != m.AllRepos
 }
 
 // Run draws the dashboard on o.Out until the user quits or ctx ends. It puts the
@@ -99,9 +106,10 @@ func Run(ctx context.Context, o Options) (err error) {
 			return
 		}
 		m.Refreshing = true
+		allRepos := m.AllRepos
 		go func() {
-			report, err := o.Source.Inbox(ctx)
-			results <- result{report: &report, err: err}
+			report, err := o.Source.InboxView(ctx, allRepos)
+			results <- result{report: &report, err: err, allRepos: allRepos}
 		}()
 	}
 	refresh()
@@ -125,14 +133,19 @@ func Run(ctx context.Context, o Options) (err error) {
 			if r.finished {
 				pending--
 			}
+			stale := r.staleView(&m)
 			pending += settle(ctx, o.Source, &m, r, results)
+			if stale {
+				// The toggle came while this refresh ran, so fetch the new view now.
+				refresh()
+			}
 		case k := <-keys:
 			before := m.Selected()
 			wasOpen := m.LogOpen
 			switch a := m.Key(k); a.Kind {
 			case ActionQuit:
 				return finish(ctx, o.Out, &m, results, pending)
-			case ActionRefresh:
+			case ActionRefresh, ActionToggleView:
 				refresh()
 			case ActionStart:
 				req := a.Start
@@ -194,12 +207,13 @@ func settle(ctx context.Context, s Source, m *Model, r result, results chan<- re
 	if r.finished {
 		m.Done(r.key)
 	}
+	stale := r.staleView(m)
 	apply(m, r)
 	if r.respond {
 		// The last answer opens the log, so it is read now rather than on the next tick.
 		readLog(m)
 	}
-	if !r.finished && (r.report == nil || r.err != nil) {
+	if !r.finished && (r.report == nil || r.err != nil || stale) {
 		return 0
 	}
 	return launchAutoFresh(ctx, s, m, results)
@@ -227,6 +241,10 @@ func launchAuto(ctx context.Context, s Source, m *Model, results chan<- result) 
 }
 
 func apply(m *Model, r result) {
+	if r.staleView(m) {
+		m.Refreshing = false
+		return
+	}
 	if r.report != nil {
 		m.Refreshing = false
 		m.RefreshedAt = time.Now()
