@@ -501,10 +501,14 @@ func TestImplementationPromptTestRulesApplyWithoutStageInstructions(t *testing.T
 	}
 }
 
-func TestPlanningPromptAsksPlanToNameEachTestBehavior(t *testing.T) {
-	const rule = "the implementation plan names each test by its readable name and the behavior it checks"
-	if p := ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}, Planning: true}); !strings.Contains(p, rule) {
+func TestPlanningPromptKeepsTestFirstWithoutNamingEveryTest(t *testing.T) {
+	const rule = "the implementation plan describes the behavior to verify, without naming every test. The implementer writes tests for that behavior first"
+	p := ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}, Planning: true})
+	if !strings.Contains(p, rule) {
 		t.Errorf("planning prompt missing %q:\n%s", rule, p)
+	}
+	if strings.Contains(p, "names each test") {
+		t.Errorf("planning prompt still asks the plan to name each test:\n%s", p)
 	}
 	if p := ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}}); strings.Contains(p, rule) {
 		t.Error("an implementation prompt carries the planning test rule")
