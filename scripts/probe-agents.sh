@@ -86,11 +86,20 @@ check "codex reviewer (read-only) cannot write" "$(test -f reviewer-wrote-codex.
 # Progress text between tool calls is billed output. Run the same multi-step task with
 # and without foreman's silent-work section, five times each since one run is noisy,
 # and compare the summed progress text (every message but the last) and output tokens.
+# A run counts only if it read each file in its own tool call and answered 6, so a run
+# that skipped the work can't make either side look quieter.
 silent="$(sed -n '/## Working silently/,/^`)/p' "$root/internal/agent/prompt.go" | sed -e '$d' -e 's/^.*WriteString(`//')"
 for f in a b c; do printf 'apple\nbanana\napricot\n' >"$f.txt"; done
 task='Read a.txt, b.txt and c.txt one at a time, each with its own tool call. Count the lines that start with "a" across all three files. End with only the count.'
-narration() { # agent mode -> "progress_chars output_tokens" summed over five runs
-  local prompt="$task" chars=0 tokens=0 c o
+claude_done='([.[] | select(.type=="assistant") | .message.content[] | select(.type=="tool_use" and .name=="Read")
+  | .input.file_path // "" | capture("(?<f>[abc])\\.txt$").f] | unique | length == 3)
+  and ([.[] | select(.type=="result") | .result // "" | test("^\\s*6\\.?\\s*$")] | any)'
+# Each file has to appear alone in some command, so one cat of all three does not count.
+codex_done='([.[] | select(.type=="item.completed" and .item.type=="command_execution")
+  | [.item.command | scan("[abc]\\.txt")] | unique | select(length == 1) | .[0]] | unique | length == 3)
+  and ([.[] | select(.type=="item.completed" and .item.type=="agent_message") | .item.text] | last // "" | test("^\\s*6\\.?\\s*$"))'
+narration() { # agent mode -> "progress_chars output_tokens skipped_runs" over five runs
+  local prompt="$task" chars=0 tokens=0 skipped=0 c o completed
   [ "$2" = silent ] && prompt="$silent"$'\n\n'"$task"
   for _ in 1 2 3 4 5; do
     if [ "$1" = claude ]; then
@@ -98,19 +107,26 @@ narration() { # agent mode -> "progress_chars output_tokens" summed over five ru
         --no-session-persistence --model haiku </dev/null >n.jsonl 2>/dev/null
       c="$(jq -rs '[.[] | select(.type=="assistant") | .message.content[] | select(.type=="text") | .text] | .[:-1] | join("") | length' n.jsonl)"
       o="$(jq -r 'select(.type=="result") | .usage.output_tokens' n.jsonl)"
+      completed="$(jq -rs "$claude_done" n.jsonl)"
     else
       codex exec --json --ephemeral -s read-only "$prompt" </dev/null >n.jsonl 2>/dev/null
       c="$(jq -rs '[.[] | select(.type=="item.completed" and .item.type=="agent_message") | .item.text] | .[:-1] | join("") | length' n.jsonl)"
       o="$(jq -r 'select(.type=="turn.completed") | .usage.output_tokens' n.jsonl)"
+      completed="$(jq -rs "$codex_done" n.jsonl)"
     fi
-    chars=$((chars+${c:-0})) tokens=$((tokens+${o:-0}))
+    if [ "$completed" = true ]; then
+      chars=$((chars+${c:-0})) tokens=$((tokens+${o:-0}))
+    else
+      skipped=$((skipped+1))
+    fi
   done
-  echo "$chars $tokens"
+  echo "$chars $tokens $skipped"
 }
 for agent in claude codex; do
-  read -r plain_chars plain_tokens <<<"$(narration "$agent" plain)"
-  read -r silent_chars silent_tokens <<<"$(narration "$agent" silent)"
+  read -r plain_chars plain_tokens plain_skipped <<<"$(narration "$agent" plain)"
+  read -r silent_chars silent_tokens silent_skipped <<<"$(narration "$agent" silent)"
   echo "$agent progress chars $plain_chars -> $silent_chars, output tokens $plain_tokens -> $silent_tokens (5 runs each)"
+  check "$agent completes every narration run" "$((plain_skipped+silent_skipped))" 0
   check "$agent writes no more progress text with the silent rule" "$([ "$silent_chars" -le "$plain_chars" ] && echo yes || echo no)" yes
 done
 
