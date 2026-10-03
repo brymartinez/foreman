@@ -308,10 +308,17 @@ the same commit. The commit message records why it changed.
   file that differs from its default and prints the `cp` command that replaces it.
 - **Prompts hold protocol, not workflow:** the role, the issue, paths and branch, push
   and `gh pr` commands, `Closes #N`, the question format, the JSON outcome, and
-  precedence (task context and decisions beat stage files). The one built-in rule is
-  the test-first `## Tests` section, so every repo gets it with or without stage files.
-  A planning turn gets a short form instead: the plan describes the behavior to verify,
-  not every test name, and the implementer writes those tests first.
+  precedence (task context and decisions beat stage files). Two rules are built in, so
+  every repo gets them with or without stage files: the test-first `## Tests` section,
+  and the `## Working silently` section. A planning turn gets a short form of the test
+  rule instead: the plan describes the behavior to verify, not every test name, and the
+  implementer writes those tests first.
+- **Agents work silently.** Text between tool calls is billed as output tokens, and
+  nobody reads a session live. Neither CLI has a flag to stop it, so the implementation
+  and review prompts both carry `silentWorkSection`, which asks for no progress text and
+  keeps the final outcome, questions, planning documents, PR text, and findings in full.
+  Resumed turns keep it because they continue the same session. The log still gets
+  every event: filtering it would save no tokens and would lose diagnostics.
 - **pr.md goes into the implementation turn,** because the agent opens the PR there.
   The review prompt never gets it.
 

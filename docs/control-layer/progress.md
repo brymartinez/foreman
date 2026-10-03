@@ -4,10 +4,10 @@
 
 Stage 39 (routing new dashboard tasks to a profile from `routing.yaml`, with the
 optional `quota-axi` check, for issue #39) is complete. Stage 31 (answering decisions
-in the dashboard), stage 29 (repository include filter and the `v` view toggle), and
-stage 38 (shorter planning documents and the `make config` notice for differing stage
-files) are
-complete. Completed runs are
+in the dashboard), stage 29 (repository include filter and the `v` view toggle), stage
+38 (shorter planning documents and the `make config` notice for differing stage files),
+and stage 37 (the `## Working silently` prompt section for issue #37) are complete.
+Completed runs are
 needed to measure the effect of the model and budget choices. The ranked refactor
 candidates below are the next code-quality stages.
 

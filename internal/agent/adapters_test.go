@@ -125,6 +125,52 @@ func TestClaudeStreamReachesTheLog(t *testing.T) {
 	}
 }
 
+func TestClaudeStreamStillLogsEveryEvent(t *testing.T) {
+	events := []string{
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"Now I'll read the file."}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read"}]}}`,
+		`{"type":"user","message":{"content":[{"type":"tool_result","content":"package x"}]}}`,
+		fmt.Sprintf(`{"type":"result","subtype":"success","structured_output":%s}`, prOpened),
+	}
+	exec := func(_ context.Context, c Command) error {
+		io.WriteString(c.Stdout, strings.Join(events, "\n")+"\n")
+		return nil
+	}
+	var log bytes.Buffer
+	turn, err := Claude{Bin: "claude", Exec: exec, NewSessionID: func() string { return "sid-1" }}.Start(context.Background(), StartInput{Worktree: "/wt", Log: &log}, func(task.Session) {})
+	if err != nil || turn.Outcome.Status != PROpened {
+		t.Fatalf("turn = %+v, %v", turn, err)
+	}
+	for _, ev := range events {
+		if !strings.Contains(log.String(), ev+"\n") {
+			t.Errorf("log missing %s", ev)
+		}
+	}
+}
+
+func TestCodexStreamStillLogsEveryEvent(t *testing.T) {
+	events := []string{
+		`{"type":"thread.started","thread_id":"th-1"}`,
+		`{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Now I'll read the file."}}`,
+		`{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"cat x.go","exit_code":0}}`,
+		`{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":12}}`,
+	}
+	exec := func(_ context.Context, c Command) error {
+		io.WriteString(c.Stdout, strings.Join(events, "\n")+"\n")
+		return os.WriteFile(argValue(c.Args, "-o"), []byte(prOpened), 0o600)
+	}
+	var log bytes.Buffer
+	turn, err := Codex{Bin: "codex", Exec: exec}.Start(context.Background(), StartInput{Worktree: "/wt", Log: &log}, func(task.Session) {})
+	if err != nil || turn.Outcome.Status != PROpened || turn.Usage.CodexOutputTokens != 12 {
+		t.Fatalf("turn = %+v, %v", turn, err)
+	}
+	for _, ev := range events {
+		if !strings.Contains(log.String(), ev+"\n") {
+			t.Errorf("log missing %s", ev)
+		}
+	}
+}
+
 func TestClaudeStreamWithoutResultHasNoSession(t *testing.T) {
 	exec := func(_ context.Context, c Command) error {
 		io.WriteString(c.Stdout, "{\"type\":\"system\",\"subtype\":\"init\"}\n")
@@ -533,6 +579,62 @@ func TestMergeBeforeReviewPromptOmitsTheTestFirstSection(t *testing.T) {
 	p := ImplementationPrompt(TaskBrief{Branch: "feat/1-x", BaseBranch: "main", Merge: &MergeBrief{Base: "main", Files: []string{"retry.go"}}})
 	if strings.Contains(p, "## Tests") {
 		t.Errorf("a merge-before-review prompt carries the test section:\n%s", p)
+	}
+}
+
+func TestImplementationPromptAsksForSilentWork(t *testing.T) {
+	for name, b := range map[string]TaskBrief{
+		"planning":       {Key: task.Key{Repo: "a/b", Number: 7}, Planning: true},
+		"implementation": {Key: task.Key{Repo: "a/b", Number: 7}},
+	} {
+		p := ImplementationPrompt(b)
+		for _, want := range []string{
+			"## Working silently",
+			"do not write progress updates",
+			"Do not send a preamble before tool calls",
+			"final response",
+			"questions",
+			"planning documents",
+			"pull request title and body",
+		} {
+			if !strings.Contains(p, want) {
+				t.Errorf("%s prompt missing %q", name, want)
+			}
+		}
+	}
+}
+
+func TestResumePromptsAskForSilentWork(t *testing.T) {
+	for name, b := range map[string]TaskBrief{
+		"feedback": {Key: task.Key{Repo: "a/b", Number: 7}, PR: 912, Feedback: []FeedbackItem{{Kind: task.IssueComment, ID: 1, Author: "dev", Body: "Rename this."}}},
+		"conflict": {Branch: "feat/1-x", BaseBranch: "main", PR: 912, Conflict: &Conflict{PR: 912, Base: "main", BaseHead: "ba5e001"}},
+		"merge":    {Branch: "feat/1-x", BaseBranch: "main", Merge: &MergeBrief{Base: "main", Files: []string{"retry.go"}}},
+	} {
+		if p := ImplementationPrompt(b); !strings.Contains(p, "## Working silently") {
+			t.Errorf("%s prompt lacks the silent work section", name)
+		}
+	}
+}
+
+func TestReviewPromptAsksForSilentWork(t *testing.T) {
+	p := ReviewPrompt(ReviewBrief{Key: task.Key{Repo: "a/b", Number: 7}, PR: 912, PRBody: "Fix it.", Branch: "feat/7-x", BaseBranch: "main"})
+	if !strings.Contains(p, "## Working silently") || !strings.Contains(p, "review findings") {
+		t.Errorf("review prompt lacks the silent work section:\n%s", p)
+	}
+}
+
+func TestSilentWorkRuleIsSharedByBothPrompts(t *testing.T) {
+	var s strings.Builder
+	silentWorkSection(&s)
+	section := s.String()
+	if !strings.HasPrefix(section, "## Working silently") {
+		t.Fatalf("section = %q", section)
+	}
+	if !strings.Contains(ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}}), section) {
+		t.Error("implementation prompt does not carry the shared section")
+	}
+	if !strings.Contains(ReviewPrompt(ReviewBrief{Key: task.Key{Repo: "a/b", Number: 7}, PR: 912}), section) {
+		t.Error("review prompt does not carry the shared section")
 	}
 }
 
