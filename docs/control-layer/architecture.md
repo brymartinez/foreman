@@ -256,13 +256,16 @@ the same commit. The commit message records why it changed.
   committed `.foreman/<stage>.md` in the task's worktree. Foreman never parses them and
   never reads CLAUDE.md or AGENTS.md.
 - **The global files are required.** Every command except `config` fails naming the
-  missing files. `make config` installs the defaults from `defaults/stages/` and never
-  overwrites an installed file, so a changed default reaches existing users only by hand.
+  missing files. `make config` (`scripts/install-stages.sh`) installs the defaults from
+  `defaults/stages/` and never overwrites an installed file. It names each installed
+  file that differs from its default and prints the `cp` command that replaces it.
 - **Prompts hold protocol, not workflow:** the role, the issue, paths and branch, push
   and `gh pr` commands, `Closes #N`, the question format, the JSON outcome, and
   precedence (task context and decisions beat stage files). Two rules are built in, so
   every repo gets them with or without stage files: the test-first `## Tests` section,
-  and the `## Working silently` section.
+  and the `## Working silently` section. A planning turn gets a short form of the test
+  rule instead: the plan describes the behavior to verify, not every test name, and the
+  implementer writes those tests first.
 - **Agents work silently.** Text between tool calls is billed as output tokens, and
   nobody reads a session live. Neither CLI has a flag to stop it, so the implementation
   and review prompts both carry `silentWorkSection`, which asks for no progress text and
