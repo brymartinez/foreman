@@ -5,7 +5,8 @@ set -eu
 script="$(cd "$(dirname "$0")" && pwd)/install-stages.sh"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-defaults="$tmp/defaults"
+# The space checks that paths with spaces stay one argument.
+defaults="$tmp/foreman clone/defaults"
 stages="$tmp/stages"
 mkdir -p "$defaults" "$stages"
 failed=0
@@ -29,7 +30,7 @@ echo "$out" | grep -qxF "wrote $stages/missing.md" || fail "a missing stage file
 echo "$out" | grep -qxF "kept $stages/same.md" || fail "an identical stage file is not reported as kept"
 
 echo "$out" | grep -qxF "differs $stages/old.md" || fail "a differing stage file is not reported as differs"
-echo "$out" | grep -qxF "  replace it with: cp $defaults/old.md $stages/old.md" || fail "a differing stage file has no cp command"
+echo "$out" | grep -qxF "  replace it with: cp '$defaults/old.md' '$stages/old.md'" || fail "a differing stage file has no cp command"
 [ "$(cat "$stages/old.md")" = "my old copy" ] || fail "a differing stage file was overwritten"
 
 if [ "$failed" -ne 0 ]; then

@@ -15,6 +15,6 @@ for f in "$defaults"/*.md; do
 		echo "kept $dest"
 	else
 		echo "differs $dest"
-		echo "  replace it with: cp $f $dest"
+		echo "  replace it with: cp '$f' '$dest'"
 	fi
 done

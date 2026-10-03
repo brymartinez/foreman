@@ -20,8 +20,8 @@ install: build
 # Existing stage files are yours, so config never overwrites them. It reports each one
 # that differs from its default, with a command to replace it.
 config:
-	mkdir -p $(STAGES_DIR)
-	@sh scripts/install-stages.sh $(CURDIR)/defaults/stages $(STAGES_DIR)
+	mkdir -p "$(STAGES_DIR)"
+	@sh scripts/install-stages.sh "$(CURDIR)/defaults/stages" "$(STAGES_DIR)"
 
 test:
 	go vet ./... && go test ./...
