@@ -28,6 +28,9 @@ func (s stubSource) Tasks(context.Context) ([]*task.Record, error)            { 
 func (s stubSource) Start(context.Context, app.StartRequest) (*task.Record, error) {
 	return s.rec, s.err
 }
+func (s stubSource) Route(context.Context, app.RouteRequest) (app.Decision, error) {
+	return app.Decision{}, app.ErrRoutingOff
+}
 func (s stubSource) Cancel(context.Context, *task.Record) (*task.Record, error) {
 	return s.rec, s.err
 }

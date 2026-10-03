@@ -29,6 +29,9 @@ const (
 	TypingContext
 	ConfirmingCancel
 	AnsweringDecision
+	// Routing waits for App.Route; ConfirmingRoute shows its choice.
+	Routing
+	ConfirmingRoute
 )
 
 type ActionKind int
@@ -43,6 +46,7 @@ const (
 	ActionAuto
 	ActionRespond
 	ActionToggleView
+	ActionRoute
 )
 
 // Action is what a keystroke asks the driver to do. The model itself does no I/O.
@@ -55,6 +59,10 @@ type Action struct {
 	// Respond is the NEEDS_DECISION task to record Answer for, as typed.
 	Respond task.Key
 	Answer  string
+	// Route asks which profile should start an issue. RouteSeq tells its result
+	// apart from one the developer has since backed out of.
+	Route    app.RouteRequest
+	RouteSeq int
 }
 
 // Model is everything the dashboard draws and everything a keystroke changes.
@@ -100,7 +108,17 @@ type Model struct {
 	// looking at every repository never starts work outside the configured lists.
 	AllRepos bool
 
+	// RouteOn means routing.yaml is in use: auto mode routes each new issue, and
+	// the agent choice offers routing for an issue never delegated.
+	RouteOn bool
+
 	pending      app.StartRequest  // the delegation being collected
+	pendingNew   bool              // the pending issue was never delegated
+	routing      bool              // the pending delegation asks for a route
+	routeSeq     int               // the route request the footer waits for
+	route        app.Decision      // the route on show while ConfirmingRoute
+	routeErr     string            // why the route on show failed
+	waiting      map[task.Key]wait // auto starts held back by routing
 	cancelTarget task.Key          // the task named when cancellation was requested
 	manualTask   bool              // cursor movement stops following the latest delegation
 	tried        map[task.Key]bool // issues started this session, by hand or automatically
@@ -243,6 +261,13 @@ func (m *Model) Key(k Key) Action {
 		return m.confirmCancel(k)
 	case AnsweringDecision:
 		return m.answerDecision(k)
+	case Routing:
+		if k.Kind == KeyEscape {
+			m.Mode = ChoosingAgent
+		}
+		return Action{}
+	case ConfirmingRoute:
+		return m.confirmRoute(k)
 	}
 	return m.browse(k)
 }
@@ -404,6 +429,7 @@ func (m *Model) enter() Action {
 			return Action{Kind: ActionResume, Resume: e.Item.Key}
 		}
 		m.pending = app.StartRequest{Repo: e.Item.Key.Repo, Issue: e.Item.Key.Number}
+		m.pendingNew = !e.Delegated
 		m.Mode, m.Input = ChoosingAgent, ""
 		return Action{}
 	}
@@ -557,12 +583,18 @@ func (m *Model) chooseAgent(k Key) Action {
 	case k.Kind == KeyEscape:
 		m.Mode = Browsing
 	case k.Kind == KeyRune && k.Rune == '1':
-		m.pending.Agent, m.Mode, m.Input = task.Claude, TypingContext, ""
+		m.pending.Agent, m.routing, m.Mode, m.Input = task.Claude, false, TypingContext, ""
 	case k.Kind == KeyRune && k.Rune == '2':
-		m.pending.Agent, m.Mode, m.Input = task.Codex, TypingContext, ""
+		m.pending.Agent, m.routing, m.Mode, m.Input = task.Codex, false, TypingContext, ""
+	case k.Kind == KeyRune && k.Rune == '3' && m.offersRoute():
+		m.pending.Agent, m.routing, m.Mode, m.Input = "", true, TypingContext, ""
 	}
 	return Action{}
 }
+
+// offersRoute reports whether the agent choice offers routing. A FAILED issue keeps
+// the profile it ran with, so only an issue never delegated is routed.
+func (m *Model) offersRoute() bool { return m.RouteOn && m.pendingNew }
 
 func (m *Model) typeContext(k Key) Action {
 	switch {
@@ -574,15 +606,52 @@ func (m *Model) typeContext(k Key) Action {
 		}
 	case k.Kind == KeyRune:
 		m.Input += string(k.Rune)
+	case k.Kind == KeyEnter && m.routing:
+		m.pending.ContextFile = strings.TrimSpace(m.Input)
+		m.Mode, m.Input = Routing, ""
+		m.routeSeq++
+		req := app.RouteRequest{Repo: m.pending.Repo, Issue: m.pending.Issue, ContextFile: m.pending.ContextFile}
+		return Action{Kind: ActionRoute, Route: req, RouteSeq: m.routeSeq}
 	case k.Kind == KeyEnter:
 		req := m.pending
 		req.ContextFile = strings.TrimSpace(m.Input)
 		m.Mode, m.Input = Browsing, ""
 		m.manualTask = false
 		m.Message = fmt.Sprintf("Starting %s#%d with %s…", req.Repo, req.Issue, req.Agent)
-		k := task.Key{Repo: req.Repo, Number: req.Issue}
-		m.tried, m.starting = mark(m.tried, k), mark(m.starting, k)
-		return Action{Kind: ActionStart, Start: req}
+		return m.startPending(req)
+	}
+	return Action{}
+}
+
+func (m *Model) startPending(req app.StartRequest) Action {
+	k := task.Key{Repo: req.Repo, Number: req.Issue}
+	m.tried, m.starting = mark(m.tried, k), mark(m.starting, k)
+	return Action{Kind: ActionStart, Start: req}
+}
+
+// Routed shows a route result, unless the developer has backed out of it.
+func (m *Model) Routed(seq int, d app.Decision, err error) {
+	if m.Mode != Routing || seq != m.routeSeq {
+		return
+	}
+	m.Mode, m.route, m.routeErr = ConfirmingRoute, d, ""
+	if err != nil {
+		m.routeErr = err.Error()
+	}
+}
+
+// confirmRoute starts the shown profile on Enter. Esc goes back to the agent choice,
+// where 1 and 2 still override the route.
+func (m *Model) confirmRoute(k Key) Action {
+	switch {
+	case k.Kind == KeyEscape:
+		m.Mode = ChoosingAgent
+	case k.Kind == KeyEnter && m.route.Profile != nil && m.routeErr == "":
+		req := m.pending
+		req.Agent, req.Profile, req.RouteReason = "", m.route.Profile, m.route.Reason
+		m.Mode, m.manualTask = Browsing, false
+		m.Message = fmt.Sprintf("Starting %s#%d with profile %s…", req.Repo, req.Issue, req.Profile.Name)
+		return m.startPending(req)
 	}
 	return Action{}
 }

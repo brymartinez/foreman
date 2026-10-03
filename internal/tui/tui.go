@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/brymartinez/foreman/internal/agent"
 	"github.com/brymartinez/foreman/internal/app"
 	"github.com/brymartinez/foreman/internal/logs"
 	"github.com/brymartinez/foreman/internal/task"
@@ -31,6 +32,9 @@ type Options struct {
 	// LocalEvery is how often the task files and the selected log are re-read.
 	LocalEvery time.Duration
 	Auto       Auto
+	// Route says routing.yaml is in use, even one that failed to load: Route then
+	// reports the error rather than starting with the wrong agent.
+	Route bool
 }
 
 // result is one finished background call. The event loop owns the model, so a
@@ -51,6 +55,12 @@ type result struct {
 	answered *task.Record
 	// allRepos is the view a refresh fetched.
 	allRepos bool
+	// routed is a manual route's result, for the request numbered routeSeq.
+	routed   *app.Decision
+	routeSeq int
+	// wait is why routing held an auto start back; selection is what it chose.
+	wait      string
+	selection agent.Selection
 }
 
 // staleView reports a refresh fetched for the view the developer has since left.
@@ -83,6 +93,7 @@ func Run(ctx context.Context, o Options) (err error) {
 	var m Model
 	m.Width, m.Height = size(o.Out)
 	m.SetAuto(o.Auto)
+	m.RouteOn = o.Route
 
 	keys := make(chan Key, 64)
 	go readKeys(ctx, o.In, keys, escapeWait)
@@ -151,6 +162,9 @@ func Run(ctx context.Context, o Options) (err error) {
 				req := a.Start
 				pending++
 				go func() { results <- start(ctx, o.Source, req, false) }()
+			case ActionRoute:
+				req, seq := a.Route, a.RouteSeq
+				go func() { results <- route(ctx, o.Source, req, seq) }()
 			case ActionCancel:
 				rec := a.Cancel
 				pending++
@@ -235,7 +249,8 @@ func launchAutoFresh(ctx context.Context, s Source, m *Model, results chan<- res
 func launchAuto(ctx context.Context, s Source, m *Model, results chan<- result) int {
 	reqs := m.AutoStarts()
 	for _, req := range reqs {
-		go func() { results <- start(ctx, s, req, true) }()
+		prior := m.prior(task.Key{Repo: req.Repo, Number: req.Issue})
+		go func() { results <- autoStart(ctx, s, req, prior) }()
 	}
 	return len(reqs)
 }
@@ -245,12 +260,24 @@ func apply(m *Model, r result) {
 		m.Refreshing = false
 		return
 	}
+	if r.routed != nil {
+		m.Routed(r.routeSeq, *r.routed, r.err)
+		return
+	}
 	if r.report != nil {
 		m.Refreshing = false
 		m.RefreshedAt = time.Now()
 		if r.err == nil {
 			m.SetInbox(app.Delegable(*r.report))
 			m.Warnings = r.report.Warnings
+			m.retryWaiting()
+		}
+	}
+	if r.auto && r.finished {
+		if r.wait != "" {
+			m.autoWaiting(r.key, r.wait, r.selection)
+		} else {
+			delete(m.waiting, r.key)
 		}
 	}
 	if r.respond {
@@ -287,6 +314,34 @@ func start(ctx context.Context, s Source, req app.StartRequest, auto bool) resul
 	return r
 }
 
+// route asks App.Route for a manual start's profile. It writes nothing, so it is not
+// counted as pending.
+func route(ctx context.Context, s Source, req app.RouteRequest, seq int) result {
+	d, err := s.Route(ctx, req)
+	if err != nil {
+		err = fmt.Errorf("route %s#%d: %w", req.Repo, req.Issue, err)
+	}
+	return result{routed: &d, routeSeq: seq, err: err}
+}
+
+// autoStart routes an auto start that has no agent, then starts it with the chosen
+// profile. When no suitable profile can run, nothing starts and the result says why.
+func autoStart(ctx context.Context, s Source, req app.StartRequest, prior *agent.Selection) result {
+	if req.Agent != "" {
+		return start(ctx, s, req, true)
+	}
+	key := task.Key{Repo: req.Repo, Number: req.Issue}
+	d, err := s.Route(ctx, app.RouteRequest{Repo: req.Repo, Issue: req.Issue, Prior: prior})
+	switch {
+	case err != nil:
+		return result{err: fmt.Errorf("auto: route %s#%d: %w", req.Repo, req.Issue, err), key: key, auto: true, finished: true}
+	case d.Profile == nil:
+		return result{message: fmt.Sprintf("! auto: %s#%d waits: %s", req.Repo, req.Issue, d.Wait), wait: d.Wait, selection: d.Selection, key: key, auto: true, finished: true}
+	}
+	req.Profile, req.RouteReason = d.Profile, d.Reason
+	return start(ctx, s, req, true)
+}
+
 func startResult(ctx context.Context, s Source, req app.StartRequest) result {
 	if req.ContextFile != "" {
 		// The runner a later `foreman respond` spawns reads this path from its own
@@ -303,6 +358,9 @@ func startResult(ctx context.Context, s Source, req app.StartRequest) result {
 	}
 	if rec.State == task.Failed {
 		return result{message: fmt.Sprintf("! %s#%d could not start: %s", rec.Repo, rec.Number, rec.LastOutcome.Summary), finished: true}
+	}
+	if p := rec.Delegation.Profile; p != nil {
+		return result{message: fmt.Sprintf("Started %s#%d with profile %s on %s", rec.Repo, rec.Number, p.Name, rec.Delegation.Branch), finished: true}
 	}
 	return result{message: fmt.Sprintf("Started %s#%d on %s", rec.Repo, rec.Number, rec.Delegation.Branch), finished: true}
 }

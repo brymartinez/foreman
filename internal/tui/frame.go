@@ -119,6 +119,9 @@ func inboxPane(m Model) pane {
 	for _, e := range m.Inbox {
 		k := e.Item.Key
 		detail := strings.Join(e.Changes, ", ")
+		if w, ok := m.waiting[k]; ok {
+			detail = render.JoinFacts("waiting: "+w.reason, detail)
+		}
 		r := row{lines: []string{fmt.Sprintf("%s#%d  %s", k.Repo, k.Number, e.Item.Title)}}
 		if e.Delegated {
 			// INBOX only ever offers delegated work the developer can move, so its state
@@ -441,7 +444,14 @@ func lastColumns(s string, width int) string {
 func footer(m Model) string {
 	switch m.Mode {
 	case ChoosingAgent:
+		if m.offersRoute() {
+			return fmt.Sprintf("Delegate %s#%d with:  [1] Claude   [2] Codex   [3] Route   esc cancel", m.pending.Repo, m.pending.Issue)
+		}
 		return fmt.Sprintf("Delegate %s#%d with:  [1] Claude   [2] Codex   esc cancel", m.pending.Repo, m.pending.Issue)
+	case Routing:
+		return fmt.Sprintf("Choosing a profile for %s#%d…   esc back", m.pending.Repo, m.pending.Issue)
+	case ConfirmingRoute:
+		return routeHints(m)
 	case TypingContext:
 		return "Context file (enter to skip): " + m.Input + "█"
 	case ConfirmingCancel:
@@ -468,6 +478,21 @@ func footer(m Model) string {
 		return hintsShort
 	}
 	return hintsLong
+}
+
+// routeHints show the routed profile, or why nothing can start.
+func routeHints(m Model) string {
+	ref := fmt.Sprintf("%s#%d", m.pending.Repo, m.pending.Issue)
+	switch d := m.route; {
+	case m.routeErr != "":
+		return fmt.Sprintf("Route %s: ! %s   esc back", ref, printable(m.routeErr))
+	case d.Profile == nil:
+		return fmt.Sprintf("Route %s waits: %s   esc back", ref, printable(d.Wait))
+	default:
+		p := d.Profile
+		return fmt.Sprintf("Route %s: %s (%s; plan %s, implement %s). %s   enter start   esc back", ref, p.Name, p.Agent,
+			render.ModelText(p.PlanModel, p.PlanReasoningEffort), render.ModelText(p.Model, p.ReasoningEffort), printable(d.Reason))
+	}
 }
 
 // answerHints say what Enter does on an empty answer, as foreman respond's prompt does.
