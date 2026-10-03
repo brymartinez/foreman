@@ -668,3 +668,68 @@ func TestTurnLogOmittedWithoutStep(t *testing.T) {
 		t.Errorf("turn lines = %q, want none", got)
 	}
 }
+
+func TestClaudeUsesProfileModels(t *testing.T) {
+	var commands []Command
+	exec := func(_ context.Context, cmd Command) error {
+		commands = append(commands, cmd)
+		result := prOpened
+		if slices.Contains(cmd.Args, "--no-session-persistence") {
+			result = reviewJSON
+		}
+		fmt.Fprintf(cmd.Stdout, `{"type":"result","subtype":"success","structured_output":%s}`, result)
+		return nil
+	}
+	var log bytes.Buffer
+	c := Claude{Bin: "claude", Model: "opus", PlanModel: "opus", ReviewModel: "haiku", Exec: exec, NewSessionID: func() string { return "sid-1" }}
+	p := &task.Profile{Name: "cheap", Agent: task.Claude, PlanModel: "sonnet", Model: "sonnet-impl"}
+	if _, err := c.Start(context.Background(), StartInput{Worktree: "/wt", Stage: task.StagePlan, Step: StepPlan, Log: &log, Profile: p}, func(task.Session) {}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Resume(context.Background(), task.Session{Agent: task.Claude, ID: "sid-1"}, StartInput{Worktree: "/wt", Stage: task.StageImplement, Step: StepImplement, Log: &log, Profile: p}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Review(context.Background(), StartInput{Worktree: "/wt", Profile: p}); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []string{"sonnet", "sonnet-impl", "haiku"} {
+		if got := argValue(commands[i].Args, "--model"); got != want {
+			t.Errorf("command %d model = %q, want %q", i, got, want)
+		}
+	}
+	if !strings.Contains(log.String(), "claude:sonnet:plan\n") || !strings.Contains(log.String(), "claude:sonnet-impl:implement\n") {
+		t.Errorf("log = %q", log.String())
+	}
+}
+
+func TestCodexUsesProfileModelsAndEfforts(t *testing.T) {
+	var commands []Command
+	exec := func(_ context.Context, cmd Command) error {
+		commands = append(commands, cmd)
+		fmt.Fprintln(cmd.Stdout, `{"type":"thread.started","thread_id":"th-1"}`)
+		result := prOpened
+		if slices.Contains(cmd.Args, "--ephemeral") {
+			result = reviewJSON
+		}
+		return os.WriteFile(argValue(cmd.Args, "-o"), []byte(result), 0o600)
+	}
+	c := Codex{Bin: "codex", Model: "big", PlanModel: "big", ReviewModel: "rev", ReasoningEffort: "high", PlanReasoningEffort: "high", ReviewReasoningEffort: "low", Exec: exec}
+	p := &task.Profile{Name: "codex", Agent: task.Codex, PlanModel: "gpt-6-luna", PlanReasoningEffort: "xhigh", Model: "gpt-6-sol", ReasoningEffort: "medium"}
+	if _, err := c.Start(context.Background(), StartInput{Worktree: "/wt", Stage: task.StagePlan, Profile: p}, func(task.Session) {}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Resume(context.Background(), task.Session{Agent: task.Codex, ID: "th-1"}, StartInput{Worktree: "/wt", Stage: task.StageImplement, Profile: p}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Review(context.Background(), StartInput{Worktree: "/wt", Profile: p}); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []struct{ model, effort string }{{"gpt-6-luna", "xhigh"}, {"gpt-6-sol", "medium"}, {"rev", "low"}} {
+		if got := argValue(commands[i].Args, "-m"); got != want.model {
+			t.Errorf("command %d model = %q, want %q", i, got, want.model)
+		}
+		if !slices.Contains(commands[i].Args, fmt.Sprintf("model_reasoning_effort=%q", want.effort)) {
+			t.Errorf("command %d missing %s effort: %q", i, want.effort, commands[i].Args)
+		}
+	}
+}

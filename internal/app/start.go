@@ -21,6 +21,11 @@ type StartRequest struct {
 	// NewOnly refuses an issue foreman has delegated before, in any state. The
 	// dashboard's auto mode sets it, because its inbox can be a refresh old.
 	NewOnly bool
+	// Profile is the routed profile, with RouteReason saying why it was chosen. Agent
+	// may be left empty; it then comes from the profile. A start without a profile
+	// keeps the task's stored profile when the agent is the same.
+	Profile     *task.Profile
+	RouteReason string
 }
 
 // ErrDelegated is a NewOnly start for an issue that already has a delegation.
@@ -43,6 +48,14 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 	}
 	if err := newOnly(req, existing); err != nil {
 		return nil, err
+	}
+	if p := req.Profile; p != nil {
+		if req.Agent == "" {
+			req.Agent = p.Agent
+		}
+		if req.Agent != p.Agent {
+			return nil, fmt.Errorf("profile %s runs %s, not %s", p.Name, p.Agent, req.Agent)
+		}
 	}
 	if _, ok := a.Agents[req.Agent]; !ok {
 		return nil, fmt.Errorf("agent %s is not configured", req.Agent)
@@ -107,6 +120,8 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			BaseRef:     wt.BaseRef,
 			Worktree:    wt.Path,
 			ContextFile: req.ContextFile,
+			Profile:     req.Profile,
+			RouteReason: req.RouteReason,
 		}
 		// The same branch has the same PR, so a restart can pick up at its review.
 		// Another implementer starts over: its reviewer wrote the existing PR. A
@@ -115,6 +130,10 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		// waiting on the PR keep it for any agent, because the run reads them through
 		// that number and the new agent has to answer them first.
 		sameAgent := prev != nil && prev.Implementer.Agent == req.Agent
+		// A retry with the same agent keeps its route. Choosing another agent drops it.
+		if req.Profile == nil && sameAgent && prev.Profile != nil {
+			cur.Delegation.Profile, cur.Delegation.RouteReason, cur.Delegation.RouteLogged = prev.Profile, prev.RouteReason, prev.RouteLogged
+		}
 		if was != task.PRClosed && prev != nil && prev.Branch == wt.Branch && (sameAgent || len(cur.UnhandledFeedback()) > 0) {
 			cur.Delegation.PR, cur.Delegation.PRURL, cur.Delegation.PRHead = prev.PR, prev.PRURL, prev.PRHead
 			// The same PR keeps its conflict repair: a spent one is not repeated, and one a
@@ -125,7 +144,11 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 				cur.Delegation.BaseRef = prev.BaseRef
 			}
 		}
-		cur.LastOutcome = &task.Outcome{Status: "started", Summary: fmt.Sprintf("dispatched to %s", req.Agent), At: now}
+		summary := fmt.Sprintf("dispatched to %s", req.Agent)
+		if p := cur.Delegation.Profile; p != nil {
+			summary = fmt.Sprintf("dispatched to %s with profile %s", req.Agent, p.Name)
+		}
+		cur.LastOutcome = &task.Outcome{Status: "started", Summary: summary, At: now}
 		return cur, nil
 	})
 	if err != nil {

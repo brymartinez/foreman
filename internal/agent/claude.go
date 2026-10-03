@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -51,6 +52,10 @@ func (c Claude) Resume(ctx context.Context, s task.Session, in StartInput) (Turn
 }
 
 func (c Claude) run(ctx context.Context, in StartInput, session task.Session, sessionFlag string) (Turn, error) {
+	if p := in.Profile; p != nil {
+		c.Model = cmp.Or(p.Model, c.Model)
+		c.PlanModel = cmp.Or(p.PlanModel, c.PlanModel)
+	}
 	if in.Stage == task.StagePlan && c.PlanModel != "" {
 		c.Model = c.PlanModel
 	}

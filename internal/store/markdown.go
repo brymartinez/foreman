@@ -148,6 +148,9 @@ type frontmatter struct {
 	URL                 string                 `yaml:"url"`
 	State               task.State             `yaml:"state"`
 	ImplementationAgent task.Agent             `yaml:"implementation_agent,omitempty"`
+	Profile             *task.Profile          `yaml:"profile,omitempty"`
+	RouteReason         string                 `yaml:"route_reason,omitempty"`
+	RouteLogged         bool                   `yaml:"route_logged,omitempty"`
 	StartedAt           *time.Time             `yaml:"started_at,omitempty"`
 	SessionID           string                 `yaml:"session_id,omitempty"`
 	ReviewAgent         task.Agent             `yaml:"review_agent,omitempty"`
@@ -302,6 +305,9 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 		}
 		rec.Delegation = &task.Delegation{
 			Implementer:      task.Session{Agent: impl, ID: fm.SessionID},
+			Profile:          fm.Profile,
+			RouteReason:      fm.RouteReason,
+			RouteLogged:      fm.RouteLogged,
 			Reviewer:         impl.Reviewer(),
 			Branch:           fm.Branch,
 			BaseRef:          fm.BaseRef,
@@ -320,6 +326,9 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 		}
 		if fm.WorktreeRemovedAt != nil {
 			rec.Delegation.WorktreeRemovedAt = *fm.WorktreeRemovedAt
+		}
+		if fm.Profile != nil && fm.Profile.Agent != impl {
+			return nil, fmt.Errorf("profile %q is for %q, but implementation_agent is %q", fm.Profile.Name, fm.Profile.Agent, impl)
 		}
 		if fm.ReviewAgent != "" && fm.ReviewAgent != impl.Reviewer() {
 			return nil, fmt.Errorf("review_agent must be the competing agent %q, got %q", impl.Reviewer(), fm.ReviewAgent)
@@ -395,6 +404,7 @@ func fromRecord(rec *task.Record) frontmatter {
 	}
 	if d := rec.Delegation; d != nil {
 		fm.ImplementationAgent = d.Implementer.Agent
+		fm.Profile, fm.RouteReason, fm.RouteLogged = d.Profile, d.RouteReason, d.RouteLogged
 		if !d.StartedAt.IsZero() {
 			t := d.StartedAt
 			fm.StartedAt = &t
