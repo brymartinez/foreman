@@ -51,7 +51,8 @@ make setup
 
 `make setup` builds foreman, installs it to `~/.local/bin`, and copies the default stage
 instructions from `defaults/stages/` into `~/.config/foreman/stages/`. It never
-overwrites a stage file you already have. `make install` and `make config` run the
+overwrites a stage file you already have. When yours differs from the current default,
+it prints `differs <path>` and the `cp` command that replaces it. `make install` and `make config` run the
 steps separately; set `BIN_DIR` or `CONFIG_DIR` to change where they go.
 
 ## Usage
