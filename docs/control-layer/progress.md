@@ -3,7 +3,8 @@
 ## Current stage
 
 Stage 31 (answering decisions in the dashboard for issue #31) and stage 29 (repository
-include filter and the `v` view toggle for issue #29) are complete. Completed runs are
+include filter and the `v` view toggle for issue #29) are complete. Stage 37 (the
+`## Working silently` prompt section for issue #37) is complete. Completed runs are
 needed to measure the effect of the model and budget choices. The ranked refactor
 candidates below are the next code-quality stages.
 
