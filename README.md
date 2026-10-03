@@ -55,7 +55,9 @@ make setup
 `make setup` builds foreman, installs it to `~/.local/bin`, copies the default stage
 instructions from `defaults/stages/` into `~/.config/foreman/stages/`, and copies the
 starter `defaults/routing.yaml` to `~/.config/foreman/routing.yaml`. It never
-overwrites a stage file or a routing file you already have. `make install` and `make config` run the
+overwrites a stage file or a routing file you already have. When a stage file differs
+from the current default, it prints `differs <path>` and the `cp` command that replaces
+it. `make install` and `make config` run the
 steps separately; set `BIN_DIR` or `CONFIG_DIR` to change where they go.
 
 ## Usage

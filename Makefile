@@ -18,17 +18,15 @@ install: build
 	rm -f $(BIN_DIR)/foreman
 	cp dist/foreman $(BIN_DIR)/foreman
 
-# Existing stage and routing files are yours, so config never overwrites them.
+# Existing stage and routing files are yours, so config never overwrites them. It
+# reports each stage file that differs from its default, with a command to replace it.
 config:
-	mkdir -p $(STAGES_DIR)
-	@for f in defaults/stages/*.md; do \
-		dest=$(STAGES_DIR)/$$(basename $$f); \
-		if [ -e "$$dest" ]; then echo "kept $$dest"; \
-		else cp "$$f" "$$dest" && echo "wrote $$dest"; fi; \
-	done
-	@dest=$(CONFIG_DIR:/=)/routing.yaml; \
+	mkdir -p "$(STAGES_DIR)"
+	@sh scripts/install-stages.sh "$(CURDIR)/defaults/stages" "$(STAGES_DIR)"
+	@dest="$(CONFIG_DIR:/=)/routing.yaml"; \
 	if [ -e "$$dest" ]; then echo "kept $$dest"; \
 	else cp defaults/routing.yaml "$$dest" && echo "wrote $$dest"; fi
 
 test:
 	go vet ./... && go test ./...
+	sh scripts/install-stages_test.sh

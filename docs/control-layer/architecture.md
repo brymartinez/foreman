@@ -302,12 +302,15 @@ the same commit. The commit message records why it changed.
   committed `.foreman/<stage>.md` in the task's worktree. Foreman never parses them and
   never reads CLAUDE.md or AGENTS.md.
 - **The global files are required.** Every command except `config` fails naming the
-  missing files. `make config` installs the defaults from `defaults/stages/` and never
-  overwrites an installed file, so a changed default reaches existing users only by hand.
+  missing files. `make config` (`scripts/install-stages.sh`) installs the defaults from
+  `defaults/stages/` and never overwrites an installed file. It names each installed
+  file that differs from its default and prints the `cp` command that replaces it.
 - **Prompts hold protocol, not workflow:** the role, the issue, paths and branch, push
   and `gh pr` commands, `Closes #N`, the question format, the JSON outcome, and
   precedence (task context and decisions beat stage files). The one built-in rule is
   the test-first `## Tests` section, so every repo gets it with or without stage files.
+  A planning turn gets a short form instead: the plan describes the behavior to verify,
+  not every test name, and the implementer writes those tests first.
 - **pr.md goes into the implementation turn,** because the agent opens the PR there.
   The review prompt never gets it.
 
