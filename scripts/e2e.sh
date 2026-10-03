@@ -633,6 +633,51 @@ scenario_tui() {
 	mv "$sandbox/implement.md" "$sandbox/stages/implement.md"
 }
 
+scenario_routing() {
+	echo "routing: routing.yaml is reported, and a routed task keeps its profile"
+	setup routing
+	foreman config --show >"$sandbox/show-off.txt"
+	check "config --show reports routing off without routing.yaml" contains "$sandbox/show-off.txt" "Routing: off (no "
+	cp "$root/defaults/routing.yaml" "$sandbox/routing.yaml"
+	foreman config --show >"$sandbox/show-on.txt"
+	check "config --show reports the starter file" contains "$sandbox/show-on.txt" "Routing profiles: claude (default), codex"
+	printf 'profiles: {}\n' >"$sandbox/routing.yaml"
+	check "an invalid routing.yaml fails config --show" bash -c "cd '$sandbox' && ! '$work/foreman' config --show >'$sandbox/show-bad.txt'"
+	check "and names the problem" contains "$sandbox/show-bad.txt" "routing.yaml: profiles: none defined"
+	check "an invalid routing.yaml leaves other commands working" foreman status
+	rm "$sandbox/routing.yaml"
+
+	# A dashboard start routed #42 to a profile that plans with opus, and the run failed.
+	cat >"$sandbox/tasks/acme-widgets-42.md" <<EOF2
+---
+repo: acme/widgets
+number: 42
+kind: issue
+title: Add retries
+url: https://github.com/acme/widgets/issues/42
+state: FAILED
+implementation_agent: claude
+profile:
+  name: deep
+  agent: claude
+  plan_model: opus
+  model: opus
+route_reason: broad or ambiguous design work
+---
+EOF2
+	check "a retry with the same agent starts" foreman start 42 --agent claude
+	check "the run reaches a clean review" wait_status "review ✓"
+	local log
+	log=$(ls "$sandbox"/logs/*.log)
+	check "the log has the route line" contains "$log" "route:deep:claude:broad or ambiguous design work"
+	check "the route line comes before the first turn" bash -c "grep -nE 'route:|claude:[a-z]+:plan' '$log' | head -1 | grep -qF route:"
+	check "planning uses the profile's model" bash -c "! grep -qF 'claude model=sonnet' '$state/models.log'"
+	check "the competing agent still reviews" contains "$state/agents.log" "codex review"
+	foreman show 42 >"$sandbox/show.txt"
+	check "show lists the profile and reason" contains "$sandbox/show.txt" "Profile       deep (plan opus, implement opus) · broad or ambiguous design work"
+	check "the task file keeps the profile" contains "$sandbox/tasks/acme-widgets-42.md" "route_logged: true"
+}
+
 scenario_feedback() {
 	echo "feedback: a comment on the PR comes back to the agent"
 	setup feedback
@@ -706,7 +751,7 @@ scenario_conflict() {
 	check "the worktree is kept" test -d "$wt"
 }
 
-scenarios=${*:-runner notify logs inbox inbox_lifecycle rereview conflicts respond cancel feedback conflict tui}
+scenarios=${*:-runner notify logs inbox inbox_lifecycle rereview conflicts respond cancel feedback conflict tui routing}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"

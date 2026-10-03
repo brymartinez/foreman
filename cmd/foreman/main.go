@@ -22,7 +22,9 @@ import (
 	"github.com/brymartinez/foreman/internal/github"
 	"github.com/brymartinez/foreman/internal/logs"
 	"github.com/brymartinez/foreman/internal/notifications"
+	"github.com/brymartinez/foreman/internal/quota"
 	"github.com/brymartinez/foreman/internal/render"
+	"github.com/brymartinez/foreman/internal/routing"
 	"github.com/brymartinez/foreman/internal/runner"
 	"github.com/brymartinez/foreman/internal/stages"
 	"github.com/brymartinez/foreman/internal/store"
@@ -91,16 +93,26 @@ func run(argv []string) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
+	claude := agent.Claude{Bin: cfg.Claude.Command, Model: cfg.Claude.Model, PlanModel: cfg.Claude.PlanModel, ReviewModel: cfg.Claude.ReviewModel, Exec: agent.RunCommand}
+	codex := agent.Codex{Bin: cfg.Codex.Command, Model: cfg.Codex.Model, PlanModel: cfg.Codex.PlanModel, ReviewModel: cfg.Codex.ReviewModel,
+		ReasoningEffort: cfg.Codex.ReasoningEffort, PlanReasoningEffort: cfg.Codex.PlanReasoningEffort, ReviewReasoningEffort: cfg.Codex.ReviewReasoningEffort, Exec: agent.RunCommand}
+	// A routing.yaml that fails to load stops only the dashboard starts that route.
+	routingPath := routing.Path(cfg.Path)
+	routes, routesErr := routing.Load(routingPath)
 	a := app.App{
 		Store:        store.Markdown{Dir: cfg.TasksDir},
 		GitHub:       github.New(),
 		Repositories: github.New(),
 		Worktrees:    worktree.Git{},
-		Agents: map[task.Agent]app.AgentAdapter{
-			task.Claude: agent.Claude{Bin: cfg.Claude.Command, Model: cfg.Claude.Model, PlanModel: cfg.Claude.PlanModel, ReviewModel: cfg.Claude.ReviewModel, Exec: agent.RunCommand},
-			task.Codex: agent.Codex{Bin: cfg.Codex.Command, Model: cfg.Codex.Model, PlanModel: cfg.Codex.PlanModel, ReviewModel: cfg.Codex.ReviewModel,
-				ReasoningEffort: cfg.Codex.ReasoningEffort, PlanReasoningEffort: cfg.Codex.PlanReasoningEffort, ReviewReasoningEffort: cfg.Codex.ReviewReasoningEffort, Exec: agent.RunCommand},
+		Agents:       map[task.Agent]app.AgentAdapter{task.Claude: claude, task.Codex: codex},
+		Routing:      routes,
+		RoutingErr:   routesErr,
+		RoutingDefaults: routing.Defaults{
+			task.Claude: {Model: cfg.Claude.Model, PlanModel: cfg.Claude.PlanModel},
+			task.Codex:  {Model: cfg.Codex.Model, PlanModel: cfg.Codex.PlanModel, ReasoningEffort: cfg.Codex.ReasoningEffort, PlanReasoningEffort: cfg.Codex.PlanReasoningEffort},
 		},
+		Selector:             agent.Selectors{Claude: claude, Codex: codex},
+		Quota:                quota.Axi{Command: "quota-axi", Exec: agent.RunCommand},
 		Runners:              runner.Processes{LogDir: cfg.LogDir},
 		Stages:               stages.Files{GlobalDir: cfg.StagesDir},
 		WorktreesDir:         cfg.WorktreesDir,
@@ -130,7 +142,8 @@ func run(argv []string) int {
 		if err := tui.Run(ctx, tui.Options{
 			In: os.Stdin, Out: os.Stdout, Source: a,
 			GitHubEvery: time.Duration(cfg.Refresh) * time.Second, LocalEvery: localRefresh,
-			Auto: autoMode(cfg.Auto),
+			Auto:  autoMode(cfg.Auto),
+			Route: routes != nil || routesErr != nil,
 		}); err != nil {
 			return fail(err)
 		}
@@ -266,6 +279,10 @@ func run(argv []string) int {
 		switch {
 		case cmd.ConfigShow:
 			render.Config(os.Stdout, cfg)
+			render.Routing(os.Stdout, routingPath, routes, routesErr)
+			if routesErr != nil {
+				return 1
+			}
 			return 0
 		default:
 			return stageConfig(ctx, cfg)

@@ -50,7 +50,8 @@ Headless mode is `claude -p <prompt>`. Every feature below was checked with a re
   `"type": ["object", "null"]` with strict-mode properties. Both CLIs accept it and
   return the object for a "planned" outcome (probe-agents.sh).
 - **Other options.** `--no-session-persistence` gives disposable reviewer sessions.
-  `--max-budget-usd` caps spend.
+  `--max-budget-usd` caps spend. `--tools ""` disables every built-in tool; the routing
+  selector uses it. That flag is from `--help` and has not been probed.
 
 ## Codex CLI
 
@@ -88,6 +89,19 @@ Headless mode is `codex exec <prompt>`.
   review prompt, so both reviewers get the same inputs and return the same schema.
 - **Other options.** `--ephemeral` gives disposable reviewer sessions. `codex exec` also
   has a `--worktree` flag, which foreman doesn't use because it manages worktrees itself.
+  `--skip-git-repo-check` lets `codex exec` run outside a git repository; the routing
+  selector runs in a scratch directory with it. That flag is from `--help` and has not
+  been probed.
+
+## quota-axi
+
+Optional. `quota-axi --provider claude,codex --json` was run on 2026-10-03. It prints
+`{"schemaVersion":5,"providers":[...]}`. Each provider has `provider`, `state.stale`,
+and `quotaSemantics.effectiveAvailability[]` rows with `scope` (`all_models` or a
+model), `status` (`known` or not), and `effectivePercentRemaining`. Its help says
+`--json` keeps every provider and marks absent ones `notSetUp`. The documented exit
+codes are 0, 1 when every provider fails (the report is still printed), and 2 for a
+usage error. An exhausted provider was not observed live.
 
 ## gh
 

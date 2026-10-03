@@ -1,4 +1,5 @@
-# make setup builds foreman, installs it, and copies the default stage instructions.
+# make setup builds foreman, installs it, and copies the default stage instructions
+# and routing file.
 BIN_DIR ?= $(HOME)/.local/bin
 # Foreman reads global stage files from stages/ next to its config file.
 CONFIG_DIR ?= $(if $(FOREMAN_CONFIG),$(dir $(FOREMAN_CONFIG)),$(HOME)/.config/foreman)
@@ -17,7 +18,7 @@ install: build
 	rm -f $(BIN_DIR)/foreman
 	cp dist/foreman $(BIN_DIR)/foreman
 
-# Existing stage files are yours, so config never overwrites them.
+# Existing stage and routing files are yours, so config never overwrites them.
 config:
 	mkdir -p $(STAGES_DIR)
 	@for f in defaults/stages/*.md; do \
@@ -25,6 +26,9 @@ config:
 		if [ -e "$$dest" ]; then echo "kept $$dest"; \
 		else cp "$$f" "$$dest" && echo "wrote $$dest"; fi; \
 	done
+	@dest=$(CONFIG_DIR:/=)/routing.yaml; \
+	if [ -e "$$dest" ]; then echo "kept $$dest"; \
+	else cp defaults/routing.yaml "$$dest" && echo "wrote $$dest"; fi
 
 test:
 	go vet ./... && go test ./...

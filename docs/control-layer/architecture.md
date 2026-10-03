@@ -4,13 +4,15 @@
 cmd/foreman           wiring: build adapters, call app, render output
 internal/cli          argv -> Command; no I/O beyond parsing
 internal/config       tasks directory resolution
+internal/routing      routing.yaml: profiles, rules, default, and their validation
 internal/render       terminal formatting of app results
 internal/tui          the dashboard: pure Model and Frame, one terminal loop
 internal/app          orchestration + ports.go (the interfaces below)
   ├── github          GitHubClient and RepositoryManager over `gh`
   ├── store           TaskStore over Markdown + YAML frontmatter
   ├── worktree        WorktreeManager over `git worktree`
-  ├── agent           outcome contract, prompt, claude.go / codex.go adapters
+  ├── agent           outcome contract, prompt, claude.go / codex.go adapters, selector
+  ├── quota           QuotaChecker over the optional `quota-axi`
   ├── runner          spawns and checks the detached `foreman __run` process
   └── stages          resolves ~/.config/foreman/stages/<stage>.md + <repo>/.foreman/<stage>.md
 internal/task         the durable model: Record, State, Delegation, Decision
@@ -87,6 +89,9 @@ foreman               -> the dashboard, until q or ctrl+c:
                          every `refresh` seconds (60 by default): app.InboxView, the
                            same as `foreman inbox`
                          enter on an inbox issue -> agent, context file, app.Start
+                           3 (routing on, never delegated) -> context file,
+                             app.Route, show the profile and reason; enter ->
+                             app.Start with the profile, esc -> agent choice
                          enter on a REVIEWED issue -> app.Resume, no prompts
                          enter on delegated work -> open that task's log below the lists
                          enter on a NEEDS_DECISION task -> the oldest unanswered
@@ -103,7 +108,9 @@ foreman               -> the dashboard, until q or ctrl+c:
                          auto mode, after each successful refresh, finished start,
                            and 1s tick: app.Start with auto.agent for assigned,
                            never delegated issues, oldest first, while fewer than
-                           auto.max_concurrent runs are active (D144)
+                           auto.max_concurrent runs are active (D144). With routing
+                           on: app.Route, then app.Start with the profile, no
+                           confirmation; a wait holds the issue until the next refresh
 
 foreman inbox|status  -> runner pid dead while WORKING/REVIEWING -> FAILED
                          readiness gate (gate.go), per task with a PR:
@@ -221,8 +228,10 @@ the same commit. The commit message records why it changed.
   implementer and the other as the reviewer.
 - **Headless turns with a structured outcome.** Each turn ends in a final message that
   matches `internal/agent/outcome.schema.json`: `planned`, `pr_opened`, `blocked` with
-  questions, or `failed`. `agent.ParseOutcome` is the only way agent output enters the
-  program, and it rejects questions with fewer than two options or duplicate labels.
+  questions, or `failed`. `agent.ParseOutcome` is the only way an implementer's output
+  enters the program, and it rejects questions with fewer than two options or duplicate
+  labels. The reviewer and the routing selector have their own schemas and parsers,
+  `agent.ParseReview` and `agent.ParseSelection`.
   Rejected: interactive sessions with terminal scraping.
 - **Permissions.** The dangerous bypass flags are never used. Claude runs with
   `acceptEdits` and the fixed `Bash,WebFetch,WebSearch` tool list; the list is not
@@ -242,7 +251,42 @@ the same commit. The commit message records why it changed.
   planning context (about 200k tokens on one task).
 - **Models and effort are set per step:** `plan_model`, `model` (implementation, fixes,
   feedback, merges, PR creation), and `review_model`; Codex also takes reasoning effort
-  per step. Each turn logs an `agent:model:step` line.
+  per step. Each turn logs an `agent:model:step` line. A routed task's stored profile
+  replaces the plan and implementation settings for its turns; review settings never
+  change.
+
+### Routing
+
+- **`routing.yaml` sits next to `config.yaml`** and holds the selector, named
+  profiles, ordered rules (`when`, `profiles`, `why`), and a `default`. A profile sets
+  `agent` and may set `plan_model`, `model`, and, for Codex, the two efforts; omitted
+  fields inherit `claude.*` or `codex.*`. Budgets, notifications, repository filters,
+  cleanup, auto mode, and review settings stay in `config.yaml`. No file means routing
+  is off. A file that fails to load is an error on every route and in `config --show`,
+  and nothing that needed a route starts; other commands still run.
+- **Only dashboard starts of never-delegated issues are routed:** auto mode, and `3` in
+  the agent choice. `1` and `2` override it. `foreman start` and `inbox` never route.
+- **Fit comes first.** A selector turn (Claude with `claude.plan_model` unless
+  `selector` says otherwise) reads the repository, title, labels, body (6000 runes), the
+  last 10 non-foreman comments (1000 runes each), and the context file (4000 runes),
+  under 20000 runes in all, and names a rule or 0. It runs with no tools in a scratch
+  directory. A selector failure, an unknown rule, or 0 uses `default`, and the reason
+  says so.
+- **Quota only removes candidates.** Candidates are the chosen rule's profiles in the
+  order listed, or `default` alone. `quota-axi` removes those whose agent it confirms
+  exhausted: a fresh `all_models` reading at 0%. Another profile runs only when the rule
+  lists it. With no candidate left, nothing starts: the dashboard shows why, and auto
+  mode keeps the selection and routes again after the next GitHub refresh. When quota
+  is unknown (no `quota-axi`, a failure, or no reading) the default runs if it is a
+  candidate, else the first, and the reason says `quota unknown`. Ranking by percent
+  left was rejected: it would override the cost order the rule sets.
+- **The choice is stored resolved** on the delegation (`profile`, `route_reason`), so
+  editing either file never changes a running task. The runner writes
+  `route:<profile>:<agent>:<reason>` once, before the run's first `agent:model:step`
+  line (`route_logged`). A restart with the same agent keeps the profile; another agent
+  drops it. The reviewer stays the competing agent with its review settings.
+- Rejected: routing inside `app.Start` (a manual start could not confirm first) and in
+  the runner (the task is already WORKING, so it could neither wait nor change agents).
 - **Dollar budgets cap Claude only.** Codex reports no cost and its tokens arrive only
   when a turn ends, so foreman records Codex tokens and never invents a price.
 - **Validation is self-reported.** Foreman records what the agent ran and doesn't re-run
@@ -370,5 +414,10 @@ the same commit. The commit message records why it changed.
   darwin and linux on arm64 and amd64, no Windows (the runner needs `setsid`), not
   signed. Local builds report `0.1.0-dev (<revision>)`, with `-dirty`
   when the tree had changes.
+- **`quota-axi` is optional** (https://github.com/kunchenguid/quota-axi), found on
+  `PATH`. Foreman runs `quota-axi --provider claude,codex --json` with a 10 second
+  limit before each route and reads `providers[].quotaSemantics.effectiveAvailability`.
+  A report printed with exit code 1 (one provider failed) is still read; a missing
+  binary, a timeout, or no report makes quota unknown.
 - **`FOREMAN_CONFIG`** points at another config file; `scripts/e2e.sh` uses it to run
   the built binary against a local origin, a stand-in `gh`, and stub agents.

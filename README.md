@@ -26,6 +26,8 @@ started.
 - [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude`) and/or
   [Codex](https://github.com/openai/codex) (`codex`), both logged in. Each agent reviews
   the other's work, so install both for the review loop.
+- Optional: [`quota-axi`](https://github.com/kunchenguid/quota-axi) on `PATH`, so
+  routing can skip an agent that has run out of quota.
 
 ## Install
 
@@ -38,6 +40,7 @@ tar -xzf foreman_*_darwin_arm64.tar.gz
 mv foreman_*_darwin_arm64/foreman ~/.local/bin/
 mkdir -p ~/.config/foreman/stages
 cp -n foreman_*_darwin_arm64/stages/*.md ~/.config/foreman/stages/
+cp -n foreman_*_darwin_arm64/routing.yaml ~/.config/foreman/   # optional: turns on routing
 ```
 
 The binaries are not notarized. If you downloaded the archive in a browser, macOS may
@@ -49,9 +52,10 @@ To build from source instead, clone the repository and run:
 make setup
 ```
 
-`make setup` builds foreman, installs it to `~/.local/bin`, and copies the default stage
-instructions from `defaults/stages/` into `~/.config/foreman/stages/`. It never
-overwrites a stage file you already have. `make install` and `make config` run the
+`make setup` builds foreman, installs it to `~/.local/bin`, copies the default stage
+instructions from `defaults/stages/` into `~/.config/foreman/stages/`, and copies the
+starter `defaults/routing.yaml` to `~/.config/foreman/routing.yaml`. It never
+overwrites a stage file or a routing file you already have. `make install` and `make config` run the
 steps separately; set `BIN_DIR` or `CONFIG_DIR` to change where they go.
 
 ## Usage
@@ -120,7 +124,7 @@ task's state. The selected row is drawn in reverse video with no color inside it
 |---|---|
 | `tab`, `←` `→`, `h` `l` | switch between inbox and delegated work |
 | `↑` `↓`, `k` `j` | move the focused list cursor |
-| `enter` on an issue | delegate it: pick `1` for Claude or `2` for Codex, then type an optional context file |
+| `enter` on an issue | delegate it: pick `1` for Claude, `2` for Codex, or `3` to route it, then type an optional context file |
 | `enter` on a task | open its log below, or the waiting question on a `NEEDS_DECISION` task |
 | `c` | cancel the highlighted delegated task, after a `y`/`n` confirm |
 | `a` | turn auto mode on or off; the choice is kept for the next launch |
@@ -163,6 +167,10 @@ runs you start by hand count toward that limit. Issues in one repository start o
 at a time, because they share its checkout. You can still start an issue by hand
 when the limit is full. The header shows `auto on 1/3` (active runs and the limit) or
 `auto off`.
+
+With [routing](#routing) on, auto mode routes each issue and starts it with the chosen
+profile without asking. When no suitable profile can run, the issue's row says
+`waiting:` and why, and auto mode tries it again after the next GitHub refresh.
 
 Press `a` to turn auto mode off or on. Turning it off leaves running agents alone. The
 choice is saved in `~/.local/share/foreman/state.json` and read at the next launch. A
@@ -495,6 +503,62 @@ interactive inbox to see every repository for the rest of the session; `mentions
 still applies. Auto mode pauses while the dashboard shows every repository, so it only
 starts work from your configured repositories. `foreman status` and the dashboard's delegated work list every task
 whatever its repository.
+
+## Routing
+
+`~/.config/foreman/routing.yaml`, next to `config.yaml`, lets foreman choose the agent
+and models for each new issue you start from the dashboard. Without the file, routing
+is off and the dashboard works as before. `make setup` installs this starter file:
+
+```yaml
+selector:
+  agent: claude                     # model "" uses claude.plan_model, else claude.model
+profiles:
+  claude:
+    agent: claude
+    plan_model: sonnet
+    model: opus
+  codex:
+    agent: codex
+    plan_model: gpt-6-luna
+    plan_reasoning_effort: xhigh
+    model: gpt-6-sol
+    reasoning_effort: medium
+rules:
+  - when: Broad or ambiguous work, design or architecture changes, or refactors across several packages.
+    profiles: [claude]
+    why: broad or ambiguous design work
+  - when: Narrow, well-specified change with clear steps or acceptance criteria, such as a small bug fix, a typo, or a single function.
+    profiles: [codex]
+    why: narrow, well-specified change
+  - when: Any other work.
+    profiles: [claude, codex]
+    why: general work
+default: claude
+```
+
+A profile sets `agent`, and may set `plan_model`, `model`, and for Codex
+`plan_reasoning_effort` and `reasoning_effort`. A field you leave out uses the
+`claude.*` or `codex.*` value in `config.yaml`. Budgets, notifications, repository
+filters, cleanup, auto mode, and review settings stay in `config.yaml`.
+
+Before a new task starts, the selector agent reads the issue's title, labels, body,
+recent comments, and your context file, and picks the first rule whose `when` fits.
+Foreman then tries that rule's profiles in order and skips one whose agent `quota-axi`
+reports as out of quota. A profile the rule does not list is never tried. If the
+selector is unsure or fails, foreman uses `default`. If no listed profile can run,
+nothing starts and the dashboard says why. If `quota-axi` is missing or cannot tell,
+foreman uses `default` when the rule lists it and says the quota is unknown.
+
+In the dashboard, press `3` after `enter` on a new issue to route it. The footer shows
+the chosen profile, its models, and the reason: `enter` starts it, and `esc` goes back
+to `1` and `2`, which still pick an agent yourself. `foreman start` never routes.
+
+The task keeps its profile: a retry with the same agent uses it, and starting with the
+other agent drops it. The competing agent still reviews with its review settings.
+`foreman show` lists the profile and the reason, and the task's log starts with a
+`route:<profile>:<agent>:<reason>` line. `foreman config --show` reports whether
+routing is on and exits nonzero when `routing.yaml` has an error.
 
 ## Permissions
 
