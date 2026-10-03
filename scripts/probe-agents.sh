@@ -103,7 +103,7 @@ narration() { # agent mode -> "progress_chars output_tokens" summed over five ru
       c="$(jq -rs '[.[] | select(.type=="item.completed" and .item.type=="agent_message") | .item.text] | .[:-1] | join("") | length' n.jsonl)"
       o="$(jq -r 'select(.type=="turn.completed") | .usage.output_tokens' n.jsonl)"
     fi
-    chars=$((chars+c)) tokens=$((tokens+o))
+    chars=$((chars+${c:-0})) tokens=$((tokens+${o:-0}))
   done
   echo "$chars $tokens"
 }
