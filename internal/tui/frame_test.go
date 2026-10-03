@@ -148,7 +148,7 @@ func TestFrameMarksTheFocusedPane(t *testing.T) {
 	}
 	m.Key(Key{Kind: KeyEnter})
 	logFocused := Frame(m)
-	lay, _ := layoutFor(m.Width, m.Height, true)
+	lay, _ := layoutFor(m.Width, m.Height, true, false)
 	logHeading := logFocused[lay.topHeight+2]
 	if strings.Contains(logHeading, focusMark) || strings.Count(strings.Join(logFocused, ""), focusMark) != 1 {
 		t.Errorf("log is not a focusable pane: %q", logHeading)
@@ -315,7 +315,7 @@ func TestFrameKeepsWideTextInsideItsPane(t *testing.T) {
 	}
 	// Every inbox line is exactly the pane's column count, so the task pane beside it
 	// starts where the layout puts it.
-	lay, _ := layoutFor(m.Width, m.Height, true)
+	lay, _ := layoutFor(m.Width, m.Height, true, false)
 	for i, l := range plain(paneLines(inboxPane(m), lay.leftWidth, lay.topHeight, true, 0)) {
 		if n := textWidth(l); n != lay.leftWidth {
 			t.Errorf("inbox line %d is %d columns; want %d: %q", i, n, lay.leftWidth, l)
@@ -423,7 +423,7 @@ func TestInboxRowShowsADelegatedState(t *testing.T) {
 
 // visibleShow is the show lines the pane draws, without their padding.
 func visibleShow(m *Model) []string {
-	lay, _ := layoutFor(m.Width, m.Height, true)
+	lay, _ := layoutFor(m.Width, m.Height, true, false)
 	var out []string
 	for _, l := range logPane(*m, lay.logHeight)[1:] {
 		if l = strings.TrimRight(l, " "); l != "" {
@@ -455,7 +455,7 @@ func TestShowPaneMatchesRender(t *testing.T) {
 		var b strings.Builder
 		render.Show(&b, m.Selected())
 		want := strings.Split(strings.TrimRight(b.String(), "\n"), "\n")
-		lay, _ := layoutFor(m.Width, m.Height, true)
+		lay, _ := layoutFor(m.Width, m.Height, true, false)
 		got := logPane(m, lay.logHeight)[1:]
 		for i, w := range want {
 			if strings.TrimRight(got[i], " ") != strings.TrimRight(w, " ") {
@@ -537,6 +537,150 @@ func TestFooterMentionsShow(t *testing.T) {
 				t.Errorf("width %d focus %d: footer %q", width, focus, footer)
 			}
 		}
+	}
+}
+
+// answerLine is the prompt's last row, just above the message and the footer.
+func answerLine(m Model) string {
+	lines := plain(Frame(m))
+	return strings.TrimRight(lines[len(lines)-3], " ")
+}
+
+func TestDecisionPromptShowsFullQuestion(t *testing.T) {
+	m := prompting()
+	m.Height = 50
+	got := screen(m)
+	for _, want := range []string{"Retry 4xx?", "The client retries 5xx only.", "A. Retry", "B. Fail fast", "Recommendation:", "Impact if wrong:", "Duplicate writes."} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the prompt lost %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "LOG ·") {
+		t.Errorf("the log heading is still drawn:\n%s", got)
+	}
+}
+
+func TestDecisionPromptScrollsLongTextUnderTheAnswerLine(t *testing.T) {
+	m := prompting()
+	m.Height = 20
+	press(&m, rune_('B'))
+	if strings.Contains(screen(m), "Duplicate writes.") {
+		t.Fatal("the whole question fits; the test needs it to scroll")
+	}
+	for range m.decisionLimit() {
+		press(&m, Key{Kind: KeyDown})
+	}
+	got := screen(m)
+	if !strings.Contains(got, "Duplicate writes.") {
+		t.Errorf("scrolling down did not reach the impact:\n%s", got)
+	}
+	if !strings.Contains(got, "lines ") {
+		t.Errorf("the heading does not say which lines are shown:\n%s", got)
+	}
+	if answerLine(m) != "> B█" {
+		t.Errorf("answer line = %q; want the typed answer", answerLine(m))
+	}
+}
+
+func TestDecisionPromptKeepsAnswerLineVisible(t *testing.T) {
+	for _, size := range [][2]int{{minWidth, minHeight}, {100, 30}, {200, 60}} {
+		m := prompting()
+		m.Width, m.Height = size[0], size[1]
+		press(&m, Key{Kind: KeyPageDown}, rune_('A'))
+		lines := Frame(m)
+		if len(lines) != m.Height {
+			t.Errorf("%dx%d: %d lines", m.Width, m.Height, len(lines))
+		}
+		for i, l := range plain(lines) {
+			if n := textWidth(l); n > m.Width {
+				t.Errorf("%dx%d: line %d is %d columns: %q", m.Width, m.Height, i, n, l)
+			}
+		}
+		if got := answerLine(m); got != "> A█" {
+			t.Errorf("%dx%d: answer line = %q", m.Width, m.Height, got)
+		}
+	}
+	m := prompting()
+	m.Width = minWidth
+	m.Input = strings.Repeat("x", 100) + "end"
+	if got := answerLine(m); !strings.HasSuffix(got, "end█") || textWidth(got) > m.Width {
+		t.Errorf("a long answer hides its end: %q", got)
+	}
+}
+
+func TestDecisionPromptShowsQuestionCount(t *testing.T) {
+	m := prompting()
+	if got := screen(m); !strings.Contains(got, "DECISION · a/b#10 · question 1 of 2") {
+		t.Errorf("heading lacks the count:\n%s", got)
+	}
+	m.Answered(answered(m.Selected(), "A. Retry"))
+	if got := screen(m); !strings.Contains(got, "question 2 of 2") || !strings.Contains(got, "Log the body?") {
+		t.Errorf("the second question is not shown as 2 of 2:\n%s", got)
+	}
+
+	m = model()
+	rec := asking(10)
+	rec.Decisions = rec.Decisions[:1]
+	m.SetTasks([]*task.Record{rec})
+	m.Focus = TaskPane
+	press(&m, Key{Kind: KeyEnter})
+	if got := screen(m); !strings.Contains(got, "DECISION · a/b#10") || strings.Contains(got, "question 1 of") {
+		t.Errorf("a single question shows a count:\n%s", got)
+	}
+}
+
+func TestDecisionPromptStripsControlCharacters(t *testing.T) {
+	m := model()
+	rec := asking(10)
+	rec.Decisions[0].Question.Context = "red\x1b[31m text\x1b]52;c;bad\a"
+	m.SetTasks([]*task.Record{rec})
+	m.Focus = TaskPane
+	press(&m, Key{Kind: KeyEnter}, rune_('\x1b'))
+	got := strings.Join(Frame(m), "\n")
+	for _, control := range []string{"\x1b[31m text", "\x1b]52", "\a", "\x1b█"} {
+		if strings.Contains(got, control) {
+			t.Errorf("frame retained terminal control %q", control)
+		}
+	}
+}
+
+func TestLayoutForDecisionGivesMoreRows(t *testing.T) {
+	for _, height := range []int{minHeight, 24, 30, 60} {
+		log, _ := layoutFor(100, height, true, false)
+		ask, _ := layoutFor(100, height, true, true)
+		if ask.logHeight < log.logHeight || (height >= 24 && ask.logHeight <= log.logHeight) {
+			t.Errorf("height %d: prompt gets %d rows, log %d", height, ask.logHeight, log.logHeight)
+		}
+		if ask.topHeight < 1+taskRowLines {
+			t.Errorf("height %d: task pane has %d rows; want at least %d", height, ask.topHeight, 1+taskRowLines)
+		}
+		if ask.topHeight+ask.logHeight != log.topHeight+log.logHeight {
+			t.Errorf("height %d: the prompt layout changed the body size", height)
+		}
+	}
+}
+
+func TestFooterHintsForPrompt(t *testing.T) {
+	for _, width := range []int{minWidth, 100, 200} {
+		m := prompting()
+		m.Width = width
+		got := plain(Frame(m))
+		footer := got[len(got)-1]
+		if !strings.Contains(footer, "esc") || strings.Contains(footer, "…") {
+			t.Errorf("width %d: footer %q", width, footer)
+		}
+		if width >= 100 && !strings.Contains(footer, "enter for A") {
+			t.Errorf("width %d: footer %q does not name the recommended option", width, footer)
+		}
+	}
+	m := model()
+	rec := asking(10)
+	rec.Decisions[0].Question.Recommendation = ""
+	m.SetTasks([]*task.Record{rec})
+	m.Focus = TaskPane
+	press(&m, Key{Kind: KeyEnter})
+	if got := plain(Frame(m)); strings.Contains(got[len(got)-1], "enter for") {
+		t.Errorf("footer offers a recommendation the question lacks: %q", got[len(got)-1])
 	}
 }
 

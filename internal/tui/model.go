@@ -3,6 +3,7 @@ package tui
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -27,6 +28,7 @@ const (
 	ChoosingAgent
 	TypingContext
 	ConfirmingCancel
+	AnsweringDecision
 )
 
 type ActionKind int
@@ -39,6 +41,7 @@ const (
 	ActionCancel
 	ActionResume
 	ActionAuto
+	ActionRespond
 	ActionToggleView
 )
 
@@ -49,6 +52,9 @@ type Action struct {
 	Cancel *task.Record
 	// Resume is the REVIEWED task whose PR feedback the agent should answer.
 	Resume task.Key
+	// Respond is the NEEDS_DECISION task to record Answer for, as typed.
+	Respond task.Key
+	Answer  string
 }
 
 // Model is everything the dashboard draws and everything a keystroke changes.
@@ -72,9 +78,11 @@ type Model struct {
 	// ShowTop is the first wrapped show line in view. Show is read from the top, unlike
 	// the log, which follows its tail.
 	ShowTop int
+	// DecisionTop is the first wrapped question line in view while a decision is asked.
+	DecisionTop int
 
 	Mode  Mode
-	Input string // the context file being typed
+	Input string // the context file or the decision answer being typed
 	// Message is the one line under the panes: the last result, or an error.
 	Message     string
 	Refreshing  bool
@@ -98,6 +106,8 @@ type Model struct {
 	tried        map[task.Key]bool // issues started this session, by hand or automatically
 	starting     map[task.Key]bool // starts and resumes in flight, manual or automatic
 	tasksStale   bool              // the last task read failed
+	answering    bool              // an answer is being recorded
+	question     int               // the index in Decisions of the question the prompt shows
 }
 
 // Selected is the highlighted delegated task, or nil when nothing is delegated.
@@ -128,12 +138,41 @@ func (m *Model) SetTasks(recs []*task.Record) {
 	} else {
 		m.TaskCursor = clamp(indexOfTask(recs, selected, m.TaskCursor), len(recs))
 	}
-	if cur := m.Selected(); cur == nil || cur.Key != selected {
+	cur := m.Selected()
+	if cur == nil || cur.Key != selected {
 		// The task the cursor was on is gone, so the pane is about to show another
 		// task's log. Follow its tail rather than keep the old task's scroll offset.
 		m.LogOffset = 0
 		m.LogOpen, m.ShowOpen = false, false
 	}
+	switch {
+	case m.Mode == AnsweringDecision && !asks(cur):
+		// The question was answered elsewhere, such as by foreman respond, or the task
+		// is gone. Its log takes the pane back.
+		m.Mode, m.Input = Browsing, ""
+	case m.Mode == AnsweringDecision && !m.LogOpen:
+		// The cursor moved to another task, which closed the pane.
+		m.Mode, m.Input = Browsing, ""
+	case m.Mode == AnsweringDecision && pendingIndex(cur) != m.question:
+		// The shown question was answered while the prompt was open. Text typed for it
+		// must not be recorded as the answer to the next one.
+		if !m.answering {
+			m.Message = fmt.Sprintf("%s#%d: that question was answered elsewhere; this is the next one", cur.Repo, cur.Number)
+		}
+		m.Input, m.DecisionTop, m.question = "", 0, pendingIndex(cur)
+	case m.Mode == Browsing && m.LogOpen && !m.answering && asks(cur):
+		m.openDecision()
+	}
+}
+
+// pendingIndex is the index in rec.Decisions of the oldest unanswered question, or -1.
+func pendingIndex(rec *task.Record) int {
+	return slices.IndexFunc(rec.Decisions, func(d task.Decision) bool { return d.Answer == "" })
+}
+
+// asks reports whether rec has a question the developer can answer now.
+func asks(rec *task.Record) bool {
+	return rec != nil && rec.State == task.NeedsDecision && rec.Pending() != nil
 }
 
 func newestTask(recs []*task.Record) int {
@@ -202,6 +241,8 @@ func (m *Model) Key(k Key) Action {
 		return m.typeContext(k)
 	case ConfirmingCancel:
 		return m.confirmCancel(k)
+	case AnsweringDecision:
+		return m.answerDecision(k)
 	}
 	return m.browse(k)
 }
@@ -340,7 +381,7 @@ func (m *Model) scrollEnd() {
 }
 
 func (m *Model) logPage() int {
-	lay, ok := layoutFor(m.Width, m.Height, true)
+	lay, ok := layoutFor(m.Width, m.Height, true, false)
 	if !ok {
 		return 1
 	}
@@ -370,16 +411,131 @@ func (m *Model) enter() Action {
 	switch {
 	case rec == nil:
 		m.Message = "No delegated work yet. Pick an issue on the left."
+	case asks(rec):
+		m.openDecision()
+		m.Message = ""
 	default:
 		m.LogOpen = true
 		m.LogOffset = 0
-		if rec.State == task.NeedsDecision {
-			m.Message = fmt.Sprintf("foreman respond %s#%d · answers the waiting question", rec.Repo, rec.Number)
-		} else {
-			m.Message = ""
-		}
+		m.Message = ""
 	}
 	return Action{}
+}
+
+// openDecision puts the selected task's oldest unanswered question in the lower pane.
+// The question is read from the record on each frame, so the prompt always shows the
+// next one. The cursor stays on the task, so a newer delegation cannot take the
+// prompt away while the developer types.
+func (m *Model) openDecision() {
+	m.Mode, m.Input = AnsweringDecision, ""
+	m.LogOpen, m.ShowOpen = true, false
+	m.DecisionTop = 0
+	m.question = pendingIndex(m.Selected())
+	m.manualTask = true
+}
+
+// answerDecision handles a key while the prompt is open. Every rune is text, so an
+// answer can start with q or j.
+func (m *Model) answerDecision(k Key) Action {
+	switch k.Kind {
+	case KeyEscape:
+		// Answers already recorded are saved, so reopening asks the next question.
+		m.Mode, m.Input = Browsing, ""
+		m.LogOpen = false
+	case KeyBackspace:
+		if r := []rune(m.Input); len(r) > 0 {
+			m.Input = string(r[:len(r)-1])
+		}
+	case KeyRune:
+		m.Input += string(k.Rune)
+	case KeyUp:
+		m.scrollDecision(-1)
+	case KeyDown:
+		m.scrollDecision(1)
+	case KeyPageUp:
+		m.scrollDecision(-m.decisionPage())
+	case KeyPageDown:
+		m.scrollDecision(m.decisionPage())
+	case KeyEnter:
+		rec := m.Selected()
+		if m.answering || rec == nil {
+			return Action{}
+		}
+		m.answering = true
+		// The last answer relaunches the runner, so the slot is held as for a resume.
+		m.starting = mark(m.starting, rec.Key)
+		m.Message = fmt.Sprintf("Recording the answer for %s#%d…", rec.Repo, rec.Number)
+		return Action{Kind: ActionRespond, Respond: rec.Key, Answer: m.Input}
+	}
+	return Action{}
+}
+
+// Answered applies a recorded answer. The record replaces the task's entry at once, so
+// the prompt shows the next question without waiting for the next task read. After the
+// last answer the pane goes back to the task's log, following its tail.
+func (m *Model) Answered(rec *task.Record) {
+	m.answering = false
+	for i, cur := range m.Tasks {
+		if cur.Key == rec.Key {
+			m.Tasks[i] = rec
+		}
+	}
+	if cur := m.Selected(); cur == nil || cur.Key != rec.Key {
+		return
+	}
+	if asks(rec) {
+		if m.Mode == AnsweringDecision {
+			m.Input, m.DecisionTop, m.question = "", 0, pendingIndex(rec)
+		}
+		return
+	}
+	if m.Mode == AnsweringDecision || (m.Mode == Browsing && m.LogOpen) {
+		m.Mode, m.Input = Browsing, ""
+		m.LogOpen, m.ShowOpen, m.LogOffset = true, false, 0
+	}
+}
+
+// AnswerFailed keeps the prompt and the typed text, so the developer can fix the
+// answer and press Enter again.
+func (m *Model) AnswerFailed() { m.answering = false }
+
+// decisionLines is the selected task's pending question as foreman respond prints it,
+// wrapped to the pane width.
+func (m *Model) decisionLines() []string {
+	rec := m.Selected()
+	if rec == nil || rec.Pending() == nil {
+		return nil
+	}
+	var b bytes.Buffer
+	render.Blocked(&b, rec.Pending().Question)
+	var out []string
+	for _, l := range strings.Split(strings.TrimRight(b.String(), "\n"), "\n") {
+		out = append(out, wrapLine(printable(l), m.Width)...)
+	}
+	return out
+}
+
+// decisionPage is how many question lines the prompt shows: the pane less its heading
+// and the answer line. At the smallest height the heading is dropped first.
+func (m *Model) decisionPage() int {
+	lay, ok := layoutFor(m.Width, m.Height, true, true)
+	if !ok {
+		return 1
+	}
+	if lay.logHeight < 3 {
+		return max(lay.logHeight-1, 1)
+	}
+	return lay.logHeight - 2
+}
+
+// decisionLimit is the last DecisionTop that still fills the pane.
+func (m *Model) decisionLimit() int {
+	return max(len(m.decisionLines())-m.decisionPage(), 0)
+}
+
+func (m *Model) scrollDecision(by int) {
+	limit := m.decisionLimit()
+	m.DecisionTop = min(max(min(m.DecisionTop, limit)+by, 0), limit)
 }
 
 func (m *Model) startCancel() Action {

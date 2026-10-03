@@ -121,7 +121,7 @@ task's state. The selected row is drawn in reverse video with no color inside it
 | `tab`, `←` `→`, `h` `l` | switch between inbox and delegated work |
 | `↑` `↓`, `k` `j` | move the focused list cursor |
 | `enter` on an issue | delegate it: pick `1` for Claude or `2` for Codex, then type an optional context file |
-| `enter` on a task | open its log below; show how to answer a waiting question |
+| `enter` on a task | open its log below, or the waiting question on a `NEEDS_DECISION` task |
 | `c` | cancel the highlighted delegated task, after a `y`/`n` confirm |
 | `a` | turn auto mode on or off; the choice is kept for the next launch |
 | `v` | switch the inbox between your configured repositories and all of them, for this session |
@@ -144,8 +144,15 @@ process.
 60 by 12; below that it says so. When stdin or stdout is not a terminal, `foreman`
 prints this usage text and exits 0, so pipes and scripts are unaffected.
 
-Answering a question still belongs to `foreman respond <issue>`, which the dashboard
-points you at.
+Enter on a `NEEDS_DECISION` task shows its oldest unanswered question below the lists:
+the issue, context, options, recommendation, and impact. Type an option label or your
+own answer and press Enter; an empty Enter takes the recommended option. The answer is
+handled exactly as `foreman respond` handles it. With several questions waiting, the
+next one follows, and after the last the agent resumes and the pane shows its log.
+`↑` `↓` and `pgup` `pgdn` scroll a long question. Every other key is answer text. Esc
+closes the prompt; answers already recorded are kept, and Enter asks the next one. A
+task whose log is open switches to its question on its own when it needs a decision.
+`foreman respond <issue>` still works from any terminal.
 
 Auto mode is on by default. While the dashboard is open, it starts open issues
 assigned to you that foreman has never delegated, oldest first, with `auto.agent` and
@@ -381,7 +388,7 @@ runner is gone, so a second agent never shares the worktree with the first.
 | State | Meaning | Your move |
 |---|---|---|
 | `WORKING` | The implementer is running | Wait, or `foreman cancel` to stop it |
-| `NEEDS_DECISION` | The agent asked a question | `foreman respond` |
+| `NEEDS_DECISION` | The agent asked a question | `foreman respond`, or Enter on the task in the dashboard |
 | `REVIEWING` | PR open; under review, or waiting on CI | Wait, or `foreman cancel` to stop a running review |
 | `READY_FOR_HUMAN` | Review clean, CI finished (✓ or ✗ shown) | Review and merge the PR |
 | `DONE` | PR merged or issue closed | Nothing |

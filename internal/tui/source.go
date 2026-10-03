@@ -20,6 +20,9 @@ type Source interface {
 	Cancel(ctx context.Context, rec *task.Record) (*task.Record, error)
 	// Resume continues a REVIEWED task so its agent answers the comments on its PR.
 	Resume(ctx context.Context, key task.Key) (*task.Record, error)
+	// Respond records an answer to the oldest pending question, as foreman respond
+	// does, and relaunches the runner after the last one.
+	Respond(ctx context.Context, key task.Key, raw string) (*task.Record, error)
 }
 
 var _ Source = app.App{}

@@ -15,7 +15,9 @@ type layout struct {
 	leftWidth int
 }
 
-func layoutFor(width, height int, showLog bool) (layout, bool) {
+// layoutFor budgets the rows. A decision prompt gets half the body rather than a
+// quarter, because the whole question has to be read before it is answered.
+func layoutFor(width, height int, showLog, decision bool) (layout, bool) {
 	if width < minWidth || height < minHeight {
 		return layout{}, false
 	}
@@ -27,6 +29,9 @@ func layoutFor(width, height int, showLog bool) (layout, bool) {
 	// wrapped state, title, and PR badges. At the minimum height, the log still has a
 	// heading and line.
 	top := max(body*3/4, 1+taskRowLines)
+	if decision {
+		top = max(body-body/2, 1+taskRowLines)
+	}
 	top = min(top, body-2)
 	return layout{topHeight: top, logHeight: body - top, leftWidth: width * 9 / 20}, true
 }

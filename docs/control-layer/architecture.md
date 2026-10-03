@@ -89,6 +89,11 @@ foreman               -> the dashboard, until q or ctrl+c:
                          enter on an inbox issue -> agent, context file, app.Start
                          enter on a REVIEWED issue -> app.Resume, no prompts
                          enter on delegated work -> open that task's log below the lists
+                         enter on a NEEDS_DECISION task -> the oldest unanswered
+                           question below the lists; enter -> app.Respond with the
+                           typed answer, then the next question; after the last,
+                           the task's log. esc -> close; recorded answers stay
+                         an open log whose task needs a decision -> the question
                          left/right, h/l -> focus the inbox/delegated work
                          esc -> close the log
                          c on a running task     -> confirm, app.Cancel
@@ -340,7 +345,14 @@ the same commit. The commit message records why it changed.
 - **It never blocks or misdraws:** the terminal check runs before config loads, so a
   piped `foreman` prints usage and exits 0; control characters in dynamic text become
   spaces; widths are counted in terminal columns; GitHub refreshes run off the input
-  goroutine; quitting waits for a `Start` or `Cancel` in flight.
+  goroutine; quitting waits for a `Start`, `Cancel`, or `Respond` in flight.
+- **Decisions are answered in the lower pane through `app.Respond`,** so an option
+  label, free text, and an empty answer resolve as they do in `foreman respond`. The
+  prompt is its own mode: every rune is answer text, so an answer can start with `q`
+  or `j`. It reads the question from the task record on each frame, so it always shows
+  the oldest unanswered one. It takes half of the body, because a question is read in
+  full before it is answered, and the answer line is always its last row. Opening it
+  pins the cursor to the task, so a new delegation cannot move it mid-answer.
 
 ### Notifications
 
