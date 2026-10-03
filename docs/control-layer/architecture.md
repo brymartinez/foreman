@@ -271,7 +271,8 @@ the same commit. The commit message records why it changed.
   to 10 of the newest non-foreman comments (1000 runes each, 5000 in all), and the
   context file (4000 runes), and names a rule or 0. Each input has its own budget, and
   `routing.yaml` rejects rules longer than 2500 runes, so the prompt stays under 20000
-  runes without cutting any input short. It runs with no tools in a scratch
+  runes without cutting any input short. A failed read of the issue or its comments is
+  a route error, so the selector never chooses from part of the issue. It runs with no tools in a scratch
   directory. A selector failure, an unknown rule, or 0 uses `default`, and the reason
   says so.
 - **Quota only removes candidates.** Candidates are the chosen rule's profiles in the

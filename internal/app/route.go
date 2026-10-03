@@ -154,8 +154,12 @@ func (a App) routePrompt(ctx context.Context, req RouteRequest) (string, error) 
 		fmt.Fprintf(&b, "Labels: %s\n", clip(strings.Join(issue.Labels, ", "), routeLabelsRunes))
 	}
 	fmt.Fprintf(&b, "\nBody:\n%s\n", clip(issue.Body, routeBodyRunes))
-	// A failed comment read leaves the selector with the issue alone.
-	comments, _ := a.GitHub.IssueComments(ctx, key)
+	// Routing details often live in the comments, so a failed read stops the route
+	// rather than choosing from part of the issue.
+	comments, err := a.GitHub.IssueComments(ctx, key)
+	if err != nil {
+		return "", fmt.Errorf("read the issue's comments: %w", err)
+	}
 	comments = slices.DeleteFunc(comments, func(c IssueComment) bool {
 		return strings.HasPrefix(strings.TrimSpace(c.Body), "<!-- foreman:")
 	})

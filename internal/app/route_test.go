@@ -163,6 +163,18 @@ func TestRoutePromptKeepsEveryInputWhenAllAreAtTheirLimits(t *testing.T) {
 	}
 }
 
+func TestRouteCommentReadErrorIsReturnedWithoutSelecting(t *testing.T) {
+	f, s := routed(t, agent.Selection{Rule: 2}, known)
+	f.gh.issueCommentsErr = errors.New("gh: HTTP 502")
+	d, err := f.app.Route(context.Background(), routeReq)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 502") || d.Profile != nil {
+		t.Fatalf("decision %+v, err %v; want the read error and no profile", d, err)
+	}
+	if len(s.calls) != 0 {
+		t.Error("the selector ran without the issue's comments")
+	}
+}
+
 func TestRouteUncertainUsesDefault(t *testing.T) {
 	f, _ := routed(t, agent.Selection{Rule: 0, Reason: "unclear"}, known)
 	d, err := f.app.Route(context.Background(), routeReq)
