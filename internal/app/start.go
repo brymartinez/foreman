@@ -91,6 +91,10 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 	if err := a.Worktrees.Ensure(ctx, wt); err != nil {
 		return nil, err
 	}
+	head, err := a.Worktrees.Head(ctx, wt.Path)
+	if err != nil {
+		return nil, fmt.Errorf("read worktree head: %w", err)
+	}
 
 	now := a.Now()
 	_, err = a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
@@ -113,15 +117,16 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		}
 		prev := cur.Delegation
 		cur.Delegation = &task.Delegation{
-			Implementer: task.Session{Agent: req.Agent},
-			StartedAt:   now,
-			Reviewer:    req.Agent.Reviewer(),
-			Branch:      wt.Branch,
-			BaseRef:     wt.BaseRef,
-			Worktree:    wt.Path,
-			ContextFile: req.ContextFile,
-			Profile:     req.Profile,
-			RouteReason: req.RouteReason,
+			Implementer:    task.Session{Agent: req.Agent},
+			StartedAt:      now,
+			Reviewer:       req.Agent.Reviewer(),
+			Branch:         wt.Branch,
+			BaseRef:        wt.BaseRef,
+			Worktree:       wt.Path,
+			ContextFile:    req.ContextFile,
+			Profile:        req.Profile,
+			RouteReason:    req.RouteReason,
+			CheckpointHead: head,
 		}
 		// The same branch has the same PR, so a restart can pick up at its review.
 		// Another implementer starts over: its reviewer wrote the existing PR. A
@@ -130,6 +135,10 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		// waiting on the PR keep it for any agent, because the run reads them through
 		// that number and the new agent has to answer them first.
 		sameAgent := prev != nil && prev.Implementer.Agent == req.Agent
+		if sameAgent && prev.Branch == wt.Branch && prev.CheckpointHead == head {
+			cur.Delegation.CheckpointNext = prev.CheckpointNext
+			cur.Delegation.Checkpoints = prev.Checkpoints
+		}
 		// A retry with the same agent keeps its route. Choosing another agent drops it.
 		if req.Profile == nil && sameAgent && prev.Profile != nil {
 			cur.Delegation.Profile, cur.Delegation.RouteReason, cur.Delegation.RouteLogged = prev.Profile, prev.RouteReason, prev.RouteLogged

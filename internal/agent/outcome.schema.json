@@ -4,6 +4,7 @@
   "required": [
     "status",
     "summary",
+    "nextObjective",
     "prNumber",
     "prUrl",
     "validation",
@@ -15,6 +16,7 @@
       "type": "string",
       "enum": [
         "planned",
+        "checkpoint",
         "pr_opened",
         "blocked",
         "failed"
@@ -22,6 +24,12 @@
     },
     "summary": {
       "type": "string"
+    },
+    "nextObjective": {
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "prNumber": {
       "type": [

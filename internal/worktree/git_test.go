@@ -99,6 +99,38 @@ func TestEnsureRefusesConflicts(t *testing.T) {
 	}
 }
 
+func TestCheckpointRequiresAnAdvancingCleanCommitOnTheTaskBranch(t *testing.T) {
+	clone, _ := repoWithOrigin(t)
+	wt := filepath.Join(t.TempDir(), "task")
+	branch := "agent/825-a"
+	if err := (Git{}).Ensure(context.Background(), app.WorktreeRequest{RepoDir: clone, Path: wt, Branch: branch, BaseRef: "origin/main"}); err != nil {
+		t.Fatal(err)
+	}
+	base, err := (Git{}).Head(context.Background(), wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (Git{}).Checkpoint(context.Background(), wt, branch, base); err == nil || !strings.Contains(err.Error(), "no new commit") {
+		t.Fatalf("unchanged head: %v", err)
+	}
+	write(t, wt, "change.txt", "done\n")
+	if _, err := (Git{}).Checkpoint(context.Background(), wt, branch, base); err == nil || !strings.Contains(err.Error(), "uncommitted") {
+		t.Fatalf("untracked file: %v", err)
+	}
+	run(t, wt, "add", "change.txt")
+	run(t, wt, "commit", "-q", "-m", "part one")
+	if _, err := (Git{}).Checkpoint(context.Background(), wt, "another-branch", base); err == nil || !strings.Contains(err.Error(), "not another-branch") {
+		t.Fatalf("wrong branch: %v", err)
+	}
+	head, err := (Git{}).Checkpoint(context.Background(), wt, branch, base)
+	if err != nil || head == base || head != run(t, wt, "rev-parse", "HEAD") {
+		t.Fatalf("checkpoint head %q: %v", head, err)
+	}
+	if _, err := (Git{}).Checkpoint(context.Background(), wt, branch, head); err == nil || !strings.Contains(err.Error(), "no new commit") {
+		t.Fatalf("repeated head: %v", err)
+	}
+}
+
 func TestRemove(t *testing.T) {
 	clone, _ := repoWithOrigin(t)
 	ctx := context.Background()

@@ -98,6 +98,25 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
+func TestMarkdownRoundTripsImplementationCheckpoint(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	want := delegated()
+	want.Delegation.PR, want.Delegation.PRURL, want.Delegation.PRHead = 0, "", ""
+	want.Delegation.CheckpointHead = "c0ffee1"
+	want.Delegation.CheckpointNext = "Add the log pager"
+	want.Delegation.Checkpoints = 2
+	if err := s.Save(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, want.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Delegation.CheckpointHead != "c0ffee1" || got.Delegation.CheckpointNext != "Add the log pager" || got.Delegation.Checkpoints != 2 {
+		t.Fatalf("checkpoint = %+v", got.Delegation)
+	}
+}
+
 func TestOldFileLoadsWithoutConflictFields(t *testing.T) {
 	s := Markdown{Dir: t.TempDir()}
 	old := "---\nrepo: a/b\nnumber: 3\nkind: issue\nstate: READY_FOR_HUMAN\nimplementation_agent: claude\nbranch: feat/3-x\npr: 7\npr_head: c0ffee1\n---\n"

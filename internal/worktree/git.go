@@ -19,6 +19,42 @@ import (
 
 type Git struct{}
 
+func (Git) Head(ctx context.Context, dir string) (string, error) {
+	out, err := git(ctx, dir, "rev-parse", "HEAD")
+	return strings.TrimSpace(string(out)), err
+}
+
+// Checkpoint verifies the agent committed on the expected branch and left no
+// tracked or untracked work behind. Its new head must extend the previous one.
+func (g Git) Checkpoint(ctx context.Context, dir, branch, prior string) (string, error) {
+	ref, err := git(ctx, dir, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("checkpoint branch: %w", err)
+	}
+	if got := strings.TrimSpace(string(ref)); got != branch {
+		return "", fmt.Errorf("checkpoint is on branch %s, not %s", got, branch)
+	}
+	status, err := git(ctx, dir, "status", "--porcelain=v1", "--untracked-files=all")
+	if err != nil {
+		return "", err
+	}
+	if len(status) > 0 {
+		return "", errors.New("checkpoint has uncommitted or untracked files")
+	}
+	head, err := g.Head(ctx, dir)
+	if err != nil {
+		return "", err
+	}
+	if prior == "" || head == prior {
+		return "", errors.New("checkpoint has no new commit")
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "merge-base", "--is-ancestor", prior, head)
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("checkpoint commit does not extend %s: %w", prior, err)
+	}
+	return head, nil
+}
+
 func (Git) Ensure(ctx context.Context, req app.WorktreeRequest) error {
 	if _, err := git(ctx, req.RepoDir, "worktree", "prune"); err != nil {
 		return err

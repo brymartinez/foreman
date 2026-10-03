@@ -153,6 +153,10 @@ type WorktreeManager interface {
 	// Ensure is idempotent: it reuses the worktree when Path already has Branch checked out,
 	// and reuses Branch when it exists without a worktree.
 	Ensure(ctx context.Context, req WorktreeRequest) error
+	// Head reads the current commit without changing the worktree.
+	Head(ctx context.Context, dir string) (string, error)
+	// Checkpoint accepts a clean worktree on branch whose HEAD advances from prior.
+	Checkpoint(ctx context.Context, dir, branch, prior string) (string, error)
 	// Remove deletes the worktree, and the branch if asked. It refuses a worktree with
 	// uncommitted or untracked changes. A path that no longer exists is already removed.
 	Remove(ctx context.Context, req WorktreeRemoval) error

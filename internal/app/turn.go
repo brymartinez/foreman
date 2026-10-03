@@ -21,10 +21,13 @@ type turnRequest struct {
 // turnResult is a finished implementer turn. pr is the verified PR when the turn
 // reported pr_opened and the check passed; err is the turn's or the check's error.
 type turnResult struct {
-	turn agent.Turn
-	pr   *PullRequest
-	err  error
+	turn           agent.Turn
+	pr             *PullRequest
+	checkpointHead string
+	err            error
 }
+
+const maxImplementationCheckpoints = 8
 
 // prCheck verifies a turn's pr_opened claim and logs what it found.
 type prCheck func(ctx context.Context, rec *task.Record, o agent.Outcome) (*PullRequest, error)
@@ -44,8 +47,25 @@ func (a App) verifiedPR(log io.Writer) prCheck {
 // to the task file here; finishTurn records the result.
 func (a App) runTurn(ctx context.Context, rec *task.Record, req turnRequest, check prCheck, log io.Writer) turnResult {
 	turn, err := a.implement(ctx, rec, req, log)
-	if err != nil || turn.Outcome.Status != agent.PROpened {
+	if err != nil {
 		return turnResult{turn: turn, err: err}
+	}
+	if turn.Outcome.Status == agent.Checkpoint {
+		if a.needsPlan(rec) || rec.Delegation.PR != 0 || req.findings != nil || len(req.feedback) > 0 || req.merge != nil || rec.Delegation.ConflictPending {
+			return turnResult{turn: turn, err: fmt.Errorf("checkpoint is only allowed during initial implementation")}
+		}
+		if rec.Delegation.Checkpoints >= maxImplementationCheckpoints {
+			return turnResult{turn: turn, err: fmt.Errorf("implementation exceeded %d checkpoints", maxImplementationCheckpoints)}
+		}
+		head, err := a.Worktrees.Checkpoint(ctx, rec.Delegation.Worktree, rec.Delegation.Branch, rec.Delegation.CheckpointHead)
+		if err != nil {
+			return turnResult{turn: turn, err: fmt.Errorf("verify implementation checkpoint: %w", err)}
+		}
+		fmt.Fprintf(log, "foreman: verified implementation checkpoint %s\n", short(head))
+		return turnResult{turn: turn, checkpointHead: head}
+	}
+	if turn.Outcome.Status != agent.PROpened {
+		return turnResult{turn: turn}
 	}
 	if a.needsPlan(rec) {
 		fmt.Fprintf(log, "foreman: %s opened a PR without posting a plan\n", rec.Delegation.Implementer.Agent)
