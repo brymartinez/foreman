@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -124,6 +125,12 @@ func (c Codex) Review(ctx context.Context, in StartInput) (ReviewOutcome, error)
 }
 
 func (c Codex) run(ctx context.Context, in StartInput, baseArgs func(schema, last string) []string, resumeID string, onSession func(task.Session)) (Turn, error) {
+	if p := in.Profile; p != nil {
+		c.Model = cmp.Or(p.Model, c.Model)
+		c.PlanModel = cmp.Or(p.PlanModel, c.PlanModel)
+		c.ReasoningEffort = cmp.Or(p.ReasoningEffort, c.ReasoningEffort)
+		c.PlanReasoningEffort = cmp.Or(p.PlanReasoningEffort, c.PlanReasoningEffort)
+	}
 	if in.Stage == task.StagePlan {
 		if c.PlanModel != "" {
 			c.Model = c.PlanModel

@@ -15,6 +15,7 @@ for target in darwin/arm64 darwin/amd64 linux/arm64 linux/amd64; do
     -ldflags "-s -w -X main.version=$version" -o "$out/$name/foreman" ./cmd/foreman
   cp README.md "$out/$name/"
   mkdir -p "$out/$name/stages" && cp defaults/stages/*.md "$out/$name/stages/"
+  cp defaults/routing.yaml "$out/$name/"
   tar -C "$out" -czf "$out/$name.tar.gz" "$name"
   rm -rf "${out:?}/$name"
 done

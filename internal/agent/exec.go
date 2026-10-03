@@ -22,6 +22,9 @@ type StartInput struct {
 	// Log receives the agent's stderr and progress events; the runner points it at the task log.
 	Log          io.Writer
 	MaxBudgetUSD float64
+	// Profile, when set, replaces the adapter's models and effort for planning and
+	// implementation turns. Reviews ignore it.
+	Profile *task.Profile
 }
 
 // Steps name the work a turn does in its log line. Feedback and merge turns run

@@ -1,0 +1,113 @@
+{
+  "generatedAt": "2026-10-03T07:58:10.296Z",
+  "schemaVersion": 5,
+  "providers": [
+    {
+      "provider": "claude",
+      "plan": "team",
+      "windows": [
+        {
+          "id": "five_hour",
+          "label": "session",
+          "kind": "session",
+          "resetsAt": "2026-10-03T11:19:59.965228+00:00",
+          "percentRemaining": 54
+        },
+        {
+          "id": "seven_day",
+          "label": "week",
+          "kind": "weekly",
+          "resetsAt": "2026-10-08T17:59:59.965250+00:00",
+          "percentRemaining": 75
+        }
+      ],
+      "state": {
+        "status": "fresh",
+        "stale": false
+      },
+      "quotaSemantics": {
+        "status": "known",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 54,
+            "boundedBy": [
+              "five_hour",
+              "seven_day"
+            ],
+            "limitingWindowIds": [
+              "five_hour"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "provider": "codex",
+      "plan": "plus",
+      "windows": [
+        {
+          "id": "five_hour",
+          "label": "session",
+          "kind": "session",
+          "resetsAt": "2026-10-03T11:46:32.000Z",
+          "percentRemaining": 64
+        },
+        {
+          "id": "weekly",
+          "label": "week",
+          "kind": "weekly",
+          "resetsAt": "2026-10-09T21:13:59.000Z",
+          "percentRemaining": 87
+        },
+        {
+          "id": "model:base_model_inference:7d",
+          "label": "gpt-reserve week",
+          "kind": "model",
+          "resetsAt": "2026-10-10T07:58:10.000Z",
+          "percentRemaining": 100
+        }
+      ],
+      "credits": {
+        "remaining": 0,
+        "unlimited": false,
+        "unit": "credits"
+      },
+      "state": {
+        "status": "fresh",
+        "stale": false
+      },
+      "quotaSemantics": {
+        "status": "known",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 64,
+            "boundedBy": [
+              "five_hour",
+              "weekly"
+            ],
+            "limitingWindowIds": [
+              "five_hour"
+            ]
+          },
+          {
+            "scope": "model:base_model_inference",
+            "status": "known",
+            "effectivePercentRemaining": 64,
+            "boundedBy": [
+              "five_hour",
+              "weekly",
+              "model:base_model_inference:7d"
+            ],
+            "limitingWindowIds": [
+              "five_hour"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

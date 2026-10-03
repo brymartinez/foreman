@@ -40,6 +40,9 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 			cur.Delegation.RunnerPID = 0
 		}
 	}))
+	if rec, err = a.logRoute(ctx, rec, log); err != nil {
+		return err
+	}
 
 	if rec.Delegation.ConflictPending {
 		// The gate found the handed-over PR conflicting with its base. A repair
@@ -55,6 +58,17 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 	}
 	r := &taskRun{a: a, ctx: ctx, final: final, log: log, rec: rec, feedback: feedback}
 	return r.loop(firstStep(rec, len(feedback)))
+}
+
+// logRoute writes the route line once per routing decision, ahead of the run's
+// agent:model:step lines, so the log says which profile ran and why.
+func (a App) logRoute(ctx context.Context, rec *task.Record, log io.Writer) (*task.Record, error) {
+	d := rec.Delegation
+	if d.Profile == nil || d.RouteLogged {
+		return rec, nil
+	}
+	fmt.Fprintf(log, "route:%s:%s:%s\n", d.Profile.Name, d.Profile.Agent, strings.Join(strings.Fields(d.RouteReason), " "))
+	return a.update(ctx, rec.Key, existing(func(cur *task.Record) { cur.Delegation.RouteLogged = true }))
 }
 
 // step is one phase of a run. Each step's method returns the step that follows it.
@@ -302,7 +316,7 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 	case len(feedback) > 0:
 		step = agent.StepFeedback
 	}
-	in := agent.StartInput{Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD, Stage: stage, Step: step}
+	in := agent.StartInput{Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD, Stage: stage, Step: step, Profile: d.Profile}
 	resume := ""
 	var conflict *agent.Conflict
 	if d.ConflictPending {

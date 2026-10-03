@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/brymartinez/foreman/internal/agent"
 	"github.com/brymartinez/foreman/internal/app"
 	"github.com/brymartinez/foreman/internal/task"
 )
@@ -101,8 +102,13 @@ func (m *Model) AutoStarts() []app.StartRequest {
 		m.tried = mark(m.tried, it.Key)
 		m.starting = mark(m.starting, it.Key)
 		// The task list leaves out inactive work such as PR_CLOSED, so only App.Start
-		// can see that another command delegated this issue since the refresh.
-		reqs = append(reqs, app.StartRequest{Repo: it.Key.Repo, Issue: it.Key.Number, Agent: m.AutoAgent, NewOnly: true})
+		// can see that another command delegated this issue since the refresh. With
+		// routing on, the agent is left empty for autoStart to route.
+		req := app.StartRequest{Repo: it.Key.Repo, Issue: it.Key.Number, Agent: m.AutoAgent, NewOnly: true}
+		if m.RouteOn {
+			req.Agent = ""
+		}
+		reqs = append(reqs, req)
 	}
 	return reqs
 }
@@ -114,6 +120,37 @@ func (m *Model) TasksFailed() { m.tasksStale = true }
 // Done frees the slot a start or resume held once its result comes back.
 func (m *Model) Done(key task.Key) {
 	delete(m.starting, key)
+}
+
+// wait is an auto start routing held back: no suitable profile could run.
+type wait struct {
+	reason    string
+	selection agent.Selection
+}
+
+// autoWaiting marks an issue routing held back. It stays tried until the next
+// GitHub refresh, so quota-axi is asked at most once per refresh.
+func (m *Model) autoWaiting(key task.Key, reason string, sel agent.Selection) {
+	if m.waiting == nil {
+		m.waiting = map[task.Key]wait{}
+	}
+	m.waiting[key] = wait{reason: reason, selection: sel}
+}
+
+// retryWaiting lets auto mode route the waiting issues again after a refresh.
+func (m *Model) retryWaiting() {
+	for k := range m.waiting {
+		delete(m.tried, k)
+	}
+}
+
+// prior is the selection an earlier route of key made, so a retry skips the selector.
+func (m *Model) prior(key task.Key) *agent.Selection {
+	w, ok := m.waiting[key]
+	if !ok {
+		return nil
+	}
+	return &w.selection
 }
 
 func (m *Model) toggleAuto() Action {

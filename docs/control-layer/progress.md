@@ -2,10 +2,11 @@
 
 ## Current stage
 
-Stage 31 (answering decisions in the dashboard for issue #31), stage 29 (repository
-include filter and the `v` view toggle for issue #29), stage 38 (shorter planning
-documents and the `make config` notice for differing stage files, issue #38), and
-stage 37 (the `## Working silently` prompt section for issue #37) are complete.
+Stage 39 (routing new dashboard tasks to a profile from `routing.yaml`, with the
+optional `quota-axi` check, for issue #39) is complete. Stage 31 (answering decisions
+in the dashboard), stage 29 (repository include filter and the `v` view toggle), stage
+38 (shorter planning documents and the `make config` notice for differing stage files),
+and stage 37 (the `## Working silently` prompt section for issue #37) are complete.
 Completed runs are
 needed to measure the effect of the model and budget choices. The ranked refactor
 candidates below are the next code-quality stages.
@@ -35,6 +36,9 @@ Findings 1 to 4 were fixed in stage 28.
     builders would let tests check one section at a time.
 
 ## Known limitations
+
+- Routing's dashboard flow is covered by unit tests with a stub source. `scripts/e2e.sh`
+  cannot drive the dashboard, so it checks `config --show` and a retried routed task.
 
 - The gate runs only when `inbox` or `status` runs, or while the dashboard is open,
   because the design rules out daemons. Nothing runs between commands

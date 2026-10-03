@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/brymartinez/foreman/internal/app"
+	"github.com/brymartinez/foreman/internal/routing"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -484,5 +485,41 @@ func TestInboxReviewedSection(t *testing.T) {
 `
 	if buf.String() != want {
 		t.Errorf("got:\n%s\nwant:\n%s", buf.String(), want)
+	}
+}
+
+func TestShowPrintsProfileAndReason(t *testing.T) {
+	var buf bytes.Buffer
+	Show(&buf, &task.Record{
+		Key: task.Key{Repo: "a/b", Number: 7}, State: task.Working,
+		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex}, Reviewer: task.Claude, RouteReason: "narrow, well-specified change",
+			Profile: &task.Profile{Name: "codex", Agent: task.Codex, PlanModel: "gpt-6-luna", PlanReasoningEffort: "xhigh", Model: "gpt-6-sol", ReasoningEffort: "medium"}},
+	})
+	if !strings.Contains(buf.String(), "Profile       codex (plan gpt-6-luna xhigh, implement gpt-6-sol medium) · narrow, well-specified change\n") {
+		t.Errorf("missing profile in:\n%s", buf.String())
+	}
+	buf.Reset()
+	Show(&buf, &task.Record{Key: task.Key{Repo: "a/b", Number: 7}, State: task.Working,
+		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex}})
+	if strings.Contains(buf.String(), "Profile") {
+		t.Errorf("an unrouted task shows a profile:\n%s", buf.String())
+	}
+}
+
+func TestConfigShowReportsRouting(t *testing.T) {
+	var buf bytes.Buffer
+	Routing(&buf, "/c/routing.yaml", &routing.Config{Profiles: map[string]routing.Profile{"codex": {}, "claude": {}}, Default: "claude"}, nil)
+	if got := buf.String(); !strings.Contains(got, "Routing: on (/c/routing.yaml)") || !strings.Contains(got, "Routing profiles: claude (default), codex") {
+		t.Errorf("on:\n%s", got)
+	}
+	buf.Reset()
+	Routing(&buf, "/c/routing.yaml", nil, nil)
+	if got := buf.String(); !strings.Contains(got, "Routing: off (no /c/routing.yaml)") {
+		t.Errorf("off:\n%s", got)
+	}
+	buf.Reset()
+	Routing(&buf, "/c/routing.yaml", nil, errors.New(`/c/routing.yaml: default: unknown profile "gpt"`))
+	if got := buf.String(); !strings.Contains(got, "Routing: error") || !strings.Contains(got, `! /c/routing.yaml: default: unknown profile "gpt"`) {
+		t.Errorf("error:\n%s", got)
 	}
 }

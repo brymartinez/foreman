@@ -291,3 +291,47 @@ func TestUpdateSerializesConcurrentWriters(t *testing.T) {
 		t.Fatalf("lost updates: PR counter = %d, want 20", got.Delegation.PR)
 	}
 }
+
+func TestStoreRoundTripsProfile(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	want := delegated()
+	want.Delegation.Profile = &task.Profile{Name: "claude", Agent: task.Claude, PlanModel: "sonnet", Model: "opus"}
+	want.Delegation.RouteReason = "broad or ambiguous design work"
+	want.Delegation.RouteLogged = true
+	if err := s.Save(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, want.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Delegation.Profile, want.Delegation.Profile) || got.Delegation.RouteReason != want.Delegation.RouteReason || !got.Delegation.RouteLogged {
+		t.Fatalf("got %+v %q %v", got.Delegation.Profile, got.Delegation.RouteReason, got.Delegation.RouteLogged)
+	}
+}
+
+func TestOldFileLoadsWithoutAProfile(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	old := "---\nrepo: a/b\nnumber: 3\nkind: issue\nstate: WORKING\nimplementation_agent: claude\nbranch: feat/3-x\n---\n"
+	if err := os.WriteFile(filepath.Join(s.Dir, "a-b-3.md"), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, task.Key{Repo: "a/b", Number: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := got.Delegation; d.Profile != nil || d.RouteReason != "" || d.RouteLogged {
+		t.Fatalf("delegation = %+v", d)
+	}
+}
+
+func TestStoreRejectsAProfileForAnotherAgent(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	bad := "---\nrepo: a/b\nnumber: 3\nkind: issue\nstate: WORKING\nimplementation_agent: claude\nprofile:\n  name: codex\n  agent: codex\n---\n"
+	if err := os.WriteFile(filepath.Join(s.Dir, "a-b-3.md"), []byte(bad), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Get(ctx, task.Key{Repo: "a/b", Number: 3}); err == nil || !strings.Contains(err.Error(), "profile") {
+		t.Fatalf("got %v, want a profile error", err)
+	}
+}

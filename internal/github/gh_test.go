@@ -379,3 +379,24 @@ func TestGetItemParsesCreatedAt(t *testing.T) {
 		t.Fatalf("created at = %s, want %s", item.CreatedAt, want)
 	}
 }
+
+func TestIssueCommentsReadsEveryPage(t *testing.T) {
+	var calls [][]string
+	run := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		calls = append(calls, args)
+		if len(args) > 1 && args[1] == "repos/ridezoomo/armada-backend/issues/912/comments" {
+			return os.ReadFile("testdata/pr_issue_comments.json")
+		}
+		return nil, fmt.Errorf("unexpected gh call: %q", args)
+	}
+	got, err := Client{Run: run}.IssueComments(context.Background(), task.Key{Repo: "ridezoomo/armada-backend", Number: 912})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 1 || !slices.Contains(calls[0], "--paginate") || !slices.Contains(calls[0], "--slurp") {
+		t.Errorf("argv = %q", calls)
+	}
+	if len(got) != 2 || got[0].ID != 4401 || got[0].Body != "Looks good, ship it." || got[1].ID != 4402 {
+		t.Fatalf("got %+v", got)
+	}
+}

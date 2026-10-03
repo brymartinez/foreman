@@ -168,24 +168,26 @@ func (f *fakeStore) List(context.Context) ([]*task.Record, error) {
 }
 
 type fakeGitHub struct {
-	items          []InboxItem
-	truncated      []string
-	fetched        []task.Key
-	issue          Issue
-	repo           RepoInfo
-	prs            map[int]PullRequest
-	onPR           func() // runs once, inside the next GetPullRequest
-	ci             map[int]task.CIStatus
-	comments       map[int64]IssueComment // posted issue comments by id
-	edits          int                    // PostIssueComment calls that edited a comment
-	postErr        error                  // fails the PostIssueComment call after the first postOK
-	postOK         int
-	prComments     map[int][]PRComment // the PR conversation, by PR number
-	prCommentErr   error
-	prCommentReads int
-	baseHeads      map[string]string // branch heads on GitHub, by branch name
-	baseHeadErr    error
-	mu             sync.Mutex
+	items            []InboxItem
+	truncated        []string
+	fetched          []task.Key
+	issue            Issue
+	repo             RepoInfo
+	prs              map[int]PullRequest
+	onPR             func() // runs once, inside the next GetPullRequest
+	ci               map[int]task.CIStatus
+	comments         map[int64]IssueComment // posted issue comments by id
+	edits            int                    // PostIssueComment calls that edited a comment
+	postErr          error                  // fails the PostIssueComment call after the first postOK
+	postOK           int
+	prComments       map[int][]PRComment // the PR conversation, by PR number
+	prCommentErr     error
+	prCommentReads   int
+	baseHeads        map[string]string // branch heads on GitHub, by branch name
+	baseHeadErr      error
+	issueComments    []IssueComment // the issue's conversation, for routing
+	issueCommentsErr error
+	mu               sync.Mutex
 }
 
 func (f *fakeGitHub) BranchHead(_ context.Context, _ task.Repo, branch string) (string, error) {
@@ -282,6 +284,10 @@ func (f *fakeGitHub) GetIssue(_ context.Context, k task.Key) (Issue, error) {
 	i := f.issue
 	i.Key = k
 	return i, nil
+}
+
+func (f *fakeGitHub) IssueComments(context.Context, task.Key) ([]IssueComment, error) {
+	return f.issueComments, f.issueCommentsErr
 }
 
 func (f *fakeGitHub) RepoAt(context.Context, string) (RepoInfo, error) { return f.repo, nil }

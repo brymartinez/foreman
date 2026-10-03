@@ -4,6 +4,7 @@ package render
 import (
 	"fmt"
 	"io"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/brymartinez/foreman/internal/agent"
 	"github.com/brymartinez/foreman/internal/app"
 	"github.com/brymartinez/foreman/internal/config"
+	"github.com/brymartinez/foreman/internal/routing"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -371,6 +373,9 @@ func Show(w io.Writer, r *task.Record) {
 	if d := r.Delegation; d != nil {
 		row("Agent", fmt.Sprintf("%s (reviewer: %s)", agentName(d.Implementer.Agent), agentName(d.Reviewer)))
 		row("Session", d.Implementer.ID)
+		if p := d.Profile; p != nil {
+			row("Profile", fmt.Sprintf("%s (plan %s, implement %s) · %s", p.Name, ModelText(p.PlanModel, p.PlanReasoningEffort), ModelText(p.Model, p.ReasoningEffort), orDash(d.RouteReason)))
+		}
 		row("Context file", d.ContextFile)
 		row("Branch", fmt.Sprintf("%s (from %s)", d.Branch, orDash(d.BaseRef)))
 		if d.WorktreeRemovedAt.IsZero() {
@@ -618,6 +623,30 @@ func Config(w io.Writer, c config.Config) {
 	fmt.Fprintf(w, "Codex review reasoning effort: %s\n", orDefault(c.Codex.ReviewReasoningEffort, orDefault(c.Codex.ReasoningEffort, "CLI default")))
 	fmt.Fprintf(w, "Cleanup on done: %t\n", c.Cleanup.OnDone)
 	fmt.Fprintf(w, "Delete merged branch: %t\n", c.Cleanup.DeleteMergedBranch)
+}
+
+// Routing reports whether routing.yaml is in use, its profiles, or why it failed to load.
+func Routing(w io.Writer, path string, c *routing.Config, err error) {
+	switch {
+	case err != nil:
+		fmt.Fprintf(w, "Routing: error\n! %v\n", err)
+	case c == nil:
+		fmt.Fprintf(w, "Routing: off (no %s)\n", path)
+	default:
+		fmt.Fprintf(w, "Routing: on (%s)\n", path)
+		names := slices.Sorted(maps.Keys(c.Profiles))
+		for i, n := range names {
+			if n == c.Default {
+				names[i] = n + " (default)"
+			}
+		}
+		fmt.Fprintf(w, "Routing profiles: %s\n", strings.Join(names, ", "))
+	}
+}
+
+// ModelText is a model and its reasoning effort, if any.
+func ModelText(model, effort string) string {
+	return strings.TrimSpace(orDefault(model, "default") + " " + effort)
 }
 
 func orThree(rounds int) int {
