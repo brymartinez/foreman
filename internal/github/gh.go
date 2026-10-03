@@ -300,6 +300,26 @@ func (c Client) PullRequestComments(ctx context.Context, pr task.Key) ([]app.PRC
 	return comments, nil
 }
 
+// IssueComments reads an issue's conversation comments, oldest first.
+func (c Client) IssueComments(ctx context.Context, issue task.Key) ([]app.IssueComment, error) {
+	path := fmt.Sprintf(commentThreads[0].path, issue.Repo, issue.Number)
+	out, err := c.Run(ctx, "", "api", path, "--paginate", "--slurp")
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, gone(err))
+	}
+	var pages [][]prComment
+	if err := json.Unmarshal(out, &pages); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	var comments []app.IssueComment
+	for _, page := range pages {
+		for _, r := range page {
+			comments = append(comments, app.IssueComment{ID: r.ID, URL: r.HTMLURL, Body: r.Body})
+		}
+	}
+	return comments, nil
+}
+
 func parsePRComments(out []byte, kind task.CommentKind, path string) ([]app.PRComment, error) {
 	var pages [][]prComment
 	if err := json.Unmarshal(out, &pages); err != nil {

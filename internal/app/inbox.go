@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/brymartinez/foreman/internal/routing"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -65,7 +66,15 @@ type App struct {
 	// HideMentionOnly drops items the searches found only because they mention the
 	// developer. False shows every item, which is the default.
 	HideMentionOnly bool
-	Now             func() time.Time
+	// Routing is routing.yaml, or nil when routing is off. RoutingErr is why it
+	// failed to load; Route reports it, and commands that never route ignore it.
+	Routing         *routing.Config
+	RoutingErr      error
+	RoutingDefaults routing.Defaults
+	Selector        Selector
+	// Quota may be nil, which makes every agent's quota unknown.
+	Quota QuotaChecker
+	Now   func() time.Time
 }
 
 // Inbox is InboxView with the configured repository filter.

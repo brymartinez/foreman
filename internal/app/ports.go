@@ -114,6 +114,8 @@ type GitHubClient interface {
 	// comments, the inline review comments and their replies, and the body of each
 	// submitted review. A review with no body is left out.
 	PullRequestComments(ctx context.Context, pr task.Key) ([]PRComment, error)
+	// IssueComments reads an issue's conversation comments, oldest first.
+	IssueComments(ctx context.Context, issue task.Key) ([]IssueComment, error)
 	// BranchHead returns the commit a branch points at on GitHub.
 	BranchHead(ctx context.Context, repo task.Repo, branch string) (string, error)
 }
@@ -227,4 +229,30 @@ func (a Alert) Label() string {
 // failures, and the caller ignores the error.
 type Notifier interface {
 	Notify(Alert) error
+}
+
+// Selector reads an issue against the routing rules and picks one.
+type Selector interface {
+	Select(ctx context.Context, in agent.SelectInput) (agent.Selection, error)
+}
+
+type QuotaStatus int
+
+const (
+	QuotaUnknown QuotaStatus = iota
+	QuotaAvailable
+	// QuotaExhausted means the agent is confirmed to have no quota left on any model.
+	QuotaExhausted
+)
+
+// Quota is one agent's availability. Percent is the share left when Status is known.
+type Quota struct {
+	Status  QuotaStatus
+	Percent float64
+}
+
+// QuotaChecker reports each agent's availability. An agent missing from the map is
+// unknown. An error means every agent is unknown, and says why.
+type QuotaChecker interface {
+	Quota(ctx context.Context) (map[task.Agent]Quota, error)
 }

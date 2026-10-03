@@ -4,6 +4,7 @@ package routing
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
@@ -16,7 +17,6 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/brymartinez/foreman/internal/config"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -52,11 +52,9 @@ type Rule struct {
 	Why string `yaml:"why"`
 }
 
-// Defaults are the agent settings in config.yaml that a profile inherits.
-type Defaults struct {
-	Claude config.Claude
-	Codex  config.Codex
-}
+// Defaults are the claude.* and codex.* settings in config.yaml that a profile
+// inherits, by agent.
+type Defaults map[task.Agent]task.Profile
 
 // Path is routing.yaml next to the config file, so FOREMAN_CONFIG moves both.
 func Path(configPath string) string {
@@ -133,32 +131,22 @@ func (c Config) Validate() error {
 // Resolve fills a profile's omitted fields from config.yaml. Planning falls back to
 // the implementation model and effort, as the adapters do without a profile.
 func (c Config) Resolve(name string, d Defaults) task.Profile {
-	p := c.Profiles[name]
-	out := task.Profile{Name: name, Agent: p.Agent, Model: p.Model, PlanModel: p.PlanModel}
-	if p.Agent == task.Codex {
-		out.Model = or(out.Model, d.Codex.Model)
-		out.PlanModel = or(out.PlanModel, d.Codex.PlanModel, out.Model)
-		out.ReasoningEffort = or(p.ReasoningEffort, d.Codex.ReasoningEffort)
-		out.PlanReasoningEffort = or(p.PlanReasoningEffort, d.Codex.PlanReasoningEffort, out.ReasoningEffort)
-		return out
-	}
-	out.Model = or(out.Model, d.Claude.Model)
-	out.PlanModel = or(out.PlanModel, d.Claude.PlanModel, out.Model)
+	p, inherit := c.Profiles[name], d[c.Profiles[name].Agent]
+	out := task.Profile{Name: name, Agent: p.Agent}
+	out.Model = cmp.Or(p.Model, inherit.Model)
+	out.PlanModel = cmp.Or(p.PlanModel, inherit.PlanModel, out.Model)
+	out.ReasoningEffort = cmp.Or(p.ReasoningEffort, inherit.ReasoningEffort)
+	out.PlanReasoningEffort = cmp.Or(p.PlanReasoningEffort, inherit.PlanReasoningEffort, out.ReasoningEffort)
 	return out
 }
 
 // SelectorFor resolves the selector's agent, model, and effort.
 func (c Config) SelectorFor(d Defaults) Selector {
 	s := c.Selector
-	if s.Agent == "" {
-		s.Agent = task.Claude
-	}
-	if s.Agent == task.Codex {
-		s.Model = or(s.Model, d.Codex.PlanModel, d.Codex.Model)
-		s.ReasoningEffort = or(s.ReasoningEffort, d.Codex.PlanReasoningEffort, d.Codex.ReasoningEffort)
-		return s
-	}
-	s.Model = or(s.Model, d.Claude.PlanModel, d.Claude.Model)
+	s.Agent = cmp.Or(s.Agent, task.Claude)
+	inherit := d[s.Agent]
+	s.Model = cmp.Or(s.Model, inherit.PlanModel, inherit.Model)
+	s.ReasoningEffort = cmp.Or(s.ReasoningEffort, inherit.PlanReasoningEffort, inherit.ReasoningEffort)
 	return s
 }
 
@@ -168,13 +156,4 @@ func (r Rule) Reason() string {
 		return r.Why
 	}
 	return r.When
-}
-
-func or(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }

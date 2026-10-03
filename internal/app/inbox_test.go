@@ -185,6 +185,7 @@ type fakeGitHub struct {
 	prCommentReads int
 	baseHeads      map[string]string // branch heads on GitHub, by branch name
 	baseHeadErr    error
+	issueComments  []IssueComment // the issue's conversation, for routing
 	mu             sync.Mutex
 }
 
@@ -282,6 +283,10 @@ func (f *fakeGitHub) GetIssue(_ context.Context, k task.Key) (Issue, error) {
 	i := f.issue
 	i.Key = k
 	return i, nil
+}
+
+func (f *fakeGitHub) IssueComments(context.Context, task.Key) ([]IssueComment, error) {
+	return f.issueComments, nil
 }
 
 func (f *fakeGitHub) RepoAt(context.Context, string) (RepoInfo, error) { return f.repo, nil }

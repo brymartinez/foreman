@@ -70,7 +70,7 @@ func TestParseOutcomeRejectsUnknownStatus(t *testing.T) {
 
 // Codex --output-schema is strict: every object must require all its properties and forbid extras.
 func TestSchemasAreStrictModeCompatible(t *testing.T) {
-	for name, schema := range map[string][]byte{"outcome": OutcomeSchema, "review": ReviewSchema} {
+	for name, schema := range map[string][]byte{"outcome": OutcomeSchema, "review": ReviewSchema, "selection": SelectionSchema} {
 		t.Run(name, func(t *testing.T) { checkStrict(t, schema) })
 	}
 }

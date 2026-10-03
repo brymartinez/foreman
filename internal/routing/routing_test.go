@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brymartinez/foreman/internal/config"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -91,8 +90,8 @@ func TestValidateRejects(t *testing.T) {
 }
 
 var defaults = Defaults{
-	Claude: config.Claude{Model: "opus", PlanModel: "sonnet"},
-	Codex:  config.Codex{Model: "gpt-6-sol", PlanModel: "gpt-6-luna", ReasoningEffort: "medium", PlanReasoningEffort: "xhigh"},
+	task.Claude: {Model: "opus", PlanModel: "sonnet"},
+	task.Codex:  {Model: "gpt-6-sol", PlanModel: "gpt-6-luna", ReasoningEffort: "medium", PlanReasoningEffort: "xhigh"},
 }
 
 func TestResolveInheritsOmittedFields(t *testing.T) {
@@ -127,7 +126,7 @@ func TestSelectorDefaultsToClaudePlanModel(t *testing.T) {
 	if got := c.SelectorFor(defaults); got.Agent != task.Claude || got.Model != "sonnet" {
 		t.Errorf("got %+v, want claude with the plan model", got)
 	}
-	if got := c.SelectorFor(Defaults{Claude: config.Claude{Model: "opus"}}); got.Model != "opus" {
+	if got := c.SelectorFor(Defaults{task.Claude: {Model: "opus"}}); got.Model != "opus" {
 		t.Errorf("got %+v, want claude.model when no plan model is set", got)
 	}
 	c.Selector = Selector{Agent: task.Codex, ReasoningEffort: "low"}

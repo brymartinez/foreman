@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["rule", "reason"],
+  "properties": {
+    "rule": { "type": "integer" },
+    "reason": { "type": "string" }
+  }
+}
