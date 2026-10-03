@@ -37,7 +37,6 @@ Findings 1 to 4 were fixed in stage 28.
 
 - Routing's dashboard flow is covered by unit tests with a stub source. `scripts/e2e.sh`
   cannot drive the dashboard, so it checks `config --show` and a retried routed task.
-  The selector's `--tools ""` and `--skip-git-repo-check` flags have not been probed.
 
 - The gate runs only when `inbox` or `status` runs, or while the dashboard is open,
   because the design rules out daemons. Nothing runs between commands
