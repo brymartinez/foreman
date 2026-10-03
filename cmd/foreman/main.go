@@ -3,15 +3,12 @@ package main
 import (
 	"bufio"
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
-	"slices"
 	"syscall"
 	"time"
 
@@ -23,7 +20,6 @@ import (
 	"github.com/brymartinez/foreman/internal/logs"
 	"github.com/brymartinez/foreman/internal/notifications"
 	"github.com/brymartinez/foreman/internal/quota"
-	"github.com/brymartinez/foreman/internal/render"
 	"github.com/brymartinez/foreman/internal/routing"
 	"github.com/brymartinez/foreman/internal/runner"
 	"github.com/brymartinez/foreman/internal/stages"
@@ -58,8 +54,7 @@ func run(argv []string) int {
 		fmt.Print(cli.Usage)
 		return 0
 	case cli.Version:
-		info, _ := debug.ReadBuildInfo()
-		fmt.Println("foreman", buildVersion(version, info))
+		fmt.Println("foreman", currentVersion())
 		return 0
 	case cli.TUI:
 		// A pipe or a script gets the usage text, the way a bare `foreman` always has.
@@ -71,25 +66,21 @@ func run(argv []string) int {
 		}
 	}
 	// An invalid config must not lock the developer out of the command that fixes it.
-	if cmd.Name == cli.Config && cmd.ConfigEdit {
+	if cmd.Name == cli.Edit {
 		return editConfig()
 	}
 	cfg, err := config.Load()
 	if err != nil {
 		return fail(err)
 	}
-	// The detached runner has no one to read its stderr, and config --show prints
-	// these warnings itself.
-	if cmd.Name != cli.Run && !(cmd.Name == cli.Config && cmd.ConfigShow) {
+	// The detached runner has no one to read its stderr.
+	if cmd.Name != cli.Run {
 		for _, problem := range cfg.WebhookProblems() {
 			fmt.Fprintf(os.Stderr, "foreman: %s\n", problem)
 		}
 	}
-	// config stays usable so a missing stage file can be diagnosed.
-	if cmd.Name != cli.Config {
-		if err := (stages.Files{GlobalDir: cfg.StagesDir}).RequireGlobal(); err != nil {
-			return fail(err)
-		}
+	if err := (stages.Files{GlobalDir: cfg.StagesDir}).RequireGlobal(); err != nil {
+		return fail(err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
@@ -97,8 +88,7 @@ func run(argv []string) int {
 	codex := agent.Codex{Bin: cfg.Codex.Command, Model: cfg.Codex.Model, PlanModel: cfg.Codex.PlanModel, ReviewModel: cfg.Codex.ReviewModel,
 		ReasoningEffort: cfg.Codex.ReasoningEffort, PlanReasoningEffort: cfg.Codex.PlanReasoningEffort, ReviewReasoningEffort: cfg.Codex.ReviewReasoningEffort, Exec: agent.RunCommand}
 	// A routing.yaml that fails to load stops only the dashboard starts that route.
-	routingPath := routing.Path(cfg.Path)
-	routes, routesErr := routing.Load(routingPath)
+	routes, routesErr := routing.Load(routing.Path(cfg.Path))
 	a := app.App{
 		Store:        store.Markdown{Dir: cfg.TasksDir},
 		GitHub:       github.New(),
@@ -142,150 +132,11 @@ func run(argv []string) int {
 		if err := tui.Run(ctx, tui.Options{
 			In: os.Stdin, Out: os.Stdout, Source: a,
 			GitHubEvery: time.Duration(cfg.Refresh) * time.Second, LocalEvery: localRefresh,
-			Auto:  autoMode(cfg.Auto),
-			Route: routes != nil || routesErr != nil,
+			Auto:    autoMode(cfg.Auto, cmd.Auto),
+			Route:   routes != nil || routesErr != nil,
+			Version: currentVersion(),
 		}); err != nil {
 			return fail(err)
-		}
-	case cli.Inbox:
-		stdin := bufio.NewReader(os.Stdin)
-		if cmd.NonInteractive {
-			if _, err := os.Stat(cfg.TasksDir); err != nil {
-				return fail(fmt.Errorf("tasks directory %s is not ready; run interactive foreman inbox first: %w", cfg.TasksDir, err))
-			}
-		} else {
-			ready, err := config.EnsureTasksDir(stdin, os.Stdout, cfg.TasksDir)
-			if err != nil {
-				return fail(err)
-			}
-			if !ready {
-				return 0
-			}
-		}
-		report, err := a.Inbox(ctx)
-		if err != nil {
-			return fail(err)
-		}
-		if cmd.NonInteractive {
-			render.Inbox(os.Stdout, report)
-			break
-		}
-		render.InboxActivity(os.Stdout, report)
-		reload := func(allRepos bool) (app.InboxReport, error) { return a.InboxView(ctx, allRepos) }
-		selection, err := app.ChooseInbox(stdin, os.Stdout, report, reload)
-		if err != nil {
-			return fail(err)
-		}
-		if selection == nil {
-			break
-		}
-		if selection.Resume {
-			rec, err := a.Resume(ctx, selection.Key)
-			if err != nil {
-				return fail(err)
-			}
-			render.Resumed(os.Stdout, rec)
-			break
-		}
-		contextFile := selection.ContextFile
-		if contextFile != "" {
-			if contextFile, err = filepath.Abs(contextFile); err != nil {
-				return fail(err)
-			}
-		}
-		rec, err := a.Start(ctx, app.StartRequest{Repo: selection.Key.Repo, Issue: selection.Key.Number, Agent: selection.Agent, ContextFile: contextFile})
-		if err != nil {
-			return fail(err)
-		}
-		render.Started(os.Stdout, rec)
-	case cli.Status:
-		recs, warnings, err := a.Status(ctx)
-		if err != nil {
-			return fail(err)
-		}
-		render.Status(os.Stdout, recs)
-		render.Warnings(os.Stdout, warnings)
-	case cli.Show:
-		rec, err := a.Find(ctx, cmd.Repo, cmd.Issue)
-		if err != nil {
-			return fail(err)
-		}
-		render.Show(os.Stdout, rec)
-	case cli.Cancel:
-		rec, err := a.Find(ctx, cmd.Repo, cmd.Issue)
-		if err != nil {
-			return fail(err)
-		}
-		if rec, err = a.Cancel(ctx, rec); err != nil {
-			return fail(err)
-		}
-		render.Cancelled(os.Stdout, rec)
-	case cli.Logs:
-		rec, err := a.Find(ctx, cmd.Repo, cmd.Issue)
-		if err != nil {
-			return fail(err)
-		}
-		if rec.Delegation == nil || rec.Delegation.RunnerLog == "" {
-			return fail(errors.New("task has no runner log"))
-		}
-		if err := showLogs(ctx, rec.Delegation.RunnerLog, cmd.RawLogs, cmd.Follow); err != nil {
-			return fail(err)
-		}
-	case cli.Start:
-		dir, err := os.Getwd()
-		if err != nil {
-			return fail(err)
-		}
-		contextFile := cmd.ContextFile
-		if contextFile != "" {
-			if contextFile, err = filepath.Abs(contextFile); err != nil {
-				return fail(err)
-			}
-		}
-		rec, err := a.Start(ctx, app.StartRequest{Repo: cmd.Repo, Issue: cmd.Issue, Agent: cmd.Agent, ContextFile: contextFile, BranchType: cmd.BranchType, Dir: dir})
-		if err != nil {
-			return fail(err)
-		}
-		render.Started(os.Stdout, rec)
-		if rec.State == task.Failed {
-			return 1
-		}
-	case cli.Clean:
-		results, err := a.Clean(ctx, app.CleanRequest{Repo: cmd.Repo, Issue: cmd.Issue, DryRun: cmd.DryRun})
-		if err != nil {
-			return fail(err)
-		}
-		render.Cleaned(os.Stdout, results, cmd.DryRun)
-		for _, r := range results {
-			if r.Err != nil {
-				return 1
-			}
-		}
-	case cli.Resume:
-		rec, err := a.Find(ctx, cmd.Repo, cmd.Issue)
-		if err != nil {
-			return fail(err)
-		}
-		if rec, err = a.Resume(ctx, rec.Key); err != nil {
-			return fail(err)
-		}
-		render.Resumed(os.Stdout, rec)
-		if rec.State == task.Failed {
-			return 1
-		}
-	case cli.Respond:
-		return respond(ctx, a, cmd)
-	case cli.Config:
-		switch {
-		case cmd.ConfigShow:
-			render.Config(os.Stdout, cfg)
-			render.Routing(os.Stdout, routingPath, routes, routesErr)
-			if routesErr != nil {
-				return 1
-			}
-			return 0
-		default:
-			return stageConfig(ctx, cfg)
 		}
 	case cli.Run:
 		log := &logs.Writer{W: os.Stdout}
@@ -301,17 +152,27 @@ func run(argv []string) int {
 }
 
 // autoMode reads the saved auto mode choice. A state file that cannot be read
-// leaves auto mode on, and the dashboard shows why.
-func autoMode(cfg config.Auto) tui.Auto {
+// leaves auto mode on, and the dashboard shows why. A launch flag replaces the
+// saved choice for this session without writing it, so its read error is moot;
+// toggling with a still saves.
+func autoMode(cfg config.Auto, override cli.AutoMode) tui.Auto {
 	auto := tui.Auto{Enabled: true, Agent: cfg.Agent, Max: cfg.MaxConcurrent}
 	path, err := config.StatePath()
 	if err != nil {
 		auto.LoadErr = err
-		return auto
+	} else {
+		auto.Enabled, auto.LoadErr = config.LoadAutoEnabled(path)
+		auto.Save = func(on bool) error { return config.SaveAutoEnabled(path, on) }
 	}
-	auto.Enabled, auto.LoadErr = config.LoadAutoEnabled(path)
-	auto.Save = func(on bool) error { return config.SaveAutoEnabled(path, on) }
+	if override != cli.AutoSaved {
+		auto.Enabled, auto.LoadErr = override == cli.AutoOn, nil
+	}
 	return auto
+}
+
+func currentVersion() string {
+	info, _ := debug.ReadBuildInfo()
+	return buildVersion(version, info)
 }
 
 func notification(cfg config.Config) app.Notifier {
@@ -320,100 +181,6 @@ func notification(cfg config.Config) app.Notifier {
 		return nil
 	}
 	return notifications.Discord{WebhookURL: n.WebhookURL, LogPath: filepath.Join(cfg.LogDir, "notifications.log")}
-}
-
-func showLogs(ctx context.Context, path string, raw, follow bool) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return logs.Show(ctx, os.Stdout, f, raw, follow, 500*time.Millisecond)
-}
-
-func respond(ctx context.Context, a app.App, cmd cli.Command) int {
-	rec, err := a.Find(ctx, cmd.Repo, cmd.Issue)
-	if err != nil {
-		return fail(err)
-	}
-	if rec.State != task.NeedsDecision || rec.Pending() == nil {
-		return fail(fmt.Errorf("%s#%d is %s, not waiting for a decision", rec.Repo, rec.Number, rec.State))
-	}
-	fmt.Printf("%s#%d %s\n", rec.Repo, rec.Number, rec.Title)
-	stdin := bufio.NewReader(os.Stdin)
-	total := rec.PendingCount()
-	for i := 1; rec.State == task.NeedsDecision; i++ {
-		idx := slices.IndexFunc(rec.Decisions, func(d task.Decision) bool { return d.Answer == "" })
-		pending := rec.Decisions[idx]
-		fmt.Println()
-		if total > 1 {
-			fmt.Printf("Question %d of %d\n", i, total)
-		}
-		render.Blocked(os.Stdout, pending.Question)
-		prompt := "\nDecision:\n> "
-		if o, ok := pending.Question.Recommended(); ok {
-			prompt = fmt.Sprintf("\nDecision (option label, your own answer, or Enter for %s):\n> ", o.Label)
-		}
-		fmt.Print(prompt)
-		line, err := stdin.ReadString('\n')
-		if err != nil && line == "" {
-			if errors.Is(err, io.EOF) {
-				// No answer typed: never accept a recommendation the developer didn't see through.
-				fmt.Printf("\n%d %s still waiting; run foreman respond %s#%d again.\n", rec.PendingCount(), plural(rec.PendingCount(), "question is", "questions are"), rec.Repo, rec.Number)
-				return 1
-			}
-			return fail(err)
-		}
-		if rec, err = a.Respond(ctx, rec.Key, line); err != nil {
-			return fail(err)
-		}
-		fmt.Printf("\nRecorded: %s\n", rec.Decisions[idx].Answer)
-	}
-	d := rec.Delegation
-	if rec.State == task.Failed {
-		return fail(errors.New(rec.LastOutcome.Summary))
-	}
-	fmt.Printf("%s continues in %s (log: %s)\nCheck progress with: foreman status\n", d.Implementer.Agent, d.Worktree, d.RunnerLog)
-	return 0
-}
-
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return one
-	}
-	return many
-}
-
-// stageConfig shows the stage instructions in effect for the repository at the
-// current directory. An empty stage lists every stage's sources.
-func stageConfig(ctx context.Context, cfg config.Config) int {
-	dir, err := os.Getwd()
-	if err != nil {
-		return fail(err)
-	}
-	root, err := stages.RepoRoot(ctx, dir)
-	if err != nil {
-		return fail(err)
-	}
-	files := stages.Files{GlobalDir: cfg.StagesDir}
-	var reports []render.StageReport
-	code := 0
-	for _, st := range task.Stages {
-		r := render.StageReport{GlobalWhere: filepath.Join(cfg.StagesDir, string(st)+".md")}
-		if root != "" {
-			r.RepoWhere = filepath.Join(root, stages.RepoDir, string(st)+".md")
-		}
-		if r.Instructions, r.Err = files.Resolve(root, st); r.Err != nil {
-			r.Instructions.Stage, code = st, 1
-		}
-		if r.GlobalMissing() {
-			code = 1
-		}
-		reports = append(reports, r)
-	}
-	home, _ := os.UserHomeDir()
-	render.StageSources(os.Stdout, reports, home, root)
-	return code
 }
 
 // editConfig opens the config file in the developer's editor. A file that fails to
@@ -443,7 +210,7 @@ func editConfig() int {
 		return fail(fmt.Errorf("edit config with %s: %w", editor, err))
 	}
 	if _, err := config.Load(); err != nil {
-		return fail(fmt.Errorf("%v; run foreman config --edit again to fix it", err))
+		return fail(fmt.Errorf("%v; run foreman -c again to fix it", err))
 	}
 	return 0
 }

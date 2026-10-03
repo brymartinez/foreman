@@ -1,10 +1,8 @@
 package logs
 
 import (
-	"bufio"
-	"context"
+	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -53,87 +51,78 @@ func (w *Writer) line(s string) error {
 	return err
 }
 
-// Show prints the log at r, cleaned unless raw. With follow it keeps reading as the
-// runner appends, until ctx ends, and holds back a line until it is complete.
-func Show(ctx context.Context, w io.Writer, r io.Reader, raw, follow bool, poll time.Duration) error {
-	br := bufio.NewReaderSize(r, 64*1024)
-	var partial string
-	for {
-		chunk, err := br.ReadString('\n')
-		partial += chunk
-		if err == nil {
-			printLine(w, strings.TrimSuffix(partial, "\n"), raw)
-			partial = ""
-			continue
-		}
-		if !errors.Is(err, io.EOF) {
-			return err
-		}
-		if !follow {
-			if partial != "" {
-				printLine(w, partial, raw)
-			}
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-time.After(poll):
-		}
+// Back returns where to start reading so that the read ends at end and holds about
+// chunk bytes of whole lines: the first line start at or after end-chunk. A line
+// longer than chunk is taken whole, so the start can lie further back.
+func Back(r io.ReaderAt, end, chunk int64) (int64, error) {
+	lo := max(end-chunk, 0)
+	if lo == 0 {
+		return 0, nil
 	}
+	// A newline at lo-1 makes lo itself a line start.
+	buf, err := readAt(r, lo-1, end-1)
+	if err != nil {
+		return 0, err
+	}
+	if i := bytes.IndexByte(buf, '\n'); i >= 0 {
+		return lo + int64(i), nil
+	}
+	for pos := lo - 1; pos > 0; {
+		from := max(pos-chunk, 0)
+		buf, err := readAt(r, from, pos)
+		if err != nil {
+			return 0, err
+		}
+		if i := bytes.LastIndexByte(buf, '\n'); i >= 0 {
+			return from + int64(i) + 1, nil
+		}
+		pos = from
+	}
+	return 0, nil
 }
 
-// tailBytes bounds how much of a log Tail reads. A task that runs for hours writes
-// far more than a pane can show, and Tail is called once a second.
-const tailBytes = 128 << 10
+// Lines reads the log at r from start, a line start, to end as display lines,
+// cleaned unless raw. A last line with no newline is still being written: its
+// display lines come last and partial counts them, and next is where that line
+// starts, so the following read takes it again whole. Otherwise next is end.
+func Lines(r io.ReaderAt, start, end int64, raw bool) (lines []string, next int64, partial int, err error) {
+	data, err := readAt(r, start, end)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	text, unfinished, next := string(data), "", end
+	if i := strings.LastIndexByte(text, '\n'); i < len(text)-1 {
+		text, unfinished = text[:i+1], text[i+1:]
+		next = start + int64(i) + 1
+	}
+	lines = display(strings.Split(text, "\n"), raw)
+	tail := display([]string{unfinished}, raw)
+	return append(lines, tail...), next, len(tail), nil
+}
 
-// Tail returns the last n display lines of the log at r, cleaned unless raw. It reads
-// only the final tailBytes, and drops the partial line that window starts in.
-func Tail(r io.ReadSeeker, n int, raw bool) ([]string, error) {
-	size, err := r.Seek(0, io.SeekEnd)
-	if err != nil {
+func readAt(r io.ReaderAt, from, to int64) ([]byte, error) {
+	buf := make([]byte, to-from)
+	if n, err := r.ReadAt(buf, from); n < len(buf) {
 		return nil, err
 	}
-	start := max(size-tailBytes, 0)
-	if _, err := r.Seek(start, io.SeekStart); err != nil {
-		return nil, err
-	}
-	data, err := io.ReadAll(r)
-	if err != nil {
-		return nil, err
-	}
-	text := string(data)
-	if start > 0 {
-		if i := strings.IndexByte(text, '\n'); i >= 0 {
-			text = text[i+1:]
-		} else {
-			text = ""
-		}
-	}
-	var lines []string
-	for _, line := range strings.Split(text, "\n") {
+	return buf, nil
+}
+
+// display turns file lines into the lines a reader sees. Cleaning can drop a line
+// or expand one event into several.
+func display(lines []string, raw bool) []string {
+	var out []string
+	for _, line := range lines {
 		if !raw {
 			line = cleanLine(line)
 		}
-		for _, out := range strings.Split(line, "\n") {
-			if out != "" {
-				lines = append(lines, out)
+		for _, l := range strings.Split(line, "\n") {
+			if l != "" {
+				out = append(out, l)
 			}
 		}
 	}
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	return lines, nil
-}
-
-func printLine(w io.Writer, line string, raw bool) {
-	if !raw {
-		line = cleanLine(line)
-	}
-	if line != "" {
-		fmt.Fprintln(w, line)
-	}
+	return out
 }
 
 func cleanLine(line string) string {

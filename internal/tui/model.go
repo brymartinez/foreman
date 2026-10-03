@@ -3,6 +3,7 @@ package tui
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -47,6 +48,10 @@ const (
 	ActionRespond
 	ActionToggleView
 	ActionRoute
+	// ActionReadLog rereads the open log from its tail; ActionLoadOlder reads the
+	// lines before the oldest loaded one.
+	ActionReadLog
+	ActionLoadOlder
 )
 
 // Action is what a keystroke asks the driver to do. The model itself does no I/O.
@@ -70,11 +75,21 @@ type Model struct {
 	Width, Height int
 	Inbox         []app.InboxEntry
 	Tasks         []*task.Record
-	// Log is the selected task's runner log, oldest line first.
-	Log     []string
-	LogErr  string
+	// Log is the loaded part of the selected task's runner log, oldest line first.
+	Log    []string
+	LogErr string
+	// LogPath is the file Log was read from. Empty means the next read starts over.
 	LogPath string
 	LogOpen bool // Enter on a delegated task reveals its log below the lists.
+	// LogRaw shows the log's lines as written instead of cleaned. It lasts for this
+	// session and applies to every task's log.
+	LogRaw bool
+	// LogAtStart means Log reaches back to the first line of the file.
+	LogAtStart bool
+
+	// HelpOpen shows the keys and Version in place of the panes.
+	HelpOpen bool
+	Version  string
 
 	Focus       Pane
 	InboxCursor int
@@ -126,6 +141,10 @@ type Model struct {
 	tasksStale   bool              // the last task read failed
 	answering    bool              // an answer is being recorded
 	question     int               // the index in Decisions of the question the prompt shows
+	logStart     int64             // the byte offset of the first loaded log line
+	logEnd       int64             // where the next read of new log lines starts
+	logPartial   int               // trailing Log lines from an unfinished last line, read again
+	logShort     int               // the part of a scroll step that waits for older lines
 }
 
 // Selected is the highlighted delegated task, or nil when nothing is delegated.
@@ -252,6 +271,10 @@ func (m *Model) Key(k Key) Action {
 	if k.Kind == KeyCtrlC {
 		return Action{Kind: ActionQuit}
 	}
+	if m.HelpOpen {
+		m.HelpOpen = false
+		return Action{}
+	}
 	switch m.Mode {
 	case ChoosingAgent:
 		return m.chooseAgent(k)
@@ -280,6 +303,13 @@ func (m *Model) browse(k Key) Action {
 		return Action{Kind: ActionRefresh}
 	case k.Kind == KeyRune && k.Rune == 'a':
 		return m.toggleAuto()
+	case k.Kind == KeyRune && k.Rune == '?':
+		m.HelpOpen = true
+	case m.LogOpen && !m.ShowOpen && k.Kind == KeyRune && k.Rune == 'R':
+		m.LogRaw = !m.LogRaw
+		// Cleaned and raw lines do not line up, so the new view starts at the tail.
+		m.LogPath, m.LogOffset = "", 0
+		return Action{Kind: ActionReadLog}
 	case k.Kind == KeyRune && k.Rune == 'v':
 		m.AllRepos = !m.AllRepos
 		// The rows belong to the view just left, so none stays selectable until the
@@ -301,21 +331,21 @@ func (m *Model) browse(k Key) Action {
 	case m.LogOpen && k.Kind == KeyRune && k.Rune == 's':
 		m.toggleShow()
 	case m.LogOpen && m.Focus == TaskPane && (k.Kind == KeyRune && k.Rune == 'u'):
-		m.scrollLog(m.logPage())
+		return m.scrollLog(m.logPage())
 	case m.LogOpen && m.Focus == TaskPane && (k.Kind == KeyRune && k.Rune == 'd'):
-		m.scrollLog(-m.logPage())
+		return m.scrollLog(-m.logPage())
 	case m.LogOpen && m.Focus == TaskPane && k.Kind == KeyCtrlU:
-		m.scrollLog(max(m.logPage()/2, 1))
+		return m.scrollLog(max(m.logPage()/2, 1))
 	case m.LogOpen && m.Focus == TaskPane && k.Kind == KeyCtrlD:
-		m.scrollLog(-max(m.logPage()/2, 1))
+		return m.scrollLog(-max(m.logPage()/2, 1))
 	case m.LogOpen && m.Focus == TaskPane && k.Kind == KeyRune && k.Rune == 'g':
-		m.scrollTop()
+		return m.scrollTop()
 	case m.LogOpen && m.Focus == TaskPane && k.Kind == KeyRune && k.Rune == 'G':
 		m.scrollEnd()
 	case m.LogOpen && k.Kind == KeyPageUp:
-		m.scrollLog(m.logPage())
+		return m.scrollLog(m.logPage())
 	case m.LogOpen && k.Kind == KeyPageDown:
-		m.scrollLog(-m.logPage())
+		return m.scrollLog(-m.logPage())
 	case m.LogOpen && k.Kind == KeyEnd:
 		m.scrollEnd()
 	case k.Kind == KeyRune && k.Rune == 'c':
@@ -371,30 +401,52 @@ func (m *Model) showLimit() int {
 }
 
 // scrollLog moves the open view by lines; a positive count goes toward older log lines
-// or toward the top of the show text.
-func (m *Model) scrollLog(by int) {
+// or toward the top of the show text. A step past the oldest loaded line stops there
+// and asks for older lines when the file has them; LoadedOlder takes the rest of the
+// step once they arrive.
+func (m *Model) scrollLog(by int) Action {
 	if m.ShowOpen {
 		// A refresh or a resize can shrink the text under a stored ShowTop, so the step
 		// starts from the page the frame draws, not from the stale position.
 		limit := m.showLimit()
 		m.ShowTop = min(max(min(m.ShowTop, limit)-by, 0), limit)
-		return
+		return Action{}
 	}
-	m.LogOffset += by
-	if limit := len(m.Log) - m.logPage(); m.LogOffset > limit {
-		m.LogOffset = limit
+	want := m.LogOffset + by
+	limit := max(len(m.Log)-m.logPage(), 0)
+	m.LogOffset, m.logShort = min(max(want, 0), limit), 0
+	if want > limit && !m.LogAtStart && m.LogPath != "" {
+		m.logShort = want - limit
+		return Action{Kind: ActionLoadOlder}
 	}
-	if m.LogOffset < 0 {
-		m.LogOffset = 0
-	}
+	return Action{}
 }
 
-func (m *Model) scrollTop() {
+// toFileStart is a scroll step long enough to reach the first line of any log.
+const toFileStart = math.MaxInt / 4
+
+func (m *Model) scrollTop() Action {
 	if m.ShowOpen {
 		m.ShowTop = 0
-		return
+		return Action{}
 	}
-	m.scrollLog(len(m.Log))
+	return m.scrollLog(toFileStart)
+}
+
+// LoadedOlder puts lines, read from the file at start, before the loaded ones. The
+// offset counts back from the tail, so the view holds still, and then it takes the
+// rest of the step that asked for them.
+func (m *Model) LoadedOlder(lines []string, start int64) Action {
+	m.Log = append(lines, m.Log...)
+	m.logStart, m.LogAtStart = start, start == 0
+	return m.scrollLog(m.logShort)
+}
+
+// clearLog forgets the loaded log, so the next read starts at the tail of whatever
+// log is selected then.
+func (m *Model) clearLog() {
+	m.Log, m.LogErr, m.LogPath, m.LogAtStart, m.LogOffset = nil, "", "", false, 0
+	m.logStart, m.logEnd, m.logPartial, m.logShort = 0, 0, 0, 0
 }
 
 func (m *Model) scrollEnd() {
