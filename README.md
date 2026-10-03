@@ -537,7 +537,8 @@ rules:
 default: claude
 ```
 
-A profile sets `agent`, and may set `plan_model`, `model`, and for Codex
+The rules' `when` texts may take up to 2500 characters in all, so the issue always
+fits in the selector's input. A profile sets `agent`, and may set `plan_model`, `model`, and for Codex
 `plan_reasoning_effort` and `reasoning_effort`. A field you leave out uses the
 `claude.*` or `codex.*` value in `config.yaml`. Budgets, notifications, repository
 filters, cleanup, auto mode, and review settings stay in `config.yaml`.

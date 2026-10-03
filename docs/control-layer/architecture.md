@@ -267,9 +267,11 @@ the same commit. The commit message records why it changed.
 - **Only dashboard starts of never-delegated issues are routed:** auto mode, and `3` in
   the agent choice. `1` and `2` override it. `foreman start` and `inbox` never route.
 - **Fit comes first.** A selector turn (Claude with `claude.plan_model` unless
-  `selector` says otherwise) reads the repository, title, labels, body (6000 runes), the
-  last 10 non-foreman comments (1000 runes each), and the context file (4000 runes),
-  under 20000 runes in all, and names a rule or 0. It runs with no tools in a scratch
+  `selector` says otherwise) reads the repository, title, labels, body (6000 runes), up
+  to 10 of the newest non-foreman comments (1000 runes each, 5000 in all), and the
+  context file (4000 runes), and names a rule or 0. Each input has its own budget, and
+  `routing.yaml` rejects rules longer than 2500 runes, so the prompt stays under 20000
+  runes without cutting any input short. It runs with no tools in a scratch
   directory. A selector failure, an unknown rule, or 0 uses `default`, and the reason
   says so.
 - **Quota only removes candidates.** Candidates are the chosen rule's profiles in the

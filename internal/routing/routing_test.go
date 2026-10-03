@@ -77,6 +77,7 @@ func TestValidateRejects(t *testing.T) {
 		{"bad agent", strings.Replace(valid, "{agent: codex}", "{agent: gemini}", 1), "profiles.codex.agent"},
 		{"claude effort", strings.Replace(valid, "{agent: claude}", "{agent: claude, reasoning_effort: high}", 1), "profiles.claude"},
 		{"claude selector effort", valid + "selector: {agent: claude, reasoning_effort: high}\n", "selector"},
+		{"rules too long", strings.Replace(valid, "when: big work", "when: "+strings.Repeat("w", MaxRulesRunes), 1), "rules: the when texts"},
 		{"bad selector agent", valid + "selector: {agent: gemini}\n", "selector.agent"},
 	}
 	for _, tc := range cases {

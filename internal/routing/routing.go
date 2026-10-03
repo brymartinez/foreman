@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"go.yaml.in/yaml/v3"
 
@@ -83,6 +84,19 @@ func Load(path string) (*Config, error) {
 	return &c, nil
 }
 
+// MaxRulesRunes caps the rules as the selector reads them, one numbered line each,
+// so the issue and the context file always fit in the selector's input.
+const MaxRulesRunes = 2500
+
+// RulesText is the numbered rule list the selector reads.
+func (c Config) RulesText() string {
+	var b strings.Builder
+	for i, r := range c.Rules {
+		fmt.Fprintf(&b, "%d. %s\n", i+1, strings.Join(strings.Fields(r.When), " "))
+	}
+	return b.String()
+}
+
 // Validate reports the first problem, naming its key.
 func (c Config) Validate() error {
 	if c.Selector.Agent != "" {
@@ -124,6 +138,9 @@ func (c Config) Validate() error {
 				return fmt.Errorf("rules[%d].profiles: unknown profile %q", i, name)
 			}
 		}
+	}
+	if n := utf8.RuneCountInString(c.RulesText()); n > MaxRulesRunes {
+		return fmt.Errorf("rules: the when texts take %d characters; the limit is %d", n, MaxRulesRunes)
 	}
 	return nil
 }

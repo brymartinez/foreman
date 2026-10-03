@@ -7,6 +7,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/brymartinez/foreman/internal/agent"
 	"github.com/brymartinez/foreman/internal/task"
@@ -16,15 +17,18 @@ import (
 // the developer or auto.agent names.
 var ErrRoutingOff = errors.New("routing is off")
 
-// Limits on what the selector reads, in runes. They keep one routing call cheap
-// whatever the size of the issue.
+// Limits on what the selector reads, in runes. Each input has its own budget, and
+// with routing.MaxRulesRunes they sum to under 20000, so no input crowds out another
+// and the prompt needs no overall cut.
 const (
-	routeBodyRunes    = 6000
-	routeComments     = 10
-	routeCommentRunes = 1000
-	routeContextRunes = 4000
-	routePromptRunes  = 20000
-	routeReasonRunes  = 120
+	routeTitleRunes    = 300
+	routeLabelsRunes   = 500
+	routeBodyRunes     = 6000
+	routeComments      = 10
+	routeCommentRunes  = 1000
+	routeCommentsRunes = 5000 // all kept comments together
+	routeContextRunes  = 4000
+	routeReasonRunes   = 120
 )
 
 type RouteRequest struct {
@@ -134,8 +138,8 @@ func quotaNote(agents []task.Agent) string {
 	return strings.Join(names, " and ") + " quota exhausted"
 }
 
-// routePrompt asks the selector for a rule number. The rules and the instructions
-// come first, so the cut at routePromptRunes can only shorten the issue text.
+// routePrompt asks the selector for a rule number, giving it the rules, the issue,
+// its recent comments, and the context file, each cut to its own budget.
 func (a App) routePrompt(ctx context.Context, req RouteRequest) (string, error) {
 	key := task.Key{Repo: req.Repo, Number: req.Issue}
 	issue, err := a.GitHub.GetIssue(ctx, key)
@@ -144,12 +148,10 @@ func (a App) routePrompt(ctx context.Context, req RouteRequest) (string, error) 
 	}
 	var b strings.Builder
 	b.WriteString("Pick the routing rule that fits this GitHub issue. The rules are in order. Answer with the number of the first rule whose description fits the work, or 0 if none fits or you are unsure. Give a reason of at most ten words. Do not use any tools.\n\nRules:\n")
-	for i, r := range a.Routing.Rules {
-		fmt.Fprintf(&b, "%d. %s\n", i+1, oneLine(r.When))
-	}
-	fmt.Fprintf(&b, "\nRepository: %s\nIssue: #%d %s\n", req.Repo, req.Issue, oneLine(issue.Title))
+	b.WriteString(a.Routing.RulesText())
+	fmt.Fprintf(&b, "\nRepository: %s\nIssue: #%d %s\n", req.Repo, req.Issue, clip(oneLine(issue.Title), routeTitleRunes))
 	if len(issue.Labels) > 0 {
-		fmt.Fprintf(&b, "Labels: %s\n", strings.Join(issue.Labels, ", "))
+		fmt.Fprintf(&b, "Labels: %s\n", clip(strings.Join(issue.Labels, ", "), routeLabelsRunes))
 	}
 	fmt.Fprintf(&b, "\nBody:\n%s\n", clip(issue.Body, routeBodyRunes))
 	// A failed comment read leaves the selector with the issue alone.
@@ -157,13 +159,20 @@ func (a App) routePrompt(ctx context.Context, req RouteRequest) (string, error) 
 	comments = slices.DeleteFunc(comments, func(c IssueComment) bool {
 		return strings.HasPrefix(strings.TrimSpace(c.Body), "<!-- foreman:")
 	})
-	if len(comments) > routeComments {
-		comments = comments[len(comments)-routeComments:]
+	// The newest comments are kept, as many as fit the count and the budget.
+	var kept []string
+	used := 0
+	for i := len(comments) - 1; i >= 0 && len(kept) < routeComments; i-- {
+		body := clip(comments[i].Body, routeCommentRunes)
+		if used += utf8.RuneCountInString(body); used > routeCommentsRunes {
+			break
+		}
+		kept = append(kept, body)
 	}
-	if len(comments) > 0 {
+	if len(kept) > 0 {
 		b.WriteString("\nComments, oldest first:\n")
-		for _, c := range comments {
-			fmt.Fprintf(&b, "---\n%s\n", clip(c.Body, routeCommentRunes))
+		for _, body := range slices.Backward(kept) {
+			fmt.Fprintf(&b, "---\n%s\n", body)
 		}
 	}
 	if req.ContextFile != "" {
@@ -173,7 +182,7 @@ func (a App) routePrompt(ctx context.Context, req RouteRequest) (string, error) 
 		}
 		fmt.Fprintf(&b, "\nContext from the developer:\n%s\n", clip(string(raw), routeContextRunes))
 	}
-	return clip(b.String(), routePromptRunes-1), nil
+	return b.String(), nil
 }
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }

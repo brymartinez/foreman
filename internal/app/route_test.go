@@ -115,11 +115,51 @@ func TestRoutePromptIsBounded(t *testing.T) {
 	if strings.Contains(p, "BODYEND") || strings.Contains(p, "CTXEND") || strings.Contains(p, "PLANTEXT") || strings.Contains(p, strings.Repeat("c", 1001)) {
 		t.Error("body, context file, or comments were not cut, or a foreman comment was included")
 	}
-	if strings.Contains(p, "comment-04") || !strings.Contains(p, "comment-05") || !strings.Contains(p, "comment-14") {
-		t.Error("want the 10 most recent comments")
+	if strings.Contains(p, "comment-09") || !strings.Contains(p, "comment-10") || !strings.Contains(p, "comment-14") {
+		t.Error("want the most recent comments that fit the comment budget")
 	}
 	if n := utf8.RuneCountInString(p); n >= 20000 {
 		t.Errorf("prompt is %d runes", n)
+	}
+}
+
+func TestRoutePromptKeepsEveryInputWhenAllAreAtTheirLimits(t *testing.T) {
+	f, s := routed(t, agent.Selection{Rule: 1}, known)
+	f.app.Routing.Rules = nil
+	for range 40 {
+		f.app.Routing.Rules = append(f.app.Routing.Rules, routing.Rule{When: strings.Repeat("r", 55), Profiles: []string{"claude"}})
+	}
+	if err := f.app.Routing.Validate(); err != nil {
+		t.Fatalf("rules near the limit must be valid: %v", err)
+	}
+	f.gh.issue.Title = strings.Repeat("t", 1000)
+	for i := range 100 {
+		f.gh.issue.Labels = append(f.gh.issue.Labels, fmt.Sprintf("label-%02d-%s", i, strings.Repeat("l", 20)))
+	}
+	f.gh.issue.Body = strings.Repeat("b", 9000)
+	for i := range 15 {
+		f.gh.issueComments = append(f.gh.issueComments, IssueComment{ID: int64(i), Body: fmt.Sprintf("comment-%02d ", i) + strings.Repeat("c", 1500)})
+	}
+	ctxFile := filepath.Join(t.TempDir(), "ctx.md")
+	os.WriteFile(ctxFile, []byte(strings.Repeat("x", 6000)), 0o644)
+	req := routeReq
+	req.ContextFile = ctxFile
+	if _, err := f.app.Route(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	p := s.calls[0].Prompt
+	if n := utf8.RuneCountInString(p); n >= 20000 {
+		t.Errorf("prompt is %d runes", n)
+	}
+	for name, want := range map[string]string{
+		"last rule":    "40. " + strings.Repeat("r", 55),
+		"body":         strings.Repeat("b", 5999) + "…",
+		"newest":       "comment-14",
+		"context file": strings.Repeat("x", 3999) + "…",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt lost the %s", name)
+		}
 	}
 }
 
