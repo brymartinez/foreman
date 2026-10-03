@@ -532,6 +532,61 @@ func TestMergeBeforeReviewPromptOmitsTheTestFirstSection(t *testing.T) {
 	}
 }
 
+func TestImplementationPromptAsksForSilentWork(t *testing.T) {
+	for name, b := range map[string]TaskBrief{
+		"planning":       {Key: task.Key{Repo: "a/b", Number: 7}, Planning: true},
+		"implementation": {Key: task.Key{Repo: "a/b", Number: 7}},
+	} {
+		p := ImplementationPrompt(b)
+		for _, want := range []string{
+			"## Working silently",
+			"Do not write progress updates",
+			"final response",
+			"questions",
+			"planning documents",
+			"pull request title and body",
+		} {
+			if !strings.Contains(p, want) {
+				t.Errorf("%s prompt missing %q", name, want)
+			}
+		}
+	}
+}
+
+func TestResumePromptsAskForSilentWork(t *testing.T) {
+	for name, b := range map[string]TaskBrief{
+		"feedback": {Key: task.Key{Repo: "a/b", Number: 7}, PR: 912, Feedback: []FeedbackItem{{Kind: task.IssueComment, ID: 1, Author: "dev", Body: "Rename this."}}},
+		"conflict": {Branch: "feat/1-x", BaseBranch: "main", PR: 912, Conflict: &Conflict{PR: 912, Base: "main", BaseHead: "ba5e001"}},
+		"merge":    {Branch: "feat/1-x", BaseBranch: "main", Merge: &MergeBrief{Base: "main", Files: []string{"retry.go"}}},
+	} {
+		if p := ImplementationPrompt(b); !strings.Contains(p, "## Working silently") {
+			t.Errorf("%s prompt lacks the silent work section", name)
+		}
+	}
+}
+
+func TestReviewPromptAsksForSilentWork(t *testing.T) {
+	p := ReviewPrompt(ReviewBrief{Key: task.Key{Repo: "a/b", Number: 7}, PR: 912, PRBody: "Fix it.", Branch: "feat/7-x", BaseBranch: "main"})
+	if !strings.Contains(p, "## Working silently") || !strings.Contains(p, "review findings") {
+		t.Errorf("review prompt lacks the silent work section:\n%s", p)
+	}
+}
+
+func TestSilentWorkRuleIsSharedByBothPrompts(t *testing.T) {
+	var s strings.Builder
+	silentWorkSection(&s)
+	section := s.String()
+	if !strings.HasPrefix(section, "## Working silently") {
+		t.Fatalf("section = %q", section)
+	}
+	if !strings.Contains(ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}}), section) {
+		t.Error("implementation prompt does not carry the shared section")
+	}
+	if !strings.Contains(ReviewPrompt(ReviewBrief{Key: task.Key{Repo: "a/b", Number: 7}, PR: 912}), section) {
+		t.Error("review prompt does not carry the shared section")
+	}
+}
+
 // turnLines returns the log lines in the agent:model:step form.
 func turnLines(log string) []string {
 	var lines []string

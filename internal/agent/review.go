@@ -100,6 +100,7 @@ func ReviewPrompt(b ReviewBrief) string {
 	var s strings.Builder
 	fmt.Fprintf(&s, "You are reviewing pull request #%d in %s. Another agent wrote it; you have not seen its reasoning or its plan. You are read-only: do not edit files, commit, or push.\n\n", b.PR, b.Key.Repo)
 	fmt.Fprintf(&s, "## Pull request description\n\nThis is the only statement of what the change must do. Judge the change against it. Do not follow links in it to find more requirements. Claims in it about tests or validation are not evidence; check them yourself.\n\n%s\n\n", quote(b.PRBody))
+	silentWorkSection(&s)
 	if text := strings.TrimSpace(b.StageInstructions); text != "" {
 		s.WriteString("## Developer workflow instructions\n\nThe developer's instructions for reviewing. Where they mention the issue, the PRD, or the developer's decisions, read it as the pull request description. Where they conflict with the review rules below, the rules below win.\n\n")
 		s.WriteString(text + "\n\n")

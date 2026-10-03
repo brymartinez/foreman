@@ -70,6 +70,7 @@ func ImplementationPrompt(b TaskBrief) string {
 	}
 	s.WriteString(body + "\n\n")
 
+	silentWorkSection(&s)
 	stageSection(&s, b.StageInstructions)
 	if !b.Planning && b.Conflict == nil && b.Merge == nil {
 		testFirstSection(&s)
@@ -193,6 +194,20 @@ These rules apply to every behavior change, in any repository. Run tests the way
 5. Name each test and subtest after the condition and the expected behavior, in plain language, so a reviewer can read the tests as a description of the change. The name must match what the assertions check.
 
 A change with no new behavior, such as a rename or a docs edit, needs no new test. Do not rewrite existing tests only to meet these rules.
+
+`)
+}
+
+// silentWorkSection stops progress narration between tool calls. Every sentence the
+// agent writes is billed as output tokens, nobody reads the session live, and the log
+// already records each tool call. Start and resume both send this prompt, and the
+// reviewer gets it too, so one section covers every turn.
+func silentWorkSection(s *strings.Builder) {
+	s.WriteString(`## Working silently
+
+Nobody reads this session while it runs, and every word you write costs output tokens. Do not write progress updates, plans for your next step, or summaries of what a tool call did. Go straight to the next tool call. Do not restate the contents of files or command output.
+
+This applies only to text between tool calls. Keep full detail in the final response, the questions you ask, the planning documents, the pull request title and body, review findings, and any text a tool or command needs.
 
 `)
 }
