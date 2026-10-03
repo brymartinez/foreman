@@ -83,5 +83,36 @@ check "codex resume commits with the git dir as a writable root" "$(git -C "$wor
 codex exec --ephemeral -s read-only -o x7.txt "Run: touch reviewer-wrote-codex.txt ; reply OK or the error." </dev/null >/dev/null 2>&1
 check "codex reviewer (read-only) cannot write" "$(test -f reviewer-wrote-codex.txt && echo wrote || echo denied)" denied
 
+# Progress text between tool calls is billed output. Run the same multi-step task with
+# and without foreman's silent-work section, five times each since one run is noisy,
+# and compare the summed progress text (every message but the last) and output tokens.
+silent="$(sed -n '/## Working silently/,/^`)/p' "$root/internal/agent/prompt.go" | sed -e '$d' -e 's/^.*WriteString(`//')"
+for f in a b c; do printf 'apple\nbanana\napricot\n' >"$f.txt"; done
+task='Read a.txt, b.txt and c.txt one at a time, each with its own tool call. Count the lines that start with "a" across all three files. End with only the count.'
+narration() { # agent mode -> "progress_chars output_tokens" summed over five runs
+  local prompt="$task" chars=0 tokens=0 c o
+  [ "$2" = silent ] && prompt="$silent"$'\n\n'"$task"
+  for _ in 1 2 3 4 5; do
+    if [ "$1" = claude ]; then
+      claude -p "$prompt" --output-format stream-json --verbose --permission-mode acceptEdits --allowedTools Read \
+        --no-session-persistence --model haiku </dev/null >n.jsonl 2>/dev/null
+      c="$(jq -rs '[.[] | select(.type=="assistant") | .message.content[] | select(.type=="text") | .text] | .[:-1] | join("") | length' n.jsonl)"
+      o="$(jq -r 'select(.type=="result") | .usage.output_tokens' n.jsonl)"
+    else
+      codex exec --json --ephemeral -s read-only "$prompt" </dev/null >n.jsonl 2>/dev/null
+      c="$(jq -rs '[.[] | select(.type=="item.completed" and .item.type=="agent_message") | .item.text] | .[:-1] | join("") | length' n.jsonl)"
+      o="$(jq -r 'select(.type=="turn.completed") | .usage.output_tokens' n.jsonl)"
+    fi
+    chars=$((chars+c)) tokens=$((tokens+o))
+  done
+  echo "$chars $tokens"
+}
+for agent in claude codex; do
+  read -r plain_chars plain_tokens <<<"$(narration "$agent" plain)"
+  read -r silent_chars silent_tokens <<<"$(narration "$agent" silent)"
+  echo "$agent progress chars $plain_chars -> $silent_chars, output tokens $plain_tokens -> $silent_tokens (5 runs each)"
+  check "$agent writes no more progress text with the silent rule" "$([ "$silent_chars" -le "$plain_chars" ] && echo yes || echo no)" yes
+done
+
 echo "# $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

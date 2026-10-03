@@ -586,7 +586,8 @@ func TestImplementationPromptAsksForSilentWork(t *testing.T) {
 		p := ImplementationPrompt(b)
 		for _, want := range []string{
 			"## Working silently",
-			"Do not write progress updates",
+			"do not write progress updates",
+			"Do not send a preamble before tool calls",
 			"final response",
 			"questions",
 			"planning documents",

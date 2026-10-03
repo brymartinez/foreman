@@ -205,7 +205,7 @@ A change with no new behavior, such as a rename or a docs edit, needs no new tes
 func silentWorkSection(s *strings.Builder) {
 	s.WriteString(`## Working silently
 
-Nobody reads this session while it runs, and every word you write costs output tokens. Do not write progress updates, plans for your next step, or summaries of what a tool call did. Go straight to the next tool call. Do not restate the contents of files or command output.
+Nobody reads this session while it runs, and every word you write costs output tokens. This overrides any default instruction to send preamble or progress messages. Do not send a preamble before tool calls, and do not write progress updates, plans for your next step, or summaries of what a tool call did. Go straight to the next tool call. Do not restate the contents of files or command output.
 
 This applies only to text between tool calls. Keep full detail in the final response, the questions you ask, the planning documents, the pull request title and body, review findings, and any text a tool or command needs.
 
