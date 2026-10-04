@@ -54,6 +54,43 @@ func TestParseOutcomePlanned(t *testing.T) {
 	}
 }
 
+func TestParseOutcomeCheckpointRequiresShortNextObjectiveAndPassingValidation(t *testing.T) {
+	valid := `{"status":"checkpoint","summary":"committed the first part","nextObjective":"Add the log pager","prNumber":null,"prUrl":null,"validation":[{"command":"go test ./...","passed":true}],"questions":[],"documents":null}`
+	got, err := ParseOutcome([]byte(valid))
+	if err != nil || got.Status != Checkpoint || got.NextObjective != "Add the log pager" || len(got.Validation) != 1 {
+		t.Fatalf("checkpoint = %+v, %v", got, err)
+	}
+	for name, wire := range map[string]string{
+		"missing next objective": strings.Replace(valid, `"Add the log pager"`, "null", 1),
+		"failed validation":      strings.Replace(valid, `"passed":true`, `"passed":false`, 1),
+		"no validation":          strings.Replace(valid, `[{"command":"go test ./...","passed":true}]`, `[]`, 1),
+		"long next objective":    strings.Replace(valid, `"Add the log pager"`, `"`+strings.Repeat("x", 501)+`"`, 1),
+	} {
+		if _, err := ParseOutcome([]byte(wire)); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+}
+
+func TestImplementationPromptOffersCheckpointsOnlyBeforeAPullRequest(t *testing.T) {
+	b := TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}, IssueBody: "A detailed issue body", Branch: "feat/7", BaseBranch: "main", Worktree: "/wt"}
+	if p := ImplementationPrompt(b); !strings.Contains(p, `status "checkpoint"`) {
+		t.Fatal("initial implementation prompt lacks checkpoint guidance")
+	}
+	b.CheckpointHead, b.NextObjective = "abc123", "Add the log pager"
+	if p := ImplementationPrompt(b); !strings.Contains(p, "Add the log pager") || strings.Contains(p, "A detailed issue body") {
+		t.Fatal("checkpoint continuation did not use the small handoff")
+	}
+	b.PR = 912
+	if p := ImplementationPrompt(b); strings.Contains(p, `status "checkpoint"`) {
+		t.Fatal("PR feedback prompt offered checkpoints")
+	}
+	b.PR, b.Planning = 0, true
+	if p := ImplementationPrompt(b); strings.Contains(p, `status "checkpoint"`) {
+		t.Fatal("planning prompt offered checkpoints")
+	}
+}
+
 func TestParseOutcomeRejectsSingleOptionQuestion(t *testing.T) {
 	wire := `{"status":"blocked","summary":"s","prNumber":null,"prUrl":null,"validation":[],
 "questions":[{"issue":"q","context":"c","options":[{"label":"A","description":"only"}],"recommendation":"A","impactIfWrong":"i"}]}`

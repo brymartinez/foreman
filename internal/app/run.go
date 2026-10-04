@@ -142,6 +142,13 @@ func (r *taskRun) implement() (step, error) {
 	res := a.runTurn(r.ctx, r.rec, turnRequest{findings: r.findings}, a.verifiedPR(r.log), r.log)
 	rec, err := a.finishTurn(r.ctx, r.final, r.rec.Key, during, res, func(cur *task.Record) {
 		applyTurn(cur, res.turn, res.pr, res.err, a.Now())
+		if res.err == nil && res.turn.Outcome.Status == agent.Checkpoint {
+			cur.Delegation.CheckpointHead = res.checkpointHead
+			cur.Delegation.CheckpointNext = res.turn.Outcome.NextObjective
+			cur.Delegation.Checkpoints++
+			cur.Delegation.Implementer.ID = ""
+			cur.Validation = res.turn.Outcome.Validation
+		}
 	}, r.log)
 	if err != nil {
 		return stepDone, err
@@ -151,6 +158,9 @@ func (r *taskRun) implement() (step, error) {
 		if r.rec, err = a.postPlan(r.ctx, r.final, rec, res.turn.Outcome.Documents, r.log); err != nil || r.rec.State != task.Working {
 			return stepDone, err
 		}
+		return stepImplement, nil
+	}
+	if res.err == nil && res.turn.Outcome.Status == agent.Checkpoint {
 		return stepImplement, nil
 	}
 	if rec.State != task.Reviewing {
@@ -354,6 +364,9 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 	}
 	brief.Merge = merge
 	brief.PR, brief.Feedback, brief.Conflict = d.PR, feedbackItems(feedback), conflict
+	if d.PR == 0 && d.CheckpointNext != "" {
+		brief.CheckpointHead, brief.NextObjective = d.CheckpointHead, d.CheckpointNext
+	}
 	// The repo layer comes from the worktree: the committed .foreman/ on the base.
 	implement, err := a.Stages.Resolve(d.Worktree, task.StageImplement)
 	if err != nil {
@@ -591,7 +604,10 @@ func applyTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error,
 	case agent.PROpened:
 		rec.State = task.Reviewing
 		rec.Delegation.PR, rec.Delegation.PRURL, rec.Delegation.PRHead = pr.Key.Number, pr.URL, pr.HeadSHA
+		rec.Delegation.CheckpointNext = ""
 		rec.Validation = o.Validation
+	case agent.Checkpoint:
+		rec.State = task.Working
 	case agent.Blocked:
 		rec.State = task.NeedsDecision
 		for _, q := range o.Questions {

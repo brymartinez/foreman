@@ -39,6 +39,9 @@ type TaskBrief struct {
 	PlanInstructions string
 	// Plan is the planning documents already posted on the issue.
 	Plan []task.PlanComment
+	// A checkpoint starts a new implementation session from committed work.
+	CheckpointHead string
+	NextObjective  string
 	// PRD is the posted PRD's text, for the reviewer, who has no network.
 	PRD string
 	// PR is the task's pull request, and Feedback the comments on it still waiting for
@@ -64,11 +67,13 @@ func ImplementationPrompt(b TaskBrief) string {
 	fmt.Fprintf(&s, "You are the implementation agent for GitHub issue %s#%d. You are working unattended; nobody will answer questions during this turn.\n\n", b.Key.Repo, b.Key.Number)
 
 	fmt.Fprintf(&s, "## Issue\n\n%s\n%s\n\n", b.Title, b.URL)
-	body := strings.TrimSpace(b.IssueBody)
-	if body == "" {
-		body = "(The issue has no description.)"
+	if b.NextObjective == "" {
+		body := strings.TrimSpace(b.IssueBody)
+		if body == "" {
+			body = "(The issue has no description.)"
+		}
+		s.WriteString(body + "\n\n")
 	}
-	s.WriteString(body + "\n\n")
 
 	silentWorkSection(&s)
 	stageSection(&s, b.StageInstructions)
@@ -81,6 +86,9 @@ func ImplementationPrompt(b TaskBrief) string {
 		s.WriteString("## The plan\n\nYour plan for this issue is posted on it:\n\n")
 		writePlanLinks(&s, b.Plan)
 		s.WriteString("\n")
+	}
+	if b.NextObjective != "" {
+		fmt.Fprintf(&s, "## Continue from checkpoint\n\nThe branch is clean at commit %s. This is a new session; inspect the committed code and issue only as needed. Your next objective is: %s\n\nDo not reconstruct or request the earlier session transcript.\n\n", b.CheckpointHead, b.NextObjective)
 	}
 
 	if ctx := strings.TrimSpace(b.Context); ctx != "" {
@@ -124,6 +132,15 @@ func ImplementationPrompt(b TaskBrief) string {
 		}
 		s.WriteString("\n")
 	}
+	if !b.Planning && b.PR == 0 && b.Conflict == nil && b.Merge == nil {
+		s.WriteString(`## Implementation checkpoints
+
+For a multi-part change, complete one coherent, testable part at a time. When that part is committed and more work remains, end this session with status "checkpoint". Ensure the worktree is clean, report the validation you ran, and set nextObjective to one short, concrete objective for a fresh session. Do not push or open a pull request at a checkpoint. When the whole change is ready, open the pull request and report "pr_opened" instead. A small change may go directly to "pr_opened".
+
+The next session receives the commit and nextObjective, not this transcript. Keep nextObjective under 500 characters; the committed code, issue, and posted plan hold the details.
+
+`)
+	}
 
 	fmt.Fprintf(&s, `## Workspace
 
@@ -150,10 +167,10 @@ Do not push or open a pull request when you are blocked.
 
 Reply with JSON matching the provided schema:
 %s- "pr_opened" once the pull request exists: set prNumber, prUrl, and validation (each command you ran and whether it passed).
-- "blocked" when you need a decision, as described above.
+%s- "blocked" when you need a decision, as described above.
 - "failed" when you cannot complete the task: say why in summary.
-Set fields that do not apply to null, or [] for validation and questions. %s
-`, b.Worktree, b.Branch, b.BaseBranch, b.Branch, b.Branch, b.BaseBranch, b.Branch, b.Branch, b.Key.Number, prBodyRule(b.PRInstructions), prSection(b.PRInstructions), plannedStatus(b.Planning), documentsRule(b.Planning))
+Set nextObjective to null except for "checkpoint". Set fields that do not apply to null, or [] for validation and questions. %s
+`, b.Worktree, b.Branch, b.BaseBranch, b.Branch, b.Branch, b.BaseBranch, b.Branch, b.Branch, b.Key.Number, prBodyRule(b.PRInstructions), prSection(b.PRInstructions), plannedStatus(b.Planning), checkpointStatus(b), documentsRule(b.Planning))
 	return s.String()
 }
 
@@ -218,6 +235,13 @@ func plannedStatus(planning bool) string {
 	}
 	return `- "planned" once the four documents are written: set documents, with prNumber and prUrl null and validation and questions [].
 `
+}
+
+func checkpointStatus(b TaskBrief) string {
+	if b.Planning || b.PR != 0 || b.Conflict != nil || b.Merge != nil {
+		return ""
+	}
+	return "- \"checkpoint\" after committing a tested part when more implementation remains: set nextObjective and validation. Set prNumber and prUrl to null.\n"
 }
 
 func documentsRule(planning bool) string {

@@ -164,6 +164,9 @@ type frontmatter struct {
 	PR                  int                    `yaml:"pr,omitempty"`
 	PRURL               string                 `yaml:"pr_url,omitempty"`
 	PRHead              string                 `yaml:"pr_head,omitempty"`
+	CheckpointHead      string                 `yaml:"checkpoint_head,omitempty"`
+	CheckpointNext      string                 `yaml:"checkpoint_next,omitempty"`
+	Checkpoints         int                    `yaml:"checkpoints,omitempty"`
 	ConflictAttempts    []task.ConflictAttempt `yaml:"conflict_attempts,omitempty"`
 	ConflictPending     bool                   `yaml:"conflict_pending,omitempty"`
 	GitHub              *snapshot              `yaml:"github,omitempty"`
@@ -318,6 +321,9 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 			PR:               fm.PR,
 			PRURL:            fm.PRURL,
 			PRHead:           fm.PRHead,
+			CheckpointHead:   fm.CheckpointHead,
+			CheckpointNext:   fm.CheckpointNext,
+			Checkpoints:      fm.Checkpoints,
 			ConflictAttempts: fm.ConflictAttempts,
 			ConflictPending:  fm.ConflictPending,
 		}
@@ -417,6 +423,7 @@ func fromRecord(rec *task.Record) frontmatter {
 			fm.WorktreeRemovedAt = &t
 		}
 		fm.RunnerPID, fm.RunnerLog, fm.PR, fm.PRURL, fm.PRHead = d.RunnerPID, d.RunnerLog, d.PR, d.PRURL, d.PRHead
+		fm.CheckpointHead, fm.CheckpointNext, fm.Checkpoints = d.CheckpointHead, d.CheckpointNext, d.Checkpoints
 		fm.ConflictAttempts, fm.ConflictPending = d.ConflictAttempts, d.ConflictPending
 	}
 	if s := rec.GitHub; s != nil {

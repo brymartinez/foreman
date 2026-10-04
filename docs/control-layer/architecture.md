@@ -52,6 +52,11 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
     planned      -> gh: post analysis, PRD, design, and plan as four issue comments
                     (edit the earlier comments on a re-plan), record their ids and URLs,
                     then turn = implementer.Start(new session, posted plan links)
+  while implementing before a PR exists, a turn may return checkpoint:
+    verify the expected branch, a clean worktree, and a new descendant commit;
+    save the commit and one short next objective, then Start a fresh session
+    from the issue, plan links, decisions, committed code, and that objective
+    (no prior transcript); after eight checkpoints, fail instead of looping
   switch turn.Outcome.Status
     blocked      -> save each of Questions as a decision, state NEEDS_DECISION, exit
     failed       -> state FAILED, exit
@@ -195,7 +200,7 @@ the same commit. The commit message records why it changed.
   |---|---|---|
   | `stepAnswer` | a turn on the waiting comments | stopped or blocked: done. Head unchanged: handover. Else review |
   | `stepPickUpReview` | re-verify the PR, record its head | PR not open: implement. Else review |
-  | `stepImplement` | a plan, implement, or fix turn | plan posted: implement. Not REVIEWING: done. Else review |
+  | `stepImplement` | a plan, implement, or fix turn | plan posted or checkpoint verified: implement. Not REVIEWING: done. Else review |
   | `stepReview` | conflict check, review, escalate | findings: implement. Clean: handover. Else done |
   | `stepHandover` | read comments that arrived during the run | comments: answer. Else done |
 
@@ -237,7 +242,7 @@ the same commit. The commit message records why it changed.
 - **Claude and Codex are interchangeable.** Every feature works with either as the
   implementer and the other as the reviewer.
 - **Headless turns with a structured outcome.** Each turn ends in a final message that
-  matches `internal/agent/outcome.schema.json`: `planned`, `pr_opened`, `blocked` with
+  matches `internal/agent/outcome.schema.json`: `planned`, `checkpoint`, `pr_opened`, `blocked` with
   questions, or `failed`. `agent.ParseOutcome` is the only way an implementer's output
   enters the program, and it rejects questions with fewer than two options or duplicate
   labels. The reviewer and the routing selector have their own schemas and parsers,
@@ -259,6 +264,17 @@ the same commit. The commit message records why it changed.
   comments with a `<!-- foreman:<doc> -->` marker and edits them on a re-plan. There is
   no approval gate. Implementation then starts a fresh session, so it doesn't carry the
   planning context (about 200k tokens on one task).
+- **Implementation checkpoints reset context within the implement phase.** Before a
+  PR exists, an implementer may finish one tested part with `checkpoint`, one short
+  next objective, and reported passing validation. Foreman accepts it only when the
+  worktree is clean on the task branch and HEAD advances from the last accepted
+  commit. It saves the commit, objective, and usage together, clears the old session,
+  and starts a fresh one. The new prompt includes the title and issue URL, plan links,
+  recorded decisions, developer context and stage instructions, commit, and objective;
+  it omits the issue body and previous transcript. A retry keeps the objective only
+  when the worktree still points at the accepted commit. Checkpoints are limited to
+  eight per task. Planning, PR feedback, merge repair, and review fixes do not
+  checkpoint. Validation remains agent reported; Foreman verifies Git state.
 - **Models and effort are set per step:** `plan_model`, `model` (implementation, fixes,
   feedback, merges, PR creation), and `review_model`; Codex also takes reasoning effort
   per step. Each turn logs an `agent:model:step` line. A routed task's stored profile

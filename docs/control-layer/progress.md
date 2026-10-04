@@ -7,7 +7,8 @@ dashboard, `-a`/`--auto` and `--no-auto` set auto mode for the session, and `-c`
 the config. The task and config subcommands are gone. The dashboard gained `?` (keys
 and version), `R` (raw log lines), and log paging back to the file start.
 `scripts/e2e.sh` drives the dashboard through `scripts/tui-drive.py`.
-Stage 39 (routing new dashboard tasks to a profile from `routing.yaml`, with the
+Stage 40 (bounded implementation checkpoints with fresh sessions and small durable
+handoffs) is complete. Stage 39 (routing new dashboard tasks to a profile from `routing.yaml`, with the
 optional `quota-axi` check, for issue #39) is complete. Stage 31 (answering decisions
 in the dashboard), stage 29 (repository include filter and the `v` view toggle), stage
 38 (shorter planning documents and the `make config` notice for differing stage files),
@@ -42,6 +43,9 @@ Findings 1 to 4 were fixed in stage 28.
 
 ## Known limitations
 
+- Implementation checkpoint validation commands are agent reported, as with PR
+  validation. Foreman verifies the branch, clean worktree, and advancing commit.
+  A headless agent may still run a long turn before it elects to checkpoint.
 - Routing's selector flow (`3` in the agent choice) is covered by unit tests with a stub
   source. `scripts/e2e.sh` checks a retried routed task.
 - The gate runs only while the dashboard is open, because the design rules out

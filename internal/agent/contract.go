@@ -21,10 +21,11 @@ var OutcomeSchema []byte
 type Status string
 
 const (
-	Planned   Status = "planned"
-	PROpened  Status = "pr_opened"
-	Blocked   Status = "blocked"
-	FailedRun Status = "failed"
+	Planned    Status = "planned"
+	Checkpoint Status = "checkpoint"
+	PROpened   Status = "pr_opened"
+	Blocked    Status = "blocked"
+	FailedRun  Status = "failed"
 )
 
 type Check = task.Check
@@ -32,12 +33,13 @@ type Check = task.Check
 // Outcome is how every implementation turn ends. For pr_opened, PRNumber may be 0
 // when the agent could not report it; foreman then looks the PR up by branch.
 type Outcome struct {
-	Status     Status
-	Summary    string
-	PRNumber   int
-	PRURL      string
-	Validation []Check
-	Questions  []task.Question
+	Status        Status
+	Summary       string
+	NextObjective string
+	PRNumber      int
+	PRURL         string
+	Validation    []Check
+	Questions     []task.Question
 	// Documents are the planning documents a planned turn wrote, by task.PlanDocs.
 	Documents map[task.PlanDoc]string
 }
@@ -50,13 +52,14 @@ type wireDocuments struct {
 }
 
 type wireOutcome struct {
-	Status     Status          `json:"status"`
-	Summary    string          `json:"summary"`
-	PRNumber   *int            `json:"prNumber"`
-	PRURL      *string         `json:"prUrl"`
-	Validation []Check         `json:"validation"`
-	Questions  []task.Question `json:"questions"`
-	Documents  *wireDocuments  `json:"documents"`
+	Status        Status          `json:"status"`
+	Summary       string          `json:"summary"`
+	NextObjective *string         `json:"nextObjective"`
+	PRNumber      *int            `json:"prNumber"`
+	PRURL         *string         `json:"prUrl"`
+	Validation    []Check         `json:"validation"`
+	Questions     []task.Question `json:"questions"`
+	Documents     *wireDocuments  `json:"documents"`
 }
 
 func ParseOutcome(raw []byte) (Outcome, error) {
@@ -92,6 +95,26 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 		if w.PRURL != nil {
 			out.PRURL = *w.PRURL
 		}
+		out.Validation = w.Validation
+	case Checkpoint:
+		if w.PRNumber != nil || w.PRURL != nil || len(w.Questions) > 0 || w.Documents != nil {
+			return Outcome{}, errors.New("checkpoint outcome includes unrelated fields")
+		}
+		if w.NextObjective == nil || strings.TrimSpace(*w.NextObjective) == "" {
+			return Outcome{}, errors.New("checkpoint outcome needs a next objective")
+		}
+		if len([]rune(*w.NextObjective)) > 500 {
+			return Outcome{}, errors.New("checkpoint next objective exceeds 500 characters")
+		}
+		if len(w.Validation) == 0 {
+			return Outcome{}, errors.New("checkpoint outcome needs the validation that was run")
+		}
+		for _, check := range w.Validation {
+			if !check.Passed {
+				return Outcome{}, errors.New("checkpoint validation must pass")
+			}
+		}
+		out.NextObjective = strings.TrimSpace(*w.NextObjective)
 		out.Validation = w.Validation
 	case Blocked:
 		if len(w.Questions) == 0 {

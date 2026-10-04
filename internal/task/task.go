@@ -140,6 +140,11 @@ type Delegation struct {
 	PRURL             string
 	// PRHead is the PR's head commit when foreman last read it. A review covers one head.
 	PRHead string
+	// CheckpointHead is the last accepted implementation commit, or the head when
+	// the worktree was prepared. The commit and CheckpointNext cross to a fresh session.
+	CheckpointHead string
+	CheckpointNext string
+	Checkpoints    int
 	// ConflictAttempts lists every PR head and base head an automatic merge conflict
 	// repair ran for, oldest first. A repair runs once per pair. ConflictPending is set
 	// until the runner has run the last one.

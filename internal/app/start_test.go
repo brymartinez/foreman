@@ -15,14 +15,36 @@ import (
 )
 
 type fakeWorktrees struct {
-	reqs      []WorktreeRequest
-	removed   []WorktreeRemoval
-	removeErr error
+	reqs            []WorktreeRequest
+	head            string
+	checkpointHeads []string
+	checkpointErr   error
+	removed         []WorktreeRemoval
+	removeErr       error
 	// contains answers Contains; nil reports every ancestor as merged.
 	contains  func(dir, ancestor, descendant string) (bool, error)
 	checks    []MergeCheck
 	conflicts [][]string // consumed one per check; clean once empty
 	checkErr  error
+}
+
+func (f *fakeWorktrees) Head(_ context.Context, _ string) (string, error) {
+	if f.head == "" {
+		return "basehead", nil
+	}
+	return f.head, nil
+}
+
+func (f *fakeWorktrees) Checkpoint(_ context.Context, _, _, _ string) (string, error) {
+	if f.checkpointErr != nil {
+		return "", f.checkpointErr
+	}
+	if len(f.checkpointHeads) == 0 {
+		return "", errors.New("no checkpoint head")
+	}
+	head := f.checkpointHeads[0]
+	f.checkpointHeads = f.checkpointHeads[1:]
+	return head, nil
 }
 
 func (f *fakeWorktrees) Contains(_ context.Context, dir, ancestor, descendant string) (bool, error) {
