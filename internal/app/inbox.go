@@ -74,7 +74,9 @@ type App struct {
 	Selector        Selector
 	// Quota may be nil, which makes every agent's quota unknown.
 	Quota QuotaChecker
-	Now   func() time.Time
+	// LogDir holds the task logs. History scans it for PRs from older tasks.
+	LogDir string
+	Now    func() time.Time
 }
 
 // Inbox is InboxView with the configured repository filter.
