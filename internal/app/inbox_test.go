@@ -147,6 +147,7 @@ func (f *fakeStore) Update(ctx context.Context, k task.Key, fn func(*task.Record
 			d := *c.Delegation
 			c.Delegation = &d
 		}
+		c.Attempts = slices.Clone(c.Attempts)
 		cur = &c
 	}
 	next, err := fn(cur)

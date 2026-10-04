@@ -29,6 +29,10 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 			return nil, errors.New("task is not WORKING; nothing to run")
 		}
 		cur.Delegation.RunnerPID = pid
+		// The runner goes straight on to the attempt's first agent turn.
+		if at := cur.CurrentAttempt(); at != nil && at.StartedAt.IsZero() {
+			at.StartedAt = a.Now()
+		}
 		return cur, nil
 	})
 	if err != nil {
@@ -485,14 +489,19 @@ func addUsage(total *task.Usage, turn task.Usage) {
 }
 
 // update is Store.Update plus the developer's notification: a task that moves into
-// a state that needs them announces it, whichever command or runner moved it.
+// a state that needs them announces it, whichever command or runner moved it. It also
+// marks a phase change on the task's attempt in the same write.
 func (a App) update(ctx context.Context, key task.Key, fn func(cur *task.Record) (*task.Record, error)) (*task.Record, error) {
 	var before task.State
 	rec, err := a.Store.Update(ctx, key, func(cur *task.Record) (*task.Record, error) {
 		if cur != nil {
 			before = cur.State
 		}
-		return fn(cur)
+		next, err := fn(cur)
+		if err == nil && next != nil {
+			next.Track(a.Now())
+		}
+		return next, err
 	})
 	if err == nil && rec != nil && rec.State != before {
 		a.notify(key, rec)
