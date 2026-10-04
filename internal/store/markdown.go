@@ -179,6 +179,7 @@ type frontmatter struct {
 	Plan                []task.PlanComment     `yaml:"plan,omitempty"`
 	Feedback            []feedbackFM           `yaml:"feedback,omitempty"`
 	CI                  *ciFM                  `yaml:"ci,omitempty"`
+	Attempts            []task.Attempt         `yaml:"attempts,omitempty"`
 }
 
 type feedbackFM struct {
@@ -374,6 +375,14 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 		}
 		rec.CI = &task.CIStatus{State: c.State, Failing: c.Failing, CheckedAt: c.CheckedAt}
 	}
+	for _, a := range fm.Attempts {
+		for _, m := range a.Marks {
+			if !task.ValidPhase(m.Phase) {
+				return nil, fmt.Errorf("attempt mark at %s has unknown phase %q", m.At.Format(time.RFC3339), m.Phase)
+			}
+		}
+	}
+	rec.Attempts = fm.Attempts
 	if o := fm.LastOutcome; o != nil {
 		rec.LastOutcome = &task.Outcome{Status: o.Status, Summary: o.Summary, At: o.At}
 	}
@@ -435,6 +444,7 @@ func fromRecord(rec *task.Record) frontmatter {
 	}
 	fm.Validation = rec.Validation
 	fm.Plan = rec.Plan
+	fm.Attempts = rec.Attempts
 	for _, f := range rec.Feedback {
 		item := feedbackFM{Kind: f.Kind, ID: f.ID, Author: f.Author, URL: f.URL, At: f.At, Digest: f.Digest}
 		if !f.HandledAt.IsZero() {
