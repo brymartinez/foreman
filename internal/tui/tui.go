@@ -19,9 +19,10 @@ import (
 	"github.com/brymartinez/foreman/internal/task"
 )
 
-// logLines is how much of a runner log the dashboard keeps, so page up reaches back
-// further than one screen.
-const logLines = 500
+// logChunk bounds one read of a runner log: the tail read when a log opens, and each
+// read of older lines as the reader scrolls back. A task that runs for hours writes far
+// more than a pane can show. Tests shrink it.
+var logChunk int64 = 128 << 10
 
 type Options struct {
 	In     *os.File
@@ -35,6 +36,8 @@ type Options struct {
 	// Route says routing.yaml is in use, even one that failed to load: Route then
 	// reports the error rather than starting with the wrong agent.
 	Route bool
+	// Version is the foreman version the help shows.
+	Version string
 }
 
 // result is one finished background call. The event loop owns the model, so a
@@ -93,7 +96,7 @@ func Run(ctx context.Context, o Options) (err error) {
 	var m Model
 	m.Width, m.Height = size(o.Out)
 	m.SetAuto(o.Auto)
-	m.RouteOn = o.Route
+	m.RouteOn, m.Version = o.Route, o.Version
 
 	keys := make(chan Key, 64)
 	go readKeys(ctx, o.In, keys, escapeWait)
@@ -177,6 +180,10 @@ func Run(ctx context.Context, o Options) (err error) {
 				key, raw := a.Respond, a.Answer
 				pending++
 				go func() { results <- respond(ctx, o.Source, key, raw) }()
+			case ActionReadLog:
+				readLog(&m)
+			case ActionLoadOlder:
+				loadOlder(&m)
 			case ActionAuto:
 				if o.Auto.Save != nil {
 					if err := o.Auto.Save(m.AutoOn); err != nil {
@@ -344,8 +351,8 @@ func autoStart(ctx context.Context, s Source, req app.StartRequest, prior *agent
 
 func startResult(ctx context.Context, s Source, req app.StartRequest) result {
 	if req.ContextFile != "" {
-		// The runner a later `foreman respond` spawns reads this path from its own
-		// working directory, so store it absolute, as `inbox` and `start` do.
+		// The runner a later answer spawns reads this path from its own working
+		// directory, so store it absolute.
 		abs, err := filepath.Abs(req.ContextFile)
 		if err != nil {
 			return result{err: fmt.Errorf("context file %s: %w", req.ContextFile, err), finished: true}
@@ -386,7 +393,7 @@ func resumeResult(ctx context.Context, s Source, key task.Key) result {
 }
 
 // respond records an answer typed in the dashboard through App.Respond, so it is
-// resolved exactly as foreman respond resolves it. It is counted as pending, because
+// resolved by the same rules as every answer. It is counted as pending, because
 // the last answer records WORKING before App.Respond spawns the runner.
 func respond(ctx context.Context, s Source, key task.Key, raw string) result {
 	r := respondResult(ctx, s, key, raw)
@@ -433,42 +440,92 @@ func readLocal(ctx context.Context, s Source, m *Model) {
 	readLog(m)
 }
 
-// readLog re-tails the selected task's runner log. Moving the cursor calls it too, so
-// the pane never shows one task's lines under another task's heading.
+// readLog brings the selected task's runner log up to date. It reads the tail when
+// the log is new to the pane, and after that only the bytes the runner has added, so
+// older lines loaded by scrolling back stay. Moving the cursor calls it too, so the
+// pane never shows one task's lines under another task's heading.
 func readLog(m *Model) {
-	before := len(m.Log)
-	m.Log, m.LogErr = nil, ""
-	if !m.LogOpen {
-		m.LogOffset = 0
-		return
-	}
 	rec := m.Selected()
-	if rec == nil || rec.Delegation == nil || rec.Delegation.RunnerLog == "" {
-		m.LogOffset = 0
+	if !m.LogOpen || rec == nil || rec.Delegation == nil || rec.Delegation.RunnerLog == "" {
+		m.clearLog()
 		return
 	}
-	lines, err := tailFile(rec.Delegation.RunnerLog)
-	if err != nil {
-		m.LogErr, m.LogOffset = err.Error(), 0
-		return
-	}
-	m.Log = lines
-	if m.LogOffset > 0 {
-		// The offset counts back from the tail, so a running agent's new lines would
-		// slide the view forward while the reader is scrolled back. Move the offset by
-		// the growth to hold the same lines on screen until End follows again. Past
-		// logLines the oldest lines are dropped and the view moves with them.
-		m.scrollLog(len(lines) - before)
+	path := rec.Delegation.RunnerLog
+	if err := appendLog(m, path); err != nil {
+		m.clearLog()
+		m.LogErr = err.Error()
 	}
 }
 
-func tailFile(path string) ([]string, error) {
+func appendLog(m *Model, path string) error {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer f.Close()
-	return logs.Tail(f, logLines, false)
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	size := info.Size()
+	if path != m.LogPath || size < m.logEnd {
+		// A new log, or one rewritten from the start: read its tail.
+		start, err := logs.Back(f, size, logChunk)
+		if err != nil {
+			return err
+		}
+		lines, next, partial, err := logs.Lines(f, start, size, m.LogRaw)
+		if err != nil {
+			return err
+		}
+		m.clearLog()
+		m.Log, m.LogPath, m.LogAtStart = lines, path, start == 0
+		m.logStart, m.logEnd, m.logPartial = start, next, partial
+		return nil
+	}
+	lines, next, partial, err := logs.Lines(f, m.logEnd, size, m.LogRaw)
+	if err != nil {
+		return err
+	}
+	before := len(m.Log)
+	m.Log = append(m.Log[:len(m.Log)-m.logPartial], lines...)
+	m.logEnd, m.logPartial = next, partial
+	if m.LogOffset > 0 {
+		// The offset counts back from the tail, so a running agent's new lines would
+		// slide the view forward while the reader is scrolled back. Move the offset by
+		// the growth to hold the same lines on screen until End follows again.
+		m.scrollLog(len(m.Log) - before)
+	}
+	return nil
+}
+
+// loadOlder reads chunks of the open log before its oldest loaded line until the
+// scroll step that asked for them is taken or the file start is reached. Each chunk
+// is bounded; g asks for the whole file. A failed read keeps what is loaded.
+func loadOlder(m *Model) {
+	for a := (Action{Kind: ActionLoadOlder}); a.Kind == ActionLoadOlder; {
+		lines, start, err := readOlder(m.LogPath, m.logStart, m.LogRaw)
+		if err != nil {
+			m.logShort = 0
+			m.Message = "! read older log lines: " + err.Error()
+			return
+		}
+		a = m.LoadedOlder(lines, start)
+	}
+}
+
+func readOlder(path string, end int64, raw bool) ([]string, int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer f.Close()
+	start, err := logs.Back(f, end, logChunk)
+	if err != nil {
+		return nil, 0, err
+	}
+	lines, _, _, err := logs.Lines(f, start, end, raw)
+	return lines, start, err
 }
 
 // escapeWait is how long bytes that could still grow into a key wait for the rest. A

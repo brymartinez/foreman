@@ -2,124 +2,13 @@ package render
 
 import (
 	"bytes"
-	"errors"
-	"fmt"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/brymartinez/foreman/internal/app"
-	"github.com/brymartinez/foreman/internal/routing"
 	"github.com/brymartinez/foreman/internal/task"
 )
-
-func TestInboxSectionsAndHiddenCount(t *testing.T) {
-	k := func(n int) task.Key { return task.Key{Repo: "ridezoomo/armada-backend", Number: n} }
-	var buf bytes.Buffer
-	Inbox(&buf, app.InboxReport{
-		New:     []app.InboxEntry{{Item: app.InboxItem{Key: k(825), Title: "Provider retries"}, Changes: []string{"assigned to you"}}},
-		Changed: []app.InboxEntry{{Item: app.InboxItem{Key: k(812), Title: "Pagination"}, Changes: []string{"closed"}}},
-		NeedsDecision: []*task.Record{{Key: k(830), Title: "Event pagination",
-			Decisions: []task.Decision{{Question: task.Question{Issue: "Should retries apply to 4xx?"}}}}},
-		Ready: []*task.Record{{Key: k(790), Title: "Provider retries",
-			Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912, PRURL: "https://github.com/ridezoomo/armada-backend/pull/912"},
-			Validation: []task.Check{{Command: "go test ./...", Passed: true}, {Command: "go vet ./...", Passed: true}},
-			CI:         &task.CIStatus{State: task.CIPassing},
-			Reviews:    []task.Review{{Round: 1}, {Round: 2, Clean: true}},
-			Decisions:  []task.Decision{{Answer: "Keep retries limited to 5xx."}, {Answer: ""}}}},
-		Unchanged: 17,
-	})
-	want := `NEEDS DECISION
-  ridezoomo/armada-backend#830  Event pagination
-        ridezoomo/armada-backend · Should retries apply to 4xx?
-
-READY FOR YOU
-  ridezoomo/armada-backend#790  Provider retries
-        ridezoomo/armada-backend · Claude → Codex review
-        PR #912 · https://github.com/ridezoomo/armada-backend/pull/912
-
-        ✓ go test ./...
-        ✓ go vet ./...
-        ✓ CI
-        ✓ competing review
-
-        Decisions:
-        - Keep retries limited to 5xx.
-
-CHANGED
-  ridezoomo/armada-backend#812  Pagination
-        ridezoomo/armada-backend · closed
-
-NEW
-  ridezoomo/armada-backend#825  Provider retries
-        ridezoomo/armada-backend · assigned to you
-
-NO CHANGE
-  17 tracked items hidden
-`
-	if buf.String() != want {
-		t.Errorf("got:\n%s\nwant:\n%s", buf.String(), want)
-	}
-}
-
-func TestInboxUsesRepoQualifiedIdentity(t *testing.T) {
-	var buf bytes.Buffer
-	Inbox(&buf, app.InboxReport{New: []app.InboxEntry{{Item: app.InboxItem{
-		Key: task.Key{Repo: "midsoln/foreman", Number: 1}, Title: "Inbox identity",
-	}, Changes: []string{"assigned to you"}}}})
-	if !strings.Contains(buf.String(), "midsoln/foreman#1  Inbox identity") {
-		t.Errorf("repo-qualified identity missing from:\n%s", buf.String())
-	}
-}
-
-func TestInboxEmpty(t *testing.T) {
-	var buf bytes.Buffer
-	Inbox(&buf, app.InboxReport{Unchanged: 1})
-	if buf.String() != "Nothing new.\n\nNO CHANGE\n  1 tracked item hidden\n" {
-		t.Errorf("got %q", buf.String())
-	}
-}
-
-func TestStatus(t *testing.T) {
-	var buf bytes.Buffer
-	Status(&buf, []*task.Record{{
-		Key: task.Key{Repo: "ridezoomo/armada-backend", Number: 831}, Title: "Provider retries", State: task.Reviewing,
-		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912},
-	}})
-	want := "ridezoomo/armada-backend#831 Claude  REVIEWING\n       Provider retries · ridezoomo/armada-backend\n       PR #912 · reviewer: Codex\n"
-	if buf.String() != want {
-		t.Errorf("got:\n%q\nwant:\n%q", buf.String(), want)
-	}
-	buf.Reset()
-	Status(&buf, []*task.Record{{
-		Key: task.Key{Repo: "ridezoomo/armada-backend", Number: 831}, Title: "Provider retries", State: task.Reviewing,
-		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912},
-		Reviews:    []task.Review{{Round: 1}, {Round: 2, Clean: true}},
-	}})
-	want = "ridezoomo/armada-backend#831 Claude  REVIEWING\n       Provider retries · ridezoomo/armada-backend\n       PR #912 · reviewer: Codex · review ✓\n"
-	if buf.String() != want {
-		t.Errorf("got:\n%q\nwant:\n%q", buf.String(), want)
-	}
-	for _, tc := range []struct {
-		ci   task.CIStatus
-		want string
-	}{
-		{task.CIStatus{State: task.CINone}, " · CI ✓ · review ✓"},
-		{task.CIStatus{State: task.CIPending}, " · CI pending · review ✓"},
-		{task.CIStatus{State: task.CIFailing, Failing: []task.CheckRun{{Name: "test"}, {Name: "lint"}}}, " · CI ✗ test, lint · review ✓"},
-	} {
-		buf.Reset()
-		Status(&buf, []*task.Record{{
-			Key: task.Key{Repo: "a/b", Number: 820}, State: task.ReadyForHuman, CI: &tc.ci,
-			Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex}, Reviewer: task.Claude, PR: 905},
-			Reviews:    []task.Review{{Round: 1, Clean: true}},
-		}})
-		if !strings.Contains(buf.String(), "PR #905 · reviewer: Claude"+tc.want+"\n") {
-			t.Errorf("%s: got %q", tc.ci.State, buf.String())
-		}
-	}
-}
 
 func TestTaskRowsCarryStateAndBadges(t *testing.T) {
 	rows := TaskRows(&task.Record{
@@ -235,26 +124,6 @@ func TestShowClaudeTranscript(t *testing.T) {
 	}
 }
 
-func TestCancelled(t *testing.T) {
-	rec := &task.Record{
-		Key: task.Key{Repo: "a/b", Number: 7}, State: task.Failed,
-		Delegation:  &task.Delegation{Implementer: task.Session{Agent: task.Claude}},
-		LastOutcome: &task.Outcome{Status: app.Cancelled, Summary: "run cancelled during review (terminated signal received)"},
-	}
-	var buf bytes.Buffer
-	Cancelled(&buf, rec)
-	want := "Cancelled a/b#7: run cancelled during review (terminated signal received)\nThe branch and worktree are kept. To resume, run from a checkout of a/b:\n  foreman start 7 --agent claude\n"
-	if buf.String() != want {
-		t.Errorf("got:\n%s\nwant:\n%s", buf.String(), want)
-	}
-	buf.Reset()
-	rec.State, rec.LastOutcome = task.Reviewing, &task.Outcome{Status: "review_clean"}
-	Cancelled(&buf, rec)
-	if buf.String() != "a/b#7 finished before it could be cancelled: REVIEWING\n" {
-		t.Errorf("got %q", buf.String())
-	}
-}
-
 func TestShowPlanLinks(t *testing.T) {
 	var buf bytes.Buffer
 	Show(&buf, &task.Record{
@@ -315,7 +184,7 @@ A
 Impact if wrong:
 Could cause unnecessary repeated client errors.
 
-Answer with: foreman respond ridezoomo/armada-backend#825
+Answer it: press Enter on the task in the dashboard.
 `
 	out := buf.String()
 	if !strings.HasSuffix(out, want) {
@@ -355,139 +224,6 @@ func TestShowLatestReview(t *testing.T) {
 	}
 }
 
-func TestCleaned(t *testing.T) {
-	rec := func(n int) *task.Record {
-		return &task.Record{Key: task.Key{Repo: "a/b", Number: n}, Delegation: &task.Delegation{Worktree: fmt.Sprintf("/wt/%d", n), Branch: fmt.Sprintf("agent/%d-x", n)}}
-	}
-	var buf bytes.Buffer
-	Cleaned(&buf, []app.CleanResult{{Rec: rec(1), BranchDeleted: true}, {Rec: rec(2)}, {Rec: rec(3), Err: errors.New("contains modified or untracked files")}}, false)
-	want := `  a/b#1  removed /wt/1
-        branch deleted (PR merged) agent/1-x
-  a/b#2  removed /wt/2
-        branch agent/2-x kept
-  a/b#3  kept /wt/3
-        contains modified or untracked files
-`
-	if buf.String() != want {
-		t.Errorf("got:\n%s\nwant:\n%s", buf.String(), want)
-	}
-	buf.Reset()
-	Cleaned(&buf, nil, true)
-	if buf.String() != "No worktrees to clean.\n" {
-		t.Errorf("got %q", buf.String())
-	}
-}
-
-func TestReadyShowsFailingCIForTheDeveloper(t *testing.T) {
-	var buf bytes.Buffer
-	Inbox(&buf, app.InboxReport{Ready: []*task.Record{{Key: task.Key{Repo: "a/b", Number: 825}, Title: "T",
-		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912},
-		CI:         &task.CIStatus{State: task.CIFailing, Failing: []task.CheckRun{{Name: "test", Link: "https://ci/1"}, {Name: "lint"}}},
-		Reviews:    []task.Review{{Round: 1, Clean: true}}}}})
-	if want := "        ✗ CI: test, lint\n            test  https://ci/1\n        ✓ competing review\n"; !strings.Contains(buf.String(), want) {
-		t.Errorf("missing %q in:\n%s", want, buf.String())
-	}
-}
-
-func TestStageSources(t *testing.T) {
-	g := "/home/u/.config/foreman/stages/"
-	r := "/src/widgets/.foreman/"
-	var buf bytes.Buffer
-	StageSources(&buf, []StageReport{
-		{Instructions: task.StageInstructions{Stage: task.StageImplement, GlobalPath: g + "implement.md", RepoPath: r + "implement.md"}, GlobalWhere: g + "implement.md", RepoWhere: r + "implement.md"},
-		{Instructions: task.StageInstructions{Stage: task.StageReview, GlobalPath: g + "review.md"}, GlobalWhere: g + "review.md", RepoWhere: r + "review.md"},
-		{Instructions: task.StageInstructions{Stage: task.StagePR}, Err: errors.New("stage instructions /x/pr.md: permission denied")},
-		{Instructions: task.StageInstructions{Stage: task.StagePR}, GlobalWhere: g + "pr.md", RepoWhere: r + "pr.md"},
-	}, "/home/u", "/src/widgets")
-	want := `IMPLEMENT
-  global: ~/.config/foreman/stages/implement.md
-  repo:   .foreman/implement.md
-
-REVIEW
-  global: ~/.config/foreman/stages/review.md
-  repo:   not configured (.foreman/review.md)
-
-PR
-  error:  stage instructions /x/pr.md: permission denied
-
-PR
-  global: MISSING, required (~/.config/foreman/stages/pr.md)
-  repo:   not configured (.foreman/pr.md)
-
-Tasks read .foreman/ from their worktree: the version committed on the base branch.
-` + missingGlobalHint + "\n"
-	if buf.String() != want {
-		t.Errorf("got:\n%s\nwant:\n%s", buf.String(), want)
-	}
-}
-
-func TestStageContent(t *testing.T) {
-	var buf bytes.Buffer
-	StageContent(&buf, StageReport{Instructions: task.StageInstructions{Stage: task.StageReview, GlobalPath: "/g/review.md", Global: "Three passes.", Repo: "Check migrations.", RepoPath: "/r/.foreman/review.md"},
-		GlobalWhere: "/g/review.md", RepoWhere: "/r/.foreman/review.md"}, "", "/r")
-	if want := "REVIEW\n  global: /g/review.md\n  repo:   .foreman/review.md\n\nThree passes.\n\nCheck migrations.\n"; buf.String() != want {
-		t.Errorf("got:\n%s\nwant:\n%s", buf.String(), want)
-	}
-	buf.Reset()
-	StageContent(&buf, StageReport{Instructions: task.StageInstructions{Stage: task.StagePR}, GlobalWhere: "/g/pr.md"}, "", "")
-	if want := "PR\n  global: MISSING, required (/g/pr.md)\n  repo:   not in a git repository\n\n" + missingGlobalHint + "\n"; buf.String() != want {
-		t.Errorf("got:\n%s\nwant:\n%s", buf.String(), want)
-	}
-}
-
-func TestReadyFlagsCommitsSinceTheReview(t *testing.T) {
-	var buf bytes.Buffer
-	Inbox(&buf, app.InboxReport{Ready: []*task.Record{{Key: task.Key{Repo: "a/b", Number: 825}, Title: "T",
-		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912, PRHead: "beef002"},
-		CI:         &task.CIStatus{State: task.CIPassing},
-		Reviews:    []task.Review{{Round: 1, Clean: true, Head: "c0ffee1"}}}}})
-	if want := "        ✓ competing review\n        ! new commits since the review\n"; !strings.Contains(buf.String(), want) {
-		t.Errorf("missing %q in:\n%s", want, buf.String())
-	}
-}
-
-func TestInboxWarnsWhenASearchHitsTheLimit(t *testing.T) {
-	var buf bytes.Buffer
-	Inbox(&buf, app.InboxReport{Truncated: []string{"issues that mention you"}})
-	if want := "! The search for issues that mention you hit gh's result limit; some matches are missing.\n"; !strings.Contains(buf.String(), want) {
-		t.Errorf("missing %q in:\n%s", want, buf.String())
-	}
-}
-
-func TestInboxCountsWaitingQuestions(t *testing.T) {
-	var buf bytes.Buffer
-	q := task.Question{Issue: "Retry 4xx?"}
-	Inbox(&buf, app.InboxReport{NeedsDecision: []*task.Record{{Key: task.Key{Repo: "a/b", Number: 825}, Title: "T", State: task.NeedsDecision,
-		Decisions: []task.Decision{{Question: q}, {Question: task.Question{Issue: "Cap retries?"}}}}}})
-	if want := "a/b · Retry 4xx? (+1 more)"; !strings.Contains(buf.String(), want) {
-		t.Errorf("missing %q in:\n%s", want, buf.String())
-	}
-}
-
-func TestInboxReviewedSection(t *testing.T) {
-	k := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
-	var buf bytes.Buffer
-	Inbox(&buf, app.InboxReport{
-		Reviewed: []*task.Record{{Key: k, Title: "Provider retries",
-			Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912,
-				PRURL: "https://github.com/ridezoomo/armada-backend/pull/912"},
-			Feedback: []task.Feedback{
-				{Kind: task.ReviewComment, ID: 1, Author: "brymartinez"},
-				{Kind: task.IssueComment, ID: 2, Author: "dependabot[bot]", HandledAt: time.Now()},
-			}}},
-		WaitingChanges: map[task.Key][]string{k: {"1 comment to answer on PR #912"}},
-	})
-	want := `REVIEWED
-  ridezoomo/armada-backend#825  Provider retries
-        ridezoomo/armada-backend · PR #912 · 1 comment from brymartinez
-        https://github.com/ridezoomo/armada-backend/pull/912
-        • 1 comment to answer on PR #912
-`
-	if buf.String() != want {
-		t.Errorf("got:\n%s\nwant:\n%s", buf.String(), want)
-	}
-}
-
 func TestShowPrintsProfileAndReason(t *testing.T) {
 	var buf bytes.Buffer
 	Show(&buf, &task.Record{
@@ -503,23 +239,5 @@ func TestShowPrintsProfileAndReason(t *testing.T) {
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex}})
 	if strings.Contains(buf.String(), "Profile") {
 		t.Errorf("an unrouted task shows a profile:\n%s", buf.String())
-	}
-}
-
-func TestConfigShowReportsRouting(t *testing.T) {
-	var buf bytes.Buffer
-	Routing(&buf, "/c/routing.yaml", &routing.Config{Profiles: map[string]routing.Profile{"codex": {}, "claude": {}}, Default: "claude"}, nil)
-	if got := buf.String(); !strings.Contains(got, "Routing: on (/c/routing.yaml)") || !strings.Contains(got, "Routing profiles: claude (default), codex") {
-		t.Errorf("on:\n%s", got)
-	}
-	buf.Reset()
-	Routing(&buf, "/c/routing.yaml", nil, nil)
-	if got := buf.String(); !strings.Contains(got, "Routing: off (no /c/routing.yaml)") {
-		t.Errorf("off:\n%s", got)
-	}
-	buf.Reset()
-	Routing(&buf, "/c/routing.yaml", nil, errors.New(`/c/routing.yaml: default: unknown profile "gpt"`))
-	if got := buf.String(); !strings.Contains(got, "Routing: error") || !strings.Contains(got, `! /c/routing.yaml: default: unknown profile "gpt"`) {
-		t.Errorf("error:\n%s", got)
 	}
 }

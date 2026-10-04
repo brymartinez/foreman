@@ -618,7 +618,7 @@ func applyTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error,
 	}
 }
 
-// Cancelled is the outcome status of a run stopped by foreman cancel or a signal.
+// Cancelled is the outcome status of a run stopped by a cancel or a signal.
 const Cancelled = "cancelled"
 
 // applyStop marks a step that failed because the runner was told to stop. Its error

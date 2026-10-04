@@ -69,7 +69,7 @@ func TestStartPointsAReviewedTaskAtResume(t *testing.T) {
 	f := newFixture()
 	waiting(t, f)
 	_, err := f.app.Start(context.Background(), startReq(t))
-	if err == nil || !strings.Contains(err.Error(), "foreman resume") {
+	if err == nil || !strings.Contains(err.Error(), "select it in the inbox to resume") {
 		t.Fatalf("err = %v", err)
 	}
 }

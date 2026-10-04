@@ -186,7 +186,7 @@ ref. Verified by `internal/worktree/git_test.go` against git 2.50.
 
 1. **"The agent asks me mid-run."** A headless turn can't stop and wait for input. What
    works instead is that the agent ends its turn with `status: blocked` and its
-   `questions`. Foreman stores them, and `respond` resumes the same session with the
+   `questions`. Foreman stores them, and the dashboard's answer resumes the same session with the
    answers. From the user's side this behaves the same, and both CLIs support it.
 2. **`AgentAdapter.getStatus`.** Neither CLI can report on a turn that's still running.
    Foreman gets status from its own records instead: the task file, whether the runner

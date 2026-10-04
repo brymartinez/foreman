@@ -451,29 +451,6 @@ func TestMergeObservedKeepsRunnerState(t *testing.T) {
 	}
 }
 
-func TestFind(t *testing.T) {
-	other := seen(825, task.Discovered, "open", t0)
-	other.Repo = "ridezoomo/sw-automations"
-	store := &fakeStore{recs: map[task.Key]*task.Record{
-		key(825):  seen(825, task.Discovered, "open", t0),
-		other.Key: other,
-		key(1):    seen(1, task.Discovered, "open", t0),
-	}}
-	a := App{Store: store}
-	if r, err := a.Find(context.Background(), "", 1); err != nil || r.Number != 1 {
-		t.Errorf("unique find: %v %v", r, err)
-	}
-	if _, err := a.Find(context.Background(), "", 825); err == nil || !strings.Contains(err.Error(), "ridezoomo/sw-automations#825") {
-		t.Errorf("ambiguous err = %v", err)
-	}
-	if r, err := a.Find(context.Background(), "ridezoomo/sw-automations", 825); err != nil || r.Repo != "ridezoomo/sw-automations" {
-		t.Errorf("qualified find: %v %v", r, err)
-	}
-	if _, err := a.Find(context.Background(), "", 404); err == nil || !strings.Contains(err.Error(), "foreman inbox") {
-		t.Errorf("missing err = %v", err)
-	}
-}
-
 func TestStatusOrdersByAttention(t *testing.T) {
 	mk := func(n int, s task.State) *task.Record {
 		r := seen(n, s, "open", t0)

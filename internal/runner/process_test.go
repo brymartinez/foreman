@@ -16,7 +16,7 @@ import (
 )
 
 // The test binary plays three parts: the test, a launcher that spawns a runner
-// and exits at once (as `foreman start` does), and the runner itself.
+// and exits at once (as the dashboard does), and the runner itself.
 func TestMain(m *testing.M) {
 	switch {
 	case len(os.Args) > 1 && os.Args[1] == RunCommand && os.Getenv("FOREMAN_RUNNER_TEST") == "wait":

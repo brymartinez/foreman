@@ -36,7 +36,7 @@ func (a App) resumable(key task.Key, rec *task.Record) error {
 	ref := fmt.Sprintf("%s#%d", key.Repo, key.Number)
 	switch {
 	case rec == nil:
-		return fmt.Errorf("%s is not tracked; run foreman inbox first", ref)
+		return fmt.Errorf("%s is not tracked; refresh the dashboard first", ref)
 	case rec.State != task.Reviewed:
 		return fmt.Errorf("%s is %s, with no PR feedback to answer", ref, rec.State)
 	case rec.Delegation == nil:

@@ -171,7 +171,7 @@ func (a App) sourceRepo(ctx context.Context, req *StartRequest) (RepoInfo, error
 	if req.Dir != "" {
 		info, err := a.GitHub.RepoAt(ctx, req.Dir)
 		if err != nil {
-			return RepoInfo{}, fmt.Errorf("run foreman start from a checkout of the issue's repository: %w", err)
+			return RepoInfo{}, fmt.Errorf("read the repository of the checkout at %s: %w", req.Dir, err)
 		}
 		if req.Repo != "" && req.Repo != info.Repo {
 			return RepoInfo{}, fmt.Errorf("this checkout is %s, not %s", info.Repo, req.Repo)
@@ -235,11 +235,11 @@ func (a App) startable(rec *task.Record) error {
 		}
 		return nil
 	case task.NeedsDecision:
-		return fmt.Errorf("%s is waiting for your decision; use foreman respond %d", ref, rec.Number)
+		return fmt.Errorf("%s is waiting for your decision; answer it from the dashboard's delegated work", ref)
 	case task.Reviewed:
 		// Starting would rebuild the delegation and lose the session that wrote the PR
 		// the comments are on, so the task continues instead.
-		return fmt.Errorf("%s has PR feedback to answer; use foreman resume %d", ref, rec.Number)
+		return fmt.Errorf("%s has PR feedback to answer; select it in the inbox to resume it", ref)
 	}
 	return fmt.Errorf("%s is %s", ref, rec.State)
 }

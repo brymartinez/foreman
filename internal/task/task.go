@@ -131,7 +131,7 @@ type Delegation struct {
 	Branch      string
 	BaseRef     string
 	Worktree    string
-	// WorktreeRemovedAt is set once `foreman clean` removed the worktree; the branch may remain.
+	// WorktreeRemovedAt is set once cleanup removed the worktree; the branch may remain.
 	WorktreeRemovedAt time.Time
 	ContextFile       string
 	RunnerPID         int

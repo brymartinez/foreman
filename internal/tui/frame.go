@@ -38,6 +38,9 @@ func Frame(m Model) []string {
 	}
 	lines := make([]string, 0, m.Height)
 	lines = append(lines, colored(pad(header(m), m.Width), cyan))
+	if m.HelpOpen {
+		return append(lines, helpLines(m, m.Height-1)...)
+	}
 
 	right := m.Width - lay.leftWidth - 1
 	left := paneLines(inboxPane(m), lay.leftWidth, lay.topHeight, m.Focus == InboxPane, m.InboxCursor)
@@ -330,6 +333,9 @@ func logPane(m Model, height int) []string {
 	default:
 		rec := m.Selected()
 		title = fmt.Sprintf("LOG · %s#%d · %s", rec.Repo, rec.Number, rec.Delegation.RunnerLog)
+		if m.LogRaw {
+			title = fmt.Sprintf("LOG · raw · %s#%d · %s", rec.Repo, rec.Number, rec.Delegation.RunnerLog)
+		}
 		switch {
 		case m.LogErr != "":
 			body = []string{"  " + m.LogErr}
@@ -358,7 +364,64 @@ func logPane(m Model, height int) []string {
 	return out
 }
 
-// showPane renders the selected task's foreman show text from ShowTop down.
+// helpKey is one row of the help: the keys, what they do, and a short form for a
+// terminal too short to list every row.
+type helpKey struct{ keys, does, short string }
+
+var helpKeys = []helpKey{
+	{"j/k, up/down", "move in the focused pane", "j/k move"},
+	{"h/l, left/right, tab", "switch between inbox and delegated work", "h/l pane"},
+	{"enter", "inbox: start or resume an issue · tasks: open the log or the question", "enter select"},
+	{"esc", "close the lower pane", "esc close"},
+	{"s", "switch the open pane between the log and the task's state", "s show/log"},
+	{"R", "switch the log between cleaned and raw lines", "R raw log"},
+	{"u/d, pgup/pgdn", "scroll the log a page; past the top loads older lines", "u/d page"},
+	{"ctrl-u/ctrl-d", "scroll the log half a page", "ctrl-u/d half page"},
+	{"g/G, end", "go to the log's first line or follow its tail", "g/G log start/end"},
+	{"c", "cancel the selected task's run", "c cancel"},
+	{"a", "turn auto mode on or off, kept for the next launch", "a auto"},
+	{"v", "show the inbox for the configured repos or all repos", "v view"},
+	{"r", "refresh from GitHub", "r refresh"},
+	{"?", "show this help", "? help"},
+	{"q, ctrl-c", "quit", "q quit"},
+}
+
+// helpLines fills the screen under the header with the keys, the version, and how to
+// close the help. When the rows do not fit, the keys flow together in their short form.
+func helpLines(m Model, height int) []string {
+	out := []string{colored(pad(truncate("KEYS · foreman "+m.Version, m.Width), m.Width), cyan)}
+	var body []string
+	if len(helpKeys)+2 <= height {
+		width := 0
+		for _, k := range helpKeys {
+			width = max(width, textWidth(k.keys))
+		}
+		for _, k := range helpKeys {
+			body = append(body, "  "+pad(k.keys, width)+"  "+k.does)
+		}
+	} else {
+		short := make([]string, len(helpKeys))
+		for i, k := range helpKeys {
+			short[i] = k.short
+		}
+		body = wrap(strings.Join(short, " · "), m.Width-2, height-2)
+		for i := range body {
+			body[i] = "  " + body[i]
+		}
+	}
+	for _, l := range body {
+		if len(out) >= height-1 {
+			break
+		}
+		out = append(out, pad(truncate(l, m.Width), m.Width))
+	}
+	for len(out) < height-1 {
+		out = append(out, strings.Repeat(" ", m.Width))
+	}
+	return append(out, dimmed(pad(truncate("press any key to close the help", m.Width), m.Width)))
+}
+
+// showPane renders the selected task's render.Show text from ShowTop down.
 func showPane(m Model, height int) []string {
 	title, body := "SHOW · no task selected", []string{"  Delegate an issue, or press tab and pick a task to see its state."}
 	if rec := m.Selected(); rec != nil {
@@ -388,7 +451,7 @@ func showPane(m Model, height int) []string {
 }
 
 // decisionPane renders the selected task's pending question from DecisionTop down, as
-// foreman respond prints it, with the answer line always last.
+// render.Blocked prints it, with the answer line always last.
 func decisionPane(m Model, height int) []string {
 	rec := m.Selected()
 	if rec == nil || rec.Pending() == nil {
@@ -495,7 +558,7 @@ func routeHints(m Model) string {
 	}
 }
 
-// answerHints say what Enter does on an empty answer, as foreman respond's prompt does.
+// answerHints say what Enter does on an empty answer, naming the recommended option.
 func answerHints(m Model) string {
 	long, short := hintsAnswerLong, hintsAnswerShort
 	if rec := m.Selected(); rec != nil && rec.Pending() != nil {
@@ -514,13 +577,13 @@ func answerHints(m Model) string {
 const (
 	hintsAnswerLong  = "type an option label or an answer · enter to record · up/down scroll · esc close"
 	hintsAnswerShort = "label or answer · enter · up/down · esc close"
-	hintsLong        = "j/k move · h/l pane · enter select · c cancel · a auto · v view · r refresh · q quit"
-	hintsShort       = "j/k move · h/l pane · enter · c cancel · v view · q quit"
-	hintsLogLong     = "j/k task · u/d log page · ctrl-u/d half page · g/G ends · s show/log · esc close · h/l pane"
-	hintsLogShort    = "j/k task · u/d log · g/G ends · s show/log · esc close"
+	hintsLong        = "j/k move · h/l pane · enter select · c cancel · a auto · v view · r refresh · ? help · q quit"
+	hintsShort       = "j/k move · h/l pane · enter · v view · ? help · q quit"
+	hintsLogLong     = "j/k task · u/d log page · ctrl-u/d half page · g/G ends · s show/log · R raw · esc close · ? help"
+	hintsLogShort    = "j/k task · u/d log · g/G ends · s show/log · ? help"
 	// hintsOpen are for INBOX focus while the pane is open, where s still switches it.
-	hintsOpenLong  = "j/k move · h/l pane · enter select · s show/log · esc close · c cancel · a auto · v view · r refresh · q quit"
-	hintsOpenShort = "j/k move · h/l pane · enter · s show/log · c cancel · q quit"
+	hintsOpenLong  = "j/k move · h/l pane · enter select · s show/log · R raw · esc close · c cancel · a auto · v view · ? help · q quit"
+	hintsOpenShort = "j/k move · h/l pane · s show/log · esc close · ? help"
 )
 
 // truncate cuts s to at most width columns, ending in an ellipsis when it cut. A wide

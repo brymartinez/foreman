@@ -1,57 +1,62 @@
 package cli
 
 import (
+	"strings"
 	"testing"
-
-	"github.com/brymartinez/foreman/internal/task"
 )
 
-func TestParseStart(t *testing.T) {
-	cases := map[string][]string{
-		"flags after issue":  {"start", "825", "--agent", "claude", "--context", "./ctx/825.md"},
-		"flags before issue": {"start", "--agent=claude", "--context", "./ctx/825.md", "#825"},
-	}
-	want := Command{Name: Start, Issue: 825, Agent: task.Claude, ContextFile: "./ctx/825.md"}
-	for name, argv := range cases {
+func TestParseOpensTheDashboardWithTheGivenAutoMode(t *testing.T) {
+	for name, tc := range map[string]struct {
+		argv []string
+		want Command
+	}{
+		"no arguments keep the saved choice": {nil, Command{Name: TUI}},
+		"-a turns auto mode on":              {[]string{"-a"}, Command{Name: TUI, Auto: AutoOn}},
+		"--auto turns auto mode on":          {[]string{"--auto"}, Command{Name: TUI, Auto: AutoOn}},
+		"--no-auto turns auto mode off":      {[]string{"--no-auto"}, Command{Name: TUI, Auto: AutoOff}},
+		"a repeated auto flag is accepted":   {[]string{"-a", "--auto"}, Command{Name: TUI, Auto: AutoOn}},
+	} {
 		t.Run(name, func(t *testing.T) {
-			got, err := Parse(argv)
-			if err != nil || got != want {
-				t.Fatalf("Parse(%q) = %+v, %v; want %+v", argv, got, err, want)
+			if got, err := Parse(tc.argv); err != nil || got != tc.want {
+				t.Fatalf("Parse(%q) = %+v, %v; want %+v", tc.argv, got, err, tc.want)
 			}
 		})
 	}
 }
 
-func TestParseCancel(t *testing.T) {
-	got, err := Parse([]string{"cancel", "ridezoomo/armada#351"})
-	if want := (Command{Name: Cancel, Repo: "ridezoomo/armada", Issue: 351}); err != nil || got != want {
-		t.Fatalf("Parse = %+v, %v; want %+v", got, err, want)
+func TestParseCOpensTheConfigEditor(t *testing.T) {
+	if got, err := Parse([]string{"-c"}); err != nil || got != (Command{Name: Edit}) {
+		t.Fatalf("Parse(-c) = %+v, %v; want the config editor", got, err)
 	}
 }
 
-func TestParseRejects(t *testing.T) {
+func TestParseHelpAndVersionFlags(t *testing.T) {
+	for argv, want := range map[string]Name{
+		"help": Help, "-h": Help, "--help": Help,
+		"version": Version, "--version": Version,
+	} {
+		if got, err := Parse([]string{argv}); err != nil || got != (Command{Name: want}) {
+			t.Errorf("Parse(%q) = %+v, %v; want %s", argv, got, err, want)
+		}
+	}
+}
+
+func TestParseRejectsRemovedCommandsAndConflictingFlags(t *testing.T) {
 	for _, argv := range [][]string{
-		{"start", "825"},
-		{"start", "825", "--agent", "gpt"},
-		{"start", "--agent", "claude"},
-		{"start", "825", "--agent"},
-		{"start", "825", "--bogus", "x", "--agent", "codex"},
-		{"show", "abc"},
-		{"show", "1", "2"},
-		{"show", "not a repo#1"},
-		{"show", "a/b#"},
-		{"respond"},
-		{"cancel"},
-		{"cancel", "1", "2"},
-		{"inbox", "extra"},
-		{"deploy"},
+		{"inbox"}, {"status"}, {"show", "1"}, {"start", "1", "--agent", "claude"},
+		{"respond", "1"}, {"resume", "1"}, {"cancel", "1"}, {"clean"},
+		{"config", "--edit"}, {"logs", "1"}, {"tui"}, {"deploy"}, {"--bogus"},
+		{"-a", "--no-auto"},
+		{"--no-auto", "--auto"},
+		{"-c", "-a"},
+		{"--no-auto", "-c"},
+		{"-a", "extra"},
+		{"-c", "extra"},
+		{"--version", "extra"},
 		{"__run", "825"},
-		{"clean", "--force"},
-		{"config"},
-		{"config", "--stage"},
-		{"config", "--stages", "--show"},
-		{"start", "825", "--agent", "claude", "--type", "agent"},
-		{"clean", "1", "2"},
+		{"__run"},
+		{"__run", "a/b#1", "a/b#2"},
+		{"__run", "not a repo#1"},
 	} {
 		if _, err := Parse(argv); err == nil {
 			t.Errorf("Parse(%q) succeeded; want usage error", argv)
@@ -59,78 +64,22 @@ func TestParseRejects(t *testing.T) {
 	}
 }
 
-func TestParseNoArgsOpensTheDashboard(t *testing.T) {
-	for _, argv := range [][]string{nil, {"tui"}} {
-		if got, err := Parse(argv); err != nil || got != (Command{Name: TUI}) {
-			t.Errorf("Parse(%q) = %+v, %v; want the dashboard", argv, got, err)
-		}
-	}
-	for _, argv := range [][]string{{"help"}, {"-h"}, {"--help"}} {
-		if got, err := Parse(argv); err != nil || got != (Command{Name: Help}) {
-			t.Errorf("Parse(%q) = %+v, %v; want help", argv, got, err)
-		}
-	}
-	if _, err := Parse([]string{"tui", "x"}); err == nil {
-		t.Error("Parse(tui x) succeeded; want usage error")
+func TestParseRunNeedsAQualifiedIssue(t *testing.T) {
+	got, err := Parse([]string{"__run", "a/b#3"})
+	if want := (Command{Name: Run, Repo: "a/b", Issue: 3}); err != nil || got != want {
+		t.Fatalf("Parse(__run a/b#3) = %+v, %v; want %+v", got, err, want)
 	}
 }
 
-func TestParseSimple(t *testing.T) {
-	for argv, want := range map[string]Command{
-		"inbox":     {Name: Inbox},
-		"status":    {Name: Status},
-		"clean":     {Name: Clean},
-		"version":   {Name: Version},
-		"--version": {Name: Version},
-	} {
-		if got, err := Parse([]string{argv}); err != nil || got != want {
-			t.Errorf("Parse(%q) = %+v, %v", argv, got, err)
+func TestUsageListsOnlyTheLaunchFlags(t *testing.T) {
+	for _, flag := range []string{"-a, --auto", "--no-auto", "-c", "-h, --help", "--version"} {
+		if !strings.Contains(Usage, flag) {
+			t.Errorf("usage is missing %s:\n%s", flag, Usage)
 		}
 	}
-	if got, _ := Parse([]string{"show", "#12"}); got != (Command{Name: Show, Issue: 12}) {
-		t.Errorf("show #12 parsed as %+v", got)
-	}
-	if got, err := Parse([]string{"start", "825", "--type", "Fix", "--agent", "codex"}); err != nil || got.BranchType != "fix" {
-		t.Errorf("start --type parsed as %+v, %v", got, err)
-	}
-	if got, _ := Parse([]string{"config", "--stages"}); !got.ConfigStages {
-		t.Errorf("config --stages parsed as %+v", got)
-	}
-	if got, _ := Parse([]string{"config", "--show"}); !got.ConfigShow {
-		t.Errorf("config --show parsed as %+v", got)
-	}
-	if got, _ := Parse([]string{"config", "--edit"}); !got.ConfigEdit {
-		t.Errorf("config --edit parsed as %+v", got)
-	}
-	if got, err := Parse([]string{"inbox", "--non-interactive"}); err != nil || !got.NonInteractive {
-		t.Errorf("inbox --non-interactive = %+v, %v", got, err)
-	}
-	if got, _ := Parse([]string{"clean", "--dry-run", "a/b#3"}); got != (Command{Name: Clean, Repo: "a/b", Issue: 3, DryRun: true}) {
-		t.Errorf("clean parsed as %+v", got)
-	}
-	if got, _ := Parse([]string{"__run", "a/b#3"}); got != (Command{Name: Run, Repo: "a/b", Issue: 3}) {
-		t.Errorf("__run parsed as %+v", got)
-	}
-	if got, _ := Parse([]string{"show", "ridezoomo/armada-backend#825"}); got != (Command{Name: Show, Repo: "ridezoomo/armada-backend", Issue: 825}) {
-		t.Errorf("qualified show parsed as %+v", got)
-	}
-	if got, err := Parse([]string{"logs", "a/b#3", "--follow", "--raw"}); err != nil || got != (Command{Name: Logs, Repo: "a/b", Issue: 3, Follow: true, RawLogs: true}) {
-		t.Errorf("logs parsed as %+v, %v", got, err)
-	}
-}
-
-func TestParseResume(t *testing.T) {
-	for _, argv := range [][]string{{"resume", "825"}, {"resume", "#825"}} {
-		got, err := Parse(argv)
-		if err != nil || got.Name != Resume || got.Issue != 825 || got.Repo != "" {
-			t.Errorf("Parse(%q) = %+v, %v", argv, got, err)
+	for _, removed := range []string{"inbox", "status", "show", "start", "respond", "resume", "cancel", "clean", "config --", "logs", "__run"} {
+		if strings.Contains(Usage, "foreman "+removed) {
+			t.Errorf("usage still lists foreman %s:\n%s", removed, Usage)
 		}
-	}
-	got, err := Parse([]string{"resume", "midsoln/foreman#7"})
-	if err != nil || got.Repo != "midsoln/foreman" || got.Issue != 7 {
-		t.Errorf("qualified resume = %+v, %v", got, err)
-	}
-	if _, err := Parse([]string{"resume"}); err == nil {
-		t.Error("resume without an issue must fail")
 	}
 }

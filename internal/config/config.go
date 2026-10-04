@@ -64,7 +64,7 @@ type Notifications struct {
 
 // Cleanup controls what happens to a task's worktree once the task is DONE.
 type Cleanup struct {
-	// OnDone removes DONE tasks' worktrees when inbox runs. Off means only `foreman clean`.
+	// OnDone removes DONE tasks' worktrees when inbox runs. Off keeps them.
 	OnDone bool `yaml:"on_done"`
 	// DeleteMergedBranch deletes the local branch too, when its PR is merged.
 	DeleteMergedBranch bool `yaml:"delete_merged_branch"`
@@ -171,7 +171,7 @@ func parseRepoList(key string, repos []task.Repo) error {
 }
 
 // FilePath is the config file: $FOREMAN_CONFIG, or ~/.config/foreman/config.yaml.
-// It doesn't read the file, so `config --edit` can open one that fails to load.
+// It doesn't read the file, so `foreman -c` can open one that fails to load.
 func FilePath() (string, error) {
 	if path := os.Getenv("FOREMAN_CONFIG"); path != "" {
 		return path, nil
@@ -242,7 +242,7 @@ func SaveAutoEnabled(path string, on bool) error {
 }
 
 // Materialize writes the resolved configuration only when the config file is
-// missing or empty. This gives `config --edit` useful defaults without replacing
+// missing or empty. This gives `foreman -c` useful defaults without replacing
 // an existing user's file.
 func Materialize(path string, cfg Config) error {
 	info, err := os.Stat(path)

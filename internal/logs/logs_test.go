@@ -2,8 +2,6 @@ package logs
 
 import (
 	"bytes"
-	"context"
-	"io"
 	"strings"
 	"testing"
 )
@@ -16,12 +14,9 @@ func TestWriterTimestampsLinesAndCleanSummarizesJSON(t *testing.T) {
 	if len(lines) != 2 || !strings.Contains(lines[0], " foreman: starting") || !strings.Contains(lines[1], " 2026 detail") {
 		t.Fatalf("raw log = %q", raw.String())
 	}
-	var clean bytes.Buffer
-	if err := Show(context.Background(), &clean, strings.NewReader(lines[0]+"\n2026-09-25T18:00:00Z {\"type\":\"thread.started\",\"thread_id\":\"t1\"}\n"), false, false, 0); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(clean.String(), "codex  thread started t1") {
-		t.Fatalf("clean log = %q", clean.String())
+	clean := show(t, lines[0]+"\n2026-09-25T18:00:00Z {\"type\":\"thread.started\",\"thread_id\":\"t1\"}\n", false)
+	if !strings.Contains(clean, "codex  thread started t1") {
+		t.Fatalf("clean log = %q", clean)
 	}
 }
 
@@ -35,13 +30,10 @@ func TestCleanSummarizesClaudeEvents(t *testing.T) {
 		`T6 {"type":"result","subtype":"success"}`,
 		`T7 claude: subtype=success cost=$0.10 permission_denials=0 turns=2`,
 	}, "\n") + "\n"
-	var clean bytes.Buffer
-	if err := Show(context.Background(), &clean, strings.NewReader(log), false, false, 0); err != nil {
-		t.Fatal(err)
-	}
+	clean := show(t, log, false)
 	want := "T1 claude session started s1\nT3 claude Bash List files\nT5 claude message\nT7 claude: subtype=success cost=$0.10 permission_denials=0 turns=2\n"
-	if clean.String() != want {
-		t.Errorf("clean log =\n%s\nwant\n%s", clean.String(), want)
+	if clean != want {
+		t.Errorf("clean log =\n%s\nwant\n%s", clean, want)
 	}
 }
 
@@ -57,40 +49,6 @@ func TestWriterFlushKeepsAnUnterminatedLastLine(t *testing.T) {
 	}
 	if !strings.HasSuffix(raw.String(), " partial\n") {
 		t.Fatalf("flushed log = %q", raw.String())
-	}
-}
-
-// growingLog returns each chunk from one Read, then EOF, as a file being appended
-// to does. It cancels the follow once every chunk is out.
-type growingLog struct {
-	chunks []string
-	eof    bool
-	done   func()
-}
-
-func (g *growingLog) Read(p []byte) (int, error) {
-	if g.eof || len(g.chunks) == 0 {
-		g.eof = false
-		if len(g.chunks) == 0 {
-			g.done()
-		}
-		return 0, io.EOF
-	}
-	n := copy(p, g.chunks[0])
-	g.chunks, g.eof = g.chunks[1:], true
-	return n, nil
-}
-
-func TestShowFollowWaitsForALineToFinish(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	log := &growingLog{chunks: []string{"2026-09-25T18:00:00Z foreman: star", "ting claude\n2026-09-25T18:00:01Z done\n"}, done: cancel}
-	var out bytes.Buffer
-	if err := Show(ctx, &out, log, false, true, 0); err != nil {
-		t.Fatal(err)
-	}
-	want := "2026-09-25T18:00:00Z foreman: starting claude\n2026-09-25T18:00:01Z done\n"
-	if out.String() != want {
-		t.Fatalf("followed log = %q, want %q", out.String(), want)
 	}
 }
 
@@ -113,10 +71,7 @@ func TestCleanSummarizesCodexEvents(t *testing.T) {
 		`T14 {"type":"turn.failed","error":{"message":"usage limit reached"}}`,
 		`T15 {"type":"turn.completed","usage":{"input_tokens":46553,"cached_input_tokens":35712,"output_tokens":82,"reasoning_output_tokens":7}}`,
 	}, "\n") + "\n"
-	var clean bytes.Buffer
-	if err := Show(context.Background(), &clean, strings.NewReader(log), false, false, 0); err != nil {
-		t.Fatal(err)
-	}
+	clean := show(t, log, false)
 	want := strings.Join([]string{
 		"T1 codex  thread started t1",
 		"T3 codex  message: I’ll read the file.",
@@ -131,32 +86,26 @@ func TestCleanSummarizesCodexEvents(t *testing.T) {
 		"T14 codex  turn failed: usage limit reached",
 		"T15 codex  turn completed input=46553 cached=35712 output=82 reasoning=7 (USD unavailable)",
 	}, "\n") + "\n"
-	if clean.String() != want {
-		t.Errorf("clean log =\n%s\nwant\n%s", clean.String(), want)
+	if clean != want {
+		t.Errorf("clean log =\n%s\nwant\n%s", clean, want)
 	}
-	var rawOut bytes.Buffer
-	if err := Show(context.Background(), &rawOut, strings.NewReader(log), true, false, 0); err != nil {
-		t.Fatal(err)
-	}
-	if rawOut.String() != log {
-		t.Errorf("raw changed the log:\n%s", rawOut.String())
+	rawOut := show(t, log, true)
+	if rawOut != log {
+		t.Errorf("raw changed the log:\n%s", rawOut)
 	}
 }
 
 func TestCleanCutsALongCodexLine(t *testing.T) {
 	long := strings.Repeat("x", 400)
-	var clean bytes.Buffer
 	line := `T1 {"type":"item.completed","item":{"id":"i","type":"agent_message","text":"` + long + `"}}`
-	if err := Show(context.Background(), &clean, strings.NewReader(line+"\n"), false, false, 0); err != nil {
-		t.Fatal(err)
-	}
-	got := strings.TrimSpace(clean.String())
+	clean := show(t, line+"\n", false)
+	got := strings.TrimSpace(clean)
 	if len([]rune(got)) > 180 || !strings.HasSuffix(got, "…") {
 		t.Errorf("line not cut: %d runes, %q", len([]rune(got)), got)
 	}
 }
 
-func TestTurnLineReachesCleanRawAndTailViews(t *testing.T) {
+func TestTurnLineReachesCleanAndRawViews(t *testing.T) {
 	var log bytes.Buffer
 	w := &Writer{W: &log}
 	_, _ = w.Write([]byte("codex:gpt-6-sol:review\n"))
@@ -165,19 +114,21 @@ func TestTurnLineReachesCleanRawAndTailViews(t *testing.T) {
 		t.Fatalf("raw log = %q", log.String())
 	}
 	for _, raw := range []bool{false, true} {
-		var out bytes.Buffer
-		if err := Show(context.Background(), &out, strings.NewReader(log.String()), raw, false, 0); err != nil {
-			t.Fatal(err)
-		}
-		if out.String() != line+"\n" {
-			t.Errorf("Show raw=%v = %q, want %q", raw, out.String(), line+"\n")
-		}
-		got, err := Tail(bytes.NewReader(log.Bytes()), 10, raw)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(got) != 1 || got[0] != line {
-			t.Errorf("Tail raw=%v = %q, want [%q]", raw, got, line)
+		if out := show(t, log.String(), raw); out != line+"\n" {
+			t.Errorf("show raw=%v = %q, want %q", raw, out, line+"\n")
 		}
 	}
+}
+
+// show is the log as the dashboard shows it, one line per display line.
+func show(t *testing.T, log string, raw bool) string {
+	t.Helper()
+	lines, _, _, err := Lines(strings.NewReader(log), 0, int64(len(log)), raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n") + "\n"
 }

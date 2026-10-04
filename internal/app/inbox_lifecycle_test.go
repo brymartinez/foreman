@@ -1,9 +1,9 @@
 package app
 
 import (
-	"bufio"
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -48,10 +48,12 @@ func TestInboxRefreshLifecycle(t *testing.T) {
 		if len(report.Warnings) != 1 || !strings.Contains(report.Warnings[0].Error(), "#2") {
 			t.Fatalf("warnings: %v", report.Warnings)
 		}
-		var out strings.Builder
-		_, err = ChooseInbox(bufio.NewReader(strings.NewReader("q\n")), &out, report, nil)
-		if err != nil || !strings.Contains(out.String(), "#4") || strings.Contains(out.String(), "#1") || strings.Contains(out.String(), "#2") || strings.Contains(out.String(), "#3") {
-			t.Fatalf("picker: %s, %v", out.String(), err)
+		var offered []int
+		for _, e := range Delegable(report) {
+			offered = append(offered, e.Item.Key.Number)
+		}
+		if !slices.Equal(offered, []int{4}) {
+			t.Fatalf("delegable issues = %v; want only #4", offered)
 		}
 	}
 	if gh.calls[old.Key] != 1 || gh.calls[dead.Key] != 2 || gh.calls[delegated.Key] != 2 {
