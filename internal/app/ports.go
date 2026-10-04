@@ -54,7 +54,11 @@ type PullRequest struct {
 	// unknown is common right after a push to either branch.
 	Mergeable string
 	// Body is the PR description. The reviewer checks the change against it alone.
-	Body string
+	Body  string
+	Title string
+	// ClosedAt and MergedAt are zero while the PR is open. A merged PR has both.
+	ClosedAt time.Time
+	MergedAt time.Time
 }
 
 const (
