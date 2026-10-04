@@ -2,6 +2,11 @@
 
 ## Current stage
 
+The Codex Git permission repair is complete. New and resumed implementation turns use
+a scoped permission profile for linked-worktree Git metadata. A model-free Codex
+sandbox probe covers staging, committing, and a tracking push. The runner stop test
+skips when its required `ps` command is unavailable in an agent sandbox.
+
 Stage 43 (foreman is TUI-first, for issue #43) is complete. Bare `foreman` opens the
 dashboard, `-a`/`--auto` and `--no-auto` set auto mode for the session, and `-c` edits
 the config. The task and config subcommands are gone. The dashboard gained `?` (keys
@@ -71,5 +76,7 @@ Findings 1 to 4 were fixed in stage 28.
 
 ## Next stage
 
-Compare completed task usage and outcomes before changing the models or budgets. For
-code quality, take refactor candidate 5 (`cmd/foreman` wiring) next.
+Retry issue #46 with the repaired Codex adapter after installing this build. Its
+worktree still has uncommitted first-stage changes. After that, compare completed
+task usage and outcomes before changing the models or budgets. For code quality,
+take refactor candidate 5 (`cmd/foreman` wiring) next.

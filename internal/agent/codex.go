@@ -15,10 +15,8 @@ import (
 	"github.com/brymartinez/foreman/internal/task"
 )
 
-// Codex drives `codex exec`. The workspace-write sandbox blocks network by default;
-// the agent needs it to push and open the PR, so it is enabled explicitly. It also
-// can't write outside the worktree, where a linked worktree keeps its git data, so that
-// directory is added as a writable root.
+// Codex drives `codex exec`. Its permission profile allows worktree edits,
+// network access for PRs, and the Git metadata paths needed to commit and push.
 type Codex struct {
 	Bin       string
 	Model     string
@@ -38,64 +36,76 @@ func (c Codex) Start(ctx context.Context, in StartInput, onSession func(task.Ses
 		return append([]string{
 			"exec", "--json",
 			"-C", in.Worktree,
-			"-s", "workspace-write",
-			"-c", "sandbox_workspace_write.network_access=true",
 			"--output-schema", schema,
 			"-o", last,
-		}, gitWriteArgs(in.Worktree)...)
+		}, gitPermissionArgs(in.Worktree)...)
 	}, "", onSession)
 }
 
-// Resume continues a thread by id. `codex exec resume` has no -s or -C flag, so the
-// sandbox is set through -c and the directory through the process cwd.
+// Resume continues a thread by id. `codex exec resume` uses the process cwd.
 func (c Codex) Resume(ctx context.Context, s task.Session, in StartInput) (Turn, error) {
 	return c.run(ctx, in, func(schema, last string) []string {
 		return append([]string{
 			"exec", "resume", "--json",
-			"-c", `sandbox_mode="workspace-write"`,
-			"-c", "sandbox_workspace_write.network_access=true",
 			"--output-schema", schema,
 			"-o", last,
-		}, gitWriteArgs(in.Worktree)...)
+		}, gitPermissionArgs(in.Worktree)...)
 	}, s.ID, func(task.Session) {})
 }
 
-// gitWriteArgs makes the repository's git directory writable in the sandbox. A linked
-// worktree's index, refs, and objects live in the main clone's .git, outside the
-// worktree, so without it `git commit` fails. `exec resume` has no --add-dir flag, so
-// both commands set it through -c.
-func gitWriteArgs(worktree string) []string {
-	dir := gitCommonDir(worktree)
-	if dir == "" {
-		return nil
+// gitPermissionArgs grants the exact metadata paths Git updates. Codex protects a
+// .git root even when legacy writable_roots names it, so a profile must grant its
+// child paths and root files explicitly.
+func gitPermissionArgs(worktree string) []string {
+	gitdir, common := gitDirs(worktree)
+	paths := []string{
+		gitdir,
+		filepath.Join(common, "objects"),
+		filepath.Join(common, "refs"),
+		filepath.Join(common, "logs"),
+		filepath.Join(common, "config"),
+		filepath.Join(common, "config.lock"),
+		filepath.Join(common, "packed-refs"),
+		filepath.Join(common, "packed-refs.lock"),
+		filepath.Join(common, "FETCH_HEAD"),
+		filepath.Join(common, "ORIG_HEAD"),
 	}
-	roots, _ := json.Marshal([]string{dir})
-	return []string{"-c", "sandbox_workspace_write.writable_roots=" + string(roots)}
+	rules := []string{`":root"="read"`, `":workspace_roots"={"."="write",".git"="write"}`, `":slash_tmp"="write"`, `":tmpdir"="write"`}
+	for _, path := range paths {
+		rules = append(rules, fmt.Sprintf("%q=\"write\"", path))
+	}
+	return []string{
+		"-c", `default_permissions="foreman-git"`,
+		"-c", "permissions.foreman-git.filesystem={" + strings.Join(rules, ",") + "}",
+		"-c", "permissions.foreman-git.network.enabled=true",
+	}
 }
 
-// gitCommonDir follows a linked worktree's .git file to the main clone's .git. It
-// returns "" for a plain checkout, whose .git is already inside the worktree.
-func gitCommonDir(worktree string) string {
+// gitDirs follows a linked worktree's .git file to its per-worktree metadata and
+// the main clone's shared metadata. A plain checkout uses its own .git for both.
+func gitDirs(worktree string) (string, string) {
+	plain := filepath.Join(worktree, ".git")
 	b, err := os.ReadFile(filepath.Join(worktree, ".git"))
 	if err != nil {
-		return ""
+		return plain, plain
 	}
 	gitdir, ok := strings.CutPrefix(strings.TrimSpace(string(b)), "gitdir: ")
 	if !ok {
-		return ""
+		return plain, plain
 	}
 	if !filepath.IsAbs(gitdir) {
 		gitdir = filepath.Join(worktree, gitdir)
 	}
 	common, err := os.ReadFile(filepath.Join(gitdir, "commondir"))
 	if err != nil {
-		return filepath.Clean(gitdir)
+		gitdir = filepath.Clean(gitdir)
+		return gitdir, gitdir
 	}
 	dir := strings.TrimSpace(string(common))
 	if !filepath.IsAbs(dir) {
 		dir = filepath.Join(gitdir, dir)
 	}
-	return filepath.Clean(dir)
+	return filepath.Clean(gitdir), filepath.Clean(dir)
 }
 
 // Review runs a disposable (--ephemeral) session in the read-only sandbox.
