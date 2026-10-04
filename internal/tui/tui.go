@@ -64,6 +64,12 @@ type result struct {
 	// wait is why routing held an auto start back; selection is what it chose.
 	wait      string
 	selection agent.Selection
+	// historyLoad marks a PR history load coming back, for the allRepos view.
+	// historySeq numbers the request, so only the latest one is shown.
+	historyLoad     bool
+	historySeq      int
+	history         []app.HistoryRow
+	historyWarnings []error
 }
 
 // staleView reports a refresh fetched for the view the developer has since left.
@@ -126,6 +132,10 @@ func Run(ctx context.Context, o Options) (err error) {
 			results <- result{report: &report, err: err, allRepos: allRepos}
 		}()
 	}
+	reloadHistory := func() {
+		allRepos, seq := m.AllRepos, m.historySeq
+		go func() { results <- loadHistory(ctx, o.Source, allRepos, seq) }()
+	}
 	refresh()
 	readLocal(ctx, o.Source, &m)
 	draw(o.Out, Frame(m))
@@ -156,11 +166,19 @@ func Run(ctx context.Context, o Options) (err error) {
 		case k := <-keys:
 			before := m.Selected()
 			wasOpen := m.LogOpen
+			src, _ := m.logSource()
 			switch a := m.Key(k); a.Kind {
 			case ActionQuit:
 				return finish(ctx, o.Out, &m, results, pending)
-			case ActionRefresh, ActionToggleView:
+			case ActionRefresh:
 				refresh()
+			case ActionToggleView:
+				refresh()
+				if m.HistoryOpen {
+					reloadHistory()
+				}
+			case ActionLoadHistory:
+				reloadHistory()
 			case ActionStart:
 				req := a.Start
 				pending++
@@ -192,7 +210,7 @@ func Run(ctx context.Context, o Options) (err error) {
 				}
 				pending += launchAutoFresh(ctx, o.Source, &m, results)
 			}
-			if m.Selected() != before || (!wasOpen && m.LogOpen) {
+			if now, _ := m.logSource(); m.Selected() != before || (!wasOpen && m.LogOpen) || now != src {
 				// The heading names the new task, so the body must not still hold the
 				// old task's lines until the next local tick.
 				readLog(&m)
@@ -230,8 +248,9 @@ func settle(ctx context.Context, s Source, m *Model, r result, results chan<- re
 	}
 	stale := r.staleView(m)
 	apply(m, r)
-	if r.respond {
-		// The last answer opens the log, so it is read now rather than on the next tick.
+	if r.respond || r.historyLoad {
+		// The last answer opens the log, and a history load can move the selected
+		// attempt's range, so the log is read now rather than on the next tick.
 		readLog(m)
 	}
 	if !r.finished && (r.report == nil || r.err != nil || stale) {
@@ -269,6 +288,13 @@ func apply(m *Model, r result) {
 	}
 	if r.routed != nil {
 		m.Routed(r.routeSeq, *r.routed, r.err)
+		return
+	}
+	if r.historyLoad {
+		// r or v while the load ran asked for a newer load, which is on its way.
+		if r.historySeq == m.historySeq {
+			m.SetHistory(r.history, r.historyWarnings, r.err)
+		}
 		return
 	}
 	if r.report != nil {
@@ -419,6 +445,12 @@ func respondResult(ctx context.Context, s Source, key task.Key, raw string) resu
 	return r
 }
 
+// loadHistory reads the PR history. It writes nothing, so it is not counted as pending.
+func loadHistory(ctx context.Context, s Source, allRepos bool, seq int) result {
+	rows, warnings, err := s.History(ctx, allRepos)
+	return result{historyLoad: true, historySeq: seq, history: rows, historyWarnings: warnings, err: err, allRepos: allRepos}
+}
+
 func stop(ctx context.Context, s Source, rec *task.Record) result {
 	updated, err := s.Cancel(ctx, rec)
 	if err != nil {
@@ -440,25 +472,25 @@ func readLocal(ctx context.Context, s Source, m *Model) {
 	readLog(m)
 }
 
-// readLog brings the selected task's runner log up to date. It reads the tail when
-// the log is new to the pane, and after that only the bytes the runner has added, so
-// older lines loaded by scrolling back stay. Moving the cursor calls it too, so the
-// pane never shows one task's lines under another task's heading.
+// readLog brings the open log up to date: the selected task's runner log, or the
+// selected history row's part of its task log. It reads the tail when the log is new
+// to the pane, and after that only the bytes the runner has added, so older lines
+// loaded by scrolling back stay. Moving the cursor calls it too, so the pane never
+// shows one task's lines under another task's heading.
 func readLog(m *Model) {
-	rec := m.Selected()
-	if !m.LogOpen || rec == nil || rec.Delegation == nil || rec.Delegation.RunnerLog == "" {
+	src, ok := m.logSource()
+	if !ok {
 		m.clearLog()
 		return
 	}
-	path := rec.Delegation.RunnerLog
-	if err := appendLog(m, path); err != nil {
+	if err := appendLog(m, src); err != nil {
 		m.clearLog()
 		m.LogErr = err.Error()
 	}
 }
 
-func appendLog(m *Model, path string) error {
-	f, err := os.Open(path)
+func appendLog(m *Model, src logSource) error {
+	f, err := os.Open(src.path)
 	if err != nil {
 		return err
 	}
@@ -468,22 +500,30 @@ func appendLog(m *Model, path string) error {
 		return err
 	}
 	size := info.Size()
-	if path != m.LogPath || size < m.logEnd {
-		// A new log, or one rewritten from the start: read its tail.
-		start, err := logs.Back(f, size, logChunk)
+	end := size
+	if src.ceil > 0 && src.ceil < size {
+		end = src.ceil
+	}
+	if src.path != m.LogPath || src.floor != m.logFloor || src.ceil != m.logCeil || size < m.logEnd {
+		// A new log, a new range of it, or one rewritten from the start: read its tail.
+		start, err := logs.Back(f, end, logChunk)
 		if err != nil {
 			return err
 		}
-		lines, next, partial, err := logs.Lines(f, start, size, m.LogRaw)
+		start = max(start, src.floor)
+		lines, next, partial, err := logs.Lines(f, start, end, m.LogRaw)
 		if err != nil {
 			return err
 		}
 		m.clearLog()
-		m.Log, m.LogPath, m.LogAtStart = lines, path, start == 0
-		m.logStart, m.logEnd, m.logPartial = start, next, partial
+		m.Log, m.LogPath, m.LogAtStart = lines, src.path, start <= src.floor
+		m.logStart, m.logEnd, m.logPartial, m.logFloor, m.logCeil = start, next, partial, src.floor, src.ceil
 		return nil
 	}
-	lines, next, partial, err := logs.Lines(f, m.logEnd, size, m.LogRaw)
+	if m.logEnd >= end {
+		return nil
+	}
+	lines, next, partial, err := logs.Lines(f, m.logEnd, end, m.LogRaw)
 	if err != nil {
 		return err
 	}
@@ -504,7 +544,7 @@ func appendLog(m *Model, path string) error {
 // is bounded; g asks for the whole file. A failed read keeps what is loaded.
 func loadOlder(m *Model) {
 	for a := (Action{Kind: ActionLoadOlder}); a.Kind == ActionLoadOlder; {
-		lines, start, err := readOlder(m.LogPath, m.logStart, m.LogRaw)
+		lines, start, err := readOlder(m.LogPath, m.logFloor, m.logStart, m.LogRaw)
 		if err != nil {
 			m.logShort = 0
 			m.Message = "! read older log lines: " + err.Error()
@@ -514,7 +554,9 @@ func loadOlder(m *Model) {
 	}
 }
 
-func readOlder(path string, end int64, raw bool) ([]string, int64, error) {
+// readOlder reads the chunk before end, stopping at floor, the first byte the pane
+// may show.
+func readOlder(path string, floor, end int64, raw bool) ([]string, int64, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, 0, err
@@ -524,6 +566,7 @@ func readOlder(path string, end int64, raw bool) ([]string, int64, error) {
 	if err != nil {
 		return nil, 0, err
 	}
+	start = max(start, floor)
 	lines, _, _, err := logs.Lines(f, start, end, raw)
 	return lines, start, err
 }

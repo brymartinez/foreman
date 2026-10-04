@@ -15,7 +15,7 @@ internal/app          orchestration + ports.go (the interfaces below)
   ├── quota           QuotaChecker over the optional `quota-axi`
   ├── runner          spawns and checks the detached `foreman __run` process
   └── stages          resolves ~/.config/foreman/stages/<stage>.md + <repo>/.foreman/<stage>.md
-internal/task         the durable model: Record, State, Delegation, Decision
+internal/task         the durable model: Record, State, Delegation, Decision, Attempt
 ```
 
 `app` depends only on the interfaces in `internal/app/ports.go`. Presentation stays in
@@ -96,6 +96,8 @@ foreman [-a|--auto|--no-auto]
                                     task's log; no GitHub call
                          every `refresh` seconds (60 by default), and on r:
                            app.InboxView, the refresh below
+                         p -> app.History in the background: the PR history
+                           in place of the dashboard, until esc
                          enter on an inbox issue -> agent, context file, app.Start
                            3 (routing on, never delegated) -> context file,
                              app.Route, show the profile and reason; enter ->
@@ -169,7 +171,8 @@ foreman -c            -> open the config in $VISUAL, $EDITOR, or vi, before the 
 Nothing runs in the background except the runner working on a task. The readiness and
 liveness checks happen on each dashboard refresh. Every task write goes through
 `App.update`, which posts an alert to the Discord webhook when a task enters
-NEEDS_DECISION, FAILED, READY_FOR_HUMAN, or REVIEWED.
+NEEDS_DECISION, FAILED, READY_FOR_HUMAN, or REVIEWED, and marks a phase change on the
+task's attempt.
 
 ## Design rules
 
@@ -238,7 +241,19 @@ the same commit. The commit message records why it changed.
   and saves atomically. The inbox refresh merges in only fields that come from GitHub.
 - **Every write goes through `App.update`**, which sends the alert when the state
   enters NEEDS_DECISION, FAILED, READY_FOR_HUMAN, or REVIEWED. Call sites never notify
-  on their own.
+  on their own. A test fails on any other `Store.Update` or `Store.Save` in `app`.
+- **Attempts record where the time went.** An attempt is one run of work that produces
+  one PR. `App.Start` opens one unless it keeps the PR or the current attempt has no PR
+  yet, and stores the task log's size
+  as the attempt's first byte; the runner stamps the first agent turn. `App.update`
+  calls `Record.Track`, which derives the phase from the state (`PhaseOf`: planning,
+  implementation, review and fixes, CI wait, paused, ended) and adds a mark when it
+  changes, so the runner and the dashboard refresh both record boundaries. Track also
+  stamps the first READY_FOR_HUMAN as the handoff and the merge or close as the end.
+  The marks tile the time, so the phase totals add up to the first turn to the first
+  handoff. Rejected: a timestamp at each of the forty-odd state assignments, where one
+  missed site would break the totals silently. Tasks from before attempts have none
+  and are not given one, since their start cannot be known.
 - **States mean one thing each.** FAILED is stopped and restartable, including a
   cancelled run; a separate CANCELLED state was rejected. A PR closed without merging
   is `PR_CLOSED`, not FAILED: it is how the developer calls off work, so it sends no
@@ -263,9 +278,10 @@ the same commit. The commit message records why it changed.
   Rejected: interactive sessions with terminal scraping.
 - **Permissions.** The dangerous bypass flags are never used. Claude runs with
   `acceptEdits` and the fixed `Bash,WebFetch,WebSearch` tool list; the list is not
-  configurable, because removing `Bash` broke every task. Codex runs `workspace-write`
-  with network access, plus the clone's `.git` as a writable root, because foreman's
-  worktrees keep their git data outside the worktree.
+  configurable, because removing `Bash` broke every task. Codex implementation turns
+  use a `foreman-git` permission profile with worktree writes and network access. The
+  profile grants the linked worktree's Git directory and the clone's Git object, ref,
+  log, and top-level files used by add, commit, fetch, and push. Reviews stay read-only.
 - **The agent pushes and opens the PR.** Foreman then checks with `gh` that the PR is
   open, in the task's repo, from the task branch, against the task's base, and records
   the verified number and head. A PR the developer retargets keeps its new base.
@@ -460,6 +476,19 @@ the same commit. The commit message records why it changed.
   line. `R` shows raw lines and returns to the tail, since raw and cleaned lines do not
   line up. The scroll offset counts from the tail and grows with new lines, so a reader
   scrolled back keeps the same lines on screen.
+
+- **The PR history is its own full-screen view.** `p` opens it and esc returns.
+  `App.History` builds the rows when it opens and on `r`, and follows `v`. It reads
+  recorded attempts, then older PRs from the task files and from the
+  `foreman: verified PR` lines of every log in `log_dir`, which also finds attempts a
+  restart replaced. Each PR is read with `gh pr view` through four workers; open PRs
+  are dropped, and one gh cannot read stays last as `unknown`. Older PRs have no
+  handoff time, so their timing is `unavailable`. A PR's log range starts at the last
+  runner start before its verified line and ends at the first start after it, so a
+  failed runner in between belongs to neither. When no start separates two PRs, both
+  show the whole issue log, labeled. The
+  detail pane's log reuses the log pane's paging inside the attempt's byte range, and
+  rereads it when a reload changes the range.
 
 ### Notifications
 

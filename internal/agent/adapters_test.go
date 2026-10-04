@@ -228,8 +228,9 @@ func TestCodexStart(t *testing.T) {
 	if turn.Outcome.PRNumber != 912 {
 		t.Errorf("outcome = %+v", turn.Outcome)
 	}
-	if got.Args[0] != "exec" || argValue(got.Args, "-C") != "/wt" || argValue(got.Args, "-s") != "workspace-write" ||
-		!slices.Contains(got.Args, "sandbox_workspace_write.network_access=true") || got.Args[len(got.Args)-1] != "do it" {
+	if got.Args[0] != "exec" || argValue(got.Args, "-C") != "/wt" ||
+		!slices.Contains(got.Args, `default_permissions="foreman-git"`) ||
+		!slices.Contains(got.Args, "permissions.foreman-git.network.enabled=true") || got.Args[len(got.Args)-1] != "do it" {
 		t.Errorf("argv = %q", got.Args)
 	}
 	if !strings.Contains(log.String(), "thread.started") {
@@ -279,9 +280,10 @@ func TestCodexStageModelsAndEffortOnStartResumeAndReview(t *testing.T) {
 	}
 }
 
-// A linked worktree's git data lives in the main clone, outside the sandbox's
-// workspace, so both Start and Resume must make it writable or commits fail.
-func TestCodexCanWriteTheWorktreesGitDir(t *testing.T) {
+// A linked worktree's git data lives in the main clone. Codex protects a .git
+// root even when workspace-write names it as writable, so the permission profile
+// must grant the paths Git actually updates.
+func TestCodexStartAndResumeGrantLinkedWorktreeGitWrites(t *testing.T) {
 	dir := t.TempDir()
 	clone, wt := filepath.Join(dir, "clone"), filepath.Join(dir, "wt")
 	for _, args := range [][]string{
@@ -293,11 +295,27 @@ func TestCodexCanWriteTheWorktreesGitDir(t *testing.T) {
 			t.Fatalf("git %v: %v %s", args, err, out)
 		}
 	}
-	out, err := exec.Command("git", "-C", wt, "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
+	gitDirOut, err := exec.Command("git", "-C", wt, "rev-parse", "--path-format=absolute", "--git-dir").Output()
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "sandbox_workspace_write.writable_roots=[" + fmt.Sprintf("%q", strings.TrimSpace(string(out))) + "]"
+	commonOut, err := exec.Command("git", "-C", wt, "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitDir, common := strings.TrimSpace(string(gitDirOut)), strings.TrimSpace(string(commonOut))
+	wantPaths := []string{
+		gitDir,
+		filepath.Join(common, "objects"),
+		filepath.Join(common, "refs"),
+		filepath.Join(common, "logs"),
+		filepath.Join(common, "config"),
+		filepath.Join(common, "config.lock"),
+		filepath.Join(common, "packed-refs"),
+		filepath.Join(common, "packed-refs.lock"),
+		filepath.Join(common, "FETCH_HEAD"),
+		filepath.Join(common, "ORIG_HEAD"),
+	}
 
 	var got Command
 	run := func(_ context.Context, c Command) error {
@@ -309,17 +327,26 @@ func TestCodexCanWriteTheWorktreesGitDir(t *testing.T) {
 	if _, err := codex.Start(context.Background(), StartInput{Worktree: wt, Prompt: "p"}, func(task.Session) {}); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(got.Args, want) {
-		t.Errorf("start argv = %q, want %q", got.Args, want)
-	}
+	checkCodexGitPermissions(t, got.Args, wantPaths)
 	if _, err := codex.Resume(context.Background(), task.Session{Agent: task.Codex, ID: "th-1"}, StartInput{Worktree: wt, Prompt: "p"}); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(got.Args, want) {
-		t.Errorf("resume argv = %q, want %q", got.Args, want)
+	checkCodexGitPermissions(t, got.Args, wantPaths)
+}
+
+func checkCodexGitPermissions(t *testing.T, args, paths []string) {
+	t.Helper()
+	joined := strings.Join(args, "\n")
+	if !strings.Contains(joined, `default_permissions="foreman-git"`) || !strings.Contains(joined, "permissions.foreman-git.filesystem=") {
+		t.Errorf("codex argv has no Git permission profile: %q", args)
 	}
-	if args := gitWriteArgs(clone); args != nil {
-		t.Errorf("a plain checkout's .git is inside the workspace; got %q", args)
+	for _, path := range paths {
+		if !strings.Contains(joined, fmt.Sprintf("%q=\"write\"", path)) {
+			t.Errorf("codex argv does not grant Git path %q: %q", path, args)
+		}
+	}
+	if strings.Contains(joined, "sandbox_workspace_write.writable_roots") || strings.Contains(joined, `sandbox_mode="workspace-write"`) || slices.Contains(args, "-s") {
+		t.Errorf("codex argv still relies on the ineffective writable_roots setting: %q", args)
 	}
 }
 
@@ -397,7 +424,7 @@ func TestResumeArgvAndMissingSession(t *testing.T) {
 	}
 	n := len(got.Args)
 	if got.Args[0] != "exec" || got.Args[1] != "resume" || got.Args[n-2] != "th-1" || got.Args[n-1] != "answer" ||
-		!slices.Contains(got.Args, `sandbox_mode="workspace-write"`) || slices.Contains(got.Args, "-C") {
+		!slices.Contains(got.Args, `default_permissions="foreman-git"`) || slices.Contains(got.Args, "-C") {
 		t.Errorf("codex resume argv = %q", got.Args)
 	}
 

@@ -24,6 +24,8 @@ const (
 	KeyCtrlC
 	KeyCtrlD
 	KeyCtrlU
+	KeyCtrlF
+	KeyCtrlB
 )
 
 // Key is one keystroke. Rune is set only for KeyRune.
@@ -59,6 +61,10 @@ func DecodeKey(p []byte, final bool) (Key, int, bool) {
 		return Key{Kind: KeyCtrlD}, 1, true
 	case 0x15:
 		return Key{Kind: KeyCtrlU}, 1, true
+	case 0x06:
+		return Key{Kind: KeyCtrlF}, 1, true
+	case 0x02:
+		return Key{Kind: KeyCtrlB}, 1, true
 	}
 	if p[0] < 0x20 {
 		return Key{Kind: KeyUnknown}, 1, true

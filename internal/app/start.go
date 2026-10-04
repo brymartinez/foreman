@@ -154,6 +154,16 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 				cur.Delegation.BaseRef = prev.BaseRef
 			}
 		}
+		// A kept PR continues its attempt, or stays with the older record when it
+		// predates attempts. So does an attempt that has no PR yet: the earlier runs
+		// were work toward the PR this one opens. Anything else is a new attempt.
+		switch at := cur.CurrentAttempt(); {
+		case cur.Delegation.PR != 0:
+		case at != nil && at.PR == 0:
+			at.Agent = req.Agent
+		default:
+			cur.Attempts = append(cur.Attempts, task.Attempt{Agent: req.Agent, LogStart: logSize(prev)})
+		}
 		summary := fmt.Sprintf("dispatched to %s", req.Agent)
 		if p := cur.Delegation.Profile; p != nil {
 			summary = fmt.Sprintf("dispatched to %s with profile %s", req.Agent, p.Name)
@@ -244,6 +254,19 @@ func (a App) restoreWorktree(ctx context.Context, key task.Key) error {
 		return cur, nil
 	})
 	return err
+}
+
+// logSize is where the next attempt's lines start in the task log. The runner has not
+// been spawned yet, so nothing else is writing it.
+func logSize(prev *task.Delegation) int64 {
+	if prev == nil || prev.RunnerLog == "" {
+		return 0
+	}
+	info, err := os.Stat(prev.RunnerLog)
+	if err != nil {
+		return 0
+	}
+	return info.Size()
 }
 
 func newOnly(req StartRequest, rec *task.Record) error {

@@ -117,6 +117,7 @@ func run(argv []string) int {
 		IncludedRepositories: cfg.IncludedRepos,
 		ExcludedRepositories: cfg.ExcludedRepos,
 		HideMentionOnly:      !cfg.Mentions,
+		LogDir:               cfg.LogDir,
 		Now:                  func() time.Time { return time.Now().Truncate(time.Second) },
 	}
 

@@ -80,6 +80,11 @@ func TestSpawnedRunnerOutlivesItsLauncher(t *testing.T) {
 }
 
 func TestStopSignalsTheRunnerAndWaitsForIt(t *testing.T) {
+	// Alive checks the process command with ps. Some agent sandboxes block ps,
+	// so this test cannot observe the runner there even if Spawn succeeded.
+	if out, err := exec.Command("ps", "-p", fmt.Sprint(os.Getpid()), "-o", "command=").CombinedOutput(); err != nil {
+		t.Skipf("ps unavailable: %v %s", err, out)
+	}
 	t.Setenv("FOREMAN_RUNNER_TEST", "wait")
 	p := Processes{LogDir: t.TempDir(), StopWait: 5 * time.Second}
 	key := task.Key{Repo: "o/r", Number: 8}

@@ -68,8 +68,8 @@ Headless mode is `codex exec <prompt>`.
   first one is `{"type":"thread.started","thread_id":...}`. The adapter reads the ID
   from there. It cannot be assigned in advance.
 - **Resume.** `codex exec resume <thread_id> <message>` continues the thread and keeps
-  the ID. It accepts `--output-schema`, `--json`, and `-o`. It has no `-s` flag, so the
-  sandbox is set with `-c sandbox_mode=...` or comes from config.
+  the ID. It accepts `--output-schema`, `--json`, and `-o`. It has no `-s` flag, so
+  Foreman selects its permission profile with `-c default_permissions=...`.
 - **Stage settings.** `codex exec` and `codex exec resume` accept `-m <model>` and
   `-c model_reasoning_effort="<effort>"`. The installed CLI help confirms both flags;
   stage-specific model calls have not been probed against the service.
@@ -79,12 +79,12 @@ Headless mode is `codex exec <prompt>`.
 - **GitHub credentials in the sandbox.** With network access on, `gh` and git over HTTPS
   work inside the Codex sandbox using the user's keyring login.
 - **Worktrees.** A linked worktree keeps its index, refs, and objects in the main clone's
-  `.git`, outside the worktree. `-s workspace-write` doesn't let Codex write there, so
-  `git commit` fails. Adding that directory with
-  `-c 'sandbox_workspace_write.writable_roots=["<clone>/.git"]'` fixes it, for both
-  `exec` and `exec resume`. `exec resume` has no `--add-dir` flag. The earlier note said
-  no flag was needed, but the probe's clone was under `$TMPDIR`, which workspace-write
-  can write by default. The probe now excludes `/tmp` and `$TMPDIR` for these checks.
+  `.git`, outside the worktree. On Codex CLI 0.160.0, legacy `writable_roots` naming
+  `<clone>/.git` still denies `index.lock`. A named permission profile that grants the
+  worktree's Git directory and the clone's object, ref, log, and Git root file paths
+  permits `git add`, `git commit`, and `git push -u`. Run the model-free regression with
+  `FOREMAN_CODEX_SANDBOX_PROBE=1 go test ./internal/agent -run TestCodexGitProfileStagesCommitsAndPushesInALinkedWorktree -count=1`
+  outside another sandbox after upgrading Codex.
 - **Review.** `codex exec review --base <branch>` is a built-in review command and accepts
   `--output-schema`. Foreman doesn't use it. It uses plain `codex exec` with its own
   review prompt, so both reviewers get the same inputs and return the same schema.

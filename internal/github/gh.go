@@ -401,18 +401,21 @@ func (c Client) RepoAt(ctx context.Context, dir string) (app.RepoInfo, error) {
 	return app.RepoInfo{Repo: repo, DefaultBranch: r.DefaultBranchRef.Name}, nil
 }
 
-const prFields = "number,url,state,headRefName,headRefOid,baseRefName,isCrossRepository,mergeable,body"
+const prFields = "number,url,state,headRefName,headRefOid,baseRefName,isCrossRepository,mergeable,body,title,closedAt,mergedAt"
 
 type prJSON struct {
-	Number            int    `json:"number"`
-	URL               string `json:"url"`
-	State             string `json:"state"`
-	HeadRefName       string `json:"headRefName"`
-	HeadRefOid        string `json:"headRefOid"`
-	BaseRefName       string `json:"baseRefName"`
-	IsCrossRepository bool   `json:"isCrossRepository"`
-	Mergeable         string `json:"mergeable"`
-	Body              string `json:"body"`
+	Number            int       `json:"number"`
+	URL               string    `json:"url"`
+	State             string    `json:"state"`
+	HeadRefName       string    `json:"headRefName"`
+	HeadRefOid        string    `json:"headRefOid"`
+	BaseRefName       string    `json:"baseRefName"`
+	IsCrossRepository bool      `json:"isCrossRepository"`
+	Mergeable         string    `json:"mergeable"`
+	Body              string    `json:"body"`
+	Title             string    `json:"title"`
+	ClosedAt          time.Time `json:"closedAt"`
+	MergedAt          time.Time `json:"mergedAt"`
 }
 
 func (p prJSON) toPR(repo task.Repo) app.PullRequest {
@@ -426,6 +429,9 @@ func (p prJSON) toPR(repo task.Repo) app.PullRequest {
 		IsCrossRepository: p.IsCrossRepository,
 		Mergeable:         mergeable(p.Mergeable),
 		Body:              p.Body,
+		Title:             p.Title,
+		ClosedAt:          p.ClosedAt,
+		MergedAt:          p.MergedAt,
 	}
 }
 

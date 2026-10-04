@@ -176,6 +176,20 @@ func TestPullRequestBody(t *testing.T) {
 	}
 }
 
+func TestPullRequestReadsTitleAndCloseTimes(t *testing.T) {
+	c := Client{Run: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if call := strings.Join(args, " "); !strings.Contains(call, "title") || !strings.Contains(call, "closedAt") || !strings.Contains(call, "mergedAt") {
+			t.Errorf("gh call does not ask for the title and close times: %v", args)
+		}
+		return []byte(`{"number":5,"state":"MERGED","title":"Retry 5xx","closedAt":"2026-09-25T08:00:00Z","mergedAt":"2026-09-25T08:00:00Z"}`), nil
+	}}
+	pr, err := c.GetPullRequest(context.Background(), task.Key{Repo: "a/b", Number: 5})
+	want := time.Date(2026, 9, 25, 8, 0, 0, 0, time.UTC)
+	if err != nil || pr.Title != "Retry 5xx" || pr.State != "merged" || !pr.ClosedAt.Equal(want) || !pr.MergedAt.Equal(want) {
+		t.Errorf("pr = %+v, %v", pr, err)
+	}
+}
+
 func TestBranchHead(t *testing.T) {
 	var got string
 	c := Client{Run: func(_ context.Context, _ string, args ...string) ([]byte, error) {

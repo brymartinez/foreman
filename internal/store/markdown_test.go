@@ -354,3 +354,58 @@ func TestStoreRejectsAProfileForAnotherAgent(t *testing.T) {
 		t.Fatalf("got %v, want a profile error", err)
 	}
 }
+
+func TestStoreRoundTripsAttempts(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	want := delegated()
+	start := time.Date(2026, 9, 24, 16, 0, 0, 0, time.UTC)
+	want.Attempts = []task.Attempt{
+		{StartedAt: start, Agent: task.Codex, Branch: "agent/825-provider-retries", PR: 900, PRURL: "https://x/pull/900", EndedAt: start.Add(time.Hour),
+			Marks: []task.Mark{{At: start, Phase: task.PhasePlanning}, {At: start.Add(time.Hour), Phase: task.PhaseEnded}}},
+		{StartedAt: start.Add(2 * time.Hour), Agent: task.Claude, LogStart: 4096, HandoffAt: start.Add(3 * time.Hour),
+			Marks: []task.Mark{{At: start.Add(2 * time.Hour), Phase: task.PhaseReview}}},
+	}
+	if err := s.Save(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, want.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Attempts, want.Attempts) {
+		t.Fatalf("attempts\n got: %+v\nwant: %+v", got.Attempts, want.Attempts)
+	}
+}
+
+func TestOldFileLoadsWithoutAttemptsAndSavesNone(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	old := "---\nrepo: a/b\nnumber: 3\nkind: issue\nstate: READY_FOR_HUMAN\nimplementation_agent: claude\nbranch: feat/3-x\npr: 7\n---\n"
+	if err := os.WriteFile(filepath.Join(s.Dir, "a-b-3.md"), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, task.Key{Repo: "a/b", Number: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Attempts != nil {
+		t.Fatalf("attempts = %+v", got.Attempts)
+	}
+	if err := s.Save(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(s.Dir, "a-b-3.md"))
+	if strings.Contains(string(raw), "attempts") {
+		t.Errorf("saved an empty attempts key:\n%s", raw)
+	}
+}
+
+func TestStoreRejectsAnUnknownPhase(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	bad := "---\nrepo: a/b\nnumber: 3\nkind: issue\nstate: WORKING\nimplementation_agent: claude\nattempts:\n  - marks:\n      - at: 2026-10-01T09:00:00Z\n        phase: lunch\n---\n"
+	if err := os.WriteFile(filepath.Join(s.Dir, "a-b-3.md"), []byte(bad), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Get(ctx, task.Key{Repo: "a/b", Number: 3}); err == nil || !strings.Contains(err.Error(), "lunch") {
+		t.Fatalf("got %v, want an unknown phase error", err)
+	}
+}
