@@ -140,7 +140,9 @@ type WorktreeRequest struct {
 	RepoDir string // any checkout of the repository
 	Path    string
 	Branch  string
-	BaseRef string // e.g. origin/main; fetched before a new branch is created
+	// BaseRef, e.g. origin/main, is fetched before a new branch is created from it.
+	// Empty means the branch must already exist.
+	BaseRef string
 }
 
 // ErrWorktreeDirty means a worktree has uncommitted or untracked changes and was kept.

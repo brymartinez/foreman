@@ -50,9 +50,8 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			recs[i] = updated
 			continue
 		}
-		if r.State != task.PRClosed && !gated(r) {
-			// A task a runner is driving, with a PR that is still open: it is the
-			// runner's to advance, so only the PR's state was worth a look.
+		if r.State != task.PRClosed && !(pr.State == "merged" && r.Delegation.RunnerPID == 0) && !gated(r) {
+			// A running task keeps its state until the runner stops.
 			continue
 		}
 		if r.State == task.PRClosed && r.Delegation.RunnerPID != 0 {
@@ -63,6 +62,16 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			if err := a.stopRun(ctx, r); err != nil {
 				warnings = append(warnings, fmt.Errorf("stop the runner of %s#%d before PR #%d reopens: %w", r.Repo, r.Number, r.Delegation.PR, err))
 				continue
+			}
+		}
+		if r.State == task.PRClosed && !r.Delegation.WorktreeRemovedAt.IsZero() {
+			// Cleanup removed the worktree and kept the branch. A reopened PR needs the
+			// worktree to be worked on, and a merged one needs it back so cleanup deletes
+			// the branch along with it. A failed restore only warns: the task still
+			// follows its PR, a merged one keeps its branch, and a launch tries the
+			// restore again before any runner starts.
+			if err := a.restoreWorktree(ctx, r.Key); err != nil {
+				warnings = append(warnings, fmt.Errorf("restore the worktree of %s#%d as PR #%d leaves PR_CLOSED: %w", r.Repo, r.Number, r.Delegation.PR, err))
 			}
 		}
 		var ci task.CIStatus
@@ -84,8 +93,7 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			// The state is read again under the lock, so a runner that saved since the
 			// list is not overwritten by what this refresh expected to find.
 			switch {
-			case cur.State == task.PRClosed && pr.State == "merged":
-				// Reopened and merged between two refreshes: the work shipped.
+			case pr.State == "merged" && cur.Delegation.RunnerPID == 0:
 				note = advance(cur, pr, ci, a.Now())
 			case cur.State == task.PRClosed:
 				note = reopen(cur, pr, ci, a.Now())
@@ -207,12 +215,13 @@ func (a App) stopRun(ctx context.Context, r *task.Record) error {
 
 // closePR ends a task whose PR was closed without merging. The agent did not fail, so
 // the outcome says only what happened and nothing notifies the developer, who closed
-// the PR. The branch and worktree stay for a later start. The runner's pid stays too:
+// the PR. The branch stays for a later start; cleanup may remove the worktree, and a
+// later launch recreates it. The runner's pid stays too:
 // stopRun needs it, and clears it once the runner is gone.
 func closePR(rec *task.Record, now time.Time) string {
 	d := rec.Delegation
 	rec.State = task.PRClosed
-	summary := fmt.Sprintf("PR #%d closed without merging; the branch and worktree are kept", d.PR)
+	summary := fmt.Sprintf("PR #%d closed without merging; the branch is kept", d.PR)
 	rec.LastOutcome = &task.Outcome{Status: "pr_closed", Summary: summary, At: now}
 	return summary
 }

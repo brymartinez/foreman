@@ -128,10 +128,15 @@ foreman [-a|--auto|--no-auto]
                            confirmation; a wait holds the issue until the next refresh
 
 app.InboxView         -> runner pid dead while WORKING/REVIEWING -> FAILED
+                         runner pid dead in any other state -> clear the pid
                          readiness gate (gate.go), per task with a PR:
                            PR closed  -> stop the runner, PR_CLOSED
                            PR reopened -> READY_FOR_HUMAN or REVIEWING
-                         and then, per idle task with a PR:
+                           PR_CLOSED leaving for any reason -> recreate a worktree
+                             cleanup removed, from the kept branch in the managed
+                             checkout; a failed restore warns, and the PR's state
+                             still applies
+                         and then, per stopped task with a PR, including FAILED:
                            PR merged -> DONE
                            REVIEWING + clean review, PR head moved -> WORKING, spawn
                              a runner that reviews the new commits
@@ -148,8 +153,16 @@ app.InboxView         -> runner pid dead while WORKING/REVIEWING -> FAILED
                            mergeable CONFLICTING, (PR head, base head) never tried ->
                              record the pair, WORKING, spawn a runner
                            UNKNOWN or MERGEABLE -> nothing
-                         cleanup.on_done: DONE task -> git worktree remove
-                           (kept if dirty); branch -D only if its PR merged
+                         gh search, then a fetch of tracked items no search returned
+                         issue closed, dead runner the gate could not read -> clear
+                           the pid
+                         cleanup.on_done, per task with a worktree and no live runner:
+                           DONE, PR_CLOSED, or issue closed -> git worktree remove
+                           (kept if dirty, retried next refresh); branch -D only if
+                           its PR merged; with branch deletion on, a failed merge
+                           check keeps the worktree for the next refresh
+                         Reconcile, per item: issue closed, no runner -> DONE, including
+                           FAILED and PR_CLOSED; a DONE task stays DONE if it reopens
 
 foreman -c            -> open the config in $VISUAL, $EDITOR, or vi, before the config
                          loads, so an invalid file can be fixed; check it after
@@ -244,8 +257,8 @@ the same commit. The commit message records why it changed.
 - **States mean one thing each.** FAILED is stopped and restartable, including a
   cancelled run; a separate CANCELLED state was rejected. A PR closed without merging
   is `PR_CLOSED`, not FAILED: it is how the developer calls off work, so it sends no
-  alert, keeps the branch and worktree, and returns to READY_FOR_HUMAN or REVIEWING if
-  the PR is reopened. The runner can't write to a `PR_CLOSED` task, so the stop that
+  alert, keeps the branch, and returns to READY_FOR_HUMAN or REVIEWING if the PR is
+  reopened. A closed issue takes precedence and makes the task DONE. The runner can't write to a `PR_CLOSED` task, so the stop that
   follows is never saved as a failure.
 - **Names are computed once.** `task.WorkName` is `<issue>-<slug>` (at most 5 words and
   40 characters, conventional prefix removed). The branch is `<type>/<workName>`, with
@@ -408,8 +421,11 @@ the same commit. The commit message records why it changed.
   else asks the developer.
 - **Cleanup never loses work.** `git worktree remove` without `--force`, so a dirty
   worktree stays. The local branch is deleted (`-D`, for squash merges) only when its PR
-  merged. Each refresh cleans DONE tasks unless `cleanup.on_done` is off. There is no
-  manual cleanup: a FAILED or PR_CLOSED worktree is the developer's to remove.
+  merged. Unless `cleanup.on_done` is off, each refresh cleans the worktrees of DONE
+  and PR_CLOSED tasks once their runner has stopped. A PR_CLOSED task whose PR reopens or
+  merges gets its worktree back from the kept branch first, so a reopened PR can resume
+  and a merged one has its branch deleted by the next cleanup. A runner launched for a
+  task whose worktree was removed recreates it too. There is no manual cleanup: a FAILED worktree is the developer's to remove.
 
 ### Inbox
 

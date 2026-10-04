@@ -95,15 +95,15 @@ func (a App) InboxView(ctx context.Context, allRepos bool) (InboxReport, error) 
 		return InboxReport{}, err
 	}
 	dead := a.deadRunners(recs)
+	if err := a.clearExited(ctx, recs); err != nil {
+		return InboxReport{}, err
+	}
 	notes, checked, warnings, err := a.gate(ctx, recs)
 	if err != nil {
 		return InboxReport{}, err
 	}
 	if err := a.reap(ctx, recs, reapable(recs, dead, checked)); err != nil {
 		return InboxReport{}, err
-	}
-	if a.CleanOnDone {
-		a.cleanDone(ctx, recs, notes)
 	}
 	search, err := a.GitHub.InboxItems(ctx)
 	if err != nil {
@@ -113,6 +113,15 @@ func (a App) InboxView(ctx context.Context, allRepos bool) (InboxReport, error) 
 	tracked, gone, refreshWarnings, err := a.fetchTracked(ctx, recs, items, allRepos)
 	if err != nil {
 		return InboxReport{}, err
+	}
+	closed := closedItems(append(items, tracked...))
+	if err := a.releaseDead(ctx, recs, dead, closed); err != nil {
+		return InboxReport{}, err
+	}
+	// Cleanup runs before Reconcile so its notes are reported with the item, and is
+	// told which issues closed, because Reconcile ends those tasks only afterwards.
+	if a.CleanOnDone {
+		a.cleanDone(ctx, recs, closed, notes)
 	}
 	// Taken before Reconcile, which calls observe and rewrites these in place.
 	stored := storedReasons(recs)
@@ -228,17 +237,57 @@ func mergeObserved(cur, seen *task.Record) *task.Record {
 	}
 	cur.Title, cur.URL, cur.Kind = seen.Title, seen.URL, seen.Kind
 	cur.GitHub, cur.LastGitHubSync = seen.GitHub, seen.LastGitHubSync
-	if seen.State == task.Done && !keepsState(cur.State) {
+	if seen.State == task.Done && !keepsState(cur) {
 		cur.State = task.Done
 	}
 	return cur
 }
 
-// keepsState reports a task the inbox leaves in the state it found. A runner owns the
-// task it is driving, and the gate has already recorded why a PR_CLOSED task ended: a
-// closed issue must not turn that into DONE, which would clean away the worktree and
-// branch the developer was promised, and stop the gate watching for the PR to reopen.
-func keepsState(s task.State) bool { return running(s) || s == task.PRClosed }
+// keepsState reports a task the inbox leaves in the state it found: one that holds a
+// runner pid waits for that runner to stop. A task without a pid has no runner, even
+// in WORKING or REVIEWING: a clean review waits on CI in REVIEWING, and a start that
+// exited before launch leaves WORKING. Start checks the issue is open, so a refresh
+// in that gap ends a task only if the issue closed during the start. A closed issue
+// does end a PR_CLOSED task: the branch stays unless its PR merged, so DONE loses no
+// work.
+func keepsState(r *task.Record) bool {
+	return r.Delegation != nil && r.Delegation.RunnerPID != 0
+}
+
+// releaseDead clears the pid of a dead runner that reap left alone because the gate
+// could not read its PR, when the task's issue has closed. The closed issue ends the
+// task whatever the PR says, so there is no failed run to record, and the dead pid
+// would otherwise keep Reconcile from ending it.
+func (a App) releaseDead(ctx context.Context, recs []*task.Record, dead []deadRunner, closed map[task.Key]bool) error {
+	for _, dr := range dead {
+		r := recs[dr.index]
+		if !closed[r.Key] || r.Delegation == nil || r.Delegation.RunnerPID != dr.pid {
+			continue
+		}
+		updated, err := a.update(ctx, r.Key, func(cur *task.Record) (*task.Record, error) {
+			if cur.Delegation != nil && cur.Delegation.RunnerPID == dr.pid {
+				cur.Delegation.RunnerPID = 0
+			}
+			return cur, nil
+		})
+		if err != nil {
+			return err
+		}
+		recs[dr.index] = updated
+	}
+	return nil
+}
+
+// closedItems indexes the items GitHub reports as no longer open.
+func closedItems(items []InboxItem) map[task.Key]bool {
+	closed := map[task.Key]bool{}
+	for _, it := range items {
+		if it.State != "open" {
+			closed[it.Key] = true
+		}
+	}
+	return closed
+}
 
 // fetchTracked refreshes missing delegated work and undelegated items whose last
 // involvement reasons have not yet been cleared by a complete refresh. gone lists
@@ -351,6 +400,9 @@ func Reconcile(items []InboxItem, recs []*task.Record, notes map[task.Key][]stri
 		if len(changes) > 0 {
 			observe(rec, it, complete, now)
 			dirty = append(dirty, rec)
+		} else if finish(rec, it) {
+			// The issue closed while a runner held the task, and that runner has stopped.
+			dirty = append(dirty, rec)
 		}
 		changes = append(changes, notes[it.Key]...)
 		current := changes
@@ -427,11 +479,18 @@ func observe(rec *task.Record, it InboxItem, complete bool, now time.Time) {
 	rec.Title, rec.URL, rec.Kind = it.Title, it.URL, it.Kind
 	rec.GitHub = &task.Snapshot{UpdatedAt: it.UpdatedAt, State: it.State, Reasons: reasons}
 	rec.LastGitHubSync = now
-	// A closed issue or merged PR ends the task unless the state is already someone
-	// else's to set; the gate ends a delegated task when its PR is merged or closed.
-	if it.State != "open" && !keepsState(rec.State) {
-		rec.State = task.Done
+	finish(rec, it)
+}
+
+// finish ends the task of a closed issue or merged PR, unless the state is someone
+// else's to set, and reports whether it did. The gate ends a delegated task when its
+// PR is merged or closed. A task that is DONE stays DONE if its issue reopens.
+func finish(rec *task.Record, it InboxItem) bool {
+	if it.State == "open" || rec.State == task.Done || keepsState(rec) {
+		return false
 	}
+	rec.State = task.Done
+	return true
 }
 
 func describeChanges(seen *task.Snapshot, it InboxItem, complete bool) []string {

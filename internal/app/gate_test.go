@@ -140,7 +140,63 @@ func TestGateMergedIsDoneAndClosedIsPRClosed(t *testing.T) {
 	}
 }
 
-const prClosedNote = "PR #912 closed without merging; the branch and worktree are kept"
+func TestGateMergedPRCompletesAFailedTask(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	f.store.recs[key].State = task.Failed
+	setPR(f, "merged")
+	f.gh.items = []InboxItem{item(825, "open", t0, task.Assigned)}
+	report, err := f.app.Inbox(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Done || got.LastOutcome.Status != "merged" || len(report.Changed) != 1 || !slices.Contains(report.Changed[0].Changes, "PR #912 merged") {
+		t.Errorf("state %s outcome %+v changed %+v", got.State, got.LastOutcome, report.Changed)
+	}
+}
+
+func TestGateMergedPRWaitsForTheRunnerToStop(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	f.store.recs[key].State = task.Failed
+	f.store.recs[key].Delegation.RunnerPID = 77
+	f.runners.alive[77] = true
+	setPR(f, "merged")
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.Failed || got.Delegation.RunnerPID != 77 {
+		t.Fatalf("state %s pid %d", got.State, got.Delegation.RunnerPID)
+	}
+	if len(f.runners.stopped) != 0 {
+		t.Errorf("stopped runner for merged PR: %v", f.runners.stopped)
+	}
+	f.store.recs[key].Delegation.RunnerPID = 0
+	delete(f.runners.alive, 77)
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.Done {
+		t.Errorf("state after runner stopped = %s", got.State)
+	}
+}
+
+func TestGateMergedPRCompletesAFailedTaskWhoseRunnerExitedBeforeClearingItsPID(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	f.store.recs[key].State = task.Failed
+	f.store.recs[key].Delegation.RunnerPID = 77
+	setPR(f, "merged")
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.Done || got.Delegation.RunnerPID != 0 {
+		t.Errorf("state %s pid %d", got.State, got.Delegation.RunnerPID)
+	}
+}
+
+const prClosedNote = "PR #912 closed without merging; the branch is kept"
 
 func TestGateClosedPRIsPRClosedNotFailed(t *testing.T) {
 	f := newFixture()
@@ -329,6 +385,7 @@ func TestInboxUnreadablePRLeavesADeadRunnerAlone(t *testing.T) {
 	f.store.recs[key].State = task.Working
 	f.store.recs[key].Delegation.RunnerPID = 77
 	delete(f.gh.prs, 912)
+	f.gh.items = []InboxItem{item(825, "open", t0, task.Assigned)}
 	f.notes.sent = nil
 	if _, err := f.app.Inbox(context.Background()); err != nil {
 		t.Fatal(err)
@@ -537,25 +594,23 @@ func TestGatePRClosedThenMergedIsDone(t *testing.T) {
 	}
 }
 
-func TestPRClosedSurvivesAClosedIssue(t *testing.T) {
+func TestClosedIssueCompletesAPRClosedTaskAndKeepsItsBranch(t *testing.T) {
 	f := newFixture()
 	f.app.CleanOnDone, f.app.DeleteMergedBranches = true, true
 	key := reviewed(t, f)
 	setPR(f, "closed")
 	// No search returns the task, so the same refresh re-fetches the issue, which the
-	// developer closed along with the PR. That must not turn PR_CLOSED into DONE.
-	if _, err := f.app.Inbox(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if got := f.store.recs[key]; got.State != task.PRClosed || got.GitHub.State != "closed" {
-		t.Fatalf("state %s, issue %s", got.State, got.GitHub.State)
-	}
+	// developer closed along with the PR. The closed issue wins over PR_CLOSED.
 	if _, err := f.app.Inbox(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.PRClosed || len(f.wt.removed) != 0 || !got.Delegation.WorktreeRemovedAt.IsZero() {
-		t.Errorf("the worktree was cleaned away: state %s removed %+v", got.State, f.wt.removed)
+	if got.State != task.Done || got.GitHub.State != "closed" {
+		t.Fatalf("state %s, issue %s", got.State, got.GitHub.State)
+	}
+	want := WorktreeRemoval{Path: "/wt/ridezoomo-armada-backend/825-provider-retries", Branch: "feat/825-provider-retries"}
+	if !slices.Equal(f.wt.removed, []WorktreeRemoval{want}) || got.Delegation.WorktreeRemovedAt.IsZero() {
+		t.Errorf("removed %+v, rec %+v", f.wt.removed, got.Delegation)
 	}
 }
 
@@ -593,6 +648,7 @@ func TestInboxListsReadyWithoutAChangedEntry(t *testing.T) {
 func TestReconcileClosedIssueEndsIdleDelegatedTasks(t *testing.T) {
 	blocked := seen(7, task.NeedsDecision, "open", t0)
 	working := seen(8, task.Working, "open", t0)
+	working.Delegation = &task.Delegation{RunnerPID: 4242}
 	items := []InboxItem{item(7, "closed", t1, task.Tracked), item(8, "closed", t1, task.Tracked)}
 	Reconcile(items, []*task.Record{blocked, working}, nil, true, now)
 	if blocked.State != task.Done || working.State != task.Working {

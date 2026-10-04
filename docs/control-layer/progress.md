@@ -2,6 +2,12 @@
 
 ## Current stage
 
+Stage 46 (reconcile stopped delegated tasks, for issue #46) is complete. A refresh
+marks a stopped task DONE when its linked PR merges or its issue closes, including
+FAILED and PR_CLOSED tasks. With `cleanup.on_done`, it removes clean DONE and
+PR_CLOSED worktrees once the runner stops, and keeps the branch unless the PR merged.
+A launch recreates a removed worktree, so a reopened PR can resume.
+
 Stage 45 (PR history, for issue #45) is complete. `p` opens the merged and closed
 Foreman PRs with their phase times and each attempt's log. Task files record
 `attempts`, with phase marks written in `App.update`.

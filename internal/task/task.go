@@ -46,7 +46,7 @@ const (
 	Done     State = "DONE"
 	Failed   State = "FAILED"
 	// PRClosed means the task's PR was closed without merging. The agent did not
-	// fail, so the task keeps its file, worktree, and branch.
+	// fail, so the task keeps its file and branch. Cleanup may remove its worktree.
 	PRClosed State = "PR_CLOSED"
 )
 

@@ -88,6 +88,9 @@ func (Git) Ensure(ctx context.Context, req app.WorktreeRequest) error {
 		_, err := git(ctx, req.RepoDir, "worktree", "add", req.Path, req.Branch)
 		return err
 	}
+	if req.BaseRef == "" {
+		return fmt.Errorf("branch %s does not exist in %s", req.Branch, req.RepoDir)
+	}
 	if remote, branch, ok := strings.Cut(req.BaseRef, "/"); ok {
 		if _, err := git(ctx, req.RepoDir, "fetch", remote, branch); err != nil {
 			return err

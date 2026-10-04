@@ -70,6 +70,18 @@ func TestEnsureCreatesFromFreshBaseAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestEnsureWithoutABaseRefRequiresTheBranchToExist(t *testing.T) {
+	clone, _ := repoWithOrigin(t)
+	req := app.WorktreeRequest{RepoDir: clone, Path: filepath.Join(t.TempDir(), "825-a"), Branch: "agent/825-a"}
+	err := (Git{}).Ensure(context.Background(), req)
+	if err == nil || !strings.Contains(err.Error(), "agent/825-a does not exist") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, statErr := os.Stat(req.Path); !os.IsNotExist(statErr) {
+		t.Errorf("worktree created: %v", statErr)
+	}
+}
+
 func TestEnsureRefusesConflicts(t *testing.T) {
 	clone, _ := repoWithOrigin(t)
 	ctx := context.Background()
