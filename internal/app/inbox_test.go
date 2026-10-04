@@ -97,6 +97,7 @@ func TestReconcile(t *testing.T) {
 
 func TestReconcileTrackedFetchKeepsSearchReasons(t *testing.T) {
 	rec := seen(7, task.Working, "open", t0, task.Assigned)
+	rec.Delegation = &task.Delegation{RunnerPID: 4242}
 	_, dirty := Reconcile([]InboxItem{item(7, "closed", t1, task.Tracked)}, []*task.Record{rec}, nil, false, now)
 	if len(dirty) != 1 || !slices.Equal(rec.GitHub.Reasons, []task.InboxReason{task.Assigned}) {
 		t.Fatalf("reasons = %v", rec.GitHub.Reasons)

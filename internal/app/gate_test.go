@@ -633,6 +633,7 @@ func TestInboxListsReadyWithoutAChangedEntry(t *testing.T) {
 func TestReconcileClosedIssueEndsIdleDelegatedTasks(t *testing.T) {
 	blocked := seen(7, task.NeedsDecision, "open", t0)
 	working := seen(8, task.Working, "open", t0)
+	working.Delegation = &task.Delegation{RunnerPID: 4242}
 	items := []InboxItem{item(7, "closed", t1, task.Tracked), item(8, "closed", t1, task.Tracked)}
 	Reconcile(items, []*task.Record{blocked, working}, nil, true, now)
 	if blocked.State != task.Done || working.State != task.Working {

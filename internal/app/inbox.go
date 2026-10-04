@@ -234,13 +234,15 @@ func mergeObserved(cur, seen *task.Record) *task.Record {
 	return cur
 }
 
-// keepsState reports a task the inbox leaves in the state it found. A task that holds
-// a runner pid waits for that runner to stop. WORKING without a pid is a runner about
-// to launch. A REVIEWING task without a pid has stopped: a clean review waits there on
-// CI. A closed issue does end a PR_CLOSED task: the branch stays unless its PR merged,
-// so DONE loses no work.
+// keepsState reports a task the inbox leaves in the state it found: one that holds a
+// runner pid waits for that runner to stop. A task without a pid has no runner, even
+// in WORKING or REVIEWING: a clean review waits on CI in REVIEWING, and a start that
+// exited before launch leaves WORKING. Start checks the issue is open, so a refresh
+// in that gap ends a task only if the issue closed during the start. A closed issue
+// does end a PR_CLOSED task: the branch stays unless its PR merged, so DONE loses no
+// work.
 func keepsState(r *task.Record) bool {
-	return r.State == task.Working || (r.Delegation != nil && r.Delegation.RunnerPID != 0)
+	return r.Delegation != nil && r.Delegation.RunnerPID != 0
 }
 
 // closedItems indexes the items GitHub reports as no longer open.

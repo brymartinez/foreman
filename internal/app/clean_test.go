@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
 
@@ -103,6 +104,49 @@ func TestInboxClosedIssueCompletesAStoppedReviewingTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := f.store.recs[key]; got.State != task.Done || len(f.wt.removed) != 1 {
+		t.Errorf("state %s, removed %+v", got.State, f.wt.removed)
+	}
+}
+
+func TestInboxClosedIssueCompletesAWorkingTaskWithoutARunner(t *testing.T) {
+	f := newFixture()
+	f.app.CleanOnDone = true
+	key := reviewed(t, f)
+	// A start that exited before launch recorded a runner pid.
+	f.store.recs[key].State = task.Working
+	if _, err := f.app.Inbox(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.Done || len(f.wt.removed) != 1 {
+		t.Errorf("state %s, removed %+v", got.State, f.wt.removed)
+	}
+}
+
+// failFirstPR fails the first PR lookup, the way a transient gh error would.
+type failFirstPR struct {
+	*fakeGitHub
+	failed bool
+}
+
+func (f *failFirstPR) GetPullRequest(ctx context.Context, k task.Key) (PullRequest, error) {
+	if !f.failed {
+		f.failed = true
+		return PullRequest{}, errors.New("gh: timeout")
+	}
+	return f.fakeGitHub.GetPullRequest(ctx, k)
+}
+
+func TestInboxDeletesTheMergedBranchOfAClosedIssueTheGateCouldNotRead(t *testing.T) {
+	f := newFixture()
+	f.app.CleanOnDone, f.app.DeleteMergedBranches = true, true
+	key := reviewed(t, f)
+	f.store.recs[key].State = task.Failed
+	setPR(f, "merged")
+	f.app.GitHub = &failFirstPR{fakeGitHub: f.gh}
+	if _, err := f.app.Inbox(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.Done || len(f.wt.removed) != 1 || !f.wt.removed[0].DeleteBranch {
 		t.Errorf("state %s, removed %+v", got.State, f.wt.removed)
 	}
 }

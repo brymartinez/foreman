@@ -49,7 +49,7 @@ func hasWorktree(r *task.Record) bool {
 
 func (a App) clean(ctx context.Context, rec *task.Record) CleanResult {
 	d := rec.Delegation
-	res := CleanResult{Rec: rec, BranchDeleted: a.DeleteMergedBranches && rec.State == task.Done && a.prMerged(ctx, rec)}
+	res := CleanResult{Rec: rec, BranchDeleted: a.DeleteMergedBranches && a.prMerged(ctx, rec)}
 	if err := a.Worktrees.Remove(ctx, WorktreeRemoval{Path: d.Worktree, Branch: d.Branch, DeleteBranch: res.BranchDeleted}); err != nil {
 		res.Err, res.BranchDeleted = err, false
 		return res
@@ -67,7 +67,9 @@ func (a App) clean(ctx context.Context, rec *task.Record) CleanResult {
 }
 
 // prMerged asks GitHub rather than trusting the task state: an issue closed by hand is
-// DONE too, and its branch may hold the only copy of the work. An error keeps the branch.
+// DONE too, and its branch may hold the only copy of the work. A task the gate could
+// not read is still FAILED when its closed issue is cleaned, and its PR may have merged.
+// An error keeps the branch.
 func (a App) prMerged(ctx context.Context, rec *task.Record) bool {
 	if rec.Delegation.PR == 0 {
 		return false
