@@ -324,3 +324,30 @@ func TestAnOlderHistoryLoadDoesNotReplaceANewerOne(t *testing.T) {
 		t.Fatalf("rows = %d, want the newest load's 5", len(m.History))
 	}
 }
+
+func TestThePhaseSummaryWrapsInAnEightyColumnTerminal(t *testing.T) {
+	row, _ := historyLog(t, 30, 1, 30)
+	row.Phases = map[task.Phase]time.Duration{task.PhasePlanning: 12 * time.Minute, task.PhaseImplementation: 34 * time.Minute,
+		task.PhaseReview: 21 * time.Minute, task.PhaseCI: 15 * time.Minute, task.PhasePaused: 58 * time.Minute}
+	row.Total = 140 * time.Minute
+	m := openHistory(t, []app.HistoryRow{row}, 30)
+	m.Width = 80
+	m.Key(Key{Kind: KeyEnter})
+	readLog(&m)
+	frame := Frame(m)
+	text := strings.Join(frame, "\n")
+	for _, want := range []string{"paused 58m00s", "total 2h20m", "line 30"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("detail is missing %q:\n%s", want, text)
+		}
+	}
+	if len(frame) != 30 {
+		t.Errorf("frame has %d lines, want 30", len(frame))
+	}
+	page := m.logPage()
+	m.Key(Key{Kind: KeyTab})
+	m.Key(Key{Kind: KeyRune, Rune: 'g'})
+	if got := strings.Join(Frame(m), "\n"); !strings.Contains(got, fmt.Sprintf("line %d ", page)) || strings.Contains(got, fmt.Sprintf("line %d ", page+1)) {
+		t.Errorf("the log shows more or fewer than its %d-line page:\n%s", page, got)
+	}
+}

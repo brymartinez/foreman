@@ -181,3 +181,17 @@ func TestARunThatFailsBeforeAnAgentTurnLeavesTheAttemptUnstarted(t *testing.T) {
 		t.Fatalf("attempt started at %v with no agent turn", a.StartedAt)
 	}
 }
+
+func TestAFailedFirstTurnStampDoesNotStartTheAgent(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	f.store.failUpdate = func(next *task.Record) bool {
+		a := next.CurrentAttempt()
+		return a != nil && !a.StartedAt.IsZero()
+	}
+	f.claude.turn = prTurn("sid-1")
+	_ = f.app.RunTask(context.Background(), key, 4242, io.Discard)
+	if f.claude.starts != 0 {
+		t.Fatalf("the agent ran %d turns with no recorded first turn", f.claude.starts)
+	}
+}

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -129,7 +130,11 @@ func entryNumbers(es []InboxEntry) []int {
 	return out
 }
 
-type fakeStore struct{ recs map[task.Key]*task.Record }
+type fakeStore struct {
+	recs map[task.Key]*task.Record
+	// failUpdate, when set, fails a write whose result it returns true for.
+	failUpdate func(next *task.Record) bool
+}
 
 func (f *fakeStore) Get(_ context.Context, k task.Key) (*task.Record, error) { return f.recs[k], nil }
 func (f *fakeStore) Save(_ context.Context, r *task.Record) error {
@@ -151,6 +156,9 @@ func (f *fakeStore) Update(ctx context.Context, k task.Key, fn func(*task.Record
 		cur = &c
 	}
 	next, err := fn(cur)
+	if err == nil && next != nil && f.failUpdate != nil && f.failUpdate(next) {
+		return nil, errors.New("task file write failed")
+	}
 	if err == nil && next != nil {
 		f.recs[k] = next
 	}

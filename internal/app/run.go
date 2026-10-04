@@ -346,7 +346,9 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 		resume = agent.FindingsMessage(*findings)
 	}
 	if resume != "" && d.Implementer.ID != "" {
-		a.startAttempt(ctx, rec)
+		if err := a.startAttempt(ctx, rec); err != nil {
+			return agent.Turn{}, err
+		}
 		fmt.Fprintf(log, "foreman: resuming %s session %s\n", adapter.Name(), d.Implementer.ID)
 		in.Prompt = resume
 		turn, err := adapter.Resume(ctx, d.Implementer, in)
@@ -390,7 +392,9 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 		fmt.Fprintf(log, "foreman: starting %s in %s\n", adapter.Name(), d.Worktree)
 	}
 	in.Prompt = agent.ImplementationPrompt(brief)
-	a.startAttempt(ctx, rec)
+	if err := a.startAttempt(ctx, rec); err != nil {
+		return agent.Turn{}, err
+	}
 	return adapter.Start(ctx, in, func(s task.Session) {
 		_, _ = a.update(ctx, rec.Key, existing(func(cur *task.Record) {
 			cur.Delegation.Implementer = s
@@ -399,18 +403,23 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 }
 
 // startAttempt stamps the attempt's first agent turn just before the agent starts, so
-// routing, conflict checks, and turn preparation before it do not count as work.
-func (a App) startAttempt(ctx context.Context, rec *task.Record) {
+// routing, conflict checks, and turn preparation before it do not count as work. The
+// agent does not start unless the stamp is saved: a PR whose first turn went
+// unrecorded would show no timing at all.
+func (a App) startAttempt(ctx context.Context, rec *task.Record) error {
 	if at := rec.CurrentAttempt(); at == nil || !at.StartedAt.IsZero() {
-		return
+		return nil
 	}
 	now := a.Now()
-	rec.CurrentAttempt().StartedAt = now
-	_, _ = a.update(ctx, rec.Key, existing(func(cur *task.Record) {
+	if _, err := a.update(ctx, rec.Key, existing(func(cur *task.Record) {
 		if at := cur.CurrentAttempt(); at != nil && at.StartedAt.IsZero() {
 			at.StartedAt = now
 		}
-	}))
+	})); err != nil {
+		return fmt.Errorf("record the attempt's first turn: %w", err)
+	}
+	rec.CurrentAttempt().StartedAt = now
+	return nil
 }
 
 // answerFeedback runs one turn that answers the comments it is given. The PR head
@@ -481,7 +490,9 @@ func (a App) review(ctx context.Context, rec *task.Record, log io.Writer) (agent
 	} else {
 		brief.Comments = feedbackItems(slices.DeleteFunc(comments, func(c PRComment) bool { return strings.TrimSpace(c.Body) == "" }))
 	}
-	a.startAttempt(ctx, rec)
+	if err := a.startAttempt(ctx, rec); err != nil {
+		return agent.ReviewOutcome{}, err
+	}
 	fmt.Fprintf(log, "foreman: %s reviewing PR #%d (round %d)\n", reviewer.Name(), d.PR, len(rec.Reviews)+1)
 	return reviewer.Review(ctx, agent.StartInput{
 		Worktree:     d.Worktree,

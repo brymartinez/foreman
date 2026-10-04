@@ -190,11 +190,11 @@ func (m *Model) historyPage() int {
 	return max(list-1, 1)
 }
 
-// historyLogPage is how many log lines the detail shows under its title, its phases,
-// and its log heading.
+// historyLogPage is how many log lines the detail shows under its title, its phase
+// lines, and its log heading.
 func (m *Model) historyLogPage() int {
 	_, lower := historyLayout(m.Height, true)
-	return max(lower-3, 1)
+	return max(lower-2-len(m.phaseLines()), 1)
 }
 
 // historyFrame draws the PR history in place of the dashboard.
@@ -318,19 +318,37 @@ var phaseNames = map[task.Phase]string{
 	task.PhasePaused:         "paused",
 }
 
-// phasesText is the detail's phase line: each measured phase, then the total.
-func phasesText(r app.HistoryRow) string {
+// phaseParts are the detail's phase values: each measured phase, then the total.
+func phaseParts(r app.HistoryRow) []string {
 	if r.Timing == app.TimingUnavailable || r.Phases == nil {
-		return "phase times unavailable"
+		return []string{"phase times unavailable"}
 	}
 	var parts []string
 	for _, p := range task.MeasuredPhases {
 		parts = append(parts, phaseNames[p]+" "+duration(r.Phases[p]))
 	}
 	if r.Timing == app.TimingNoHandoff {
-		return strings.Join(append(parts, fmt.Sprintf("no handoff, %s to the close", duration(r.Total))), " · ")
+		return append(parts, fmt.Sprintf("no handoff, %s to the close", duration(r.Total)))
 	}
-	return strings.Join(append(parts, "total "+duration(r.Total)), " · ")
+	return append(parts, "total "+duration(r.Total))
+}
+
+// phaseLines packs the selected row's phase values into lines of the terminal's
+// width, breaking only between values, so a narrow terminal still shows every one.
+func (m *Model) phaseLines() []string {
+	r := m.selectedHistory()
+	if r == nil {
+		return nil
+	}
+	var lines []string
+	for _, part := range phaseParts(*r) {
+		if n := len(lines); n > 0 && textWidth(lines[n-1]+" · "+part) <= m.Width {
+			lines[n-1] += " · " + part
+			continue
+		}
+		lines = append(lines, part)
+	}
+	return lines
 }
 
 // historyDetail renders the selected PR's heading, its phases, and its log slice.
@@ -369,11 +387,11 @@ func historyDetail(m Model, height int) []string {
 	if m.HistoryLogFocus {
 		logTitle = focusMark + logTitle
 	}
-	out := []string{
-		colored(pad(truncate(heading, m.Width), m.Width), cyan),
-		pad(truncate(phasesText(*r), m.Width), m.Width),
-		colored(pad(truncate(logTitle, m.Width), m.Width), cyan),
+	out := []string{colored(pad(truncate(heading, m.Width), m.Width), cyan)}
+	for _, l := range m.phaseLines() {
+		out = append(out, pad(truncate(l, m.Width), m.Width))
 	}
+	out = append(out, colored(pad(truncate(logTitle, m.Width), m.Width), cyan))
 	var body []string
 	switch {
 	case m.LogErr != "":
@@ -382,7 +400,7 @@ func historyDetail(m Model, height int) []string {
 		body = []string{"  No log lines."}
 	default:
 		end := max(len(m.Log)-m.LogOffset, 0)
-		body = m.Log[max(end-(height-3), 0):end]
+		body = m.Log[max(end-m.historyLogPage(), 0):end]
 	}
 	for _, l := range body {
 		if len(out) >= height {
