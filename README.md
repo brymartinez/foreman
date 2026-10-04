@@ -4,7 +4,7 @@ A local CLI that hands GitHub issues to Claude Code or Codex, and gives the PR b
 you only once it is ready for your review.
 
 ```
-foreman start 825 --agent claude
+foreman  →  pick issue #825 in the inbox, choose Claude
         ↓
   Claude implements in its own worktree, pushes, and opens the PR
         ↓
@@ -12,12 +12,12 @@ foreman start 825 --agent claude
         ↓
   foreman reads the PR's CI checks on GitHub
         ↓
-foreman inbox  →  READY FOR YOU
+foreman  →  READY_FOR_HUMAN in delegated work
 ```
 
 You review and merge. Foreman never merges, and it doesn't run as a background service.
-Nothing happens between commands except the per-task runner that works on an issue you
-started.
+Nothing happens while the dashboard is closed except the per-task runner that works on
+an issue you started.
 
 ## Requirements
 
@@ -62,33 +62,21 @@ steps separately; set `BIN_DIR` or `CONFIG_DIR` to change where they go.
 
 ## Usage
 
-Run `start` from any checkout of the repository. Foreman reads the repo and its default
-branch from that checkout.
+Foreman is a dashboard. Everything you do with a task happens there.
 
 ```bash
-foreman                                        # dashboard: inbox, delegated work, and logs
-foreman inbox                                  # refresh, pick an issue, and delegate it
-foreman inbox --non-interactive                 # print the report without prompting
-foreman start 825 --agent claude               # delegate issue #825
-foreman start 825 --agent codex --context ./context/825.md
-foreman start 825 --agent claude --type fix    # force the branch prefix
-foreman status                                 # delegated work, most urgent first
-foreman show 825                               # everything recorded for one task
-foreman logs 825                               # clean, timestamped runner log
-foreman logs 825 --follow                       # follow a live runner
-foreman logs 825 --raw                          # show raw agent JSONL (Claude and Codex)
-foreman respond 825                            # answer a question from the agent
-foreman cancel 825                             # stop a running agent; foreman start resumes
-foreman clean --dry-run                        # which worktrees would be removed
-foreman clean                                  # remove worktrees of DONE tasks
-foreman config --stages                         # which stage instruction files apply here
-foreman config --show                           # show the resolved configuration
-foreman config --edit                           # edit the config in $VISUAL/$EDITOR
-foreman version
+foreman              # open the dashboard: inbox, delegated work, and logs
+foreman -a           # open it with auto mode on for this session (also --auto)
+foreman --no-auto    # open it with auto mode off for this session
+foreman -c           # edit the config in $VISUAL, $EDITOR, or vi
+foreman --help
+foreman --version
 ```
 
-`<issue>` can be `825`, `#825`, or `owner/repo#825`. Use the last form when the same
-number is tracked in more than one repo.
+`-a` and `--no-auto` override the saved auto mode choice for this session only and
+don't change it. `-c` opens the config even when it fails to load, shows the error
+first, and checks the file again once the editor exits. A missing or empty config is
+filled with the defaults before it opens.
 
 ## Dashboard
 
@@ -106,17 +94,21 @@ foreman · 2 delegated · 3 in the inbox · auto on 1/3 · refreshed 10:01:22
 ────────────────────────────────────────────────────────────────────────────────
 LOG · midsoln/foreman#2 · ~/.local/share/foreman/logs/2.log
 2026-09-29T10:01:04Z claude Bash go test ./internal/tui
-j/k task · u/d log page · ctrl-u/d half page · g/G ends · s show/log · esc close · h/l pane
+j/k task · u/d log page · ctrl-u/d half page · g/G ends · s show/log · R raw · esc close · ? help
 ```
 
 The left pane holds issues you can delegate, and the right pane holds delegated work.
 Press `←`/`→`, `h`/`l`, or `tab` to switch between them. In DELEGATED WORK, use `j`/`k`
 to pick a task and Enter to open its log below the lists. Escape closes the log. With
-the log open, `u`/`d` and `g`/`G` scroll it while `j`/`k` still select tasks. Press `s`,
-from either list, to swap the log for the task's full `foreman show` output, wrapped to
-the terminal width and scrolled with the same keys. Press `s` again to return to the
-log. Press `c` from either list to cancel the highlighted delegated task, after
-confirmation.
+the log open, `u`/`d` and `g`/`G` scroll it while `j`/`k` still select tasks. The log
+opens at its tail. Scrolling past the oldest loaded line reads older lines from the log
+file, and `g` reads back to its first line. Press `R` to switch between cleaned lines
+and the raw agent JSONL; the log returns to its tail and the heading says `raw`. Press
+`s`, from either list, to swap the log for everything recorded for the task: its state,
+branch, worktree, PR, planning comments, CI, usage, and last outcome, scrolled with the
+same keys. Press `s` again to return to the log. Press `c` from either list to cancel
+the highlighted delegated task, after confirmation. Press `?` for the keys and the
+foreman version; any key closes it.
 
 Row text is drawn in your terminal's own foreground, so it reads on a light theme and a
 dark one alike. Color is kept for the headings, the dividers, the message line, and each
@@ -126,7 +118,7 @@ task's state. The selected row is drawn in reverse video with no color inside it
 |---|---|
 | `tab`, `←` `→`, `h` `l` | switch between inbox and delegated work |
 | `↑` `↓`, `k` `j` | move the focused list cursor |
-| `enter` on an issue | delegate it: pick `1` for Claude, `2` for Codex, or `3` to route it, then type an optional context file |
+| `enter` on an issue | delegate it: pick `1` for Claude, `2` for Codex, or `3` to route it, then type an optional context file. A `FAILED` issue starts again; a `REVIEWED` one resumes on its PR comments |
 | `enter` on a task | open its log below, or the waiting question on a `NEEDS_DECISION` task |
 | `c` | cancel the highlighted delegated task, after a `y`/`n` confirm |
 | `a` | turn auto mode on or off; the choice is kept for the next launch |
@@ -134,31 +126,31 @@ task's state. The selected row is drawn in reverse video with no color inside it
 | `r` | refresh from GitHub now |
 | `u` `d` with a log open | scroll up or down one page |
 | `ctrl+u` `ctrl+d` with a log open | scroll up or down half a page |
-| `g` `G` with a log open | jump to the oldest available line or follow the tail |
-| `s` with a log open | switch between the log and the task's `foreman show` output |
+| `g` `G` with a log open | jump to the log's first line or follow the tail |
+| `R` with a log open | switch between cleaned and raw log lines |
+| `s` with a log open | switch between the log and everything recorded for the task |
 | `pgup` `pgdn`, `end` | optional log scroll keys for keyboards that have them |
 | `esc` | close the log or abandon a prompt |
+| `?` | show the keys and the version |
 | `q`, `ctrl+c` | quit |
 
 Delegated work is re-read from the task files every second, so a state change shows up
 on its own. GitHub is refreshed every `refresh` seconds, 60 by default, and when you
-press `r`: that runs the same work as `foreman inbox`, including the readiness gate and
-the DONE cleanup. The dashboard refreshes only while it is open and starts no background
-process.
+press `r`. A refresh runs the searches, the readiness gate, and the DONE cleanup. The
+dashboard refreshes only while it is open and starts no background process.
 
-`foreman tui` is the same command spelled out. The dashboard needs a terminal at least
+The dashboard needs a terminal at least
 60 by 12; below that it says so. When stdin or stdout is not a terminal, `foreman`
-prints this usage text and exits 0, so pipes and scripts are unaffected.
+prints the usage text and exits 0, so pipes and scripts are unaffected.
 
 Enter on a `NEEDS_DECISION` task shows its oldest unanswered question below the lists:
 the issue, context, options, recommendation, and impact. Type an option label or your
-own answer and press Enter; an empty Enter takes the recommended option. The answer is
-handled exactly as `foreman respond` handles it. With several questions waiting, the
+own answer and press Enter; an empty Enter takes the recommended option. With several
+questions waiting, the
 next one follows, and after the last the agent resumes and the pane shows its log.
 `↑` `↓` and `pgup` `pgdn` scroll a long question. Every other key is answer text. Esc
 closes the prompt; answers already recorded are kept, and Enter asks the next one. A
 task whose log is open switches to its question on its own when it needs a decision.
-`foreman respond <issue>` still works from any terminal.
 
 Auto mode is on by default. While the dashboard is open, it starts open issues
 assigned to you that foreman has never delegated, oldest first, with `auto.agent` and
@@ -175,14 +167,15 @@ profile without asking. When no suitable profile can run, the issue's row says
 `waiting:` and why, and auto mode tries it again after the next GitHub refresh.
 
 Press `a` to turn auto mode off or on. Turning it off leaves running agents alone. The
-choice is saved in `~/.local/share/foreman/state.json` and read at the next launch. A
+choice is saved in `~/.local/share/foreman/state.json` and read at the next launch,
+unless you launch with `-a` or `--no-auto`. A
 start that fails is shown on the message line and is not retried until you reopen the
 dashboard. An issue that lacks detail goes through the usual decision flow.
 
-`foreman inbox` lists open issues assigned to you, open issues and PRs that mention
-you, and PRs that request your review. It also reports what changed since the last run,
-including a reason an item lost, such as "no longer assigned to you". Each search
-returns up to 1000 results, and the inbox warns when one hits that limit.
+The inbox searches for open issues assigned to you, open issues and PRs that mention
+you, and PRs that request your review. INBOX lists the issues you can delegate, with
+what changed since the last refresh beneath each one. Each search returns up to 1000
+results.
 
 Set `mentions: false` to leave out the items found only because they mention you, in the
 inbox and in the dashboard's INBOX pane. An item that is also assigned to you, or that
@@ -193,34 +186,29 @@ itself on the way out; foreman still stops checking it. It also stays hidden whe
 search hits its result limit and foreman has to fetch it by key, because the setting
 is applied to the involvement foreman recorded for it.
 
-Waiting tasks show changes beneath their NEEDS DECISION or READY FOR YOU entry,
-including CI changes. Missing undelegated items are checked until a successful
+Missing undelegated items are checked until a successful
 refresh with complete searches clears their involvement reasons, then stop being
 refetched. Delegated work stays tracked. Missing items are not offered for new
 delegation. A failed item lookup warns without aborting the inbox, keeps its stored
 state, and retries next time. An issue you never delegated that GitHub no longer has,
-or that you can no longer see, is reported once and then not checked again. DONE tasks
-and repositories outside the configured filter are excluded. `foreman status` lists every task it can,
-with any failed PR or CI lookups as warnings underneath.
+or that you can no longer see, is dropped and then not checked again. Failed PR or CI
+lookups are counted as warnings in the header.
 
-Local builds show the commit in `foreman version`, for example
+Local builds show the commit in `foreman --version` and in the `?` help, for example
 `foreman 0.1.0-dev (72a70ce12345-dirty)`. The `dirty` suffix means the build included
 uncommitted changes. Builds without Git metadata show `unknown`; release builds
 show their stamped version.
 
-The inbox is interactive by default. It shows repo-qualified identities such as
-`acme/widgets#825`, offers the issues for delegation, asks which configured agent should
-implement the chosen one, and accepts an optional context Markdown file. Press `v` to switch between your configured
-repositories and all of them, and `q` to leave without starting work. Use
-`--non-interactive` for scripts and the report-style output. The interactive picker
-shows unchanged current items again on later runs and can be run from any directory.
-When you delegate an item, Foreman clones or reuses its source checkout under
-`repositories_dir`, then creates the agent worktree under `worktrees_dir`.
+INBOX shows repo-qualified identities such as `acme/widgets#825`. When you delegate
+one, Foreman clones or reuses its source checkout under `repositories_dir`, then
+creates the agent worktree under `worktrees_dir`, so you can run `foreman` from any
+directory.
 
-`--context` is a Markdown file with extra instructions, for example "keep the 5xx-only
-retry behavior". The agent treats it as part of the task.
+The context file you can type after picking an agent is a Markdown file with extra
+instructions, for example "keep the 5xx-only retry behavior". The agent treats it as
+part of the task.
 
-### What `start` does
+### What a start does
 
 1. It creates a worktree and branch named after the issue, for example
    `fix/825-provider-retries`. The slug is capped at 5 words, and the worktree directory
@@ -228,17 +216,16 @@ retry behavior". The agent treats it as part of the task.
    - The prefix is a conventional-commit type. Foreman takes it from the title's own
      prefix (`fix: …`), otherwise from a label (`bug` → `fix`, `documentation` →
      `docs`, …), otherwise it uses `feat`.
-   - `--type chore` overrides it.
-2. It launches a detached runner, logs to `~/.local/share/foreman/logs/`, and returns
-   immediately.
+2. It launches a detached runner that logs to `~/.local/share/foreman/logs/`. The
+   runner keeps going after you quit the dashboard.
 3. The runner has the agent implement the issue, run validation, push, and open a PR
    with `gh pr create`. Foreman then checks with GitHub that the PR exists and targets
    the right branch.
 4. The other agent reviews the PR in a read-only, throwaway session. Findings go back
    to the implementer's session, and the loop repeats until the review is clean.
-5. The next time you run `inbox` or `status`, foreman reads the PR's CI checks on
+5. On the next GitHub refresh, foreman reads the PR's CI checks on
    GitHub, the same list as at the bottom of the PR page. Once they finish, the task is
-   READY FOR YOU.
+   `READY_FOR_HUMAN`.
    - Passing checks show as `✓ CI`. Failing checks are listed as `✗ CI: test`, with
      links.
    - CI belongs to the repo's owners, so foreman never runs or fixes it. You decide
@@ -247,10 +234,10 @@ retry behavior". The agent treats it as part of the task.
    - A merged PR marks the task DONE. A PR closed without merging marks it
      `PR_CLOSED` and stops the run.
 6. Every review records the commit it covered. If the PR gets new commits after a clean
-   review, the next `inbox` or `status` has the reviewer look at them before the task
-   is READY FOR YOU. Once a task is READY FOR YOU, the PR is yours: new commits are
-   flagged in its checklist but not taken back. A runner that crashes during a review
-   picks up at the review when you run `foreman start` again.
+   review, the next refresh has the reviewer look at them before the task is
+   `READY_FOR_HUMAN`. Once it is, the PR is yours: new commits are flagged but not taken
+   back. A runner that crashes during a review picks up at the review when you start
+   the `FAILED` task again from the inbox.
 
 ## Planning
 
@@ -261,7 +248,7 @@ posted plan links to implement the work. If planning needs a decision, the task 
 to `NEEDS_DECISION`. Otherwise, it continues to the PR without an approval step.
 The reviewer checks the PR against the posted PRD.
 
-`foreman show` links the four comments. A task that plans again, for example after a
+The `s` view links the four comments. A task that plans again, for example after a
 failed run, edits the same comments instead of adding new ones. A task that already
 has a PR goes on without a plan.
 
@@ -282,33 +269,29 @@ Foreman never reads or changes those files.
 | `review` | the competing reviewer | `~/.config/foreman/stages/review.md` | `.foreman/review.md` |
 | `pr` | the implementer, for the PR description | `~/.config/foreman/stages/pr.md` | `.foreman/pr.md` |
 
-- The four global files are required. Every command except `config` fails when one
-  is missing. `make config` installs the defaults from `defaults/stages/`, and the
+- The four global files are required. The dashboard won't open when one is missing,
+  and says which. `make config` installs the defaults from `defaults/stages/`, and the
   release archives carry them in `stages/`. Edit your copies freely.
 - Repo files are optional.
 - When both files exist, the agent gets both: global first, then the repo's more
   specific rules.
-- The task's `--context` file and your recorded decisions take precedence over stage
+- The task's context file and your recorded decisions take precedence over stage
   instructions.
 - Tasks read `.foreman/` from their worktree, so only the version committed on the base
   branch counts.
 - A PR body always includes `Closes #N`. A review always ends in foreman's JSON format.
   Otherwise the text is passed through as written.
 
-```bash
-foreman config --stages         # where each stage's instructions come from
-```
-
 ## Cleaning up worktrees
 
-When `inbox` finds a task DONE, it removes the task's worktree. When the PR was merged,
-it also deletes the local `feat/...` or `fix/...` branch. `foreman clean` does the same on demand,
-and `foreman clean <issue>` also works for a FAILED or PR_CLOSED task.
+When a refresh finds a task DONE, it removes the task's worktree. When the PR was
+merged, it also deletes the local `feat/...` or `fix/...` branch. There is no manual
+cleanup: the worktree of a FAILED or PR_CLOSED task stays until you remove it with
+`git worktree remove`.
 
-- A worktree with uncommitted or untracked changes is never removed. Inbox reports it,
-  and you rerun `foreman clean <issue>` once it is tidy.
-- A branch whose PR wasn't merged is kept, so `foreman start` can pick the work up
-  again.
+- A worktree with uncommitted or untracked changes is never removed. A later refresh
+  removes it once it is tidy.
+- A branch whose PR wasn't merged is kept, so a new start can pick the work up again.
 - Remote branches are left to GitHub's "Automatically delete head branches" setting.
 
 Turn either behavior off in the config, under `cleanup`.
@@ -325,48 +308,17 @@ becomes ready for review, or gets PR feedback. Each post names the alert, the ta
 (`owner/repo#N`) and its state, and links the PR, or the issue when there is no PR yet.
 Set the webhook URL in `notifications.webhook_url` (see Configuration). The URL is a
 secret: keep the config file `chmod 600`. Foreman warns when the URL is missing or the
-file is readable by other users, and `config --show` prints only whether it is set.
-Delivery is best effort. A failed post never changes a task, and Foreman appends the
-error to `notifications.log` in the log directory. The inbox and `status` show the same
-thing the next time you run them.
+file is readable by other users, and never prints the URL. Delivery is best effort. A
+failed post never changes a task, and Foreman appends the error to `notifications.log`
+in the log directory. The dashboard shows the task's state the same either way.
 
-```
-NEEDS DECISION
-  acme/widgets#825  Provider retries
-        acme/widgets · Should retries also apply to 4xx responses?
-```
-
-`foreman respond 825` shows each waiting question in turn and reads your answers:
-
-```
-BLOCKED: Need decision
-
-Issue:
-Should retries also apply to 4xx responses?
-
-Context:
-The retry queue only retries 5xx today. The issue says "retry failed requests".
-
-Options:
-A. Keep retries limited to 5xx
-B. Retry 4xx as well
-
-Recommendation:
-A
-
-Impact if wrong:
-Retrying 4xx repeats requests that will never succeed.
-
-Decision (option label, your own answer, or Enter for A):
-> A
-```
-
-You can type an option label, write your own answer, or press Enter to take the
-recommendation. If input ends before you answer, the remaining questions keep
-waiting. Foreman saves each answer to the task file and, once all are answered, resumes
+In the dashboard, Enter on the `NEEDS_DECISION` task shows each waiting question in
+turn: the issue, context, options, recommendation, and impact if wrong. You can type
+an option label, write your own answer, or press Enter to take the recommendation. Esc
+leaves the remaining questions waiting. Foreman saves each answer to the task file
+and, once all are answered, resumes
 the same agent session with them. If that session is gone, it starts a fresh turn that includes every
-decision so far. The answer also appears in the READY FOR YOU summary and in the PR
-description.
+decision so far. The answer also appears in the PR description.
 
 The implementer and reviewer take turns: every fix is reviewed again. If the review
 after the third fix (`fix_rounds`) still has findings, foreman asks the same way: do
@@ -378,32 +330,30 @@ along with your answer.
 Closing a delegated PR without merging it ends the task. On the next GitHub refresh,
 foreman stops the agent if one is still running, moves the task to `PR_CLOSED`, and
 drops it from DELEGATED WORK. Nothing is deleted: the task file, the worktree, and the
-branch are kept, and `foreman clean <issue>` removes the worktree when you want it gone.
+branch are kept.
 Closing the issue as well leaves the task `PR_CLOSED` rather than DONE, so the worktree
 is not cleaned up behind you.
-The run did not fail, so there is no failure notification; the change is reported as an
-inbox note the next time you look.
+The run did not fail, so there is no failure notification.
 
 Reopen the PR and the task comes back on the following refresh. Foreman reads the PR's
 CI and uses the review it already has: a clean review of the PR's current head with
-finished CI makes the task `READY_FOR_HUMAN`, and anything else makes it `REVIEWING`,
-which `foreman start` picks up. No agent is started for you either way.
+finished CI makes the task `READY_FOR_HUMAN`, and anything else makes it `REVIEWING`.
+No agent is started for you either way.
 
 If the agent does not stop at once, the task is `PR_CLOSED` but keeps its runner, and
-every refresh tries again. `foreman start` and `foreman clean` refuse it until that
-runner is gone, so a second agent never shares the worktree with the first.
+every refresh tries again.
 
 ## States
 
 | State | Meaning | Your move |
 |---|---|---|
-| `WORKING` | The implementer is running | Wait, or `foreman cancel` to stop it |
-| `NEEDS_DECISION` | The agent asked a question | `foreman respond`, or Enter on the task in the dashboard |
-| `REVIEWING` | PR open; under review, or waiting on CI | Wait, or `foreman cancel` to stop a running review |
+| `WORKING` | The implementer is running | Wait, or `c` on the task to stop it |
+| `NEEDS_DECISION` | The agent asked a question | Enter on the task to answer |
+| `REVIEWING` | PR open; under review, or waiting on CI | Wait, or `c` on the task to stop a running review |
 | `READY_FOR_HUMAN` | Review clean, CI finished (✓ or ✗ shown) | Review and merge the PR |
 | `DONE` | PR merged or issue closed | Nothing |
-| `FAILED` | The agent failed, the run was cancelled, or the runner died | `foreman show` to see why, then `foreman start` to retry |
-| `PR_CLOSED` | You closed the PR without merging it | Nothing, or reopen the PR, or `foreman start` to retry |
+| `FAILED` | The agent failed, the run was cancelled, or the runner died | `s` on the task to see why, then Enter on it in the inbox to retry |
+| `PR_CLOSED` | You closed the PR without merging it | Nothing, or reopen the PR |
 
 ## Task files
 
@@ -417,9 +367,9 @@ Foreman rewrites only the frontmatter keys it owns. Keys you add, such as `tags`
 
 ### Obsidian
 
-The files are ready for Obsidian. On the first interactive `foreman inbox`, Foreman
+The files are ready for Obsidian. The first time you open the dashboard, Foreman
 explains the configured task directory and offers to create it. To use a folder inside
-your vault, point `tasks_dir` at it before running inbox:
+your vault, point `tasks_dir` at it first:
 
 ```yaml
 tasks_dir: ~/Documents/vault/foreman
@@ -435,7 +385,7 @@ Every key is optional. These are the defaults:
 ```yaml
 tasks_dir: ~/.local/share/foreman/tasks
 worktrees_dir: ~/.local/share/foreman/worktrees
-repositories_dir: ~/.local/share/foreman/repositories # inbox source checkouts
+repositories_dir: ~/.local/share/foreman/repositories # source checkouts for delegated work
 log_dir: ~/.local/share/foreman/logs
 review_rounds: 3                     # reviewer passes over the whole PR per review
 fix_rounds: 3                        # fix and re-review cycles before foreman asks you
@@ -466,7 +416,7 @@ codex:
 include_repositories: []             # exact owner/name; when set, the inbox shows only these
 exclude_repositories: []             # exact owner/name hidden from the inbox when include is empty
 cleanup:
-  on_done: true                   # inbox removes DONE tasks' worktrees
+  on_done: true                   # each refresh removes DONE tasks' worktrees
   delete_merged_branch: true      # and the local branch, once the PR is merged
 ```
 
@@ -474,8 +424,7 @@ cleanup:
 
 Planning, implementation, and review can use separate models. PR creation is part of
 implementation. The agent chosen for the task plans and implements; the competing
-agent reviews. Run `foreman config --edit` to set the values, then
-`foreman config --show` to see what each stage will use. For example:
+agent reviews. Run `foreman -c` to set the values. For example:
 
 ```yaml
 claude:
@@ -498,13 +447,11 @@ GitHub whenever you ask.
 `include_repositories` and `exclude_repositories` accept exact repository names such as
 `acme/widgets`. A nonempty include list limits the inbox to those repositories and the
 exclude list is then ignored. With an empty include list, the exclude list hides its
-repositories. The filter applies to fresh inbox results and tracked-task refreshes,
-including `foreman inbox --non-interactive`, and to the waiting tasks the inbox
-reports. Press `v` in the dashboard or the
-interactive inbox to see every repository for the rest of the session; `mentions`
-still applies. Auto mode pauses while the dashboard shows every repository, so it only
-starts work from your configured repositories. `foreman status` and the dashboard's delegated work list every task
-whatever its repository.
+repositories. The filter applies to fresh inbox results and tracked-task refreshes.
+Press `v` in the dashboard to see every repository for the rest of the session;
+`mentions` still applies. Auto mode pauses while the dashboard shows every repository,
+so it only starts work from your configured repositories. DELEGATED WORK lists every
+task whatever its repository.
 
 ## Routing
 
@@ -555,13 +502,13 @@ foreman uses `default` when the rule lists it and says the quota is unknown.
 
 In the dashboard, press `3` after `enter` on a new issue to route it. The footer shows
 the chosen profile, its models, and the reason: `enter` starts it, and `esc` goes back
-to `1` and `2`, which still pick an agent yourself. `foreman start` never routes.
+to `1` and `2`, which still pick an agent yourself.
 
 The task keeps its profile: a retry with the same agent uses it, and starting with the
 other agent drops it. The competing agent still reviews with its review settings.
-`foreman show` lists the profile and the reason, and the task's log starts with a
-`route:<profile>:<agent>:<reason>` line. `foreman config --show` reports whether
-routing is on and exits nonzero when `routing.yaml` has an error.
+The `s` view lists the profile and the reason, and the task's log starts with a
+`route:<profile>:<agent>:<reason>` line. An error in `routing.yaml` shows when you
+route an issue, and nothing routed starts until you fix it.
 
 ## Permissions
 

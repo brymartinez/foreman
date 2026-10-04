@@ -2,6 +2,11 @@
 
 ## Current stage
 
+Stage 43 (foreman is TUI-first, for issue #43) is complete. Bare `foreman` opens the
+dashboard, `-a`/`--auto` and `--no-auto` set auto mode for the session, and `-c` edits
+the config. The task and config subcommands are gone. The dashboard gained `?` (keys
+and version), `R` (raw log lines), and log paging back to the file start.
+`scripts/e2e.sh` drives the dashboard through `scripts/tui-drive.py`.
 Stage 39 (routing new dashboard tasks to a profile from `routing.yaml`, with the
 optional `quota-axi` check, for issue #39) is complete. Stage 31 (answering decisions
 in the dashboard), stage 29 (repository include filter and the `v` view toggle), stage
@@ -20,9 +25,9 @@ Findings 1 to 4 were fixed in stage 28.
 2. The turn, verify, and record sequence copied four times. Fixed.
 3. `implement` took positional `nil` arguments, and its doc sat on `needsPlan`. Fixed.
 4. FAILED transitions written by hand. Fixed with `failTask`.
-5. `cmd/foreman/main.go` `run` (about 226 lines) parses, loads config, wires every
-   adapter, and dispatches every command in one switch. Splitting wiring from dispatch
-   would let tests cover the wiring without the binary.
+5. `cmd/foreman/main.go` `run` (about 105 lines) parses, loads config, wires every
+   adapter, and runs the dashboard or a task. Splitting wiring from dispatch would let
+   tests cover the wiring without the binary.
 6. `internal/app/gate.go` `gate` (about 115 lines) mixes GitHub reads, state
    transitions, and note building. Each check could be its own function returning the
    change to apply.
@@ -37,13 +42,15 @@ Findings 1 to 4 were fixed in stage 28.
 
 ## Known limitations
 
-- Routing's dashboard flow is covered by unit tests with a stub source. `scripts/e2e.sh`
-  cannot drive the dashboard, so it checks `config --show` and a retried routed task.
-
-- The gate runs only when `inbox` or `status` runs, or while the dashboard is open,
-  because the design rules out daemons. Nothing runs between commands
-  except a task's own runner. Notifications come from the runner and from those
-  commands.
+- Routing's selector flow (`3` in the agent choice) is covered by unit tests with a stub
+  source. `scripts/e2e.sh` checks a retried routed task.
+- The gate runs only while the dashboard is open, because the design rules out
+  daemons. Nothing else runs while it is closed except a task's own runner.
+  Notifications come from the runner and from dashboard refreshes.
+- A PR_CLOSED task cannot be restarted: the inbox offers only FAILED and REVIEWED
+  delegated work. Reopening the PR brings it back.
+- The dashboard does not show which searches hit the 1000-result limit, or the
+  inbox's change notes for tasks it does not offer.
 - `gh pr checks` handling is verified against gh's documented behavior and fixtures,
   not a live PR, because the user declined the live probe.
 - Validation results are self-reported by the agent. CI is the independent

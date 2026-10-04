@@ -1,8 +1,8 @@
 # Architecture
 
 ```
-cmd/foreman           wiring: build adapters, call app, render output
-internal/cli          argv -> Command; no I/O beyond parsing
+cmd/foreman           wiring: build adapters, open the dashboard or run a task
+internal/cli          argv -> Command (launch flags and __run); no I/O beyond parsing
 internal/config       tasks directory resolution
 internal/routing      routing.yaml: profiles, rules, default, and their validation
 internal/render       terminal formatting of app results
@@ -27,8 +27,8 @@ Every agent interaction is one headless turn that runs to completion and returns
 `agent.Outcome`. There are no interactive sessions and no terminal scraping.
 
 ```
-foreman start 825 --agent claude          (run from a checkout of the repo)
-  ├─ gh: repo + default branch of the checkout, fetch issue
+app.Start, from the dashboard (enter on an inbox issue, or auto mode)
+  ├─ gh: repo + default branch of the managed clone, fetch issue
   ├─ git: ensure worktree <root>/<owner>-<repo>/825-<slug> on branch <type>/825-<slug>
   ├─ store: task file, state WORKING, session id
   └─ spawn detached `foreman __run owner/repo#825` (pid + log recorded), exit
@@ -72,22 +72,25 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
                     findings after fix_rounds reviewed fixes since the last answer ->
                                 NEEDS_DECISION (A: another round, B: accept remaining), exit
 
-foreman resume 825    -> a REVIEWED task goes back to WORKING with its branch,
+app.Resume            -> a REVIEWED task goes back to WORKING with its branch,
                          worktree, PR, and session kept; the runner answers the
                          comments
-foreman respond 825   -> answer each waiting question in order; after the last,
+app.Respond           -> answer each waiting question in order; after the last,
                          state WORKING, spawn runner
                          runner: Resume(session, all answers); on ErrNoSession, a fresh
                          Start whose prompt lists all recorded decisions
-foreman cancel 825    -> SIGTERM the runner, wait up to 30s for it to exit
+app.Cancel            -> SIGTERM the runner, wait up to 30s for it to exit
                          runner: context cancelled -> agent process group stopped;
                          the failed step records FAILED, outcome cancelled, keeping
                          session, usage, branch, worktree, and PR
-foreman               -> the dashboard, until q or ctrl+c:
+foreman [-a|--auto|--no-auto]
+                      -> the dashboard, until q or ctrl+c. A launch flag sets auto
+                         mode for this session and saves nothing.
                          every 1s : app.Tasks re-reads the task files and, when open,
-                                    re-tails the selected task's runner log; no GitHub call
-                         every `refresh` seconds (60 by default): app.InboxView, the
-                           same as `foreman inbox`
+                                    reads the bytes the runner added to the selected
+                                    task's log; no GitHub call
+                         every `refresh` seconds (60 by default), and on r:
+                           app.InboxView, the refresh below
                          enter on an inbox issue -> agent, context file, app.Start
                            3 (routing on, never delegated) -> context file,
                              app.Route, show the profile and reason; enter ->
@@ -101,6 +104,11 @@ foreman               -> the dashboard, until q or ctrl+c:
                          an open log whose task needs a decision -> the question
                          left/right, h/l -> focus the inbox/delegated work
                          esc -> close the log
+                         s -> switch the open log and the task's state (render.Show)
+                         R -> switch the open log between cleaned and raw lines
+                         u, pgup, ctrl-u past the oldest loaded line -> read an
+                           older chunk of the log file; g -> read back to its start
+                         ? -> the keys and the version; any key closes it
                          c on a running task     -> confirm, app.Cancel
                          a -> toggle auto mode, saved in state.json (D144)
                          v -> toggle the inbox between the configured repositories
@@ -112,7 +120,7 @@ foreman               -> the dashboard, until q or ctrl+c:
                            on: app.Route, then app.Start with the profile, no
                            confirmation; a wait holds the issue until the next refresh
 
-foreman inbox|status  -> runner pid dead while WORKING/REVIEWING -> FAILED
+app.InboxView         -> runner pid dead while WORKING/REVIEWING -> FAILED
                          readiness gate (gate.go), per task with a PR:
                            PR closed  -> stop the runner, PR_CLOSED
                            PR reopened -> READY_FOR_HUMAN or REVIEWING
@@ -133,14 +141,15 @@ foreman inbox|status  -> runner pid dead while WORKING/REVIEWING -> FAILED
                            mergeable CONFLICTING, (PR head, base head) never tried ->
                              record the pair, WORKING, spawn a runner
                            UNKNOWN or MERGEABLE -> nothing
-                        inbox only, cleanup.on_done: DONE task -> git worktree remove
+                         cleanup.on_done: DONE task -> git worktree remove
                            (kept if dirty); branch -D only if its PR merged
-foreman clean [<issue>] -> the same cleanup on demand; <issue> may also be FAILED
-                           or PR_CLOSED
+
+foreman -c            -> open the config in $VISUAL, $EDITOR, or vi, before the config
+                         loads, so an invalid file can be fixed; check it after
 ```
 
 Nothing runs in the background except the runner working on a task. The readiness and
-liveness checks happen whenever the user runs a command. Every task write goes through
+liveness checks happen on each dashboard refresh. Every task write goes through
 `App.update`, which posts an alert to the Discord webhook when a task enters
 NEEDS_DECISION, FAILED, READY_FOR_HUMAN, or REVIEWED.
 
@@ -152,20 +161,23 @@ the same commit. The commit message records why it changed.
 
 ### Processes
 
-- **No daemon.** Nothing runs between commands except a task's own runner. The gate,
-  liveness checks, and cleanup run when `inbox` or `status` runs, or while the
-  dashboard is open, which is the same as running `inbox` on a timer. Rejected: a
+- **No daemon.** Nothing runs while the dashboard is closed except a task's own runner.
+  The gate, liveness checks, and cleanup run on each dashboard refresh. Rejected: a
   daemon, a watcher, or a runner that waits for CI.
-- **One detached runner per task.** `start`, `respond`, `resume`, and the gate spawn
+- **The dashboard is the only interface.** Bare `foreman` opens it; `-a`/`--auto` and
+  `--no-auto` set auto mode for the session, and `-c` edits the config. The only other
+  verb is the hidden `__run`. Task subcommands were dropped because they duplicated the
+  dashboard, and a piped `foreman` still prints usage.
+- **One detached runner per task.** `App.Start`, `App.Respond`, `App.Resume`, and the gate spawn
   `foreman __run owner/repo#N` with `Setsid`, so closing the terminal doesn't stop it.
   A runner is alive when `kill(pid, 0)` succeeds and `ps` shows ` __run `, which guards
   against pid reuse. A dead runner is reaped only after the gate has read its PR, so a
   GitHub outage delays a FAILED verdict instead of risking a wrong one.
 - **The runner owns its log.** `Spawn` passes the log file itself as stdout and stderr,
   and the runner timestamps its own lines. A writer in the launcher needs a pipe, which
-  dies when `start` exits and kills the runner on its next write.
+  dies when the dashboard exits and kills the runner on its next write.
 - **Stopping is clean.** Agents run in their own process group, which gets SIGTERM on
-  cancel with a 5-second `WaitDelay`. `foreman cancel` waits up to 30 seconds and never
+  cancel with a 5-second `WaitDelay`. `App.Cancel` waits up to 30 seconds and never
   SIGKILLs the runner, because that would leave the agent running. Any SIGTERM, SIGINT,
   or SIGHUP counts as a cancel and records FAILED with outcome `cancelled`.
 - **A removed task file stops its runner.** Runner writes go through `existing`, which
@@ -203,9 +215,9 @@ the same commit. The commit message records why it changed.
   replace only the keys foreman owns (snake_case) through a `yaml.Node`, so user keys
   and comments keep their place. The body is the user's: foreman's only edit is
   appending a line to `## Decisions` when an answer is recorded.
-- **Writes are locked.** The runner, `inbox`, and `status` can write one file at once.
+- **Writes are locked.** The runner and the dashboard can write one file at once.
   `TaskStore.Update` takes a flock on `<tasks_dir>/.foreman.lock`, re-reads, applies,
-  and saves atomically. `inbox` merges in only fields that come from GitHub.
+  and saves atomically. The inbox refresh merges in only fields that come from GitHub.
 - **Every write goes through `App.update`**, which sends the alert when the state
   enters NEEDS_DECISION, FAILED, READY_FOR_HUMAN, or REVIEWED. Call sites never notify
   on their own.
@@ -217,10 +229,8 @@ the same commit. The commit message records why it changed.
   follows is never saved as a failure.
 - **Names are computed once.** `task.WorkName` is `<issue>-<slug>` (at most 5 words and
   40 characters, conventional prefix removed). The branch is `<type>/<workName>`, with
-  the type from `--type`, the title prefix, the labels, then `feat`. Both are stored at
-  `start`, so renaming the issue renames nothing. Old `agent/…` branches still work.
-- **Issue references** accept `825`, `#825`, or `owner/repo#825`. A bare number that
-  matches more than one tracked repo is an error that lists the choices.
+  the type from the title prefix, the labels, then `feat`. Both are stored at the first
+  start, so renaming the issue renames nothing. Old `agent/…` branches still work.
 
 ### Agents
 
@@ -262,10 +272,10 @@ the same commit. The commit message records why it changed.
   `agent` and may set `plan_model`, `model`, and, for Codex, the two efforts; omitted
   fields inherit `claude.*` or `codex.*`. Budgets, notifications, repository filters,
   cleanup, auto mode, and review settings stay in `config.yaml`. No file means routing
-  is off. A file that fails to load is an error on every route and in `config --show`,
-  and nothing that needed a route starts; other commands still run.
-- **Only dashboard starts of never-delegated issues are routed:** auto mode, and `3` in
-  the agent choice. `1` and `2` override it. `foreman start` and `inbox` never route.
+  is off. A file that fails to load is an error on every route, and nothing that needed
+  a route starts; the rest of the dashboard still works.
+- **Only starts of never-delegated issues are routed:** auto mode, and `3` in the agent
+  choice. `1` and `2` override it.
 - **Fit comes first.** A selector turn (Claude with `claude.plan_model` unless
   `selector` says otherwise) reads the repository, title, labels, body (6000 runes), up
   to 10 of the newest non-foreman comments (1000 runes each, 5000 in all), and the
@@ -302,8 +312,8 @@ the same commit. The commit message records why it changed.
   `review`, and `pr` each resolve `stages/<stage>.md` next to the config file, then the
   committed `.foreman/<stage>.md` in the task's worktree. Foreman never parses them and
   never reads CLAUDE.md or AGENTS.md.
-- **The global files are required.** Every command except `config` fails naming the
-  missing files. `make config` (`scripts/install-stages.sh`) installs the defaults from
+- **The global files are required.** The dashboard and the runner fail naming the
+  missing files; `foreman -c` and a piped `foreman` don't check them. `make config` (`scripts/install-stages.sh`) installs the defaults from
   `defaults/stages/` and never overwrites an installed file. It names each installed
   file that differs from its default and prints the `cp` command that replaces it.
 - **Prompts hold protocol, not workflow:** the role, the issue, paths and branch, push
@@ -358,15 +368,16 @@ the same commit. The commit message records why it changed.
   with `<!-- foreman:reply -->` and foreman drops those, because replies post under the
   developer's own login. A turn that leaves the head unchanged only replied and goes
   straight back; one that moved it is reviewed. A run answers new comments at most
-  three times before handing over. `foreman resume` keeps the branch, PR, and session;
-  `start` rebuilds them.
+  three times before handing over. Enter on a REVIEWED issue resumes with the branch,
+  PR, and session kept; a start rebuilds them.
 - **A handed-over PR that conflicts is repaired once per (PR head, base head) pair.**
   Every attempted pair is kept, so none is tried twice. A repair is accepted only if
   the head moved, contains the base head, and every reported check passed; anything
   else asks the developer.
 - **Cleanup never loses work.** `git worktree remove` without `--force`, so a dirty
   worktree stays. The local branch is deleted (`-D`, for squash merges) only when its PR
-  merged. `inbox` cleans DONE tasks automatically unless `cleanup.on_done` is off.
+  merged. Each refresh cleans DONE tasks unless `cleanup.on_done` is off. There is no
+  manual cleanup: a FAILED or PR_CLOSED worktree is the developer's to remove.
 
 ### Inbox
 
@@ -382,17 +393,16 @@ the same commit. The commit message records why it changed.
   repositories and overrides `exclude_repositories`; otherwise the exclude list hides
   its repositories. `App.InboxView` drops filtered items and stored records before
   `Reconcile`, so the configured view writes no records for them and reports no waiting
-  task from them, and `fetchTracked` skips tracked items outside the view. `v` in the dashboard and the picker passes `allRepos`, which
+  task from them, and `fetchTracked` skips tracked items outside the view. `v` in the dashboard passes `allRepos`, which
   bypasses both lists for the session; the searches, involvement reasons, and
   `mentions` are the same in either view. In the dashboard, `v` empties INBOX until the
   new view's refresh lands, so no row from the old view stays selectable. Auto mode
-  starts nothing in the all view, so a look outside the filter never spends a run there. `status` and
-  DELEGATED WORK read the task store, so tasks in any repository stay reachable.
+  starts nothing in the all view, so a look outside the filter never spends a run there.
+  DELEGATED WORK reads the task store, so tasks in any repository stay reachable.
 - **Lookup failures warn and retry** next refresh without blocking other items. A 404
   or 410 on an undelegated item is reported once and then no longer checked.
-- **Delegation from the inbox doesn't need a checkout:** foreman keeps a clone under
-  `repositories_dir` and creates worktrees from it. `foreman start` stays bound to the
-  current checkout.
+- **Delegation doesn't need a checkout:** foreman keeps a clone under
+  `repositories_dir` and creates worktrees from it.
 
 ### Dashboard
 
@@ -403,18 +413,26 @@ the same commit. The commit message records why it changed.
   piped `foreman` prints usage and exits 0; control characters in dynamic text become
   spaces; widths are counted in terminal columns; GitHub refreshes run off the input
   goroutine; quitting waits for a `Start`, `Cancel`, or `Respond` in flight.
-- **Decisions are answered in the lower pane through `app.Respond`,** so an option
-  label, free text, and an empty answer resolve as they do in `foreman respond`. The
+- **Decisions are answered in the lower pane through `app.Respond`,** which resolves an
+  option label, free text, or an empty answer (the recommendation). The
   prompt is its own mode: every rune is answer text, so an answer can start with `q`
   or `j`. It reads the question from the task record on each frame, so it always shows
   the oldest unanswered one. It takes half of the body, because a question is read in
   full before it is answered, and the answer line is always its last row. Opening it
   pins the cursor to the task, so a new delegation cannot move it mid-answer.
+- **The log pane pages by byte offset.** Opening a log reads its last 128 KiB
+  (`logChunk`); each tick reads only the bytes past the loaded end, so lines loaded
+  by scrolling back stay. Scrolling past the oldest loaded line reads the chunk before
+  it through `logs.Back` and `logs.Lines`, and `g` repeats that to the file start. A
+  chunk is cut at a file line before cleaning, because cleaning can drop or expand a
+  line. `R` shows raw lines and returns to the tail, since raw and cleaned lines do not
+  line up. The scroll offset counts from the tail and grows with new lines, so a reader
+  scrolled back keeps the same lines on screen.
 
 ### Notifications
 
 - **Alerts go to a Discord webhook** (`notifications.webhook_url`). The URL is a secret:
-  `config --show` prints only whether it is set, and errors never contain it. Delivery
+  foreman never prints it, and errors never contain it. Delivery
   errors go to `<log_dir>/notifications.log` and never change a task or an exit code.
   Native desktop notifications were dropped because they never reach a phone.
 
@@ -434,3 +452,6 @@ the same commit. The commit message records why it changed.
   binary, a timeout, or no report makes quota unknown.
 - **`FOREMAN_CONFIG`** points at another config file; `scripts/e2e.sh` uses it to run
   the built binary against a local origin, a stand-in `gh`, and stub agents.
+  `scripts/tui-drive.py` (python3, standard library) runs the dashboard in a
+  pseudo-terminal and plays keys against it, so the e2e scenarios start, answer, cancel,
+  and resume work the way the developer does.
