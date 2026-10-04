@@ -259,7 +259,9 @@ func TestReopenedPRRecreatesACleanedWorktreeWhenWorkResumes(t *testing.T) {
 	if got.State != task.Working || got.Delegation.RunnerPID == 0 {
 		t.Fatalf("state %s pid %d", got.State, got.Delegation.RunnerPID)
 	}
-	want := WorktreeRequest{RepoDir: "/repos/ridezoomo-armada-backend", Path: got.Delegation.Worktree, Branch: got.Delegation.Branch, BaseRef: got.Delegation.BaseRef}
+	// No base ref: the kept branch must exist, or the restore fails instead of starting
+	// a new branch without the task's commits.
+	want := WorktreeRequest{RepoDir: "/repos/ridezoomo-armada-backend", Path: got.Delegation.Worktree, Branch: got.Delegation.Branch}
 	if len(f.wt.reqs) != ensured+1 || f.wt.reqs[ensured] != want || !got.Delegation.WorktreeRemovedAt.IsZero() {
 		t.Errorf("ensured %+v, removed at %v", f.wt.reqs[ensured:], got.Delegation.WorktreeRemovedAt)
 	}

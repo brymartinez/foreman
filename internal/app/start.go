@@ -221,7 +221,9 @@ func (a App) launch(ctx context.Context, key task.Key) (*task.Record, error) {
 
 // restoreWorktree recreates a worktree that cleanup removed. Cleanup removes a
 // PR_CLOSED task's worktree, and reopening the PR can hand the task back to a runner.
-// The local branch was kept, so the worktree comes back on the same commits.
+// The local branch was kept, so the worktree comes back on the same commits. It is
+// looked up in the managed checkout without a base ref: a task started from another
+// checkout has its branch there, and creating a fresh one would drop its commits.
 func (a App) restoreWorktree(ctx context.Context, key task.Key) error {
 	rec, err := a.Store.Get(ctx, key)
 	if err != nil || rec == nil || rec.Delegation == nil || rec.Delegation.WorktreeRemovedAt.IsZero() {
@@ -232,7 +234,7 @@ func (a App) restoreWorktree(ctx context.Context, key task.Key) error {
 	if _, err := a.sourceRepo(ctx, &req); err != nil {
 		return fmt.Errorf("restore worktree: %w", err)
 	}
-	if err := a.Worktrees.Ensure(ctx, WorktreeRequest{RepoDir: req.Dir, Path: d.Worktree, Branch: d.Branch, BaseRef: d.BaseRef}); err != nil {
+	if err := a.Worktrees.Ensure(ctx, WorktreeRequest{RepoDir: req.Dir, Path: d.Worktree, Branch: d.Branch}); err != nil {
 		return fmt.Errorf("restore worktree: %w", err)
 	}
 	_, err = a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {

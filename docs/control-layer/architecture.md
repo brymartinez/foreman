@@ -131,7 +131,8 @@ app.InboxView         -> runner pid dead while WORKING/REVIEWING -> FAILED
                            PR closed  -> stop the runner, PR_CLOSED
                            PR reopened -> READY_FOR_HUMAN or REVIEWING
                            PR_CLOSED leaving for any reason -> recreate a worktree
-                             cleanup removed, from the kept branch
+                             cleanup removed, from the kept branch in the managed
+                             checkout; a missing branch fails the restore
                          and then, per stopped task with a PR, including FAILED:
                            PR merged -> DONE
                            REVIEWING + clean review, PR head moved -> WORKING, spawn
