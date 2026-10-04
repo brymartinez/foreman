@@ -2,6 +2,9 @@
 
 ## Current stage
 
+Stage 45 (PR history, for issue #45) is complete. `p` opens the merged and closed
+Foreman PRs with their phase times and each attempt's log. Task files record
+`attempts`, with phase marks written in `App.update`.
 Stage 43 (foreman is TUI-first, for issue #43) is complete. Bare `foreman` opens the
 dashboard, `-a`/`--auto` and `--no-auto` set auto mode for the session, and `-c` edits
 the config. The task and config subcommands are gone. The dashboard gained `?` (keys
@@ -43,6 +46,11 @@ Findings 1 to 4 were fixed in stage 28.
 
 ## Known limitations
 
+- PR history shows timing only for attempts recorded since stage 45. Older PRs, and a
+  task in flight when foreman was upgraded, show `unavailable`.
+- A PR closed before its handoff is measured to the close the dashboard saw, or to
+  GitHub's close time when the dashboard was not open.
+
 - Implementation checkpoint validation commands are agent reported, as with PR
   validation. Foreman verifies the branch, clean worktree, and advancing commit.
   A headless agent may still run a long turn before it elects to checkpoint.
@@ -71,5 +79,6 @@ Findings 1 to 4 were fixed in stage 28.
 
 ## Next stage
 
-Compare completed task usage and outcomes before changing the models or budgets. For
+Compare completed task usage, outcomes, and the PR history's phase times before
+changing the models or budgets. For
 code quality, take refactor candidate 5 (`cmd/foreman` wiring) next.
