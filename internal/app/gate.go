@@ -205,12 +205,13 @@ func (a App) stopRun(ctx context.Context, r *task.Record) error {
 
 // closePR ends a task whose PR was closed without merging. The agent did not fail, so
 // the outcome says only what happened and nothing notifies the developer, who closed
-// the PR. The branch and worktree stay for a later start. The runner's pid stays too:
+// the PR. The branch stays for a later start; cleanup may remove the worktree, and a
+// later launch recreates it. The runner's pid stays too:
 // stopRun needs it, and clears it once the runner is gone.
 func closePR(rec *task.Record, now time.Time) string {
 	d := rec.Delegation
 	rec.State = task.PRClosed
-	summary := fmt.Sprintf("PR #%d closed without merging; the branch and worktree are kept", d.PR)
+	summary := fmt.Sprintf("PR #%d closed without merging; the branch is kept", d.PR)
 	rec.LastOutcome = &task.Outcome{Status: "pr_closed", Summary: summary, At: now}
 	return summary
 }

@@ -93,6 +93,20 @@ func TestInboxClosedIssueCompletesAFailedTaskAndCleansIt(t *testing.T) {
 	}
 }
 
+func TestInboxClosedIssueCompletesAStoppedReviewingTask(t *testing.T) {
+	f := newFixture()
+	f.app.CleanOnDone = true
+	key := reviewed(t, f)
+	// A clean review waiting on CI stays REVIEWING with no runner.
+	setCI(f, task.CIStatus{State: task.CIPending})
+	if _, err := f.app.Inbox(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.Done || len(f.wt.removed) != 1 {
+		t.Errorf("state %s, removed %+v", got.State, f.wt.removed)
+	}
+}
+
 func TestInboxClosedIssueWaitsForTheRunnerToStop(t *testing.T) {
 	f := newFixture()
 	f.app.CleanOnDone = true

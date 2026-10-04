@@ -182,7 +182,7 @@ func TestGateMergedPRWaitsForTheRunnerToStop(t *testing.T) {
 	}
 }
 
-const prClosedNote = "PR #912 closed without merging; the branch and worktree are kept"
+const prClosedNote = "PR #912 closed without merging; the branch is kept"
 
 func TestGateClosedPRIsPRClosedNotFailed(t *testing.T) {
 	f := newFixture()
