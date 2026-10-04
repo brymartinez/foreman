@@ -50,9 +50,8 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			recs[i] = updated
 			continue
 		}
-		if r.State != task.PRClosed && !gated(r) {
-			// A task a runner is driving, with a PR that is still open: it is the
-			// runner's to advance, so only the PR's state was worth a look.
+		if r.State != task.PRClosed && !(pr.State == "merged" && r.Delegation.RunnerPID == 0) && !gated(r) {
+			// A running task keeps its state until the runner stops.
 			continue
 		}
 		if r.State == task.PRClosed && r.Delegation.RunnerPID != 0 {
@@ -84,8 +83,7 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			// The state is read again under the lock, so a runner that saved since the
 			// list is not overwritten by what this refresh expected to find.
 			switch {
-			case cur.State == task.PRClosed && pr.State == "merged":
-				// Reopened and merged between two refreshes: the work shipped.
+			case pr.State == "merged" && cur.Delegation.RunnerPID == 0:
 				note = advance(cur, pr, ci, a.Now())
 			case cur.State == task.PRClosed:
 				note = reopen(cur, pr, ci, a.Now())

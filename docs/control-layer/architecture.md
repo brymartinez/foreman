@@ -129,7 +129,7 @@ app.InboxView         -> runner pid dead while WORKING/REVIEWING -> FAILED
                          readiness gate (gate.go), per task with a PR:
                            PR closed  -> stop the runner, PR_CLOSED
                            PR reopened -> READY_FOR_HUMAN or REVIEWING
-                         and then, per idle task with a PR:
+                         and then, per stopped task with a PR, including FAILED:
                            PR merged -> DONE
                            REVIEWING + clean review, PR head moved -> WORKING, spawn
                              a runner that reviews the new commits

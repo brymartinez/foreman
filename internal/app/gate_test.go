@@ -140,6 +140,48 @@ func TestGateMergedIsDoneAndClosedIsPRClosed(t *testing.T) {
 	}
 }
 
+func TestGateMergedPRCompletesAFailedTask(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	f.store.recs[key].State = task.Failed
+	setPR(f, "merged")
+	f.gh.items = []InboxItem{item(825, "open", t0, task.Assigned)}
+	report, err := f.app.Inbox(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Done || got.LastOutcome.Status != "merged" || len(report.Changed) != 1 || !slices.Contains(report.Changed[0].Changes, "PR #912 merged") {
+		t.Errorf("state %s outcome %+v changed %+v", got.State, got.LastOutcome, report.Changed)
+	}
+}
+
+func TestGateMergedPRWaitsForTheRunnerToStop(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	f.store.recs[key].State = task.Failed
+	f.store.recs[key].Delegation.RunnerPID = 77
+	f.runners.alive[77] = true
+	setPR(f, "merged")
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.Failed || got.Delegation.RunnerPID != 77 {
+		t.Fatalf("state %s pid %d", got.State, got.Delegation.RunnerPID)
+	}
+	if len(f.runners.stopped) != 0 {
+		t.Errorf("stopped runner for merged PR: %v", f.runners.stopped)
+	}
+	f.store.recs[key].Delegation.RunnerPID = 0
+	delete(f.runners.alive, 77)
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.Done {
+		t.Errorf("state after runner stopped = %s", got.State)
+	}
+}
+
 const prClosedNote = "PR #912 closed without merging; the branch and worktree are kept"
 
 func TestGateClosedPRIsPRClosedNotFailed(t *testing.T) {
