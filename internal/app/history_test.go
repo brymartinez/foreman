@@ -67,10 +67,10 @@ func TestHistoryListsFinishedPRsNewestFirstWithPhaseTotals(t *testing.T) {
 func TestHistoryShowsNoHandoffForAPRClosedBeforeHandoff(t *testing.T) {
 	a, store, gh := historyFixture(t)
 	att := measured(11, 0, 0)
-	att.HandoffAt, att.EndedAt = time.Time{}, mins(40)
+	att.HandoffAt, att.EndedAt = time.Time{}, mins(45)
 	att.Marks = att.Marks[:2]
 	addTask(store, "a/b", 1, att)
-	gh.prs[11] = closedPR("a/b", 11, "closed", mins(45))
+	gh.prs[11] = closedPR("a/b", 11, "closed", mins(40))
 	rows, _, err := a.History(context.Background(), false)
 	if err != nil {
 		t.Fatal(err)
@@ -238,5 +238,21 @@ func TestHistoryStartsAnOlderPRsLogAtTheRunnerThatOpenedIt(t *testing.T) {
 	}
 	if l := rows[1].Log; l.End != off[2] {
 		t.Errorf("PR 11 log = %+v, want it to end at runner 2", l)
+	}
+}
+
+func TestHistoryMeasuresAPRClosedBeforeHandoffToGitHubsCloseNotToWhenForemanSawIt(t *testing.T) {
+	a, store, gh := historyFixture(t)
+	att := measured(11, 0, 0)
+	att.HandoffAt, att.EndedAt = time.Time{}, mins(300)
+	att.Marks = append(att.Marks[:2], task.Mark{At: mins(300), Phase: task.PhaseEnded})
+	addTask(store, "a/b", 1, att)
+	gh.prs[11] = closedPR("a/b", 11, "closed", mins(40))
+	rows, _, err := a.History(context.Background(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := rows[0]; r.Timing != TimingNoHandoff || r.Total != 40*time.Minute || r.Phases[task.PhaseReview] != 30*time.Minute {
+		t.Fatalf("row = %+v, want 40m to the close on GitHub with 30m of review", r)
 	}
 }

@@ -349,7 +349,7 @@ func (a App) historyStatus(ctx context.Context, cands []historyCandidate) ([]His
 }
 
 // timeRow fills in a row's timing from its recorded attempt. A PR that closed before
-// any handoff is measured up to the close foreman saw, or else GitHub's close time.
+// any handoff is measured up to GitHub's close time, or else the close foreman saw.
 func timeRow(row *HistoryRow, att *task.Attempt) {
 	row.Timing = TimingUnavailable
 	if att == nil || att.StartedAt.IsZero() {
@@ -359,9 +359,11 @@ func timeRow(row *HistoryRow, att *task.Attempt) {
 	if !end.IsZero() {
 		row.Timing = TimingMeasured
 	} else {
-		end = att.EndedAt
+		// GitHub's close time is when the PR closed. EndedAt is when a refresh saw it,
+		// which can be hours later, so it is used only when GitHub's is unknown.
+		end = row.ClosedAt
 		if end.IsZero() {
-			end = row.ClosedAt
+			end = att.EndedAt
 		}
 		if end.IsZero() {
 			return

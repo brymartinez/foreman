@@ -375,3 +375,16 @@ func TestTheDetailShowsALogLineAtTheMinimumTerminalSize(t *testing.T) {
 		t.Errorf("frame has %d lines, want %d", len(frame), minHeight)
 	}
 }
+
+func TestALongRepositoryNameLeavesTheTotalInViewAtTheMinimumWidth(t *testing.T) {
+	rows := historyRows(1)
+	rows[0].Key.Repo, rows[0].PR = "longorganization/longrepository", 123
+	m := openHistory(t, rows, minHeight)
+	m.Width = minWidth
+	line := Frame(m)[2]
+	for _, want := range []string{"#123", "merged", "1h02m"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("row %q is missing %q", line, want)
+		}
+	}
+}

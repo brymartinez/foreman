@@ -261,7 +261,12 @@ func historyList(m Model, height int) []string {
 		repoWidth = max(repoWidth, min(textWidth(string(r.Key.Repo)), 30))
 		prWidth = max(prWidth, len(fmt.Sprintf("#%d", r.PR)))
 	}
-	titleWidth := max(m.Width-2-repoWidth-2-prWidth-2-2-statusWidth-2-totalWidth, 8)
+	// The repository gives up columns before the title drops below 8, so the status and
+	// the total always fit.
+	const minTitle = 8
+	fixed := 2 + 2 + prWidth + 2 + 2 + statusWidth + 2 + totalWidth
+	repoWidth = max(min(repoWidth, m.Width-fixed-minTitle), 1)
+	titleWidth := max(m.Width-fixed-repoWidth, minTitle)
 	top := historyTop(m.HistoryTop, m.HistoryCursor, len(m.History), rows)
 	for i := top; i < len(m.History) && len(out) < height; i++ {
 		r := m.History[i]

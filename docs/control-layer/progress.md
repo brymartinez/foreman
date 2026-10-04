@@ -48,8 +48,8 @@ Findings 1 to 4 were fixed in stage 28.
 
 - PR history shows timing only for attempts recorded since stage 45. Older PRs, and a
   task in flight when foreman was upgraded, show `unavailable`.
-- A PR closed before its handoff is measured to the close the dashboard saw, or to
-  GitHub's close time when the dashboard was not open.
+- A PR closed before its handoff is measured to GitHub's close time. When gh cannot
+  read the PR, it is measured to the close the dashboard saw, which can be later.
 
 - Implementation checkpoint validation commands are agent reported, as with PR
   validation. Foreman verifies the branch, clean worktree, and advancing commit.
