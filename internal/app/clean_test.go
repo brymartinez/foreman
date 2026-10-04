@@ -265,6 +265,39 @@ func TestReopenedPRRecreatesACleanedWorktreeWhenWorkResumes(t *testing.T) {
 	}
 }
 
+func TestInboxDeletesTheBranchOfAPRMergedAfterItsPRClosedWorktreeWasRemoved(t *testing.T) {
+	f := newFixture()
+	f.app.DeleteMergedBranches = true
+	key, _ := refreshDone(t, f, "closed")
+	if got := f.store.recs[key]; got.State != task.PRClosed || len(f.wt.removed) != 1 || f.wt.removed[0].DeleteBranch {
+		t.Fatalf("setup: state %s, removed %+v", got.State, f.wt.removed)
+	}
+	// The PR reopens and merges between two refreshes.
+	setPR(f, "merged")
+	f.app.CleanOnDone = true
+	if _, err := f.app.Inbox(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Done || len(f.wt.removed) != 2 || !f.wt.removed[1].DeleteBranch || got.Delegation.WorktreeRemovedAt.IsZero() {
+		t.Errorf("state %s, removed %+v", got.State, f.wt.removed)
+	}
+}
+
+func TestGateRestoresTheWorktreeWhenAPRClosedTasksPRReopens(t *testing.T) {
+	f := newFixture()
+	key, _ := refreshDone(t, f, "closed")
+	setPR(f, "open")
+	ensured := len(f.wt.reqs)
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State == task.PRClosed || len(f.wt.reqs) != ensured+1 || !got.Delegation.WorktreeRemovedAt.IsZero() {
+		t.Errorf("state %s, ensured %+v, removed at %v", got.State, f.wt.reqs[ensured:], got.Delegation.WorktreeRemovedAt)
+	}
+}
+
 func TestInboxCleanupKeepsADirtyWorktreeAndSaysSo(t *testing.T) {
 	f := newFixture()
 	f.wt.removeErr = ErrWorktreeDirty

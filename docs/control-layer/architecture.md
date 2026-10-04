@@ -130,6 +130,8 @@ app.InboxView         -> runner pid dead while WORKING/REVIEWING -> FAILED
                          readiness gate (gate.go), per task with a PR:
                            PR closed  -> stop the runner, PR_CLOSED
                            PR reopened -> READY_FOR_HUMAN or REVIEWING
+                           PR_CLOSED leaving for any reason -> recreate a worktree
+                             cleanup removed, from the kept branch
                          and then, per stopped task with a PR, including FAILED:
                            PR merged -> DONE
                            REVIEWING + clean review, PR head moved -> WORKING, spawn
@@ -400,9 +402,10 @@ the same commit. The commit message records why it changed.
 - **Cleanup never loses work.** `git worktree remove` without `--force`, so a dirty
   worktree stays. The local branch is deleted (`-D`, for squash merges) only when its PR
   merged. Unless `cleanup.on_done` is off, each refresh cleans the worktrees of DONE
-  and PR_CLOSED tasks once their runner has stopped. A runner launched for a task whose
-  worktree was removed recreates it from the kept branch first, so a reopened PR can
-  resume. There is no manual cleanup: a FAILED worktree is the developer's to remove.
+  and PR_CLOSED tasks once their runner has stopped. A PR_CLOSED task whose PR reopens or
+  merges gets its worktree back from the kept branch first, so a reopened PR can resume
+  and a merged one has its branch deleted by the next cleanup. A runner launched for a
+  task whose worktree was removed recreates it too. There is no manual cleanup: a FAILED worktree is the developer's to remove.
 
 ### Inbox
 

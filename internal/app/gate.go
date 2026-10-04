@@ -64,6 +64,16 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 				continue
 			}
 		}
+		if r.State == task.PRClosed && !r.Delegation.WorktreeRemovedAt.IsZero() {
+			// Cleanup removed the worktree and kept the branch. A reopened PR needs the
+			// worktree to be worked on, and a merged one needs it back so cleanup deletes
+			// the branch along with it. A failed restore leaves the task closed, and the
+			// next refresh tries again.
+			if err := a.restoreWorktree(ctx, r.Key); err != nil {
+				warnings = append(warnings, fmt.Errorf("restore the worktree of %s#%d before PR #%d leaves PR_CLOSED: %w", r.Repo, r.Number, r.Delegation.PR, err))
+				continue
+			}
+		}
 		var ci task.CIStatus
 		if pr.State == "open" {
 			if ci, err = a.GitHub.CIStatus(ctx, pr.Key); err != nil {
