@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/brymartinez/foreman/internal/task"
@@ -122,15 +123,15 @@ func TestInboxClosedIssueCompletesAWorkingTaskWithoutARunner(t *testing.T) {
 	}
 }
 
-// failFirstPR fails the first PR lookup, the way a transient gh error would.
-type failFirstPR struct {
+// failPR fails the PR lookup numbered fail, counting from 1, the way a transient gh
+// error would.
+type failPR struct {
 	*fakeGitHub
-	failed bool
+	fail, calls int
 }
 
-func (f *failFirstPR) GetPullRequest(ctx context.Context, k task.Key) (PullRequest, error) {
-	if !f.failed {
-		f.failed = true
+func (f *failPR) GetPullRequest(ctx context.Context, k task.Key) (PullRequest, error) {
+	if f.calls++; f.calls == f.fail {
 		return PullRequest{}, errors.New("gh: timeout")
 	}
 	return f.fakeGitHub.GetPullRequest(ctx, k)
@@ -142,12 +143,38 @@ func TestInboxDeletesTheMergedBranchOfAClosedIssueTheGateCouldNotRead(t *testing
 	key := reviewed(t, f)
 	f.store.recs[key].State = task.Failed
 	setPR(f, "merged")
-	f.app.GitHub = &failFirstPR{fakeGitHub: f.gh}
+	f.app.GitHub = &failPR{fakeGitHub: f.gh, fail: 1}
 	if _, err := f.app.Inbox(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.store.recs[key]; got.State != task.Done || len(f.wt.removed) != 1 || !f.wt.removed[0].DeleteBranch {
 		t.Errorf("state %s, removed %+v", got.State, f.wt.removed)
+	}
+}
+
+func TestInboxKeepsTheWorktreeUntilCleanupCanCheckTheMerge(t *testing.T) {
+	f := newFixture()
+	f.app.CleanOnDone, f.app.DeleteMergedBranches = true, true
+	key := reviewed(t, f)
+	setPR(f, "merged")
+	f.gh.items = []InboxItem{item(825, "open", t0, task.Assigned)}
+	// The gate reads the merge, and cleanup's own lookup fails.
+	f.app.GitHub = &failPR{fakeGitHub: f.gh, fail: 2}
+	report, err := f.app.Inbox(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.Done || len(f.wt.removed) != 0 || !got.Delegation.WorktreeRemovedAt.IsZero() {
+		t.Fatalf("state %s, removed %+v", got.State, f.wt.removed)
+	}
+	if changes := report.Changed[0].Changes; !strings.HasPrefix(changes[len(changes)-1], "worktree kept: ") {
+		t.Errorf("changes = %v", changes)
+	}
+	if _, err := f.app.Inbox(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.wt.removed) != 1 || !f.wt.removed[0].DeleteBranch {
+		t.Errorf("removed %+v", f.wt.removed)
 	}
 }
 

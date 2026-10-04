@@ -49,7 +49,17 @@ func hasWorktree(r *task.Record) bool {
 
 func (a App) clean(ctx context.Context, rec *task.Record) CleanResult {
 	d := rec.Delegation
-	res := CleanResult{Rec: rec, BranchDeleted: a.DeleteMergedBranches && a.prMerged(ctx, rec)}
+	res := CleanResult{Rec: rec}
+	if a.DeleteMergedBranches {
+		// Without an answer the worktree stays, so a later refresh can still delete a
+		// merged branch; once the worktree is marked removed, nothing returns to it.
+		merged, err := a.prMerged(ctx, rec)
+		if err != nil {
+			res.Err = fmt.Errorf("check whether PR #%d merged: %w", d.PR, err)
+			return res
+		}
+		res.BranchDeleted = merged
+	}
 	if err := a.Worktrees.Remove(ctx, WorktreeRemoval{Path: d.Worktree, Branch: d.Branch, DeleteBranch: res.BranchDeleted}); err != nil {
 		res.Err, res.BranchDeleted = err, false
 		return res
@@ -69,11 +79,10 @@ func (a App) clean(ctx context.Context, rec *task.Record) CleanResult {
 // prMerged asks GitHub rather than trusting the task state: an issue closed by hand is
 // DONE too, and its branch may hold the only copy of the work. A task the gate could
 // not read is still FAILED when its closed issue is cleaned, and its PR may have merged.
-// An error keeps the branch.
-func (a App) prMerged(ctx context.Context, rec *task.Record) bool {
+func (a App) prMerged(ctx context.Context, rec *task.Record) (bool, error) {
 	if rec.Delegation.PR == 0 {
-		return false
+		return false, nil
 	}
 	pr, err := a.GitHub.GetPullRequest(ctx, task.Key{Repo: rec.Repo, Number: rec.Delegation.PR})
-	return err == nil && pr.State == "merged"
+	return err == nil && pr.State == "merged", err
 }

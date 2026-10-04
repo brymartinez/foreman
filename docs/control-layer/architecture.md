@@ -150,7 +150,8 @@ app.InboxView         -> runner pid dead while WORKING/REVIEWING -> FAILED
                          cleanup.on_done, per task with a worktree and no live runner:
                            DONE, PR_CLOSED, or issue closed -> git worktree remove
                            (kept if dirty, retried next refresh); branch -D only if
-                           its PR merged
+                           its PR merged; with branch deletion on, a failed merge
+                           check keeps the worktree for the next refresh
                          Reconcile, per item: issue closed, no runner -> DONE, including
                            FAILED and PR_CLOSED; a DONE task stays DONE if it reopens
 
