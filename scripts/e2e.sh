@@ -801,7 +801,32 @@ scenario_conflict() {
 	check "the worktree is kept" test -d "$wt"
 }
 
-scenarios=${*:-runner notify logs inbox inbox_lifecycle rereview conflicts respond cancel feedback conflict tui routing}
+scenario_history() {
+	echo "history: merged and closed PRs with their phase times and logs"
+	setup history
+	check "the dashboard delegates #42" start 42
+	check "the run is handed to the developer" wait_status "READY_FOR_HUMAN" 15
+	check "the task file records the attempt's handoff" grep -q 'handoff_at:' "$sandbox/tasks/acme-widgets-42.md"
+	sed -i.bak 's/"state":"OPEN"/"state":"MERGED","title":"Add retries","closedAt":"2026-10-04T10:00:00Z","mergedAt":"2026-10-04T10:00:00Z"/' "$state/pr-942.json"
+	screen >/dev/null
+	check "the merged PR ends the task" grep -q '^state: DONE' "$sandbox/tasks/acme-widgets-42.md"
+	check "the merge ends the attempt" grep -q 'ended_at:' "$sandbox/tasks/acme-widgets-42.md"
+	# An older task's log with no task file: its PR still has a row.
+	printf '2026-09-01T09:00:00Z foreman: runner 1 started\n2026-09-01T09:20:00Z foreman: verified PR #907 https://github.com/acme/widgets/pull/907 at abc1234\n' >"$sandbox/logs/acme-widgets-7.log"
+	echo '{"number":907,"url":"https://github.com/acme/widgets/pull/907","state":"CLOSED","title":"Old attempt","closedAt":"2026-09-02T10:00:00Z"}' >"$state/pr-907.json"
+	dash -- refreshed keys=p "wait=#907" sleep=0.3 print >"$sandbox/history.txt" 2>/dev/null
+	check "p opens the PR history" contains "$sandbox/history.txt" "PR HISTORY"
+	check "the merged PR has a row with its title" grep -qE '#942 +Add retries +merged' "$sandbox/history.txt"
+	check "the older PR from a log has a row" grep -qE '#907 +Old attempt +closed +unavailable' "$sandbox/history.txt"
+	check "the newest close comes first" awk '/#942/{a=NR} /#907/{b=NR} END{exit !(a && b && a<b)}' "$sandbox/history.txt"
+	dash -- refreshed keys=p "wait=#942" 'keys=\r' "wait=total" sleep=0.3 print >"$sandbox/detail.txt" 2>/dev/null
+	check "enter shows the phase times" contains "$sandbox/detail.txt" "planning"
+	check "and the attempt's log" contains "$sandbox/detail.txt" "foreman: runner"
+	check "j, ctrl-f, ctrl-b, ctrl-d, and ctrl-u page the list" dash -- refreshed keys=p "wait=#907" 'keys=j\x06\x02\x04\x15k' "wait=PR HISTORY"
+	check "esc returns to the dashboard" dash -- refreshed keys=p "wait=#907" 'keys=\x1b' "wait=DELEGATED WORK"
+}
+
+scenarios=${*:-runner notify logs inbox inbox_lifecycle rereview conflicts respond cancel feedback conflict tui routing history}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"

@@ -52,6 +52,8 @@ const (
 	// lines before the oldest loaded one.
 	ActionReadLog
 	ActionLoadOlder
+	// ActionLoadHistory reads the PR history for the current repository view.
+	ActionLoadHistory
 )
 
 // Action is what a keystroke asks the driver to do. The model itself does no I/O.
@@ -86,6 +88,21 @@ type Model struct {
 	LogRaw bool
 	// LogAtStart means Log reaches back to the first line of the file.
 	LogAtStart bool
+
+	// HistoryOpen shows the PR history in place of the dashboard. HistoryLoading is
+	// set while App.History runs; HistoryErr is why the last load failed.
+	HistoryOpen     bool
+	History         []app.HistoryRow
+	HistoryWarnings []error
+	HistoryErr      string
+	HistoryLoading  bool
+	HistoryCursor   int
+	// HistoryTop is the first row in view.
+	HistoryTop int
+	// HistoryDetail shows the selected row's phases and log below the rows.
+	// HistoryLogFocus sends the movement keys to that log instead of the rows.
+	HistoryDetail   bool
+	HistoryLogFocus bool
 
 	// HelpOpen shows the keys and Version in place of the panes.
 	HelpOpen bool
@@ -145,6 +162,9 @@ type Model struct {
 	logEnd       int64             // where the next read of new log lines starts
 	logPartial   int               // trailing Log lines from an unfinished last line, read again
 	logShort     int               // the part of a scroll step that waits for older lines
+	logFloor     int64             // the first byte of the log the pane may show
+	historySeq   int               // the history load whose result the view waits for
+	logCeil      int64             // the byte the log the pane may show ends at; 0 is the file end
 }
 
 // Selected is the highlighted delegated task, or nil when nothing is delegated.
@@ -292,6 +312,9 @@ func (m *Model) Key(k Key) Action {
 	case ConfirmingRoute:
 		return m.confirmRoute(k)
 	}
+	if m.HistoryOpen {
+		return m.historyKey(k)
+	}
 	return m.browse(k)
 }
 
@@ -305,6 +328,8 @@ func (m *Model) browse(k Key) Action {
 		return m.toggleAuto()
 	case k.Kind == KeyRune && k.Rune == '?':
 		m.HelpOpen = true
+	case k.Kind == KeyRune && k.Rune == 'p':
+		return m.openHistory()
 	case m.LogOpen && !m.ShowOpen && k.Kind == KeyRune && k.Rune == 'R':
 		m.LogRaw = !m.LogRaw
 		// Cleaned and raw lines do not line up, so the new view starts at the tail.
@@ -438,7 +463,7 @@ func (m *Model) scrollTop() Action {
 // rest of the step that asked for them.
 func (m *Model) LoadedOlder(lines []string, start int64) Action {
 	m.Log = append(lines, m.Log...)
-	m.logStart, m.LogAtStart = start, start == 0
+	m.logStart, m.LogAtStart = start, start <= m.logFloor
 	return m.scrollLog(m.logShort)
 }
 
@@ -446,7 +471,7 @@ func (m *Model) LoadedOlder(lines []string, start int64) Action {
 // log is selected then.
 func (m *Model) clearLog() {
 	m.Log, m.LogErr, m.LogPath, m.LogAtStart, m.LogOffset = nil, "", "", false, 0
-	m.logStart, m.logEnd, m.logPartial, m.logShort = 0, 0, 0, 0
+	m.logStart, m.logEnd, m.logPartial, m.logShort, m.logFloor, m.logCeil = 0, 0, 0, 0, 0, 0
 }
 
 func (m *Model) scrollEnd() {
@@ -458,6 +483,9 @@ func (m *Model) scrollEnd() {
 }
 
 func (m *Model) logPage() int {
+	if m.HistoryOpen {
+		return m.historyLogPage()
+	}
 	lay, ok := layoutFor(m.Width, m.Height, true, false)
 	if !ok {
 		return 1

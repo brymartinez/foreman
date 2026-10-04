@@ -2,6 +2,9 @@
 
 ## Current stage
 
+Stage 45 (PR history, for issue #45) is complete. `p` opens the merged and closed
+Foreman PRs with their phase times and each attempt's log. Task files record
+`attempts`, with phase marks written in `App.update`.
 The Codex Git permission repair is complete. New and resumed implementation turns use
 a scoped permission profile for linked-worktree Git metadata. A model-free Codex
 sandbox probe covers staging, committing, and a tracking push. The runner stop test
@@ -48,6 +51,11 @@ Findings 1 to 4 were fixed in stage 28.
 
 ## Known limitations
 
+- PR history shows timing only for attempts recorded since stage 45. Older PRs, and a
+  task in flight when foreman was upgraded, show `unavailable`.
+- A PR closed before its handoff is measured to GitHub's close time. When gh cannot
+  read the PR, it is measured to the close the dashboard saw, which can be later.
+
 - Implementation checkpoint validation commands are agent reported, as with PR
   validation. Foreman verifies the branch, clean worktree, and advancing commit.
   A headless agent may still run a long turn before it elects to checkpoint.
@@ -78,5 +86,5 @@ Findings 1 to 4 were fixed in stage 28.
 
 Retry issue #46 with the repaired Codex adapter after installing this build. Its
 worktree still has uncommitted first-stage changes. After that, compare completed
-task usage and outcomes before changing the models or budgets. For code quality,
-take refactor candidate 5 (`cmd/foreman` wiring) next.
+task usage, outcomes, and the PR history's phase times before changing the models or
+budgets. For code quality, take refactor candidate 5 (`cmd/foreman` wiring) next.

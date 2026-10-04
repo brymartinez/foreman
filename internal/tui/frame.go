@@ -36,6 +36,9 @@ func Frame(m Model) []string {
 	if !ok {
 		return tooSmall(m.Width, m.Height)
 	}
+	if m.HistoryOpen && !m.HelpOpen {
+		return historyFrame(m)
+	}
 	lines := make([]string, 0, m.Height)
 	lines = append(lines, colored(pad(header(m), m.Width), cyan))
 	if m.HelpOpen {
@@ -53,15 +56,20 @@ func Frame(m Model) []string {
 		lines = append(lines, colored(strings.Repeat("─", m.Width), cyan))
 		lines = append(lines, logPane(m, lay.logHeight)...)
 	}
-	message := pad(truncate(m.Message, m.Width), m.Width)
-	if strings.HasPrefix(m.Message, "!") {
-		message = colored(message, red)
-	} else if m.Message != "" {
-		message = colored(message, green)
-	}
-	lines = append(lines, message)
+	lines = append(lines, messageLine(m))
 	lines = append(lines, dimmed(pad(truncate(footer(m), m.Width), m.Width)))
 	return lines
+}
+
+// messageLine is the last result or error, under the panes.
+func messageLine(m Model) string {
+	message := pad(truncate(m.Message, m.Width), m.Width)
+	if strings.HasPrefix(m.Message, "!") {
+		return colored(message, red)
+	} else if m.Message != "" {
+		return colored(message, green)
+	}
+	return message
 }
 
 func tooSmall(width, height int) []string {
@@ -376,9 +384,11 @@ var helpKeys = []helpKey{
 	{"s", "switch the open pane between the log and the task's state", "s show/log"},
 	{"R", "switch the log between cleaned and raw lines", "R raw log"},
 	{"u/d, pgup/pgdn", "scroll the log a page; past the top loads older lines", "u/d page"},
-	{"ctrl-u/ctrl-d", "scroll the log half a page", "ctrl-u/d half page"},
+	{"ctrl-u/ctrl-d", "scroll the log, or move the PR history, half a page", "ctrl-u/d half page"},
 	{"g/G, end", "go to the log's first line or follow its tail", "g/G log start/end"},
 	{"c", "cancel the selected task's run", "c cancel"},
+	{"p", "open the PR history of merged and closed PRs; esc returns", "p PR history"},
+	{"ctrl-f/ctrl-b", "PR history: move a full page", "ctrl-f/b page"},
 	{"a", "turn auto mode on or off, kept for the next launch", "a auto"},
 	{"v", "show the inbox for the configured repos or all repos", "v view"},
 	{"r", "refresh from GitHub", "r refresh"},
@@ -525,6 +535,9 @@ func footer(m Model) string {
 	case AnsweringDecision:
 		return answerHints(m)
 	}
+	if m.HistoryOpen {
+		return historyHints(m)
+	}
 	if m.LogOpen && m.Focus == TaskPane {
 		if textWidth(hintsLogLong) > m.Width {
 			return hintsLogShort
@@ -541,6 +554,21 @@ func footer(m Model) string {
 		return hintsShort
 	}
 	return hintsLong
+}
+
+// historyHints are the history's keys: the list's, or the detail log's when it has focus.
+func historyHints(m Model) string {
+	long, short := hintsHistoryLong, hintsHistoryShort
+	switch {
+	case m.HistoryLogFocus:
+		long, short = hintsHistoryLogLong, hintsHistoryLogShort
+	case m.HistoryDetail:
+		long, short = hintsHistoryDetailLong, hintsHistoryDetailShort
+	}
+	if textWidth(long) > m.Width {
+		return short
+	}
+	return long
 }
 
 // routeHints show the routed profile, or why nothing can start.
@@ -584,6 +612,13 @@ const (
 	// hintsOpen are for INBOX focus while the pane is open, where s still switches it.
 	hintsOpenLong  = "j/k move · h/l pane · enter select · s show/log · R raw · esc close · c cancel · a auto · v view · ? help · q quit"
 	hintsOpenShort = "j/k move · h/l pane · s show/log · esc close · ? help"
+
+	hintsHistoryLong        = "j/k move · ctrl-f/b page · ctrl-d/u half page · enter details · v view · r reload · esc back · ? help · q quit"
+	hintsHistoryShort       = "j/k move · ctrl-f/b page · enter details · esc back · ? help"
+	hintsHistoryDetailLong  = "j/k move · ctrl-f/b page · ctrl-d/u half page · tab log · R raw · esc close · ? help"
+	hintsHistoryDetailShort = "j/k move · tab log · esc close · ? help"
+	hintsHistoryLogLong     = "j/k line · u/d page · ctrl-u/d half page · g/G ends · tab rows · R raw · esc close · ? help"
+	hintsHistoryLogShort    = "j/k line · u/d page · g/G ends · tab rows · esc close"
 )
 
 // truncate cuts s to at most width columns, ending in an ellipsis when it cut. A wide

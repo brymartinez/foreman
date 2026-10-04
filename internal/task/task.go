@@ -324,6 +324,8 @@ type Record struct {
 	// CI is the readiness gate's last look at the PR's checks on GitHub. Any implementer
 	// turn clears it.
 	CI *CIStatus
+	// Attempts are the runs of work on the issue, one per PR, oldest first.
+	Attempts []Attempt
 	// Body is the Markdown below the frontmatter, round-tripped untouched so human edits survive.
 	Body string
 }
