@@ -579,25 +579,23 @@ func TestGatePRClosedThenMergedIsDone(t *testing.T) {
 	}
 }
 
-func TestPRClosedSurvivesAClosedIssue(t *testing.T) {
+func TestClosedIssueCompletesAPRClosedTaskAndKeepsItsBranch(t *testing.T) {
 	f := newFixture()
 	f.app.CleanOnDone, f.app.DeleteMergedBranches = true, true
 	key := reviewed(t, f)
 	setPR(f, "closed")
 	// No search returns the task, so the same refresh re-fetches the issue, which the
-	// developer closed along with the PR. That must not turn PR_CLOSED into DONE.
-	if _, err := f.app.Inbox(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if got := f.store.recs[key]; got.State != task.PRClosed || got.GitHub.State != "closed" {
-		t.Fatalf("state %s, issue %s", got.State, got.GitHub.State)
-	}
+	// developer closed along with the PR. The closed issue wins over PR_CLOSED.
 	if _, err := f.app.Inbox(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.PRClosed || len(f.wt.removed) != 0 || !got.Delegation.WorktreeRemovedAt.IsZero() {
-		t.Errorf("the worktree was cleaned away: state %s removed %+v", got.State, f.wt.removed)
+	if got.State != task.Done || got.GitHub.State != "closed" {
+		t.Fatalf("state %s, issue %s", got.State, got.GitHub.State)
+	}
+	want := WorktreeRemoval{Path: "/wt/ridezoomo-armada-backend/825-provider-retries", Branch: "feat/825-provider-retries"}
+	if !slices.Equal(f.wt.removed, []WorktreeRemoval{want}) || got.Delegation.WorktreeRemovedAt.IsZero() {
+		t.Errorf("removed %+v, rec %+v", f.wt.removed, got.Delegation)
 	}
 }
 

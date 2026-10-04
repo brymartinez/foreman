@@ -15,11 +15,13 @@ type CleanResult struct {
 	Err           error
 }
 
-// cleanDone is the automatic cleanup inbox runs when CleanOnDone is set. It adds
-// inbox notes and updates recs in place.
-func (a App) cleanDone(ctx context.Context, recs []*task.Record, notes map[task.Key][]string) {
+// cleanDone is the automatic cleanup inbox runs when CleanOnDone is set. It cleans
+// tasks whose issue or PR has closed: DONE, PR_CLOSED, and tasks whose issue is in
+// closed, which this refresh ends. It adds inbox notes and updates recs in place.
+func (a App) cleanDone(ctx context.Context, recs []*task.Record, closed map[task.Key]bool, notes map[task.Key][]string) {
 	for i, r := range recs {
-		if r.State != task.Done || !hasWorktree(r) || a.liveRunner(r) {
+		ended := r.State == task.Done || r.State == task.PRClosed || (closed[r.Key] && !keepsState(r))
+		if !ended || !hasWorktree(r) || a.liveRunner(r) {
 			continue
 		}
 		res := a.clean(ctx, r)

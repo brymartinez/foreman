@@ -2,10 +2,11 @@
 
 ## Current stage
 
-Stage 46 (reconcile stopped delegated tasks) is in progress. The PR gate now
-marks a stopped FAILED task DONE when its linked PR merges. It leaves a task
-with a live runner unchanged until that runner stops. Issue precedence and
-worktree cleanup remain for the next stage.
+Stage 46 (reconcile stopped delegated tasks, for issue #46) is complete. A refresh
+marks a stopped task DONE when its linked PR merges or its issue closes, including
+FAILED and PR_CLOSED tasks. With `cleanup.on_done`, it removes clean DONE and
+PR_CLOSED worktrees once the runner stops, and keeps the branch unless the PR merged.
+A launch recreates a removed worktree, so a reopened PR can resume.
 
 Stage 43 (foreman is TUI-first, for issue #43) is complete. Bare `foreman` opens the
 dashboard, `-a`/`--auto` and `--no-auto` set auto mode for the session, and `-c` edits
@@ -76,5 +77,5 @@ Findings 1 to 4 were fixed in stage 28.
 
 ## Next stage
 
-Finish stage 46 by reconciling closed issues before cleanup and cleaning eligible
-PR_CLOSED worktrees. Then verify the full refresh lifecycle and open its PR.
+Compare completed task usage and outcomes before changing the models or budgets. For
+code quality, take refactor candidate 5 (`cmd/foreman` wiring) next.
