@@ -187,6 +187,7 @@ func (a App) historyLogs(logOf map[string]task.Key) []string {
 var (
 	verifiedLine = regexp.MustCompile(`^\S+ foreman: verified PR #(\d+) (\S+)`)
 	startLine    = regexp.MustCompile(`^\S+ foreman: (runner \d+ started|starting )`)
+	runnerLine   = regexp.MustCompile(`^\S+ foreman: runner \d+ started`)
 	prURLRepo    = regexp.MustCompile(`/([^/]+/[^/]+)/pull/\d+$`)
 	logNumber    = regexp.MustCompile(`-(\d+)\.log$`)
 )
@@ -200,8 +201,9 @@ type loggedPR struct {
 
 // legacyAttempts finds the PRs a task log verified that no recorded attempt covers.
 // key is the log's task, or zero for a log whose task file is gone; the issue then
-// comes from the file name and the PR's repository. Each PR's range runs from the
-// first runner start after the previous PR to the next PR's start. When no start
+// comes from the file name and the PR's repository. A PR's range starts at the last
+// runner start before it verified the PR, so a runner that failed in between is left
+// out, and the previous PR's range ends at the first start after it. When no start
 // separates two PRs, each gets the whole log.
 func legacyAttempts(path string, key task.Key, byKey map[task.Key]*task.Record, seen map[prRef]bool, visible func(task.Repo) bool) ([]historyCandidate, error) {
 	f, err := os.Open(path)
@@ -213,7 +215,7 @@ func legacyAttempts(path string, key task.Key, byKey map[task.Key]*task.Record, 
 	}
 	defer f.Close()
 	var prs []loggedPR
-	var starts []int64
+	var starts, runners []int64
 	r := bufio.NewReader(f)
 	for off := int64(0); ; {
 		line, err := r.ReadString('\n')
@@ -226,6 +228,9 @@ func legacyAttempts(path string, key task.Key, byKey map[task.Key]*task.Record, 
 			}
 		} else if startLine.MatchString(line) {
 			starts = append(starts, off)
+			if runnerLine.MatchString(line) {
+				runners = append(runners, off)
+			}
 		}
 		off += int64(len(line))
 		if err == io.EOF {
@@ -263,12 +268,16 @@ func legacyAttempts(path string, key task.Key, byKey map[task.Key]*task.Record, 
 			continue
 		}
 		prev := prs[i-1]
-		j := slices.IndexFunc(starts, func(s int64) bool { return s > prev.last && s <= p.first })
+		between := func(s int64) bool { return s > prev.last && s <= p.first }
+		j := slices.IndexFunc(starts, between)
 		if j < 0 {
 			whole = true
 			break
 		}
 		ranges[i].Start, ranges[i-1].End = starts[j], starts[j]
+		if k := lastIndex(runners, between); k >= 0 {
+			ranges[i].Start = runners[k]
+		}
 	}
 	out := make([]historyCandidate, 0, len(prs))
 	for i, p := range prs {
@@ -281,6 +290,15 @@ func legacyAttempts(path string, key task.Key, byKey map[task.Key]*task.Record, 
 		out = append(out, historyCandidate{row: HistoryRow{Key: key, PR: p.pr, URL: p.url, Log: r}})
 	}
 	return out, nil
+}
+
+func lastIndex(s []int64, f func(int64) bool) int {
+	for i := len(s) - 1; i >= 0; i-- {
+		if f(s[i]) {
+			return i
+		}
+	}
+	return -1
 }
 
 // historyStatus reads each PR from GitHub, drops the open ones, and works out timing.

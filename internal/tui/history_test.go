@@ -296,3 +296,20 @@ type historySource struct {
 func (s historySource) History(context.Context, bool) ([]app.HistoryRow, []error, error) {
 	return s.rows, nil, nil
 }
+
+func TestAReloadThatEndsTheAttemptDropsTheNextAttemptsLines(t *testing.T) {
+	row, _ := historyLog(t, 30, 11, 30)
+	m := openHistory(t, []app.HistoryRow{row}, 40)
+	m.Key(Key{Kind: KeyEnter})
+	readLog(&m)
+	if m.Log[len(m.Log)-1] != "line 30" {
+		t.Fatalf("setup: log ends %q", m.Log[len(m.Log)-1])
+	}
+	ended, _ := historyLog(t, 30, 11, 20)
+	row.Log.End = ended.Log.End
+	m.SetHistory([]app.HistoryRow{row}, nil, nil)
+	readLog(&m)
+	if len(m.Log) != 10 || m.Log[9] != "line 20" {
+		t.Fatalf("log = %q, want lines 11 to 20 once a restart ended the attempt", m.Log)
+	}
+}

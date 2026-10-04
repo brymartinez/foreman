@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -141,5 +142,29 @@ func TestOnlyUpdateWritesTaskFiles(t *testing.T) {
 	}
 	if updates != 1 {
 		t.Errorf("found %d Store.Update calls, want only the one in App.update", updates)
+	}
+}
+
+func TestRestartBeforeAnyPRContinuesTheAttempt(t *testing.T) {
+	f := newFixture()
+	ticking(&f)
+	key := started(t, f, startReq(t))
+	f.claude.err = errors.New("agent crashed")
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	first := f.store.recs[key].CurrentAttempt().StartedAt
+	if f.store.recs[key].State != task.Failed || first.IsZero() {
+		t.Fatalf("setup: state %s attempt %+v", f.store.recs[key].State, f.store.recs[key].CurrentAttempt())
+	}
+	log := filepath.Join(t.TempDir(), "825.log")
+	if err := os.WriteFile(log, []byte("2026-10-01T09:00:00Z foreman: runner 1 started\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.store.recs[key].Delegation.RunnerLog = log
+	started(t, f, startReq(t))
+	rec := f.store.recs[key]
+	if a := rec.CurrentAttempt(); len(rec.Attempts) != 1 || !a.StartedAt.Equal(first) || a.LogStart != 0 {
+		t.Fatalf("attempts = %+v, want the first run's attempt kept with its start and first log byte", rec.Attempts)
 	}
 }

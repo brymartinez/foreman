@@ -230,7 +230,8 @@ the same commit. The commit message records why it changed.
   enters NEEDS_DECISION, FAILED, READY_FOR_HUMAN, or REVIEWED. Call sites never notify
   on their own. A test fails on any other `Store.Update` or `Store.Save` in `app`.
 - **Attempts record where the time went.** An attempt is one run of work that produces
-  one PR. `App.Start` opens one unless it keeps the PR, and stores the task log's size
+  one PR. `App.Start` opens one unless it keeps the PR or the current attempt has no PR
+  yet, and stores the task log's size
   as the attempt's first byte; the runner stamps the first agent turn. `App.update`
   calls `Record.Track`, which derives the phase from the state (`PhaseOf`: planning,
   implementation, review and fixes, CI wait, paused, ended) and adds a mark when it
@@ -465,9 +466,12 @@ the same commit. The commit message records why it changed.
   `foreman: verified PR` lines of every log in `log_dir`, which also finds attempts a
   restart replaced. Each PR is read with `gh pr view` through four workers; open PRs
   are dropped, and one gh cannot read stays last as `unknown`. Older PRs have no
-  handoff time, so their timing is `unavailable`. Their log range runs between runner
-  starts, or is the whole issue log, labeled, when no start separates two PRs. The
-  detail pane's log reuses the log pane's paging inside the attempt's byte range.
+  handoff time, so their timing is `unavailable`. A PR's log range starts at the last
+  runner start before its verified line and ends at the first start after it, so a
+  failed runner in between belongs to neither. When no start separates two PRs, both
+  show the whole issue log, labeled. The
+  detail pane's log reuses the log pane's paging inside the attempt's byte range, and
+  rereads it when a reload changes the range.
 
 ### Notifications
 

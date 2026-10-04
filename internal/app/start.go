@@ -154,8 +154,13 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			}
 		}
 		// A kept PR continues its attempt, or stays with the older record when it
-		// predates attempts. Anything else is a new attempt at a PR.
-		if cur.Delegation.PR == 0 {
+		// predates attempts. So does an attempt that has no PR yet: the earlier runs
+		// were work toward the PR this one opens. Anything else is a new attempt.
+		switch at := cur.CurrentAttempt(); {
+		case cur.Delegation.PR != 0:
+		case at != nil && at.PR == 0:
+			at.Agent = req.Agent
+		default:
 			cur.Attempts = append(cur.Attempts, task.Attempt{Agent: req.Agent, LogStart: logSize(prev)})
 		}
 		summary := fmt.Sprintf("dispatched to %s", req.Agent)

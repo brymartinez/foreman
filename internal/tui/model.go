@@ -163,6 +163,7 @@ type Model struct {
 	logPartial   int               // trailing Log lines from an unfinished last line, read again
 	logShort     int               // the part of a scroll step that waits for older lines
 	logFloor     int64             // the first byte of the log the pane may show
+	logCeil      int64             // the byte the log the pane may show ends at; 0 is the file end
 }
 
 // Selected is the highlighted delegated task, or nil when nothing is delegated.
@@ -469,7 +470,7 @@ func (m *Model) LoadedOlder(lines []string, start int64) Action {
 // log is selected then.
 func (m *Model) clearLog() {
 	m.Log, m.LogErr, m.LogPath, m.LogAtStart, m.LogOffset = nil, "", "", false, 0
-	m.logStart, m.logEnd, m.logPartial, m.logShort, m.logFloor = 0, 0, 0, 0, 0
+	m.logStart, m.logEnd, m.logPartial, m.logShort, m.logFloor, m.logCeil = 0, 0, 0, 0, 0, 0
 }
 
 func (m *Model) scrollEnd() {

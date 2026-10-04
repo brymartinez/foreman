@@ -213,3 +213,30 @@ func TestHistorySynthesizesAnAttemptForATaskFilePRMissingFromTheLog(t *testing.T
 		t.Fatalf("rows = %+v", rows)
 	}
 }
+
+func TestHistoryStartsAnOlderPRsLogAtTheRunnerThatOpenedIt(t *testing.T) {
+	a, store, gh := historyFixture(t)
+	rec := addTask(store, "a/b", 1)
+	rec.Delegation.RunnerLog = filepath.Join(a.LogDir, "a-b-1.log")
+	off := writeLog(t, rec.Delegation.RunnerLog,
+		"2026-09-01T09:00:00Z foreman: runner 1 started",
+		"2026-09-01T09:20:00Z foreman: verified PR #11 https://github.com/a/b/pull/11 at abc1234",
+		"2026-09-02T09:00:00Z foreman: runner 2 started",
+		"2026-09-02T09:01:00Z foreman: run failed",
+		"2026-09-03T09:00:00Z foreman: runner 3 started",
+		"2026-09-03T09:00:01Z foreman: starting claude in /wt",
+		"2026-09-03T09:20:00Z foreman: verified PR #12 https://github.com/a/b/pull/12 at def5678",
+	)
+	gh.prs[11] = closedPR("a/b", 11, "closed", mins(100))
+	gh.prs[12] = closedPR("a/b", 12, "merged", mins(200))
+	rows, _, err := a.History(context.Background(), false)
+	if err != nil || len(rows) != 2 {
+		t.Fatal(rows, err)
+	}
+	if l := rows[0].Log; l.Start != off[4] || l.Whole {
+		t.Errorf("PR 12 log = %+v, want it to start at runner 3, after the failed runner 2", l)
+	}
+	if l := rows[1].Log; l.End != off[2] {
+		t.Errorf("PR 11 log = %+v, want it to end at runner 2", l)
+	}
+}

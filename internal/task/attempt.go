@@ -34,8 +34,9 @@ type Mark struct {
 	Phase Phase     `yaml:"phase"`
 }
 
-// Attempt is one run of work on an issue that produces one PR. A restart that keeps
-// the PR continues its attempt; one that opens a new PR starts another.
+// Attempt is one run of work on an issue that produces one PR. A restart continues
+// the attempt while it keeps the PR or before any PR exists; a restart that will open
+// a new PR starts another.
 type Attempt struct {
 	// StartedAt is the attempt's first agent turn.
 	StartedAt time.Time `yaml:"started_at,omitempty"`

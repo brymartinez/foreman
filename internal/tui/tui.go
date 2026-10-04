@@ -501,8 +501,8 @@ func appendLog(m *Model, src logSource) error {
 	if src.ceil > 0 && src.ceil < size {
 		end = src.ceil
 	}
-	if src.path != m.LogPath || src.floor != m.logFloor || size < m.logEnd {
-		// A new log, or one rewritten from the start: read its tail.
+	if src.path != m.LogPath || src.floor != m.logFloor || src.ceil != m.logCeil || size < m.logEnd {
+		// A new log, a new range of it, or one rewritten from the start: read its tail.
 		start, err := logs.Back(f, end, logChunk)
 		if err != nil {
 			return err
@@ -514,7 +514,7 @@ func appendLog(m *Model, src logSource) error {
 		}
 		m.clearLog()
 		m.Log, m.LogPath, m.LogAtStart = lines, src.path, start <= src.floor
-		m.logStart, m.logEnd, m.logPartial, m.logFloor = start, next, partial, src.floor
+		m.logStart, m.logEnd, m.logPartial, m.logFloor, m.logCeil = start, next, partial, src.floor, src.ceil
 		return nil
 	}
 	if m.logEnd >= end {
