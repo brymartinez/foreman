@@ -351,3 +351,27 @@ func TestThePhaseSummaryWrapsInAnEightyColumnTerminal(t *testing.T) {
 		t.Errorf("the log shows more or fewer than its %d-line page:\n%s", page, got)
 	}
 }
+
+func TestTheDetailShowsALogLineAtTheMinimumTerminalSize(t *testing.T) {
+	row, _ := historyLog(t, 30, 1, 30)
+	row.Phases = map[task.Phase]time.Duration{task.PhasePlanning: 12 * time.Minute, task.PhaseImplementation: 34 * time.Minute,
+		task.PhaseReview: 21 * time.Minute, task.PhaseCI: 15 * time.Minute, task.PhasePaused: 58 * time.Minute}
+	row.Total = 140 * time.Minute
+	m := openHistory(t, []app.HistoryRow{row}, minHeight)
+	m.Width = minWidth
+	m.Key(Key{Kind: KeyEnter})
+	readLog(&m)
+	if n := len(m.phaseLines()); n != 3 {
+		t.Fatalf("setup: %d phase lines, want 3", n)
+	}
+	frame := Frame(m)
+	text := strings.Join(frame, "\n")
+	for _, want := range []string{"#7", "total 2h20m", "line 30"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("frame is missing %q:\n%s", want, text)
+		}
+	}
+	if len(frame) != minHeight {
+		t.Errorf("frame has %d lines, want %d", len(frame), minHeight)
+	}
+}

@@ -174,32 +174,39 @@ func historyTop(top, cursor, n, page int) int {
 
 // historyLayout splits the rows under the header between the list, with its title,
 // and the detail pane, with its separator. The detail gets most of the height, because
-// it holds the phases and the log.
-func historyLayout(height int, detail bool) (list, lower int) {
+// it holds the phases and the log. need is the detail's smallest useful height, and
+// the list gives up rows, down to its title and one row, so the detail has it.
+func historyLayout(height int, detail bool, need int) (list, lower int) {
 	avail := height - 3
 	if !detail {
 		return avail, 0
 	}
-	list = min(max(avail*2/5, 3), avail-5)
+	list = max(min(max(avail*2/5, 3), avail-1-need), 2)
 	return list, avail - list - 1
+}
+
+// detailNeed is the detail's smallest useful height: its heading, its phase lines, the
+// log heading, and one log line.
+func (m *Model) detailNeed() int {
+	return 3 + len(m.phaseLines())
 }
 
 // historyPage is how many rows the list shows.
 func (m *Model) historyPage() int {
-	list, _ := historyLayout(m.Height, m.HistoryDetail)
+	list, _ := historyLayout(m.Height, m.HistoryDetail, m.detailNeed())
 	return max(list-1, 1)
 }
 
-// historyLogPage is how many log lines the detail shows under its title, its phase
-// lines, and its log heading.
+// historyLogPage is how many log lines the detail shows under its heading, its phase
+// lines, and its log heading. The heading is dropped first when they do not all fit.
 func (m *Model) historyLogPage() int {
-	_, lower := historyLayout(m.Height, true)
-	return max(lower-2-len(m.phaseLines()), 1)
+	_, lower := historyLayout(m.Height, true, m.detailNeed())
+	return max(lower-m.detailNeed()+1, 1)
 }
 
 // historyFrame draws the PR history in place of the dashboard.
 func historyFrame(m Model) []string {
-	list, lower := historyLayout(m.Height, m.HistoryDetail)
+	list, lower := historyLayout(m.Height, m.HistoryDetail, m.detailNeed())
 	lines := []string{colored(pad(truncate(historyHeader(m), m.Width), m.Width), cyan)}
 	lines = append(lines, historyList(m, list)...)
 	if m.HistoryDetail {
@@ -387,7 +394,11 @@ func historyDetail(m Model, height int) []string {
 	if m.HistoryLogFocus {
 		logTitle = focusMark + logTitle
 	}
-	out := []string{colored(pad(truncate(heading, m.Width), m.Width), cyan)}
+	var out []string
+	// The list row above names the PR, so the heading goes before any log line does.
+	if height >= m.detailNeed() {
+		out = append(out, colored(pad(truncate(heading, m.Width), m.Width), cyan))
+	}
 	for _, l := range m.phaseLines() {
 		out = append(out, pad(truncate(l, m.Width), m.Width))
 	}
