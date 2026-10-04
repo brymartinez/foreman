@@ -286,6 +286,38 @@ func TestInboxDeletesTheBranchOfAPRMergedAfterItsPRClosedWorktreeWasRemoved(t *t
 	}
 }
 
+func TestGateCompletesAMergedPRClosedTaskWhoseWorktreeCannotBeRestored(t *testing.T) {
+	f := newFixture()
+	key, _ := refreshDone(t, f, "closed")
+	// The kept branch lives in another checkout, so the managed one cannot restore it.
+	f.wt.ensureErr = errors.New("branch feat/825-provider-retries does not exist")
+	setPR(f, "merged")
+	_, warnings, err := f.app.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.Done || got.Delegation.WorktreeRemovedAt.IsZero() {
+		t.Errorf("state %s, removed at %v", got.State, got.Delegation.WorktreeRemovedAt)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0].Error(), "restore the worktree") {
+		t.Errorf("warnings = %v", warnings)
+	}
+}
+
+func TestInboxClosedIssueCompletesATaskWhoseDeadRunnerPRCouldNotBeRead(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	f.store.recs[key].State = task.Working
+	f.store.recs[key].Delegation.RunnerPID = 77
+	f.app.GitHub = &failPR{fakeGitHub: f.gh, fail: 1}
+	if _, err := f.app.Inbox(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.Done || got.Delegation.RunnerPID != 0 {
+		t.Errorf("state %s pid %d", got.State, got.Delegation.RunnerPID)
+	}
+}
+
 func TestGateRestoresTheWorktreeWhenAPRClosedTasksPRReopens(t *testing.T) {
 	f := newFixture()
 	key, _ := refreshDone(t, f, "closed")

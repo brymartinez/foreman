@@ -21,6 +21,7 @@ type fakeWorktrees struct {
 	checkpointErr   error
 	removed         []WorktreeRemoval
 	removeErr       error
+	ensureErr       error
 	// contains answers Contains; nil reports every ancestor as merged.
 	contains  func(dir, ancestor, descendant string) (bool, error)
 	checks    []MergeCheck
@@ -88,7 +89,7 @@ func (f *fakeWorktrees) Remove(_ context.Context, r WorktreeRemoval) error {
 
 func (f *fakeWorktrees) Ensure(_ context.Context, r WorktreeRequest) error {
 	f.reqs = append(f.reqs, r)
-	return nil
+	return f.ensureErr
 }
 
 // fakeStages returns "<stage> instructions" for every stage and records each lookup.

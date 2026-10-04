@@ -385,6 +385,7 @@ func TestInboxUnreadablePRLeavesADeadRunnerAlone(t *testing.T) {
 	f.store.recs[key].State = task.Working
 	f.store.recs[key].Delegation.RunnerPID = 77
 	delete(f.gh.prs, 912)
+	f.gh.items = []InboxItem{item(825, "open", t0, task.Assigned)}
 	f.notes.sent = nil
 	if _, err := f.app.Inbox(context.Background()); err != nil {
 		t.Fatal(err)

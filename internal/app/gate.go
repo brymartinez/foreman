@@ -67,11 +67,11 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 		if r.State == task.PRClosed && !r.Delegation.WorktreeRemovedAt.IsZero() {
 			// Cleanup removed the worktree and kept the branch. A reopened PR needs the
 			// worktree to be worked on, and a merged one needs it back so cleanup deletes
-			// the branch along with it. A failed restore leaves the task closed, and the
-			// next refresh tries again.
+			// the branch along with it. A failed restore only warns: the task still
+			// follows its PR, a merged one keeps its branch, and a launch tries the
+			// restore again before any runner starts.
 			if err := a.restoreWorktree(ctx, r.Key); err != nil {
-				warnings = append(warnings, fmt.Errorf("restore the worktree of %s#%d before PR #%d leaves PR_CLOSED: %w", r.Repo, r.Number, r.Delegation.PR, err))
-				continue
+				warnings = append(warnings, fmt.Errorf("restore the worktree of %s#%d as PR #%d leaves PR_CLOSED: %w", r.Repo, r.Number, r.Delegation.PR, err))
 			}
 		}
 		var ci task.CIStatus

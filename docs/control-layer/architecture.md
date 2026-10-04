@@ -132,7 +132,8 @@ app.InboxView         -> runner pid dead while WORKING/REVIEWING -> FAILED
                            PR reopened -> READY_FOR_HUMAN or REVIEWING
                            PR_CLOSED leaving for any reason -> recreate a worktree
                              cleanup removed, from the kept branch in the managed
-                             checkout; a missing branch fails the restore
+                             checkout; a failed restore warns, and the PR's state
+                             still applies
                          and then, per stopped task with a PR, including FAILED:
                            PR merged -> DONE
                            REVIEWING + clean review, PR head moved -> WORKING, spawn
@@ -151,6 +152,8 @@ app.InboxView         -> runner pid dead while WORKING/REVIEWING -> FAILED
                              record the pair, WORKING, spawn a runner
                            UNKNOWN or MERGEABLE -> nothing
                          gh search, then a fetch of tracked items no search returned
+                         issue closed, dead runner the gate could not read -> clear
+                           the pid
                          cleanup.on_done, per task with a worktree and no live runner:
                            DONE, PR_CLOSED, or issue closed -> git worktree remove
                            (kept if dirty, retried next refresh); branch -D only if

@@ -112,10 +112,14 @@ func (a App) InboxView(ctx context.Context, allRepos bool) (InboxReport, error) 
 	if err != nil {
 		return InboxReport{}, err
 	}
+	closed := closedItems(append(items, tracked...))
+	if err := a.releaseDead(ctx, recs, dead, closed); err != nil {
+		return InboxReport{}, err
+	}
 	// Cleanup runs before Reconcile so its notes are reported with the item, and is
 	// told which issues closed, because Reconcile ends those tasks only afterwards.
 	if a.CleanOnDone {
-		a.cleanDone(ctx, recs, closedItems(append(items, tracked...)), notes)
+		a.cleanDone(ctx, recs, closed, notes)
 	}
 	// Taken before Reconcile, which calls observe and rewrites these in place.
 	stored := storedReasons(recs)
@@ -246,6 +250,30 @@ func mergeObserved(cur, seen *task.Record) *task.Record {
 // work.
 func keepsState(r *task.Record) bool {
 	return r.Delegation != nil && r.Delegation.RunnerPID != 0
+}
+
+// releaseDead clears the pid of a dead runner that reap left alone because the gate
+// could not read its PR, when the task's issue has closed. The closed issue ends the
+// task whatever the PR says, so there is no failed run to record, and the dead pid
+// would otherwise keep Reconcile from ending it.
+func (a App) releaseDead(ctx context.Context, recs []*task.Record, dead []deadRunner, closed map[task.Key]bool) error {
+	for _, dr := range dead {
+		r := recs[dr.index]
+		if !closed[r.Key] || r.Delegation == nil || r.Delegation.RunnerPID != dr.pid {
+			continue
+		}
+		updated, err := a.update(ctx, r.Key, func(cur *task.Record) (*task.Record, error) {
+			if cur.Delegation != nil && cur.Delegation.RunnerPID == dr.pid {
+				cur.Delegation.RunnerPID = 0
+			}
+			return cur, nil
+		})
+		if err != nil {
+			return err
+		}
+		recs[dr.index] = updated
+	}
+	return nil
 }
 
 // closedItems indexes the items GitHub reports as no longer open.
