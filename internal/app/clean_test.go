@@ -178,6 +178,20 @@ func TestInboxKeepsTheWorktreeUntilCleanupCanCheckTheMerge(t *testing.T) {
 	}
 }
 
+func TestInboxClosedIssueCompletesAFailedTaskWhoseRunnerExitedBeforeClearingItsPID(t *testing.T) {
+	f := newFixture()
+	f.app.CleanOnDone = true
+	key := reviewed(t, f)
+	f.store.recs[key].State = task.Failed
+	f.store.recs[key].Delegation.RunnerPID = 77
+	if _, err := f.app.Inbox(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.Done || got.Delegation.RunnerPID != 0 || len(f.wt.removed) != 1 {
+		t.Errorf("state %s pid %d removed %+v", got.State, got.Delegation.RunnerPID, f.wt.removed)
+	}
+}
+
 func TestInboxClosedIssueWaitsForTheRunnerToStop(t *testing.T) {
 	f := newFixture()
 	f.app.CleanOnDone = true

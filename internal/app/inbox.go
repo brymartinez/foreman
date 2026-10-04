@@ -93,6 +93,9 @@ func (a App) InboxView(ctx context.Context, allRepos bool) (InboxReport, error) 
 		return InboxReport{}, err
 	}
 	dead := a.deadRunners(recs)
+	if err := a.clearExited(ctx, recs); err != nil {
+		return InboxReport{}, err
+	}
 	notes, checked, warnings, err := a.gate(ctx, recs)
 	if err != nil {
 		return InboxReport{}, err

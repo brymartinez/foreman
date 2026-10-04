@@ -182,6 +182,20 @@ func TestGateMergedPRWaitsForTheRunnerToStop(t *testing.T) {
 	}
 }
 
+func TestGateMergedPRCompletesAFailedTaskWhoseRunnerExitedBeforeClearingItsPID(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	f.store.recs[key].State = task.Failed
+	f.store.recs[key].Delegation.RunnerPID = 77
+	setPR(f, "merged")
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.Done || got.Delegation.RunnerPID != 0 {
+		t.Errorf("state %s pid %d", got.State, got.Delegation.RunnerPID)
+	}
+}
+
 const prClosedNote = "PR #912 closed without merging; the branch is kept"
 
 func TestGateClosedPRIsPRClosedNotFailed(t *testing.T) {

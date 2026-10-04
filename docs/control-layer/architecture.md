@@ -126,6 +126,7 @@ foreman [-a|--auto|--no-auto]
                            confirmation; a wait holds the issue until the next refresh
 
 app.InboxView         -> runner pid dead while WORKING/REVIEWING -> FAILED
+                         runner pid dead in any other state -> clear the pid
                          readiness gate (gate.go), per task with a PR:
                            PR closed  -> stop the runner, PR_CLOSED
                            PR reopened -> READY_FOR_HUMAN or REVIEWING

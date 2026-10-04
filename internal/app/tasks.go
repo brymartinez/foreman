@@ -25,6 +25,9 @@ func (a App) Status(ctx context.Context) ([]*task.Record, []error, error) {
 		return nil, nil, err
 	}
 	dead := a.deadRunners(recs)
+	if err := a.clearExited(ctx, recs); err != nil {
+		return nil, nil, err
+	}
 	_, checked, warnings, err := a.gate(ctx, recs)
 	if err != nil {
 		return nil, nil, err
@@ -141,6 +144,31 @@ func (a App) reap(ctx context.Context, recs []*task.Record, dead []deadRunner) e
 			return err
 		}
 		recs[dr.index] = updated
+	}
+	return nil
+}
+
+// clearExited clears the pid of a stopped task whose runner has exited. A runner saves
+// its outcome before its deferred pid clear, so one that exits between the two leaves a
+// FAILED task with a dead pid. reap only handles running states, and a set pid holds
+// off the gate and the closed-issue check, so the task would never reach DONE.
+func (a App) clearExited(ctx context.Context, recs []*task.Record) error {
+	for i, r := range recs {
+		d := r.Delegation
+		if running(r.State) || d == nil || d.RunnerPID == 0 || a.Runners.Alive(d.RunnerPID) {
+			continue
+		}
+		pid := d.RunnerPID
+		updated, err := a.update(ctx, r.Key, func(cur *task.Record) (*task.Record, error) {
+			if !running(cur.State) && cur.Delegation != nil && cur.Delegation.RunnerPID == pid {
+				cur.Delegation.RunnerPID = 0
+			}
+			return cur, nil
+		})
+		if err != nil {
+			return err
+		}
+		recs[i] = updated
 	}
 	return nil
 }
