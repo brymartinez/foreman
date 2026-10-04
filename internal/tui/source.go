@@ -26,6 +26,9 @@ type Source interface {
 	// Respond records an answer to the oldest pending question, as App.Respond
 	// does, and relaunches the runner after the last one.
 	Respond(ctx context.Context, key task.Key, raw string) (*task.Record, error)
+	// History lists the merged and closed PRs foreman opened, newest first. It reads
+	// each PR from GitHub, so the dashboard calls it only when the view opens or reloads.
+	History(ctx context.Context, allRepos bool) ([]app.HistoryRow, []error, error)
 }
 
 var _ Source = app.App{}

@@ -40,6 +40,9 @@ func (s stubSource) Resume(context.Context, task.Key) (*task.Record, error) {
 func (s stubSource) Respond(context.Context, task.Key, string) (*task.Record, error) {
 	return s.rec, s.err
 }
+func (s stubSource) History(context.Context, bool) ([]app.HistoryRow, []error, error) {
+	return nil, nil, s.err
+}
 
 func TestApplyFillsTheInboxFromARefresh(t *testing.T) {
 	report := app.InboxReport{Current: []app.InboxEntry{
