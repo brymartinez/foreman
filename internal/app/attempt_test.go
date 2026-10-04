@@ -168,3 +168,16 @@ func TestRestartBeforeAnyPRContinuesTheAttempt(t *testing.T) {
 		t.Fatalf("attempts = %+v, want the first run's attempt kept with its start and first log byte", rec.Attempts)
 	}
 }
+
+func TestARunThatFailsBeforeAnAgentTurnLeavesTheAttemptUnstarted(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	f.stages.err = errors.New("stages/implement.md: missing")
+	_ = f.app.RunTask(context.Background(), key, 4242, io.Discard)
+	if f.claude.starts != 0 {
+		t.Fatalf("setup: the agent ran %d turns", f.claude.starts)
+	}
+	if a := f.store.recs[key].CurrentAttempt(); !a.StartedAt.IsZero() {
+		t.Fatalf("attempt started at %v with no agent turn", a.StartedAt)
+	}
+}

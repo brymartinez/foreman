@@ -163,6 +163,7 @@ type Model struct {
 	logPartial   int               // trailing Log lines from an unfinished last line, read again
 	logShort     int               // the part of a scroll step that waits for older lines
 	logFloor     int64             // the first byte of the log the pane may show
+	historySeq   int               // the history load whose result the view waits for
 	logCeil      int64             // the byte the log the pane may show ends at; 0 is the file end
 }
 

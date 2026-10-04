@@ -65,7 +65,9 @@ type result struct {
 	wait      string
 	selection agent.Selection
 	// historyLoad marks a PR history load coming back, for the allRepos view.
+	// historySeq numbers the request, so only the latest one is shown.
 	historyLoad     bool
+	historySeq      int
 	history         []app.HistoryRow
 	historyWarnings []error
 }
@@ -131,8 +133,8 @@ func Run(ctx context.Context, o Options) (err error) {
 		}()
 	}
 	reloadHistory := func() {
-		allRepos := m.AllRepos
-		go func() { results <- loadHistory(ctx, o.Source, allRepos) }()
+		allRepos, seq := m.AllRepos, m.historySeq
+		go func() { results <- loadHistory(ctx, o.Source, allRepos, seq) }()
 	}
 	refresh()
 	readLocal(ctx, o.Source, &m)
@@ -246,8 +248,9 @@ func settle(ctx context.Context, s Source, m *Model, r result, results chan<- re
 	}
 	stale := r.staleView(m)
 	apply(m, r)
-	if r.respond {
-		// The last answer opens the log, so it is read now rather than on the next tick.
+	if r.respond || r.historyLoad {
+		// The last answer opens the log, and a history load can move the selected
+		// attempt's range, so the log is read now rather than on the next tick.
 		readLog(m)
 	}
 	if !r.finished && (r.report == nil || r.err != nil || stale) {
@@ -288,8 +291,8 @@ func apply(m *Model, r result) {
 		return
 	}
 	if r.historyLoad {
-		// v while the load ran asked for the other view, whose load is on its way.
-		if r.allRepos == m.AllRepos {
+		// r or v while the load ran asked for a newer load, which is on its way.
+		if r.historySeq == m.historySeq {
 			m.SetHistory(r.history, r.historyWarnings, r.err)
 		}
 		return
@@ -443,9 +446,9 @@ func respondResult(ctx context.Context, s Source, key task.Key, raw string) resu
 }
 
 // loadHistory reads the PR history. It writes nothing, so it is not counted as pending.
-func loadHistory(ctx context.Context, s Source, allRepos bool) result {
+func loadHistory(ctx context.Context, s Source, allRepos bool, seq int) result {
 	rows, warnings, err := s.History(ctx, allRepos)
-	return result{historyLoad: true, history: rows, historyWarnings: warnings, err: err, allRepos: allRepos}
+	return result{historyLoad: true, historySeq: seq, history: rows, historyWarnings: warnings, err: err, allRepos: allRepos}
 }
 
 func stop(ctx context.Context, s Source, rec *task.Record) result {

@@ -46,6 +46,7 @@ func (m *Model) openHistory() Action {
 	m.HistoryOpen, m.HistoryDetail, m.HistoryLogFocus = true, false, false
 	m.LogOpen, m.ShowOpen = false, false
 	m.HistoryLoading, m.Message = true, ""
+	m.historySeq++
 	return Action{Kind: ActionLoadHistory}
 }
 
@@ -83,6 +84,7 @@ func (m *Model) historyKey(k Key) Action {
 		m.HistoryOpen = false
 	case k.Kind == KeyRune && k.Rune == 'r':
 		m.HistoryLoading = true
+		m.historySeq++
 		return Action{Kind: ActionLoadHistory}
 	case k.Kind == KeyRune && k.Rune == 'v':
 		m.AllRepos = !m.AllRepos
@@ -90,6 +92,7 @@ func (m *Model) historyKey(k Key) Action {
 		m.SetInbox(nil)
 		m.History, m.HistoryCursor, m.HistoryTop = nil, 0, 0
 		m.HistoryDetail, m.HistoryLogFocus, m.HistoryLoading = false, false, true
+		m.historySeq++
 		return Action{Kind: ActionToggleView}
 	case k.Kind == KeyEnter && m.selectedHistory() != nil:
 		m.HistoryDetail, m.LogOffset = true, 0

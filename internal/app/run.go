@@ -29,10 +29,6 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 			return nil, errors.New("task is not WORKING; nothing to run")
 		}
 		cur.Delegation.RunnerPID = pid
-		// The runner goes straight on to the attempt's first agent turn.
-		if at := cur.CurrentAttempt(); at != nil && at.StartedAt.IsZero() {
-			at.StartedAt = a.Now()
-		}
 		return cur, nil
 	})
 	if err != nil {
@@ -350,6 +346,7 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 		resume = agent.FindingsMessage(*findings)
 	}
 	if resume != "" && d.Implementer.ID != "" {
+		a.startAttempt(ctx, rec)
 		fmt.Fprintf(log, "foreman: resuming %s session %s\n", adapter.Name(), d.Implementer.ID)
 		in.Prompt = resume
 		turn, err := adapter.Resume(ctx, d.Implementer, in)
@@ -393,11 +390,27 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 		fmt.Fprintf(log, "foreman: starting %s in %s\n", adapter.Name(), d.Worktree)
 	}
 	in.Prompt = agent.ImplementationPrompt(brief)
+	a.startAttempt(ctx, rec)
 	return adapter.Start(ctx, in, func(s task.Session) {
 		_, _ = a.update(ctx, rec.Key, existing(func(cur *task.Record) {
 			cur.Delegation.Implementer = s
 		}))
 	})
+}
+
+// startAttempt stamps the attempt's first agent turn just before the agent starts, so
+// routing, conflict checks, and turn preparation before it do not count as work.
+func (a App) startAttempt(ctx context.Context, rec *task.Record) {
+	if at := rec.CurrentAttempt(); at == nil || !at.StartedAt.IsZero() {
+		return
+	}
+	now := a.Now()
+	rec.CurrentAttempt().StartedAt = now
+	_, _ = a.update(ctx, rec.Key, existing(func(cur *task.Record) {
+		if at := cur.CurrentAttempt(); at != nil && at.StartedAt.IsZero() {
+			at.StartedAt = now
+		}
+	}))
 }
 
 // answerFeedback runs one turn that answers the comments it is given. The PR head
@@ -468,6 +481,7 @@ func (a App) review(ctx context.Context, rec *task.Record, log io.Writer) (agent
 	} else {
 		brief.Comments = feedbackItems(slices.DeleteFunc(comments, func(c PRComment) bool { return strings.TrimSpace(c.Body) == "" }))
 	}
+	a.startAttempt(ctx, rec)
 	fmt.Fprintf(log, "foreman: %s reviewing PR #%d (round %d)\n", reviewer.Name(), d.PR, len(rec.Reviews)+1)
 	return reviewer.Review(ctx, agent.StartInput{
 		Worktree:     d.Worktree,

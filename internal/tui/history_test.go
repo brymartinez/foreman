@@ -146,11 +146,11 @@ func TestVInHistorySwitchesTheRepositoryViewAndReloads(t *testing.T) {
 	if a.Kind != ActionToggleView || !m.AllRepos || len(m.History) != 0 || !m.HistoryLoading {
 		t.Fatalf("v = %+v all %v rows %d loading %v", a, m.AllRepos, len(m.History), m.HistoryLoading)
 	}
-	apply(&m, result{history: historyRows(2), historyLoad: true, allRepos: false})
+	apply(&m, result{history: historyRows(2), historyLoad: true, historySeq: m.historySeq - 1})
 	if len(m.History) != 0 {
 		t.Fatal("a load for the view just left filled the list")
 	}
-	apply(&m, result{history: historyRows(2), historyLoad: true, allRepos: true})
+	apply(&m, result{history: historyRows(2), historyLoad: true, historySeq: m.historySeq, allRepos: true})
 	if len(m.History) != 2 || m.HistoryLoading {
 		t.Fatalf("rows %d loading %v after the current view's load", len(m.History), m.HistoryLoading)
 	}
@@ -282,8 +282,8 @@ func TestHelpListsTheHistoryKey(t *testing.T) {
 
 func TestRunLoadsHistoryThroughTheSource(t *testing.T) {
 	s := historySource{rows: historyRows(2)}
-	r := loadHistory(context.Background(), s, true)
-	if !r.historyLoad || !r.allRepos || len(r.history) != 2 {
+	r := loadHistory(context.Background(), s, true, 7)
+	if !r.historyLoad || !r.allRepos || r.historySeq != 7 || len(r.history) != 2 {
 		t.Fatalf("result = %+v", r)
 	}
 }
@@ -307,9 +307,20 @@ func TestAReloadThatEndsTheAttemptDropsTheNextAttemptsLines(t *testing.T) {
 	}
 	ended, _ := historyLog(t, 30, 11, 20)
 	row.Log.End = ended.Log.End
-	m.SetHistory([]app.HistoryRow{row}, nil, nil)
-	readLog(&m)
+	settle(context.Background(), stubSource{}, &m, result{historyLoad: true, historySeq: m.historySeq, history: []app.HistoryRow{row}}, nil)
 	if len(m.Log) != 10 || m.Log[9] != "line 20" {
 		t.Fatalf("log = %q, want lines 11 to 20 once a restart ended the attempt", m.Log)
+	}
+}
+
+func TestAnOlderHistoryLoadDoesNotReplaceANewerOne(t *testing.T) {
+	m := openHistory(t, historyRows(3), 30)
+	m.Key(Key{Kind: KeyRune, Rune: 'r'})
+	older := m.historySeq
+	m.Key(Key{Kind: KeyRune, Rune: 'r'})
+	apply(&m, result{historyLoad: true, historySeq: m.historySeq, history: historyRows(5)})
+	apply(&m, result{historyLoad: true, historySeq: older, history: historyRows(1)})
+	if len(m.History) != 5 {
+		t.Fatalf("rows = %d, want the newest load's 5", len(m.History))
 	}
 }
