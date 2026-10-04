@@ -2,6 +2,10 @@
 
 ## Current stage
 
+Stage 50 (pause log redraws, for issue #50) is in progress. The model and frames
+handle `Space`, navigation resume, and the paused indicator for task and PR history
+logs. The terminal output loop still needs to suppress writes while paused.
+
 Stage 46 (reconcile stopped delegated tasks, for issue #46) is complete. A refresh
 marks a stopped task DONE when its linked PR merges or its issue closes, including
 FAILED and PR_CLOSED tasks. With `cleanup.on_done`, it removes clean DONE and
@@ -89,6 +93,9 @@ Findings 1 to 4 were fixed in stage 28.
   repair can start one refresh late.
 
 ## Next stage
+
+Finish stage 50 by gating terminal writes while a log is paused. Test the paused
+frame, background refreshes, resize events, and resume before opening the PR.
 
 Retry issue #46 with the repaired Codex adapter after installing this build. Its
 worktree still has uncommitted first-stage changes. After that, compare completed

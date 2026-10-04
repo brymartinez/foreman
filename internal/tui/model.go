@@ -81,8 +81,9 @@ type Model struct {
 	Log    []string
 	LogErr string
 	// LogPath is the file Log was read from. Empty means the next read starts over.
-	LogPath string
-	LogOpen bool // Enter on a delegated task reveals its log below the lists.
+	LogPath   string
+	LogOpen   bool // Enter on a delegated task reveals its log below the lists.
+	LogPaused bool
 	// LogRaw shows the log's lines as written instead of cleaned. It lasts for this
 	// session and applies to every task's log.
 	LogRaw bool
@@ -201,6 +202,7 @@ func (m *Model) SetTasks(recs []*task.Record) {
 		// task's log. Follow its tail rather than keep the old task's scroll offset.
 		m.LogOffset = 0
 		m.LogOpen, m.ShowOpen = false, false
+		m.LogPaused = false
 	}
 	switch {
 	case m.Mode == AnsweringDecision && !asks(cur):
@@ -219,6 +221,9 @@ func (m *Model) SetTasks(recs []*task.Record) {
 		m.Input, m.DecisionTop, m.question = "", 0, pendingIndex(cur)
 	case m.Mode == Browsing && m.LogOpen && !m.answering && asks(cur):
 		m.openDecision()
+	}
+	if !m.LogOpen || m.Mode != Browsing {
+		m.LogPaused = false
 	}
 }
 
@@ -288,6 +293,12 @@ func clamp(i, n int) int {
 
 // Key applies one keystroke and returns what the driver must do.
 func (m *Model) Key(k Key) Action {
+	if k.Kind == KeyRune && k.Rune == ' ' && !m.HelpOpen && m.Mode == Browsing &&
+		((m.HistoryOpen && m.HistoryDetail) || (!m.HistoryOpen && m.LogOpen && !m.ShowOpen)) {
+		m.LogPaused = !m.LogPaused
+		return Action{}
+	}
+	m.LogPaused = false
 	if k.Kind == KeyCtrlC {
 		return Action{Kind: ActionQuit}
 	}
