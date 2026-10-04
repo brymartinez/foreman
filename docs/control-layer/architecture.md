@@ -265,9 +265,10 @@ the same commit. The commit message records why it changed.
   Rejected: interactive sessions with terminal scraping.
 - **Permissions.** The dangerous bypass flags are never used. Claude runs with
   `acceptEdits` and the fixed `Bash,WebFetch,WebSearch` tool list; the list is not
-  configurable, because removing `Bash` broke every task. Codex runs `workspace-write`
-  with network access, plus the clone's `.git` as a writable root, because foreman's
-  worktrees keep their git data outside the worktree.
+  configurable, because removing `Bash` broke every task. Codex implementation turns
+  use a `foreman-git` permission profile with worktree writes and network access. The
+  profile grants the linked worktree's Git directory and the clone's Git object, ref,
+  log, and top-level files used by add, commit, fetch, and push. Reviews stay read-only.
 - **The agent pushes and opens the PR.** Foreman then checks with `gh` that the PR is
   open, in the task's repo, from the task branch, against the task's base, and records
   the verified number and head. A PR the developer retargets keeps its new base.
