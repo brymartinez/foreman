@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/brymartinez/foreman/internal/app"
 	"github.com/brymartinez/foreman/internal/task"
@@ -32,6 +33,73 @@ func openHistory(t *testing.T, rows []app.HistoryRow, height int) Model {
 	}
 	m.SetHistory(rows, nil, nil)
 	return m
+}
+
+func TestOpeningHistoryShowsNarrowListVerticalTimingAndShortLog(t *testing.T) {
+	row, _ := historyLog(t, 30, 11, 20)
+	row.Phases = map[task.Phase]time.Duration{task.PhasePlanning: 20 * time.Minute, task.PhaseCI: 40 * time.Minute}
+	m := openHistory(t, []app.HistoryRow{row}, 40)
+	m.Width = 100
+	readLog(&m)
+	frame := Frame(m)
+	lay, _ := layoutFor(m.Width, m.Height, true, false)
+	if len(frame) != m.Height || m.logPage() != lay.logHeight-1 {
+		t.Fatalf("frame rows %d, log page %d, dashboard log page %d", len(frame), m.logPage(), lay.logHeight-1)
+	}
+	if !strings.Contains(frame[1], "│") || !strings.Contains(frame[1], "TIMING") {
+		t.Fatalf("upper panes missing: %q", frame[1])
+	}
+	if got := utf8.RuneCountInString(strings.SplitN(plain([]string{frame[1]})[0], "│", 2)[0]); got != 60 {
+		t.Fatalf("list width = %d, want 60 of 100 columns", got)
+	}
+	if !strings.Contains(frame[lay.topHeight+1], "─") || !strings.Contains(frame[lay.topHeight+2], "LOG") {
+		t.Fatalf("log pane starts in wrong place: %q", frame[lay.topHeight+1:lay.topHeight+3])
+	}
+	text := strings.Join(frame, "\n")
+	if strings.Contains(text, "planning 20m00s ·") || !strings.Contains(text, "planning 20m00s") || !strings.Contains(text, "CI wait 40m00s") || !strings.Contains(text, "total 1h00m") || !strings.Contains(text, "line 20") {
+		t.Fatalf("timing or selected log missing:\n%s", text)
+	}
+}
+
+func TestOpeningHistoryShowsUnavailableTiming(t *testing.T) {
+	rows := historyRows(1)
+	rows[0].Timing = app.TimingUnavailable
+	m := openHistory(t, rows, 30)
+	if text := strings.Join(Frame(m), "\n"); !strings.Contains(text, "phase times unavailable") || !strings.Contains(text, "LOG") {
+		t.Fatalf("unavailable timing or log pane missing:\n%s", text)
+	}
+}
+
+func TestHistorySelectionChangesTimingAndLog(t *testing.T) {
+	first, _ := historyLog(t, 5, 1, 2)
+	second, _ := historyLog(t, 5, 3, 5)
+	first.Total, second.Total = time.Minute, 2*time.Hour
+	m := openHistory(t, []app.HistoryRow{first, second}, 30)
+	readLog(&m)
+	if text := strings.Join(Frame(m), "\n"); !strings.Contains(text, "total 1m00s") || !strings.Contains(text, "line 2") {
+		t.Fatalf("first selection missing timing or log:\n%s", text)
+	}
+	m.Key(Key{Kind: KeyRune, Rune: 'j'})
+	readLog(&m)
+	if text := strings.Join(Frame(m), "\n"); !strings.Contains(text, "total 2h00m") || !strings.Contains(text, "line 5") || strings.Contains(text, "line 2 ") {
+		t.Fatalf("second selection has stale timing or log:\n%s", text)
+	}
+}
+
+func TestTabSwitchesHistoryFocusAndEnterFocusesLog(t *testing.T) {
+	m := openHistory(t, historyRows(1), 30)
+	m.Key(Key{Kind: KeyTab})
+	if !m.HistoryLogFocus {
+		t.Fatal("Tab did not focus log")
+	}
+	m.Key(Key{Kind: KeyTab})
+	if m.HistoryLogFocus {
+		t.Fatal("second Tab did not focus list")
+	}
+	m.Key(Key{Kind: KeyEnter})
+	if !m.HistoryLogFocus {
+		t.Fatal("Enter did not focus log")
+	}
 }
 
 func TestPOpensHistoryAndEscReturnsToTheDashboard(t *testing.T) {
@@ -187,11 +255,11 @@ func TestEnterShowsTheAttemptsPhasesAndOnlyItsLogLines(t *testing.T) {
 	m := openHistory(t, []app.HistoryRow{row}, 40)
 	m.Key(Key{Kind: KeyEnter})
 	readLog(&m)
-	if !m.HistoryDetail || len(m.Log) != 10 || m.Log[0] != "line 11" || m.Log[9] != "line 20" || !m.LogAtStart {
-		t.Fatalf("detail %v log %q at start %v, want lines 11 to 20 only", m.HistoryDetail, m.Log, m.LogAtStart)
+	if !m.HistoryLogFocus || len(m.Log) != 10 || m.Log[0] != "line 11" || m.Log[9] != "line 20" || !m.LogAtStart {
+		t.Fatalf("focus %v log %q at start %v, want lines 11 to 20 only", m.HistoryLogFocus, m.Log, m.LogAtStart)
 	}
 	text := strings.Join(Frame(m), "\n")
-	for _, want := range []string{"planning 20m00s", "CI wait 40m00s", "total 1h00m", "line 11", "line 20"} {
+	for _, want := range []string{"planning 20m00s", "CI wait 40m00s", "total 1h00m", "line 20"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("detail is missing %q:\n%s", want, text)
 		}
@@ -210,7 +278,6 @@ func TestHistoryLogScrollsBackInChunksAndStopsAtTheAttemptStart(t *testing.T) {
 	if m.LogAtStart || m.Log[len(m.Log)-1] != "line 150" {
 		t.Fatalf("first read = %q at start %v, want a tail chunk ending at line 150", m.Log, m.LogAtStart)
 	}
-	m.Key(Key{Kind: KeyTab})
 	if a := m.Key(Key{Kind: KeyRune, Rune: 'g'}); a.Kind == ActionLoadOlder {
 		loadOlder(&m)
 	}
@@ -242,13 +309,13 @@ func TestHistoryLabelsAWholeIssueLog(t *testing.T) {
 	}
 }
 
-func TestEscClosesTheDetailBeforeTheHistory(t *testing.T) {
+func TestEscReturnsFromTheLogThenClosesHistory(t *testing.T) {
 	row, _ := historyLog(t, 5, 1, 5)
 	m := openHistory(t, []app.HistoryRow{row}, 30)
 	m.Key(Key{Kind: KeyEnter})
 	m.Key(Key{Kind: KeyEscape})
-	if m.HistoryDetail || !m.HistoryOpen {
-		t.Fatalf("detail %v open %v, want the detail closed and the history still open", m.HistoryDetail, m.HistoryOpen)
+	if m.HistoryLogFocus || !m.HistoryOpen {
+		t.Fatalf("focus %v open %v, want the list focused and history still open", m.HistoryLogFocus, m.HistoryOpen)
 	}
 	m.Key(Key{Kind: KeyEscape})
 	if m.HistoryOpen {
@@ -345,7 +412,6 @@ func TestThePhaseSummaryWrapsInAnEightyColumnTerminal(t *testing.T) {
 		t.Errorf("frame has %d lines, want 30", len(frame))
 	}
 	page := m.logPage()
-	m.Key(Key{Kind: KeyTab})
 	m.Key(Key{Kind: KeyRune, Rune: 'g'})
 	if got := strings.Join(Frame(m), "\n"); !strings.Contains(got, fmt.Sprintf("line %d ", page)) || strings.Contains(got, fmt.Sprintf("line %d ", page+1)) {
 		t.Errorf("the log shows more or fewer than its %d-line page:\n%s", page, got)
@@ -361,8 +427,8 @@ func TestTheDetailShowsALogLineAtTheMinimumTerminalSize(t *testing.T) {
 	m.Width = minWidth
 	m.Key(Key{Kind: KeyEnter})
 	readLog(&m)
-	if n := len(m.phaseLines()); n != 3 {
-		t.Fatalf("setup: %d phase lines, want 3", n)
+	if n := len(m.phaseLines()); n != 6 {
+		t.Fatalf("setup: %d phase lines, want 6", n)
 	}
 	frame := Frame(m)
 	text := strings.Join(frame, "\n")
@@ -376,15 +442,29 @@ func TestTheDetailShowsALogLineAtTheMinimumTerminalSize(t *testing.T) {
 	}
 }
 
-func TestALongRepositoryNameLeavesTheTotalInViewAtTheMinimumWidth(t *testing.T) {
+func TestALongRepositoryNameLeavesTheStatusInViewAtTheMinimumWidth(t *testing.T) {
 	rows := historyRows(1)
 	rows[0].Key.Repo, rows[0].PR = "longorganization/longrepository", 123
 	m := openHistory(t, rows, minHeight)
 	m.Width = minWidth
-	line := Frame(m)[2]
-	for _, want := range []string{"#123", "merged", "1h02m"} {
-		if !strings.Contains(line, want) {
-			t.Errorf("row %q is missing %q", line, want)
+	row := strings.SplitN(plain([]string{Frame(m)[2]})[0], "│", 2)[0]
+	for _, want := range []string{"#123", "merged"} {
+		if !strings.Contains(row, want) {
+			t.Errorf("row %q is missing %q", row, want)
 		}
+	}
+}
+
+func TestANarrowListDropsTheTotalColumnAndKeepsTheTitle(t *testing.T) {
+	rows := historyRows(1)
+	rows[0].Title, rows[0].Phases = "Add retries", map[task.Phase]time.Duration{task.PhasePlanning: time.Minute}
+	m := openHistory(t, rows, minHeight)
+	m.Width = minWidth
+	row := strings.SplitN(plain([]string{Frame(m)[2]})[0], "│", 2)[0]
+	if !strings.Contains(row, "Add retr") || strings.Contains(row, "1h02m") {
+		t.Errorf("row %q should keep the title and leave the total to the timing pane", row)
+	}
+	if text := strings.Join(Frame(m), "\n"); !strings.Contains(text, "total 1h02m") {
+		t.Errorf("timing pane is missing the total:\n%s", text)
 	}
 }

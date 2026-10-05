@@ -100,9 +100,7 @@ type Model struct {
 	HistoryCursor   int
 	// HistoryTop is the first row in view.
 	HistoryTop int
-	// HistoryDetail shows the selected row's phases and log below the rows.
-	// HistoryLogFocus sends the movement keys to that log instead of the rows.
-	HistoryDetail   bool
+	// HistoryLogFocus sends the movement keys to the log instead of the rows.
 	HistoryLogFocus bool
 
 	// HelpOpen shows the keys and Version in place of the panes.
@@ -226,11 +224,11 @@ func (m *Model) SetTasks(recs []*task.Record) {
 	}
 }
 
-// logShown reports a task log or PR history detail log is on screen, the views Space
+// logShown reports a task log or PR history log is on screen, the views Space
 // can pause.
 func (m *Model) logShown() bool {
 	return !m.HelpOpen && m.Mode == Browsing &&
-		((m.HistoryOpen && m.HistoryDetail) || (!m.HistoryOpen && m.LogOpen && !m.ShowOpen))
+		(m.HistoryOpen || (m.LogOpen && !m.ShowOpen))
 }
 
 // pendingIndex is the index in rec.Decisions of the oldest unanswered question, or -1.

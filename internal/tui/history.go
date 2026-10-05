@@ -21,7 +21,7 @@ type logSource struct {
 func (m *Model) logSource() (logSource, bool) {
 	if m.HistoryOpen {
 		r := m.selectedHistory()
-		if !m.HistoryDetail || r == nil || r.Log.Path == "" {
+		if r == nil || r.Log.Path == "" {
 			return logSource{}, false
 		}
 		return logSource{path: r.Log.Path, floor: r.Log.Start, ceil: r.Log.End}, true
@@ -43,7 +43,7 @@ func (m *Model) selectedHistory() *app.HistoryRow {
 // openHistory replaces the dashboard with the PR history. The dashboard's lower pane
 // closes, so the log pane belongs to the history until Esc.
 func (m *Model) openHistory() Action {
-	m.HistoryOpen, m.HistoryDetail, m.HistoryLogFocus = true, false, false
+	m.HistoryOpen, m.HistoryLogFocus = true, false
 	m.LogOpen, m.ShowOpen = false, false
 	m.HistoryLoading, m.Message = true, ""
 	m.historySeq++
@@ -78,8 +78,8 @@ func (m *Model) historyKey(k Key) Action {
 		return Action{Kind: ActionQuit}
 	case k.Kind == KeyRune && k.Rune == '?':
 		m.HelpOpen = true
-	case k.Kind == KeyEscape && m.HistoryDetail:
-		m.HistoryDetail, m.HistoryLogFocus = false, false
+	case k.Kind == KeyEscape && m.HistoryLogFocus:
+		m.HistoryLogFocus = false
 	case k.Kind == KeyEscape:
 		m.HistoryOpen = false
 	case k.Kind == KeyRune && k.Rune == 'r':
@@ -91,14 +91,14 @@ func (m *Model) historyKey(k Key) Action {
 		// Both lists belong to the view just left, so neither stays until its load.
 		m.SetInbox(nil)
 		m.History, m.HistoryCursor, m.HistoryTop = nil, 0, 0
-		m.HistoryDetail, m.HistoryLogFocus, m.HistoryLoading = false, false, true
+		m.HistoryLogFocus, m.HistoryLoading = false, true
 		m.historySeq++
 		return Action{Kind: ActionToggleView}
 	case k.Kind == KeyEnter && m.selectedHistory() != nil:
-		m.HistoryDetail, m.LogOffset = true, 0
-	case k.Kind == KeyTab && m.HistoryDetail:
+		m.HistoryLogFocus = true
+	case k.Kind == KeyTab:
 		m.HistoryLogFocus = !m.HistoryLogFocus
-	case m.HistoryDetail && k.Kind == KeyRune && k.Rune == 'R':
+	case k.Kind == KeyRune && k.Rune == 'R':
 		m.LogRaw = !m.LogRaw
 		m.LogPath, m.LogOffset = "", 0
 		return Action{Kind: ActionReadLog}
@@ -172,47 +172,37 @@ func historyTop(top, cursor, n, page int) int {
 	return max(min(top, n-page), 0)
 }
 
-// historyLayout splits the rows under the header between the list, with its title,
-// and the detail pane, with its separator. The detail gets most of the height, because
-// it holds the phases and the log. need is the detail's smallest useful height, and
-// the list gives up rows, down to its title and one row, so the detail has it.
-func historyLayout(height int, detail bool, need int) (list, lower int) {
-	avail := height - 3
-	if !detail {
-		return avail, 0
-	}
-	list = max(min(max(avail*2/5, 3), avail-1-need), 2)
-	return list, avail - list - 1
-}
-
-// detailNeed is the detail's smallest useful height: its heading, its phase lines, the
-// log heading, and one log line.
-func (m *Model) detailNeed() int {
-	return 3 + len(m.phaseLines())
-}
-
 // historyPage is how many rows the list shows.
 func (m *Model) historyPage() int {
-	list, _ := historyLayout(m.Height, m.HistoryDetail, m.detailNeed())
-	return max(list-1, 1)
+	lay, ok := layoutFor(m.Width, m.Height, true, false)
+	if !ok {
+		return 1
+	}
+	return max(lay.topHeight-1, 1)
 }
 
-// historyLogPage is how many log lines the detail shows under its heading, its phase
-// lines, and its log heading. The heading is dropped first when they do not all fit.
+// historyLogPage matches the dashboard's open log height.
 func (m *Model) historyLogPage() int {
-	_, lower := historyLayout(m.Height, true, m.detailNeed())
-	return max(lower-m.detailNeed()+1, 1)
+	lay, ok := layoutFor(m.Width, m.Height, true, false)
+	if !ok {
+		return 1
+	}
+	return max(lay.logHeight-1, 1)
 }
 
 // historyFrame draws the PR history in place of the dashboard.
 func historyFrame(m Model) []string {
-	list, lower := historyLayout(m.Height, m.HistoryDetail, m.detailNeed())
+	lay, _ := layoutFor(m.Width, m.Height, true, false)
+	leftWidth := m.Width * 3 / 5
+	rightWidth := m.Width - leftWidth - 1
 	lines := []string{colored(pad(truncate(historyHeader(m), m.Width), m.Width), cyan)}
-	lines = append(lines, historyList(m, list)...)
-	if m.HistoryDetail {
-		lines = append(lines, colored(strings.Repeat("─", m.Width), cyan))
-		lines = append(lines, historyDetail(m, lower)...)
+	left := historyList(m, leftWidth, lay.topHeight)
+	right := historyTiming(m, rightWidth, lay.topHeight)
+	for i := range lay.topHeight {
+		lines = append(lines, left[i]+colored("│", cyan)+right[i])
 	}
+	lines = append(lines, colored(strings.Repeat("─", m.Width), cyan))
+	lines = append(lines, historyLogPane(m, lay.logHeight)...)
 	return append(lines, messageLine(m), dimmed(pad(truncate(footer(m), m.Width), m.Width)))
 }
 
@@ -238,13 +228,13 @@ const (
 
 // historyList renders the title and one line per PR: repository, number, title,
 // status, and total, with the title taking the width the others leave.
-func historyList(m Model, height int) []string {
+func historyList(m Model, width, height int) []string {
 	title := "PR HISTORY · merged and closed, newest first"
 	focused := !m.HistoryLogFocus
-	if m.HistoryDetail && focused {
+	if focused {
 		title = focusMark + title
 	}
-	out := []string{colored(pad(truncate(title, m.Width), m.Width), cyan)}
+	out := []string{colored(pad(truncate(title, width), width), cyan)}
 	rows := height - 1
 	if len(m.History) == 0 {
 		empty := "No merged or closed Foreman PRs."
@@ -254,19 +244,23 @@ func historyList(m Model, height int) []string {
 		case m.HistoryErr != "":
 			empty = "! " + m.HistoryErr
 		}
-		out = append(out, pad(truncate("  "+empty, m.Width), m.Width))
+		out = append(out, pad(truncate("  "+empty, width), width))
 	}
 	repoWidth, prWidth := 0, 0
 	for _, r := range m.History {
 		repoWidth = max(repoWidth, min(textWidth(string(r.Key.Repo)), 30))
 		prWidth = max(prWidth, len(fmt.Sprintf("#%d", r.PR)))
 	}
-	// The repository gives up columns before the title drops below 8, so the status and
-	// the total always fit.
+	// The repository gives up columns before the title drops below 8, so the status
+	// always fits. A list too narrow for the total leaves it to the timing pane.
 	const minTitle = 8
-	fixed := 2 + 2 + prWidth + 2 + 2 + statusWidth + 2 + totalWidth
-	repoWidth = max(min(repoWidth, m.Width-fixed-minTitle), 1)
-	titleWidth := max(m.Width-fixed-repoWidth, minTitle)
+	fixed := 2 + 2 + prWidth + 2 + 2 + statusWidth
+	showTotal := width-fixed-2-totalWidth >= minTitle+1
+	if showTotal {
+		fixed += 2 + totalWidth
+	}
+	repoWidth = max(min(repoWidth, width-fixed-minTitle), 1)
+	titleWidth := max(width-fixed-repoWidth, minTitle)
 	top := historyTop(m.HistoryTop, m.HistoryCursor, len(m.History), rows)
 	for i := top; i < len(m.History) && len(out) < height; i++ {
 		r := m.History[i]
@@ -275,8 +269,11 @@ func historyList(m Model, height int) []string {
 			marker = "> "
 		}
 		line := marker + pad(truncate(string(r.Key.Repo), repoWidth), repoWidth) + "  " + pad(fmt.Sprintf("#%d", r.PR), prWidth) + "  " +
-			pad(truncate(r.Title, titleWidth), titleWidth) + "  " + pad(r.Status, statusWidth) + "  " + totalText(r)
-		line = pad(truncate(line, m.Width), m.Width)
+			pad(truncate(r.Title, titleWidth), titleWidth) + "  " + pad(r.Status, statusWidth)
+		if showTotal {
+			line += "  " + totalText(r)
+		}
+		line = pad(truncate(line, width), width)
 		if i == m.HistoryCursor && focused {
 			out = append(out, reverseOn+line+attrsReset)
 			continue
@@ -284,7 +281,7 @@ func historyList(m Model, height int) []string {
 		out = append(out, highlight(line, r.Status, statusColor(r.Status)))
 	}
 	for len(out) < height {
-		out = append(out, strings.Repeat(" ", m.Width))
+		out = append(out, strings.Repeat(" ", width))
 	}
 	return out
 }
@@ -345,69 +342,66 @@ func phaseParts(r app.HistoryRow) []string {
 	return append(parts, "total "+duration(r.Total))
 }
 
-// phaseLines packs the selected row's phase values into lines of the terminal's
-// width, breaking only between values, so a narrow terminal still shows every one.
+// phaseLines are the selected row's phase values, one per timing pane line.
 func (m *Model) phaseLines() []string {
 	r := m.selectedHistory()
 	if r == nil {
 		return nil
 	}
-	var lines []string
-	for _, part := range phaseParts(*r) {
-		if n := len(lines); n > 0 && textWidth(lines[n-1]+" · "+part) <= m.Width {
-			lines[n-1] += " · " + part
-			continue
-		}
-		lines = append(lines, part)
-	}
-	return lines
+	return phaseParts(*r)
 }
 
-// historyDetail renders the selected PR's heading, its phases, and its log slice.
-func historyDetail(m Model, height int) []string {
+// historyTiming renders the selected row's phase lines beside the list. The heading
+// is dropped first when the pane is too short for every line.
+func historyTiming(m Model, width, height int) []string {
+	var out []string
+	r := m.selectedHistory()
+	if r != nil {
+		parts := m.phaseLines()
+		if height > len(parts) {
+			out = append(out, colored(pad("TIMING", width), cyan))
+		}
+		for _, line := range parts {
+			out = append(out, pad(truncate(line, width), width))
+		}
+	} else {
+		out = append(out, colored(pad("TIMING", width), cyan))
+	}
+	for len(out) < height {
+		out = append(out, strings.Repeat(" ", width))
+	}
+	return out[:height]
+}
+
+// historyLogPane renders the selected attempt's bounded log across the lower pane.
+func historyLogPane(m Model, height int) []string {
 	r := m.selectedHistory()
 	if r == nil {
-		out := []string{}
+		out := []string{colored(pad("LOG · no PR selected", m.Width), cyan)}
 		for len(out) < height {
 			out = append(out, strings.Repeat(" ", m.Width))
 		}
 		return out
 	}
-	heading := fmt.Sprintf("PR #%d · %s#%d · %s", r.PR, r.Key.Repo, r.Key.Number, r.Status)
-	if !r.ClosedAt.IsZero() {
-		heading += " " + r.ClosedAt.Local().Format("2006-01-02 15:04")
-	}
-	if r.Title != "" {
-		heading += " · " + r.Title
-	}
-	// The label goes before the path, which a narrow pane cuts.
-	logTitle := "LOG"
+	logTitle := fmt.Sprintf("LOG · PR #%d · %s#%d", r.PR, r.Key.Repo, r.Key.Number)
 	if m.LogRaw {
 		logTitle += " · raw"
 	}
 	if r.Log.Whole {
 		logTitle += " · whole issue log, attempt boundaries unknown"
 	}
+	if m.LogOffset > 0 {
+		logTitle += fmt.Sprintf(" · scrolled back %d (G to follow)", m.LogOffset)
+	}
 	if r.Log.Path == "" {
 		logTitle += " · none recorded"
 	} else {
 		logTitle += " · " + r.Log.Path
 	}
-	if m.LogOffset > 0 {
-		logTitle += fmt.Sprintf(" · scrolled back %d (G to follow)", m.LogOffset)
-	}
 	if m.HistoryLogFocus {
 		logTitle = focusMark + logTitle
 	}
-	var out []string
-	// The list row above names the PR, so the heading goes before any log line does.
-	if height >= m.detailNeed() {
-		out = append(out, colored(pad(truncate(heading, m.Width), m.Width), cyan))
-	}
-	for _, l := range m.phaseLines() {
-		out = append(out, pad(truncate(l, m.Width), m.Width))
-	}
-	out = append(out, colored(pad(truncate(logTitle, m.Width), m.Width), cyan))
+	out := []string{colored(pad(truncate(logTitle, m.Width), m.Width), cyan)}
 	var body []string
 	switch {
 	case m.LogErr != "":
