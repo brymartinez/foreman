@@ -251,10 +251,14 @@ func historyList(m Model, width, height int) []string {
 		repoWidth = max(repoWidth, min(textWidth(string(r.Key.Repo)), 30))
 		prWidth = max(prWidth, len(fmt.Sprintf("#%d", r.PR)))
 	}
-	// The repository gives up columns before the title drops below 8, so the status and
-	// the total always fit.
+	// The repository gives up columns before the title drops below 8, so the status
+	// always fits. A list too narrow for the total leaves it to the timing pane.
 	const minTitle = 8
-	fixed := 2 + 2 + prWidth + 2 + 2 + statusWidth + 2 + totalWidth
+	fixed := 2 + 2 + prWidth + 2 + 2 + statusWidth
+	showTotal := width-fixed-2-totalWidth >= minTitle+1
+	if showTotal {
+		fixed += 2 + totalWidth
+	}
 	repoWidth = max(min(repoWidth, width-fixed-minTitle), 1)
 	titleWidth := max(width-fixed-repoWidth, minTitle)
 	top := historyTop(m.HistoryTop, m.HistoryCursor, len(m.History), rows)
@@ -265,7 +269,10 @@ func historyList(m Model, width, height int) []string {
 			marker = "> "
 		}
 		line := marker + pad(truncate(string(r.Key.Repo), repoWidth), repoWidth) + "  " + pad(fmt.Sprintf("#%d", r.PR), prWidth) + "  " +
-			pad(truncate(r.Title, titleWidth), titleWidth) + "  " + pad(r.Status, statusWidth) + "  " + totalText(r)
+			pad(truncate(r.Title, titleWidth), titleWidth) + "  " + pad(r.Status, statusWidth)
+		if showTotal {
+			line += "  " + totalText(r)
+		}
 		line = pad(truncate(line, width), width)
 		if i == m.HistoryCursor && focused {
 			out = append(out, reverseOn+line+attrsReset)
@@ -335,6 +342,7 @@ func phaseParts(r app.HistoryRow) []string {
 	return append(parts, "total "+duration(r.Total))
 }
 
+// phaseLines are the selected row's phase values, one per timing pane line.
 func (m *Model) phaseLines() []string {
 	r := m.selectedHistory()
 	if r == nil {
@@ -343,6 +351,8 @@ func (m *Model) phaseLines() []string {
 	return phaseParts(*r)
 }
 
+// historyTiming renders the selected row's phase lines beside the list. The heading
+// is dropped first when the pane is too short for every line.
 func historyTiming(m Model, width, height int) []string {
 	var out []string
 	r := m.selectedHistory()

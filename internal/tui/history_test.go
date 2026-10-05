@@ -442,15 +442,29 @@ func TestTheDetailShowsALogLineAtTheMinimumTerminalSize(t *testing.T) {
 	}
 }
 
-func TestALongRepositoryNameLeavesTheTotalInViewAtTheMinimumWidth(t *testing.T) {
+func TestALongRepositoryNameLeavesTheStatusInViewAtTheMinimumWidth(t *testing.T) {
 	rows := historyRows(1)
 	rows[0].Key.Repo, rows[0].PR = "longorganization/longrepository", 123
 	m := openHistory(t, rows, minHeight)
 	m.Width = minWidth
-	line := Frame(m)[2]
+	row := strings.SplitN(plain([]string{Frame(m)[2]})[0], "│", 2)[0]
 	for _, want := range []string{"#123", "merged"} {
-		if !strings.Contains(line, want) {
-			t.Errorf("row %q is missing %q", line, want)
+		if !strings.Contains(row, want) {
+			t.Errorf("row %q is missing %q", row, want)
 		}
+	}
+}
+
+func TestANarrowListDropsTheTotalColumnAndKeepsTheTitle(t *testing.T) {
+	rows := historyRows(1)
+	rows[0].Title, rows[0].Phases = "Add retries", map[task.Phase]time.Duration{task.PhasePlanning: time.Minute}
+	m := openHistory(t, rows, minHeight)
+	m.Width = minWidth
+	row := strings.SplitN(plain([]string{Frame(m)[2]})[0], "│", 2)[0]
+	if !strings.Contains(row, "Add retr") || strings.Contains(row, "1h02m") {
+		t.Errorf("row %q should keep the title and leave the total to the timing pane", row)
+	}
+	if text := strings.Join(Frame(m), "\n"); !strings.Contains(text, "total 1h02m") {
+		t.Errorf("timing pane is missing the total:\n%s", text)
 	}
 }
