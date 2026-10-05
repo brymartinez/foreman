@@ -138,7 +138,8 @@ func Run(ctx context.Context, o Options) (err error) {
 	}
 	refresh()
 	readLocal(ctx, o.Source, &m)
-	draw(o.Out, Frame(m))
+	screen := painter{out: o.Out}
+	screen.paint(m)
 
 	for {
 		select {
@@ -146,7 +147,7 @@ func Run(ctx context.Context, o Options) (err error) {
 			return nil
 		case <-resize:
 			m.Width, m.Height = size(o.Out)
-			fmt.Fprint(o.Out, clear)
+			screen.resize()
 		case <-local.C:
 			readLocal(ctx, o.Source, &m)
 			// A run that left WORKING frees its slot here, without waiting for GitHub.
@@ -216,8 +217,37 @@ func Run(ctx context.Context, o Options) (err error) {
 				readLog(&m)
 			}
 		}
-		draw(o.Out, Frame(m))
+		screen.paint(m)
 	}
+}
+
+// painter writes Run's frames. A paused log gets one frame with its indicator, then
+// nothing, so a mouse selection in the terminal survives refreshes and log reads.
+type painter struct {
+	out    io.Writer
+	frozen bool
+	// held marks a resize that came while frozen; its clear waits for the next frame.
+	held bool
+}
+
+func (p *painter) resize() {
+	if p.frozen {
+		p.held = true
+		return
+	}
+	fmt.Fprint(p.out, clear)
+}
+
+func (p *painter) paint(m Model) {
+	if p.frozen && m.LogPaused {
+		return
+	}
+	if p.held {
+		fmt.Fprint(p.out, clear)
+		p.held = false
+	}
+	draw(p.out, Frame(m))
+	p.frozen = m.LogPaused
 }
 
 // finish waits for a Start or Cancel to come back before Run returns, so the process

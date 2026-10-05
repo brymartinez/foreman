@@ -457,6 +457,10 @@ the same commit. The commit message records why it changed.
 - **Built on `golang.org/x/term` alone.** `Model.Key` is a pure transition and `Frame` a
   pure function of the model, so nearly all of the UI is unit tested; only `Run` touches
   the terminal. Bubble Tea was rejected as ten modules in a project with one dependency.
+- **An open log can pause redraws.** `Space` toggles a model flag in the task log or PR
+  history detail. The terminal loop draws the paused frame once, then processes input,
+  refreshes, and log reads without writing another frame or resize clear until a key
+  resumes it. A non-`Space` key resumes and takes its usual action.
 - **It never blocks or misdraws:** the terminal check runs before config loads, so a
   piped `foreman` prints usage and exits 0; control characters in dynamic text become
   spaces; widths are counted in terminal columns; GitHub refreshes run off the input

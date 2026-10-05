@@ -2,6 +2,10 @@
 
 ## Current stage
 
+Stage 50 (pause log redraws, for issue #50) is complete. `Space` in a task log or PR
+history detail draws a paused frame, then `Run` writes nothing, not even a resize
+clear, until `Space` or another key resumes it.
+
 Stage 46 (reconcile stopped delegated tasks, for issue #46) is complete. A refresh
 marks a stopped task DONE when its linked PR merges or its issue closes, including
 FAILED and PR_CLOSED tasks. With `cleanup.on_done`, it removes clean DONE and

@@ -383,6 +383,7 @@ var helpKeys = []helpKey{
 	{"esc", "close the lower pane", "esc close"},
 	{"s", "switch the open pane between the log and the task's state", "s show/log"},
 	{"R", "switch the log between cleaned and raw lines", "R raw log"},
+	{"space", "pause or resume log redraws; navigation also resumes", "space pause/resume"},
 	{"u/d, pgup/pgdn", "scroll the log a page; past the top loads older lines", "u/d page"},
 	{"ctrl-u/ctrl-d", "scroll the log, or move the PR history, half a page", "ctrl-u/d half page"},
 	{"g/G, end", "go to the log's first line or follow its tail", "g/G log start/end"},
@@ -515,6 +516,9 @@ func lastColumns(s string, width int) string {
 }
 
 func footer(m Model) string {
+	if m.LogPaused {
+		return "PAUSED · space or navigation resumes"
+	}
 	switch m.Mode {
 	case ChoosingAgent:
 		if m.offersRoute() {
