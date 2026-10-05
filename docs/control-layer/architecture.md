@@ -481,7 +481,12 @@ the same commit. The commit message records why it changed.
   line up. The scroll offset counts from the tail and grows with new lines, so a reader
   scrolled back keeps the same lines on screen.
 
-- **The PR history is its own full-screen view.** `p` opens it and esc returns.
+- **The PR history is its own full-screen view.** `p` opens a narrow PR list beside
+  the selected PR's vertical phase times, with a short full-width log below. Enter
+  focuses the log, Tab switches focus, and Esc returns to the list before closing
+  history.
+  The lower log uses the dashboard's open-log height and scroll keys.
+
   `App.History` builds the rows when it opens and on `r`, and follows `v`. It reads
   recorded attempts, then older PRs from the task files and from the
   `foreman: verified PR` lines of every log in `log_dir`, which also finds attempts a
@@ -491,7 +496,7 @@ the same commit. The commit message records why it changed.
   runner start before its verified line and ends at the first start after it, so a
   failed runner in between belongs to neither. When no start separates two PRs, both
   show the whole issue log, labeled. The
-  detail pane's log reuses the log pane's paging inside the attempt's byte range, and
+  history log reuses the log pane's paging inside the attempt's byte range, and
   rereads it when a reload changes the range.
 
 ### Notifications

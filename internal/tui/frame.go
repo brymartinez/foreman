@@ -566,8 +566,6 @@ func historyHints(m Model) string {
 	switch {
 	case m.HistoryLogFocus:
 		long, short = hintsHistoryLogLong, hintsHistoryLogShort
-	case m.HistoryDetail:
-		long, short = hintsHistoryDetailLong, hintsHistoryDetailShort
 	}
 	if textWidth(long) > m.Width {
 		return short
@@ -617,12 +615,10 @@ const (
 	hintsOpenLong  = "j/k move · h/l pane · enter select · s show/log · R raw · esc close · c cancel · a auto · v view · ? help · q quit"
 	hintsOpenShort = "j/k move · h/l pane · s show/log · esc close · ? help"
 
-	hintsHistoryLong        = "j/k move · ctrl-f/b page · ctrl-d/u half page · enter details · v view · r reload · esc back · ? help · q quit"
-	hintsHistoryShort       = "j/k move · ctrl-f/b page · enter details · esc back · ? help"
-	hintsHistoryDetailLong  = "j/k move · ctrl-f/b page · ctrl-d/u half page · tab log · R raw · esc close · ? help"
-	hintsHistoryDetailShort = "j/k move · tab log · esc close · ? help"
-	hintsHistoryLogLong     = "j/k line · u/d page · ctrl-u/d half page · g/G ends · tab rows · R raw · esc close · ? help"
-	hintsHistoryLogShort    = "j/k line · u/d page · g/G ends · tab rows · esc close"
+	hintsHistoryLong     = "j/k move · ctrl-f/b page · ctrl-d/u half page · enter/tab log · v view · r reload · esc back · ? help · q quit"
+	hintsHistoryShort    = "j/k move · ctrl-f/b page · enter/tab log · esc back · ? help"
+	hintsHistoryLogLong  = "j/k line · u/d page · ctrl-u/d half page · g/G ends · tab rows · R raw · esc close · ? help"
+	hintsHistoryLogShort = "j/k line · u/d page · g/G ends · tab rows · esc close"
 )
 
 // truncate cuts s to at most width columns, ending in an ellipsis when it cut. A wide

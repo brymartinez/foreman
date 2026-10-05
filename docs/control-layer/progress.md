@@ -2,8 +2,13 @@
 
 ## Current stage
 
+Stage 52 (side-by-side PR history, for issue #52) is complete. PR history opens
+with a narrower list and vertical timing beside it, plus a short full-width log.
+The list selects the timing and attempt log. Enter and Tab focus the log; Esc
+returns to the list before closing history.
+
 Stage 50 (pause log redraws, for issue #50) is complete. `Space` in a task log or PR
-history detail draws a paused frame, then `Run` writes nothing, not even a resize
+history log draws a paused frame, then `Run` writes nothing, not even a resize
 clear, until `Space` or another key resumes it.
 
 Stage 46 (reconcile stopped delegated tasks, for issue #46) is complete. A refresh

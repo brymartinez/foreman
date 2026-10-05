@@ -16,11 +16,7 @@ func TestSpacePausesOnlyAnOpenLogAndResumesOnSecondSpace(t *testing.T) {
 			press(&m, Key{Kind: KeyEnter})
 			return m
 		}},
-		{"PR history detail", func(t *testing.T) Model {
-			m := openHistory(t, historyRows(1), 30)
-			press(&m, Key{Kind: KeyEnter})
-			return m
-		}},
+		{"PR history list", func(t *testing.T) Model { return openHistory(t, historyRows(1), 30) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := tc.setup(t)
@@ -45,7 +41,6 @@ func TestSpacePausesOnlyAnOpenLogAndResumesOnSecondSpace(t *testing.T) {
 			press(&m, Key{Kind: KeyEnter}, rune_('s'))
 			return m
 		}},
-		{"PR history list", func(t *testing.T) Model { return openHistory(t, historyRows(1), 30) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := tc.setup(t)
@@ -72,13 +67,13 @@ func TestNavigationResumesThePausedLogAndAppliesItsKey(t *testing.T) {
 	}
 
 	h := openHistory(t, historyRows(2), 30)
-	press(&h, Key{Kind: KeyEnter}, rune_(' '), Key{Kind: KeyTab})
+	press(&h, rune_(' '), Key{Kind: KeyTab})
 	if strings.Contains(screen(h), "PAUSED") || !h.HistoryLogFocus {
 		t.Fatal("Tab did not resume and focus the history log")
 	}
 	press(&h, rune_(' '), Key{Kind: KeyEscape})
-	if strings.Contains(screen(h), "PAUSED") || h.HistoryDetail {
-		t.Fatal("Escape did not resume and close the history detail")
+	if strings.Contains(screen(h), "PAUSED") || h.HistoryLogFocus || !h.HistoryOpen {
+		t.Fatal("Escape did not resume and return to the history list")
 	}
 }
 

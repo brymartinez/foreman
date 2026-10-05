@@ -818,7 +818,7 @@ scenario_history() {
 	check "p opens the PR history" contains "$sandbox/history.txt" "PR HISTORY"
 	check "the merged PR has a row with its title" grep -qE '#942 +Add retries +merged' "$sandbox/history.txt"
 	check "the older PR from a log has a row" grep -qE '#907 +Old attempt +closed +unavailable' "$sandbox/history.txt"
-	check "the newest close comes first" awk '/#942/{a=NR} /#907/{b=NR} END{exit !(a && b && a<b)}' "$sandbox/history.txt"
+	check "the newest close comes first" awk '/#942 +Add retries +merged/{a=NR} /#907 +Old attempt +closed/{b=NR} END{exit !(a && b && a<b)}' "$sandbox/history.txt"
 	dash -- refreshed keys=p "wait=#942" 'keys=\r' "wait=total" sleep=0.3 print >"$sandbox/detail.txt" 2>/dev/null
 	check "enter shows the phase times" contains "$sandbox/detail.txt" "planning"
 	check "and the attempt's log" contains "$sandbox/detail.txt" "foreman: runner"
