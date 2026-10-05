@@ -93,3 +93,56 @@ func TestHelpExplainsLogPauseAndResume(t *testing.T) {
 		}
 	}
 }
+
+func TestAPausedLogWritesOneFrameThenNothingUntilItResumes(t *testing.T) {
+	var b strings.Builder
+	p := painter{out: &b}
+	m := model()
+	m.Focus = TaskPane
+	press(&m, Key{Kind: KeyEnter})
+	press(&m, rune_(' '))
+
+	p.paint(m)
+	if !strings.Contains(b.String(), "PAUSED") {
+		t.Fatalf("the first paused frame lacks the indicator: %q", b.String())
+	}
+	b.Reset()
+	m.Log = append(m.Log, "new line")
+	p.resize()
+	p.paint(m)
+	if b.Len() != 0 {
+		t.Fatalf("a paused log wrote to the terminal: %q", b.String())
+	}
+
+	press(&m, rune_(' '))
+	p.paint(m)
+	if !strings.HasPrefix(b.String(), clear) || !strings.Contains(b.String(), "new line") ||
+		strings.Contains(b.String(), "PAUSED") {
+		t.Fatalf("resuming did not clear for the held resize and draw the latest log: %q", b.String())
+	}
+	b.Reset()
+	p.paint(m)
+	if strings.Contains(b.String(), clear) {
+		t.Fatal("the held resize cleared the screen twice")
+	}
+}
+
+func TestAResizeClearsTheScreenAtOnceWhenNotPaused(t *testing.T) {
+	var b strings.Builder
+	p := painter{out: &b}
+	p.paint(model())
+	b.Reset()
+	p.resize()
+	if b.String() != clear {
+		t.Fatalf("resize wrote %q; want a clear", b.String())
+	}
+}
+
+func TestATaskRefreshKeepsAPausedHistoryLogPaused(t *testing.T) {
+	h := openHistory(t, historyRows(1), 30)
+	press(&h, Key{Kind: KeyEnter}, rune_(' '))
+	h.SetTasks(nil)
+	if !h.LogPaused {
+		t.Fatal("a task refresh resumed the paused PR history log")
+	}
+}

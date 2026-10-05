@@ -202,7 +202,6 @@ func (m *Model) SetTasks(recs []*task.Record) {
 		// task's log. Follow its tail rather than keep the old task's scroll offset.
 		m.LogOffset = 0
 		m.LogOpen, m.ShowOpen = false, false
-		m.LogPaused = false
 	}
 	switch {
 	case m.Mode == AnsweringDecision && !asks(cur):
@@ -222,9 +221,16 @@ func (m *Model) SetTasks(recs []*task.Record) {
 	case m.Mode == Browsing && m.LogOpen && !m.answering && asks(cur):
 		m.openDecision()
 	}
-	if !m.LogOpen || m.Mode != Browsing {
+	if !m.logShown() {
 		m.LogPaused = false
 	}
+}
+
+// logShown reports a task log or PR history detail log is on screen, the views Space
+// can pause.
+func (m *Model) logShown() bool {
+	return !m.HelpOpen && m.Mode == Browsing &&
+		((m.HistoryOpen && m.HistoryDetail) || (!m.HistoryOpen && m.LogOpen && !m.ShowOpen))
 }
 
 // pendingIndex is the index in rec.Decisions of the oldest unanswered question, or -1.
@@ -293,8 +299,7 @@ func clamp(i, n int) int {
 
 // Key applies one keystroke and returns what the driver must do.
 func (m *Model) Key(k Key) Action {
-	if k.Kind == KeyRune && k.Rune == ' ' && !m.HelpOpen && m.Mode == Browsing &&
-		((m.HistoryOpen && m.HistoryDetail) || (!m.HistoryOpen && m.LogOpen && !m.ShowOpen)) {
+	if k.Kind == KeyRune && k.Rune == ' ' && m.logShown() {
 		m.LogPaused = !m.LogPaused
 		return Action{}
 	}
