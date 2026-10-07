@@ -62,6 +62,26 @@ func TestAxiExhaustedWhenAllModelsZero(t *testing.T) {
 	}
 }
 
+func TestAxiReportsConfirmedNotSetUpProvider(t *testing.T) {
+	out := axiReport(`{"provider":"claude","notSetUp":true,"state":{"stale":false}}`, provider("codex", "all_models", "known", 30))
+	q, err := Axi{Exec: printing(out, errors.New("exit status 1"))}.Quota(context.Background())
+	if err != nil || q[task.Claude].Status != app.QuotaNotSetUp || q[task.Codex].Status != app.QuotaAvailable {
+		t.Fatalf("quota = %+v, %v", q, err)
+	}
+}
+
+func TestAxiKeepsMissingAndStaleProviderUnknown(t *testing.T) {
+	out := axiReport(`{"provider":"claude","notSetUp":true,"state":{"stale":true}}`, `{"provider":"codex","state":{"stale":false,"status":"attention"}}`)
+	q, err := Axi{Exec: printing(out, nil)}.Quota(context.Background())
+	if err != nil || q[task.Claude].Status != app.QuotaUnknown || q[task.Codex].Status != app.QuotaUnknown {
+		t.Fatalf("quota = %+v, %v", q, err)
+	}
+	q, err = Axi{Exec: printing(`{"providers":[{"provider":"claude","state":{"stale":false}}]}`, nil)}.Quota(context.Background())
+	if err != nil || q[task.Codex].Status != app.QuotaUnknown {
+		t.Fatalf("missing provider row: quota = %+v, %v", q, err)
+	}
+}
+
 func TestAxiUnknownWhenScopeOrStatusUnknown(t *testing.T) {
 	out := axiReport(provider("claude", "all_models", "unknown", 0), provider("codex", "model:x", "known", 0))
 	q, err := Axi{Exec: printing(out, nil)}.Quota(context.Background())

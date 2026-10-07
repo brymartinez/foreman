@@ -2,6 +2,11 @@
 
 ## Current stage
 
+Stage 55 (skip agents that quota-axi confirms are not set up, for issue #55) is
+complete. Routing excludes a provider only when a fresh report says `notSetUp: true`.
+It tries the selected rule's remaining profiles in order, or waits and retries after
+the next GitHub refresh. Manual agent choices still bypass routing.
+
 Stage 52 (side-by-side PR history, for issue #52) is complete. PR history opens
 with a narrower list and vertical timing beside it, plus a short full-width log.
 The list selects the timing and attempt log. Enter and Tab focus the log; Esc
@@ -99,7 +104,6 @@ Findings 1 to 4 were fixed in stage 28.
 
 ## Next stage
 
-Retry issue #46 with the repaired Codex adapter after installing this build. Its
-worktree still has uncommitted first-stage changes. After that, compare completed
-task usage, outcomes, and the PR history's phase times before changing the models or
-budgets. For code quality, take refactor candidate 5 (`cmd/foreman` wiring) next.
+Compare completed task usage, outcomes, and the PR history's phase times before
+changing the models or budgets. For code quality, take refactor candidate 5
+(`cmd/foreman` wiring) next.

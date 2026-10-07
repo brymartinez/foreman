@@ -52,8 +52,8 @@ type Decision struct {
 
 // Route picks the profile a new task starts with. Fit comes first: the selector
 // picks a rule, and only that rule's profiles are candidates, in the order the rule
-// lists them. Quota then drops candidates whose agent is confirmed exhausted. When
-// quota is unknown the default wins if it is a candidate.
+// lists them. Quota then drops candidates whose agent is confirmed exhausted or
+// not set up. When quota is unknown the default wins if it is a candidate.
 func (a App) Route(ctx context.Context, req RouteRequest) (Decision, error) {
 	if a.RoutingErr != nil {
 		return Decision{}, a.RoutingErr
@@ -98,14 +98,22 @@ func (a App) Route(ctx context.Context, req RouteRequest) (Decision, error) {
 		}
 	}
 	var runnable []string
-	var exhausted []task.Agent
+	var blockedAgents []task.Agent
+	var blocked []string
 	unknown := false
 	for _, name := range candidates {
 		ag := cfg.Profiles[name].Agent
 		switch quotas[ag].Status {
 		case QuotaExhausted:
-			if !slices.Contains(exhausted, ag) {
-				exhausted = append(exhausted, ag)
+			if !slices.Contains(blockedAgents, ag) {
+				blockedAgents = append(blockedAgents, ag)
+				blocked = append(blocked, string(ag)+" quota exhausted")
+			}
+			continue
+		case QuotaNotSetUp:
+			if !slices.Contains(blockedAgents, ag) {
+				blockedAgents = append(blockedAgents, ag)
+				blocked = append(blocked, string(ag)+" not set up")
 			}
 			continue
 		case QuotaUnknown:
@@ -114,28 +122,20 @@ func (a App) Route(ctx context.Context, req RouteRequest) (Decision, error) {
 		runnable = append(runnable, name)
 	}
 	if len(runnable) == 0 {
-		return Decision{Wait: quotaNote(exhausted), Reason: clip(reason, routeReasonRunes), Selection: sel}, nil
+		return Decision{Wait: strings.Join(blocked, "; "), Reason: clip(reason, routeReasonRunes), Selection: sel}, nil
 	}
 	pick := runnable[0]
 	if unknown && slices.Contains(runnable, cfg.Default) {
 		pick = cfg.Default
 	}
-	if len(exhausted) > 0 {
-		reason += "; " + quotaNote(exhausted)
+	if len(blocked) > 0 {
+		reason += "; " + strings.Join(blocked, "; ")
 	}
 	if quotas[cfg.Profiles[pick].Agent].Status == QuotaUnknown {
 		reason += "; quota unknown"
 	}
 	p := cfg.Resolve(pick, a.RoutingDefaults)
 	return Decision{Profile: &p, Reason: clip(reason, routeReasonRunes), Selection: sel}, nil
-}
-
-func quotaNote(agents []task.Agent) string {
-	names := make([]string, len(agents))
-	for i, a := range agents {
-		names[i] = string(a)
-	}
-	return strings.Join(names, " and ") + " quota exhausted"
 }
 
 // routePrompt asks the selector for a rule number, giving it the rules, the issue,
