@@ -56,10 +56,22 @@ func execGH(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	return stdout.Bytes(), nil
 }
 
-const searchFields = "number,title,url,state,createdAt,updatedAt,repository"
+const searchFields = "number,title,url,state,createdAt,updatedAt,repository,labels"
 
 // searchLimit is the most results gh search returns for one query.
 const searchLimit = 1000
+
+type ghLabel struct {
+	Name string `json:"name"`
+}
+
+func labelNames(labels []ghLabel) []string {
+	names := make([]string, len(labels))
+	for i, label := range labels {
+		names[i] = label.Name
+	}
+	return names
+}
 
 type search struct {
 	reason task.InboxReason
@@ -82,6 +94,7 @@ type searchHit struct {
 	State      string    `json:"state"`
 	CreatedAt  time.Time `json:"createdAt"`
 	UpdatedAt  time.Time `json:"updatedAt"`
+	Labels     []ghLabel `json:"labels"`
 	Repository struct {
 		NameWithOwner string `json:"nameWithOwner"`
 	} `json:"repository"`
@@ -150,6 +163,7 @@ func (c Client) search(ctx context.Context, s search) ([]app.InboxItem, error) {
 			CreatedAt: h.CreatedAt,
 			UpdatedAt: h.UpdatedAt,
 			Reasons:   []task.InboxReason{s.reason},
+			Labels:    labelNames(h.Labels),
 		})
 	}
 	return items, nil
@@ -162,6 +176,7 @@ type restIssue struct {
 	State       string    `json:"state"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+	Labels      []ghLabel `json:"labels"`
 	PullRequest *struct {
 		MergedAt *time.Time `json:"merged_at"`
 	} `json:"pull_request"`
@@ -186,6 +201,7 @@ func (c Client) GetItem(ctx context.Context, key task.Key) (app.InboxItem, error
 		CreatedAt: r.CreatedAt,
 		UpdatedAt: r.UpdatedAt,
 		Reasons:   []task.InboxReason{task.Tracked},
+		Labels:    labelNames(r.Labels),
 	}
 	if r.PullRequest != nil {
 		item.Kind = task.PullRequest

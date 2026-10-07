@@ -130,6 +130,9 @@ func inboxPane(m Model) pane {
 	for _, e := range m.Inbox {
 		k := e.Item.Key
 		detail := strings.Join(e.Changes, ", ")
+		if awaitingTriage(e) {
+			detail = render.JoinFacts("awaiting triage", detail)
+		}
 		if w, ok := m.waiting[k]; ok {
 			detail = render.JoinFacts("waiting: "+w.reason, detail)
 		}

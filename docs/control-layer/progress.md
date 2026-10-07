@@ -2,6 +2,13 @@
 
 ## Current stage
 
+Stage 54 (require triage before automatic issue starts, for issue #54) is
+complete. The foreman-triage skill applies the `triaged` label after confirmed
+publication. Foreman reads labels during inbox refresh, marks unlabelled assigned
+issues as awaiting triage, and lets them start manually. Auto mode requires a
+successful GitHub refresh and rechecks the label before starting. Vet, tests,
+build, and the full end-to-end script pass.
+
 Stage 55 (skip agents that quota-axi confirms are not set up, for issue #55) is
 complete. Routing excludes a provider only when a fresh report says `notSetUp: true`.
 It tries the selected rule's remaining profiles in order, or waits and retries after

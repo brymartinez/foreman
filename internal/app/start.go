@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/brymartinez/foreman/internal/task"
@@ -72,6 +73,9 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 	}
 	if issue.State != "open" {
 		return nil, fmt.Errorf("%s#%d is %s", key.Repo, key.Number, issue.State)
+	}
+	if req.NewOnly && !slices.Contains(issue.Labels, "triaged") {
+		return nil, fmt.Errorf("%s#%d no longer has the triaged label", key.Repo, key.Number)
 	}
 
 	branchType := req.BranchType

@@ -352,6 +352,7 @@ notifications_config() {
 
 issue() { # issue <number> <title> [labels-json]
 	echo "$2" >"$state/title-$1"
+	printf '%s\n' "${3:-[]}" >"$state/labels-$1.json"
 	printf '{"number":%s,"title":"%s","body":"do it","labels":%s,"url":"https://github.com/acme/widgets/issues/%s","state":"OPEN","updatedAt":"2026-09-25T10:00:00Z"}\n' \
 		"$1" "$2" "${3:-[]}" "$1" >"$state/issue-$1.json"
 	printf '{"number":%s,"title":"%s","html_url":"https://github.com/acme/widgets/issues/%s","state":"open","updated_at":"2026-09-25T10:00:00Z"}\n' \
@@ -474,7 +475,9 @@ scenario_logs() {
 }
 
 hit() { # hit <repo> <number> <title>
-	printf '{"number":%s,"title":"%s","url":"https://github.com/%s/issues/%s","state":"OPEN","updatedAt":"2026-09-25T10:00:00Z","repository":{"nameWithOwner":"%s"}}' "$2" "$3" "$1" "$2" "$1"
+	local labels='[]'
+	[ ! -f "$state/labels-$2.json" ] || labels=$(cat "$state/labels-$2.json")
+	printf '{"number":%s,"title":"%s","url":"https://github.com/%s/issues/%s","state":"OPEN","updatedAt":"2026-09-25T10:00:00Z","repository":{"nameWithOwner":"%s"},"labels":%s}' "$2" "$3" "$1" "$2" "$1" "$labels"
 }
 
 scenario_inbox() {
@@ -683,9 +686,10 @@ scenario_tui() {
 	check "any key closes the help without quitting" dash -- refreshed keys=? keys=q "wait=DELEGATED WORK"
 	check "--no-auto starts with auto mode off" dash --no-auto -- refreshed "wait=auto off"
 	check "and saves nothing" test ! -e "$saved"
+	issue 42 "Add retries" '[{"name":"triaged"}]'
 	assign 42
 	check "--auto starts with auto mode on" dash --auto -- refreshed "wait=auto on"
-	check "and auto mode starts new work" wait_status "acme/widgets#42"
+	check "and auto mode starts new work" wait_status "review ✓"
 	check "-a saves nothing either" test ! -e "$saved"
 	check "a turns auto mode on and saves it" dash --no-auto -- refreshed keys=a "wait=auto on"
 	check "the saved choice is on" grep -q '"auto": *true' "$saved"

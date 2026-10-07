@@ -20,6 +20,7 @@ func assigned(repo task.Repo, n, days int) app.InboxEntry {
 	e.Item.State = "open"
 	e.Item.CreatedAt = day0.AddDate(0, 0, days)
 	e.Item.Reasons = []task.InboxReason{task.Assigned}
+	e.Item.Labels = []string{"triaged"}
 	return e
 }
 
@@ -27,6 +28,7 @@ func autoModel(max int, inbox ...app.InboxEntry) Model {
 	m := Model{Width: 100, Height: 30}
 	m.SetAuto(Auto{Enabled: true, Agent: task.Claude, Max: max})
 	m.SetInbox(inbox)
+	m.githubFresh = true
 	return m
 }
 
@@ -50,6 +52,41 @@ func ownRecord(n int, state task.State) *task.Record {
 	rec := record(n, state)
 	rec.Key = ownKey(n)
 	return rec
+}
+
+func TestAutoStartsOnlyIssuesWithTriagedLabel(t *testing.T) {
+	untriaged := own(1, 0)
+	untriaged.Item.Labels = nil
+	triaged := own(2, 1)
+	triaged.Item.Labels = []string{"triaged"}
+	m := autoModel(3, untriaged, triaged)
+	if got := startedKeys(m.AutoStarts()); !slices.Equal(got, []task.Key{triaged.Item.Key}) {
+		t.Fatalf("auto started %v; want only the issue labelled triaged", got)
+	}
+}
+
+func TestAwaitingTriageIssueShowsStatusAndCanStartManually(t *testing.T) {
+	e := own(1, 0)
+	e.Item.Labels = nil
+	m := autoModel(1, e)
+	if detail := inboxPane(m).rows[0].lines[1]; !strings.Contains(detail, "awaiting triage") {
+		t.Fatalf("inbox detail = %q; want awaiting triage", detail)
+	}
+	if action := press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter}); action.Kind != ActionStart {
+		t.Fatalf("manual start = %+v; want ActionStart", action)
+	}
+}
+
+func TestAutoWaitsForSuccessfulGitHubRefresh(t *testing.T) {
+	m := autoModel(1, own(1, 0))
+	m.beginRefresh()
+	if got := m.AutoStarts(); len(got) != 0 {
+		t.Fatalf("auto started %v while GitHub refresh was in progress", startedKeys(got))
+	}
+	apply(&m, refreshed(own(1, 0)))
+	if got := startedKeys(m.AutoStarts()); !slices.Equal(got, []task.Key{ownKey(1)}) {
+		t.Fatalf("auto started %v after successful refresh; want issue 1", got)
+	}
 }
 
 func TestAutoStartsOnlyAssignedUndelegatedOpenIssues(t *testing.T) {
@@ -88,6 +125,7 @@ func TestAutoStartUsesConfiguredAgentAndNoContext(t *testing.T) {
 	m := Model{}
 	m.SetAuto(Auto{Enabled: true, Agent: task.Codex, Max: 3})
 	m.SetInbox([]app.InboxEntry{assigned("a/b", 1, 0)})
+	m.githubFresh = true
 	got := m.AutoStarts()
 	if len(got) != 1 || got[0] != (app.StartRequest{Repo: "a/b", Issue: 1, Agent: task.Codex, NewOnly: true}) {
 		t.Fatalf("auto start = %+v; want codex, no context file, and only if never delegated", got)

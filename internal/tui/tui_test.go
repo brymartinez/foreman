@@ -71,6 +71,40 @@ func TestApplyKeepsTheInboxWhenARefreshFails(t *testing.T) {
 	}
 }
 
+func TestFailedRefreshKeepsTriagedIssueVisibleButStopsAutoStart(t *testing.T) {
+	e := assigned("a/b", 1, 0)
+	e.Item.Labels = []string{"triaged"}
+	m := autoModel(1, e)
+	apply(&m, result{report: &app.InboxReport{}, err: errors.New("gh down")})
+	if len(m.Inbox) != 1 {
+		t.Fatalf("inbox = %+v; want the issue still visible", m.Inbox)
+	}
+	if got := m.AutoStarts(); len(got) != 0 {
+		t.Fatalf("auto started %v from labels retained after a failed refresh", startedKeys(got))
+	}
+}
+
+func TestSuccessfulRefreshUsesCurrentTriagedLabel(t *testing.T) {
+	m := autoModel(1)
+	e := assigned("a/b", 1, 0)
+	e.Item.Labels = nil
+	apply(&m, refreshed(e))
+	if got := m.AutoStarts(); len(got) != 0 {
+		t.Fatalf("auto started %v without the triaged label", startedKeys(got))
+	}
+	e.Item.Labels = []string{"triaged"}
+	apply(&m, refreshed(e))
+	if got := startedKeys(m.AutoStarts()); !slices.Equal(got, []task.Key{e.Item.Key}) {
+		t.Fatalf("auto started %v after label was added; want the issue", got)
+	}
+	m = autoModel(1, e)
+	e.Item.Labels = nil
+	apply(&m, refreshed(e))
+	if got := m.AutoStarts(); len(got) != 0 {
+		t.Fatalf("auto started %v after the label was removed", startedKeys(got))
+	}
+}
+
 func TestApplyDropsAReportFetchedForTheOtherView(t *testing.T) {
 	m := Model{Width: 100, Height: 30, Refreshing: true, AllRepos: true}
 	m.SetInbox([]app.InboxEntry{entry("a/b", 1, "Open")})
