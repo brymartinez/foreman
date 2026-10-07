@@ -31,6 +31,7 @@ type Axi struct {
 type report struct {
 	Providers []struct {
 		Provider string `json:"provider"`
+		NotSetUp bool   `json:"notSetUp"`
 		State    struct {
 			Stale bool `json:"stale"`
 		} `json:"state"`
@@ -66,6 +67,10 @@ func (q Axi) Quota(ctx context.Context) (map[task.Agent]app.Quota, error) {
 	for _, p := range r.Providers {
 		a, err := task.ParseAgent(p.Provider)
 		if err != nil || p.State.Stale {
+			continue
+		}
+		if p.NotSetUp {
+			quotas[a] = app.Quota{Status: app.QuotaNotSetUp}
 			continue
 		}
 		for _, e := range p.QuotaSemantics.EffectiveAvailability {

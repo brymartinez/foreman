@@ -213,6 +213,30 @@ func TestRouteSkipsExhaustedProfile(t *testing.T) {
 	}
 }
 
+func TestRouteSkipsNotSetUpAgentForAvailableFallback(t *testing.T) {
+	f, _ := routed(t, agent.Selection{Rule: 3}, fakeQuota{q: map[task.Agent]Quota{task.Claude: {Status: QuotaNotSetUp}, task.Codex: {Status: QuotaAvailable, Percent: 40}}})
+	d, err := f.app.Route(context.Background(), routeReq)
+	if err != nil || d.Profile == nil || d.Profile.Name != "codex" || !strings.Contains(d.Reason, "claude not set up") {
+		t.Fatalf("decision = %+v, %v", d, err)
+	}
+}
+
+func TestRouteWaitsWhenOnlyRuleProfileIsNotSetUp(t *testing.T) {
+	f, _ := routed(t, agent.Selection{Rule: 2}, fakeQuota{q: map[task.Agent]Quota{task.Codex: {Status: QuotaNotSetUp}, task.Claude: {Status: QuotaAvailable, Percent: 90}}})
+	d, err := f.app.Route(context.Background(), routeReq)
+	if err != nil || d.Profile != nil || d.Wait != "codex not set up" || d.Selection.Rule != 2 {
+		t.Fatalf("decision = %+v, %v", d, err)
+	}
+}
+
+func TestRouteWaitsWhenAllCandidatesAreUnavailableForDifferentReasons(t *testing.T) {
+	f, _ := routed(t, agent.Selection{Rule: 3}, fakeQuota{q: map[task.Agent]Quota{task.Claude: {Status: QuotaNotSetUp}, task.Codex: {Status: QuotaExhausted}}})
+	d, err := f.app.Route(context.Background(), routeReq)
+	if err != nil || d.Profile != nil || !strings.Contains(d.Wait, "claude not set up") || !strings.Contains(d.Wait, "codex quota exhausted") {
+		t.Fatalf("decision = %+v, %v", d, err)
+	}
+}
+
 func TestRouteWaitsWhenAllCandidatesExhausted(t *testing.T) {
 	f, _ := routed(t, agent.Selection{Rule: 3}, fakeQuota{q: map[task.Agent]Quota{task.Claude: {Status: QuotaExhausted}, task.Codex: {Status: QuotaExhausted}}})
 	d, err := f.app.Route(context.Background(), routeReq)

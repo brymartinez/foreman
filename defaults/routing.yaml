@@ -1,8 +1,8 @@
 # Foreman routing: which agent and models start a new issue from the dashboard.
 #
 # The selector reads the issue and picks the first rule whose `when` fits, or none.
-# A rule's profiles are tried in order; a profile whose agent has no quota left is
-# skipped. No fitting rule, or an unsure selector, uses `default`.
+# A rule's profiles are tried in order; a profile whose agent has no quota left
+# or is not set up is skipped. No fitting rule, or an unsure selector, uses `default`.
 #
 # A profile sets `agent` and may set `plan_model`, `model`, and, for Codex,
 # `plan_reasoning_effort` and `reasoning_effort`. An omitted field uses the

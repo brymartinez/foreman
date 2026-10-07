@@ -332,10 +332,11 @@ the same commit. The commit message records why it changed.
   says so.
 - **Quota only removes candidates.** Candidates are the chosen rule's profiles in the
   order listed, or `default` alone. `quota-axi` removes those whose agent it confirms
-  exhausted: a fresh `all_models` reading at 0%. Another profile runs only when the rule
-  lists it. With no candidate left, nothing starts: the dashboard shows why, and auto
-  mode keeps the selection and routes again after the next GitHub refresh. When quota
-  is unknown (no `quota-axi`, a failure, or no reading) the default runs if it is a
+  exhausted (a fresh `all_models` reading at 0%) or not set up (`notSetUp: true`
+  on a fresh provider row). Another profile runs only when the rule lists it. With
+  no candidate left, nothing starts: the dashboard shows why, and auto mode keeps
+  the selection and routes again after the next GitHub refresh. A stale, missing,
+  or failed reading is unknown. When quota is unknown, the default runs if it is a
   candidate, else the first, and the reason says `quota unknown`. Ranking by percent
   left was rejected: it would override the cost order the rule sets.
 - **The choice is stored resolved** on the delegation (`profile`, `route_reason`), so
@@ -517,7 +518,8 @@ the same commit. The commit message records why it changed.
   when the tree had changes.
 - **`quota-axi` is optional** (https://github.com/kunchenguid/quota-axi), found on
   `PATH`. Foreman runs `quota-axi --provider claude,codex --json` with a 10 second
-  limit before each route and reads `providers[].quotaSemantics.effectiveAvailability`.
+  limit before each route and reads `providers[].notSetUp` and
+  `providers[].quotaSemantics.effectiveAvailability`.
   A report printed with exit code 1 (one provider failed) is still read; a missing
   binary, a timeout, or no report makes quota unknown.
 - **`FOREMAN_CONFIG`** points at another config file; `scripts/e2e.sh` uses it to run

@@ -253,6 +253,8 @@ const (
 	QuotaAvailable
 	// QuotaExhausted means the agent is confirmed to have no quota left on any model.
 	QuotaExhausted
+	// QuotaNotSetUp means the provider explicitly reports that the agent is absent.
+	QuotaNotSetUp
 )
 
 // Quota is one agent's availability. Percent is the share left when Status is known.
