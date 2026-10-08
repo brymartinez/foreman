@@ -155,6 +155,7 @@ type Model struct {
 	tried        map[task.Key]bool // issues started this session, by hand or automatically
 	starting     map[task.Key]bool // starts and resumes in flight, manual or automatic
 	tasksStale   bool              // the last task read failed
+	githubFresh  bool              // the latest GitHub refresh succeeded and is not being replaced
 	answering    bool              // an answer is being recorded
 	question     int               // the index in Decisions of the question the prompt shows
 	logStart     int64             // the byte offset of the first loaded log line
@@ -261,6 +262,11 @@ func (m *Model) SetInbox(entries []app.InboxEntry) {
 	m.InboxCursor = clamp(indexOfEntry(entries, selected, m.InboxCursor), len(entries))
 }
 
+func (m *Model) beginRefresh() {
+	m.Refreshing = true
+	m.githubFresh = false
+}
+
 func indexOfTask(recs []*task.Record, want task.Key, fallback int) int {
 	if want == (task.Key{}) {
 		return fallback
@@ -351,6 +357,7 @@ func (m *Model) browse(k Key) Action {
 		return Action{Kind: ActionReadLog}
 	case k.Kind == KeyRune && k.Rune == 'v':
 		m.AllRepos = !m.AllRepos
+		m.githubFresh = false
 		// The rows belong to the view just left, so none stays selectable until the
 		// new view's refresh fills the pane.
 		m.SetInbox(nil)

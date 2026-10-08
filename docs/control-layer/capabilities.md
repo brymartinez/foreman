@@ -130,9 +130,10 @@ Checked on 2026-10-03 with Claude Code 2.1.288 and Codex CLI 0.160.0.
 
 The user is authenticated through the keyring.
 
-- **Inbox search.** `gh search issues --assignee=@me --state=open --json number,title,repository,updatedAt,url`
+- **Inbox search.** `gh search issues --assignee=@me --state=open --json number,title,repository,updatedAt,url,labels`
   works. Other queries use `--mentions=@me`, and `gh search prs --review-requested=@me`.
-  The results include `repository.nameWithOwner`.
+  The results include `repository.nameWithOwner` and label names. Tracked-item lookups
+  through `gh api repos/<owner>/<repo>/issues/<n>` also return labels.
 - **Pull requests.** `gh pr view <n> --json` exposes `state`, `reviewDecision`,
   `latestReviews`, `statusCheckRollup`, `headRefName`, `mergedAt`, and
   `closingIssuesReferences`.

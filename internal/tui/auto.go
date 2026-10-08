@@ -30,12 +30,22 @@ func (m *Model) SetAuto(a Auto) {
 	}
 }
 
-// eligible is an open issue assigned to the developer that foreman has never
-// delegated. FAILED and REVIEWED work also sits in INBOX, but resuming it is the
-// developer's call.
-func eligible(e app.InboxEntry) bool {
+// awaitingTriage is an assigned, open issue that can be started manually but
+// cannot yet be started by auto mode.
+func awaitingTriage(e app.InboxEntry) bool {
+	return autoCandidate(e) && !slices.Contains(e.Item.Labels, "triaged")
+}
+
+// autoCandidate is an open issue assigned to the developer that foreman has
+// never delegated. FAILED and REVIEWED work also sits in INBOX, but resuming it
+// is the developer's call.
+func autoCandidate(e app.InboxEntry) bool {
 	return e.Item.Kind == task.Issue && e.Item.State == "open" && !e.Delegated &&
 		slices.Contains(e.Item.Reasons, task.Assigned)
+}
+
+func eligible(e app.InboxEntry) bool {
+	return autoCandidate(e) && slices.Contains(e.Item.Labels, "triaged")
 }
 
 // active counts the slots in use: runs in WORKING or REVIEWING plus starts still in
@@ -57,7 +67,7 @@ func (m *Model) active() int {
 // refresh, so an issue already in the task list is skipped even when the inbox
 // still shows it as never delegated.
 func (m *Model) AutoStarts() []app.StartRequest {
-	if !m.AutoOn || m.tasksStale || m.AllRepos {
+	if !m.AutoOn || m.tasksStale || !m.githubFresh || m.AllRepos {
 		return nil
 	}
 	free := m.AutoMax - m.active()
@@ -156,7 +166,7 @@ func (m *Model) prior(key task.Key) *agent.Selection {
 func (m *Model) toggleAuto() Action {
 	m.AutoOn = !m.AutoOn
 	if m.AutoOn {
-		m.Message = "Auto mode on: assigned issues start on their own."
+		m.Message = "Auto mode on: triaged, assigned issues start on their own."
 	} else {
 		m.Message = "Auto mode off: running agents keep going."
 	}

@@ -125,7 +125,7 @@ func Run(ctx context.Context, o Options) (err error) {
 		if m.Refreshing {
 			return
 		}
-		m.Refreshing = true
+		m.beginRefresh()
 		allRepos := m.AllRepos
 		go func() {
 			report, err := o.Source.InboxView(ctx, allRepos)
@@ -330,6 +330,7 @@ func apply(m *Model, r result) {
 	if r.report != nil {
 		m.Refreshing = false
 		m.RefreshedAt = time.Now()
+		m.githubFresh = r.err == nil
 		if r.err == nil {
 			m.SetInbox(app.Delegable(*r.report))
 			m.Warnings = r.report.Warnings

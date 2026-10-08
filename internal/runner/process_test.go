@@ -79,12 +79,12 @@ func TestSpawnedRunnerOutlivesItsLauncher(t *testing.T) {
 	}
 }
 
-func TestStopSignalsTheRunnerAndWaitsForIt(t *testing.T) {
-	// Alive checks the process command with ps. Some agent sandboxes block ps,
-	// so this test cannot observe the runner there even if Spawn succeeded.
-	if out, err := exec.Command("ps", "-p", fmt.Sprint(os.Getpid()), "-o", "command=").CombinedOutput(); err != nil {
-		t.Skipf("ps unavailable: %v %s", err, out)
+func TestStopSignalsTheRunnerWhenProcessListingIsUnavailable(t *testing.T) {
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "ps"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
 	}
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 	t.Setenv("FOREMAN_RUNNER_TEST", "wait")
 	p := Processes{LogDir: t.TempDir(), StopWait: 5 * time.Second}
 	key := task.Key{Repo: "o/r", Number: 8}
@@ -92,6 +92,7 @@ func TestStopSignalsTheRunnerAndWaitsForIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGTERM) })
 	for deadline := time.Now().Add(5 * time.Second); !p.Alive(pid); time.Sleep(20 * time.Millisecond) {
 		if time.Now().After(deadline) {
 			t.Fatal("runner never came up")

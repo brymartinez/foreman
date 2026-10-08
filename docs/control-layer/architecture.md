@@ -122,8 +122,9 @@ foreman [-a|--auto|--no-auto]
                            and all of them, this session only, and refresh
                          auto mode, after each successful refresh, finished start,
                            and 1s tick: app.Start with auto.agent for assigned,
-                           never delegated issues, oldest first, while fewer than
-                           auto.max_concurrent runs are active (D144). With routing
+                           triaged, never delegated issues, oldest first, while fewer
+                           than auto.max_concurrent runs are active (D144). A GitHub
+                           refresh in progress or failed blocks auto starts. With routing
                            on: app.Route, then app.Start with the profile, no
                            confirmation; a wait holds the issue until the next refresh
 
@@ -191,8 +192,10 @@ the same commit. The commit message records why it changed.
   dashboard, and a piped `foreman` still prints usage.
 - **One detached runner per task.** `App.Start`, `App.Respond`, `App.Resume`, and the gate spawn
   `foreman __run owner/repo#N` with `Setsid`, so closing the terminal doesn't stop it.
-  A runner is alive when `kill(pid, 0)` succeeds and `ps` shows ` __run `, which guards
-  against pid reuse. A dead runner is reaped only after the gate has read its PR, so a
+  The runner inherits a locked file named for its PID in `log_dir`. A runner is alive
+  when `kill(pid, 0)` succeeds and that file is locked; this guards against PID reuse
+  without process-list access. Older runners without a lock still use `ps`. A dead
+  runner is reaped only after the gate has read its PR, so a
   GitHub outage delays a FAILED verdict instead of risking a wrong one.
 - **The runner owns its log.** `Spawn` passes the log file itself as stdout and stderr,
   and the runner timestamps its own lines. A writer in the launcher needs a pipe, which
@@ -438,6 +441,14 @@ the same commit. The commit message records why it changed.
   REVIEWED. Work an agent holds stays in DELEGATED WORK, so an issue is never delegated
   twice. `mentions: false` hides mention-only items but never a delegated task that
   needs the developer.
+- **Auto mode requires current triage.** A never-delegated, open, assigned issue needs
+  the exact `triaged` label for auto mode. Without it, the inbox shows "awaiting triage"
+  and still allows manual start. Labels come from GitHub on each refresh, including
+  tracked-item lookups; they are not task-file state. Auto mode uses them only after a
+  successful GitHub refresh. Starting a refresh or failing one blocks auto starts from
+  the retained inbox until another refresh succeeds. The auto start's existing issue
+  fetch checks the label again before making a worktree, so removal after the refresh
+  also stops the start.
 - **Repository filter.** A nonempty `include_repositories` shows only those
   repositories and overrides `exclude_repositories`; otherwise the exclude list hides
   its repositories. `App.InboxView` drops filtered items and stored records before

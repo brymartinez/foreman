@@ -585,10 +585,26 @@ func TestStartNewOnlyRefusesAnIssueAlreadyDelegated(t *testing.T) {
 
 func TestStartNewOnlyStartsAnIssueNeverDelegated(t *testing.T) {
 	f := newFixture()
+	f.gh.issue.Labels = []string{"triaged"}
 	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
 	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.Discovered}
 	rec, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Issue: 825, Agent: task.Claude, NewOnly: true})
 	if err != nil || rec.State != task.Working || len(f.runners.spawned) != 1 {
 		t.Fatalf("start = %+v, %v; want a WORKING run for a tracked issue with no delegation", rec, err)
+	}
+}
+
+func TestStartNewOnlyRejectsIssueWhoseTriagedLabelWasRemoved(t *testing.T) {
+	f := newFixture()
+	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+	_, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Issue: key.Number, Agent: task.Claude, NewOnly: true})
+	if err == nil || !strings.Contains(err.Error(), "triaged") {
+		t.Fatalf("auto start = %v; want missing triaged label error", err)
+	}
+	if len(f.runners.spawned) != 0 || len(f.wt.reqs) != 0 {
+		t.Fatalf("auto start spawned %d runners and made %d worktrees", len(f.runners.spawned), len(f.wt.reqs))
+	}
+	if _, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Issue: key.Number, Agent: task.Claude}); err != nil {
+		t.Fatalf("manual start without triaged label: %v", err)
 	}
 }

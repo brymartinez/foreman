@@ -30,6 +30,7 @@ type InboxItem struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	Reasons   []task.InboxReason
+	Labels    []string
 }
 
 type Issue struct {

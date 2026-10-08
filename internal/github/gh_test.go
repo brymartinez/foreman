@@ -53,7 +53,8 @@ func TestInboxItemsMergesReasons(t *testing.T) {
 	}
 	first := items[0]
 	if first.Key != (task.Key{Repo: "ridezoomo/armada-backend", Number: 825}) ||
-		!slices.Equal(first.Reasons, []task.InboxReason{task.Assigned, task.Mentioned}) {
+		!slices.Equal(first.Reasons, []task.InboxReason{task.Assigned, task.Mentioned}) ||
+		!slices.Equal(first.Labels, []string{"bug", "triaged"}) {
 		t.Errorf("825 = %+v", first)
 	}
 	if pr := items[2]; pr.Kind != task.PullRequest || pr.Key.Number != 930 || pr.Reasons[0] != task.Mentioned {
@@ -89,7 +90,8 @@ func TestGetItemDetectsMergedPR(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if item.Kind != task.PullRequest || item.State != "merged" || item.UpdatedAt.IsZero() {
+	if item.Kind != task.PullRequest || item.State != "merged" || item.UpdatedAt.IsZero() ||
+		!slices.Equal(item.Labels, []string{"triaged"}) {
 		t.Errorf("got %+v", item)
 	}
 }

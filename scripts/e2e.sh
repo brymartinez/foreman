@@ -79,6 +79,12 @@ start() {
 	dash -- refreshed "pick=acme/widgets#$1" 'keys=\r1\r' "wait=Started acme/widgets#$1"
 }
 
+runner_pid() { sed -n 's/^runner_pid: *//p' "$sandbox/tasks/acme-widgets-$1.md"; }
+pid_gone() { ! kill -0 "$1" 2>/dev/null; }
+agent_gone() { ! kill -0 -- "-$(cat "$state/$1-agent.pid")" 2>/dev/null; }
+processes_gone() { pid_gone "$1" && agent_gone "$2"; }
+stop_agent() { kill -TERM -- "-$(cat "$state/$1-agent.pid")" 2>/dev/null || true; }
+
 # task <n> [keys] opens task #n's lower pane, presses keys there, and prints the screen.
 task() {
 	dash -- refreshed keys=l "pick=acme/widgets#$1" 'keys=\r'"${2:-}" sleep=0.3 print 2>/dev/null
@@ -271,6 +277,7 @@ if [ -n "$planning" ]; then
 	echo '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.02,"structured_output":{"status":"planned","summary":"four documents","prNumber":null,"prUrl":null,"validation":[],"questions":[],"documents":{"analysis":"Retries are missing.","prd":"R1. Retry 5xx responses.","design":"Wrap the client.","plan":"### Task 1: retries"}}}'
 	exit 0
 fi
+echo "$$" >"$E2E_STATE/implement-agent.pid"
 sleep "${E2E_AGENT_SLEEP:-1}"
 branch=$(git branch --show-current)
 echo "// retries" >>widgets.go
@@ -301,6 +308,7 @@ if [[ " $* " == *" --ephemeral "* ]]; then echo "codex review"; printf '%s' "${@
 last=
 while [ $# -gt 0 ]; do [ "$1" = -o ] && last=$2; shift; done
 echo '{"type":"thread.started","thread_id":"t1"}'
+echo "$$" >"$E2E_STATE/review-agent.pid"
 sleep "${E2E_REVIEW_SLEEP:-0}"
 echo '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":20,"reasoning_output_tokens":5}}'
 echo '{"verdict":"clean","summary":"looks right","findings":[]}' >"$last"
@@ -352,6 +360,7 @@ notifications_config() {
 
 issue() { # issue <number> <title> [labels-json]
 	echo "$2" >"$state/title-$1"
+	printf '%s\n' "${3:-[]}" >"$state/labels-$1.json"
 	printf '{"number":%s,"title":"%s","body":"do it","labels":%s,"url":"https://github.com/acme/widgets/issues/%s","state":"OPEN","updatedAt":"2026-09-25T10:00:00Z"}\n' \
 		"$1" "$2" "${3:-[]}" "$1" >"$state/issue-$1.json"
 	printf '{"number":%s,"title":"%s","html_url":"https://github.com/acme/widgets/issues/%s","state":"open","updated_at":"2026-09-25T10:00:00Z"}\n' \
@@ -406,18 +415,18 @@ scenario_notify() {
 	issue 43 "Fix pagination"
 	E2E_AGENT_SLEEP=30.017 start 43 >/dev/null
 	sleep 0.5
-	pkill -TERM -f "$work/foreman __run acme/widgets#43" || true
+	kill -TERM "$(runner_pid 43)"
 	check "a stopped runner records FAILED promptly" wait_status "FAILED" 5
 	check "and notifies" grep -q 'Run cancelled.*acme/widgets#43' "$state/notifications.log"
-	check "and leaves no agent behind" bash -c "! pgrep -f 'sleep 30.017' >/dev/null"
+	check "and leaves no agent behind" agent_gone implement
 
 	issue 44 "Fix sorting"
 	E2E_AGENT_SLEEP=30.017 start 44 >/dev/null
 	sleep 0.5
-	pkill -KILL -f "$work/foreman __run acme/widgets#44" || true
+	kill -KILL "$(runner_pid 44)"
 	screen >/dev/null
 	check "a killed runner is reaped and notifies" grep -q 'Run failed.*acme/widgets#44' "$state/notifications.log"
-	pkill -f "sleep 30.017" || true
+	stop_agent implement
 
 	echo 500 >"$state/webhook-status"
 	issue 45 "Fix caching"
@@ -474,7 +483,9 @@ scenario_logs() {
 }
 
 hit() { # hit <repo> <number> <title>
-	printf '{"number":%s,"title":"%s","url":"https://github.com/%s/issues/%s","state":"OPEN","updatedAt":"2026-09-25T10:00:00Z","repository":{"nameWithOwner":"%s"}}' "$2" "$3" "$1" "$2" "$1"
+	local labels='[]'
+	[ ! -f "$state/labels-$2.json" ] || labels=$(cat "$state/labels-$2.json")
+	printf '{"number":%s,"title":"%s","url":"https://github.com/%s/issues/%s","state":"OPEN","updatedAt":"2026-09-25T10:00:00Z","repository":{"nameWithOwner":"%s"},"labels":%s}' "$2" "$3" "$1" "$2" "$1" "$labels"
 }
 
 scenario_inbox() {
@@ -587,8 +598,8 @@ scenario_rereview() {
 	E2E_REVIEW_SLEEP=30.017 start 43 >/dev/null
 	local i=0
 	until [ "$(turns 'codex review')" = 3 ] || [ $i -gt 100 ]; do sleep 0.1; i=$((i + 1)); done
-	pkill -KILL -f "$work/foreman __run acme/widgets#43" || true
-	pkill -f "sleep 30.017" || true
+	kill -KILL "$(runner_pid 43)"
+	stop_agent review
 	check "a runner killed mid-review is reaped" wait_status "FAILED" 5
 	start 43 >/dev/null
 	check "the restart finishes the review" reviewed 43
@@ -642,9 +653,11 @@ scenario_cancel() {
 	E2E_AGENT_SLEEP=30.017 start 42 >/dev/null
 	check "the runner is working" wait_status "WORKING" 5
 	sleep 0.5
+	local pid
+	pid=$(runner_pid 42)
 	check "c then y cancels the run" dash -- refreshed keys=l pick=acme/widgets#42 keys=cy "wait=Cancelled acme/widgets#42; the branch and worktree are kept"
 	check "the task is FAILED" wait_status "FAILED" 1
-	check "no runner or agent is left" bash -c "! pgrep -f 'sleep 30.017' >/dev/null && ! pgrep -f '$work/foreman __run acme/widgets#42' >/dev/null"
+	check "no runner or agent is left" processes_gone "$pid" implement
 	local log
 	log=$(ls "$sandbox"/logs/*.log)
 	check "the log shows who stopped it" contains "$log" "foreman: cancel requested; stopping runner"
@@ -683,9 +696,10 @@ scenario_tui() {
 	check "any key closes the help without quitting" dash -- refreshed keys=? keys=q "wait=DELEGATED WORK"
 	check "--no-auto starts with auto mode off" dash --no-auto -- refreshed "wait=auto off"
 	check "and saves nothing" test ! -e "$saved"
+	issue 42 "Add retries" '[{"name":"triaged"}]'
 	assign 42
 	check "--auto starts with auto mode on" dash --auto -- refreshed "wait=auto on"
-	check "and auto mode starts new work" wait_status "acme/widgets#42"
+	check "and auto mode starts new work" wait_status "review ✓"
 	check "-a saves nothing either" test ! -e "$saved"
 	check "a turns auto mode on and saves it" dash --no-auto -- refreshed keys=a "wait=auto on"
 	check "the saved choice is on" grep -q '"auto": *true' "$saved"
