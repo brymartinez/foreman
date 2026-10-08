@@ -2,8 +2,10 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/brymartinez/foreman/internal/agent"
@@ -28,6 +30,7 @@ type turnResult struct {
 }
 
 const maxImplementationCheckpoints = 8
+const maxCheckpointValidationRepairs = 2
 
 // prCheck verifies a turn's pr_opened claim and logs what it found.
 type prCheck func(ctx context.Context, rec *task.Record, o agent.Outcome) (*PullRequest, error)
@@ -47,6 +50,7 @@ func (a App) verifiedPR(log io.Writer) prCheck {
 // to the task file here; finishTurn records the result.
 func (a App) runTurn(ctx context.Context, rec *task.Record, req turnRequest, check prCheck, log io.Writer) turnResult {
 	turn, err := a.implement(ctx, rec, req, log)
+	turn, err = a.repairFailedCheckpoint(ctx, rec, req, turn, err, log)
 	if err != nil {
 		return turnResult{turn: turn, err: err}
 	}
@@ -72,6 +76,39 @@ func (a App) runTurn(ctx context.Context, rec *task.Record, req turnRequest, che
 	}
 	pr, err := check(ctx, rec, turn.Outcome)
 	return turnResult{turn: turn, pr: pr, err: err}
+}
+
+// repairFailedCheckpoint gives the same implementation session a bounded chance
+// to fix checks it reported as failing before Foreman accepts its checkpoint.
+func (a App) repairFailedCheckpoint(ctx context.Context, rec *task.Record, req turnRequest, turn agent.Turn, err error, log io.Writer) (agent.Turn, error) {
+	if a.needsPlan(rec) || rec.Delegation.PR != 0 || rec.Delegation.ConflictPending || req.findings != nil || len(req.feedback) > 0 || req.merge != nil {
+		return turn, err
+	}
+	for attempt := 0; attempt < maxCheckpointValidationRepairs; attempt++ {
+		var failed *agent.CheckpointValidationError
+		if !errors.As(err, &failed) || turn.Outcome.Status != agent.Checkpoint || turn.Session.ID == "" {
+			return turn, err
+		}
+		adapter := a.Agents[rec.Delegation.Implementer.Agent]
+		if adapter == nil {
+			return turn, fmt.Errorf("agent %s is not configured", rec.Delegation.Implementer.Agent)
+		}
+		fmt.Fprintf(log, "foreman: checkpoint validation failed; resuming %s session %s for repair (%d/%d)\n", adapter.Name(), turn.Session.ID, attempt+1, maxCheckpointValidationRepairs)
+		in := agent.StartInput{
+			Worktree: rec.Delegation.Worktree,
+			Prompt:   "Your checkpoint reported failed validation: " + strings.Join(failed.Failed, ", ") + ". Fix the underlying problem, rerun the failed checks, and continue the implementation. Report a checkpoint only when every validation check passes. If you cannot repair it, report why with status failed.",
+			Stage:    task.StageImplement, Step: agent.StepImplement,
+			Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD, Profile: rec.Delegation.Profile,
+		}
+		next, resumeErr := adapter.Resume(ctx, turn.Session, in)
+		addUsage(&turn.Usage, next.Usage)
+		if next.Session.ID != "" {
+			turn.Session = next.Session
+		}
+		turn.Outcome = next.Outcome
+		err = resumeErr
+	}
+	return turn, err
 }
 
 // finishTurn writes a turn's result through final, so a cancelled run still records

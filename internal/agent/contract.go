@@ -44,6 +44,15 @@ type Outcome struct {
 	Documents map[task.PlanDoc]string
 }
 
+// CheckpointValidationError keeps the failed commands available for a repair turn.
+type CheckpointValidationError struct {
+	Failed []string
+}
+
+func (e *CheckpointValidationError) Error() string {
+	return "checkpoint validation must pass: " + strings.Join(e.Failed, ", ")
+}
+
 type wireDocuments struct {
 	Analysis string `json:"analysis"`
 	PRD      string `json:"prd"`
@@ -109,13 +118,17 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 		if len(w.Validation) == 0 {
 			return Outcome{}, errors.New("checkpoint outcome needs the validation that was run")
 		}
-		for _, check := range w.Validation {
-			if !check.Passed {
-				return Outcome{}, errors.New("checkpoint validation must pass")
-			}
-		}
 		out.NextObjective = strings.TrimSpace(*w.NextObjective)
 		out.Validation = w.Validation
+		var failed []string
+		for _, check := range w.Validation {
+			if !check.Passed {
+				failed = append(failed, check.Command)
+			}
+		}
+		if len(failed) > 0 {
+			return out, &CheckpointValidationError{Failed: failed}
+		}
 	case Blocked:
 		if len(w.Questions) == 0 {
 			return Outcome{}, errors.New("blocked outcome has no questions")

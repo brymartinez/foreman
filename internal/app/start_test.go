@@ -139,6 +139,7 @@ type fakeAgent struct {
 	name      task.Agent
 	turn      agent.Turn
 	turns     []agent.Turn // consumed before turn, one per Start/Resume
+	turnErrs  []error      // consumed with turns
 	err       error
 	prompt    string
 	prompts   []string
@@ -159,6 +160,11 @@ func (f *fakeAgent) next() (agent.Turn, error) {
 	if len(f.turns) > 0 {
 		t := f.turns[0]
 		f.turns = f.turns[1:]
+		if len(f.turnErrs) > 0 {
+			err := f.turnErrs[0]
+			f.turnErrs = f.turnErrs[1:]
+			return t, err
+		}
 		return t, nil
 	}
 	return f.turn, f.err

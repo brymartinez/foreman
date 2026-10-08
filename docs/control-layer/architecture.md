@@ -307,6 +307,9 @@ the same commit. The commit message records why it changed.
   when the worktree still points at the accepted commit. Checkpoints are limited to
   eight per task. Planning, PR feedback, merge repair, and review fixes do not
   checkpoint. Validation remains agent reported; Foreman verifies Git state.
+  If a checkpoint reports failed validation, Foreman resumes the same session
+  with the failed commands and allows two repair turns. A passing checkpoint
+  then follows the usual Git checks; repeated failed validation fails the task.
 - **Models and effort are set per step:** `plan_model`, `model` (implementation, fixes,
   feedback, merges, PR creation), and `review_model`; Codex also takes reasoning effort
   per step. Each turn logs an `agent:model:step` line. A routed task's stored profile

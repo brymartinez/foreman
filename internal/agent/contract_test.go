@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -69,6 +70,18 @@ func TestParseOutcomeCheckpointRequiresShortNextObjectiveAndPassingValidation(t 
 		if _, err := ParseOutcome([]byte(wire)); err == nil {
 			t.Errorf("%s was accepted", name)
 		}
+	}
+}
+
+func TestParseOutcomePreservesFailedCheckpointChecksForRepair(t *testing.T) {
+	raw := []byte(`{"status":"checkpoint","summary":"committed","nextObjective":"Continue work","prNumber":null,"prUrl":null,"validation":[{"command":"pnpm test","passed":true},{"command":"pnpm lint","passed":false}],"questions":[],"documents":null}`)
+	got, err := ParseOutcome(raw)
+	var failed *CheckpointValidationError
+	if !errors.As(err, &failed) || len(failed.Failed) != 1 || failed.Failed[0] != "pnpm lint" {
+		t.Fatalf("failed checks = %+v, err = %v", failed, err)
+	}
+	if got.Status != Checkpoint || len(got.Validation) != 2 || got.NextObjective != "Continue work" {
+		t.Fatalf("repairable checkpoint lost: %+v", got)
 	}
 }
 

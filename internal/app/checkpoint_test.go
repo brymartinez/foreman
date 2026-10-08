@@ -56,6 +56,51 @@ func TestCheckpointStartsFreshImplementationSessionWithOnlyDurableHandoff(t *tes
 	}
 }
 
+func TestFailedCheckpointValidationResumesSameSessionForRepair(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	postedPlan(f.store.recs[key])
+	f.wt.checkpointHeads = []string{"commit1"}
+	failed := checkpointTurn("first-session", "Continue work")
+	failed.Outcome.Validation = append(failed.Outcome.Validation, task.Check{Command: "pnpm lint", Passed: false})
+	f.claude.turns = []agent.Turn{failed, checkpointTurn("first-session", "Continue work"), prTurn("second-session")}
+	f.claude.turnErrs = []error{&agent.CheckpointValidationError{Failed: []string{"pnpm lint"}}, nil, nil}
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Reviewing || got.Delegation.Checkpoints != 1 || f.claude.starts != 2 || len(f.claude.resumed) != 1 {
+		t.Fatalf("state %s checkpoints %d starts %d resumes %v", got.State, got.Delegation.Checkpoints, f.claude.starts, f.claude.resumed)
+	}
+	if !strings.Contains(f.claude.resumed[0], "first-session") || !strings.Contains(f.claude.resumed[0], "pnpm lint") {
+		t.Fatalf("repair prompt = %q", f.claude.resumed[0])
+	}
+	if got.Usage.ClaudeTurns != 2 || got.Usage.ClaudeCostUSD != 2.5 {
+		t.Fatalf("repair usage lost: %+v", got.Usage)
+	}
+}
+
+func TestRepeatedFailedCheckpointValidationStopsAfterRepairLimit(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	postedPlan(f.store.recs[key])
+	failed := checkpointTurn("first-session", "Continue work")
+	failed.Outcome.Validation = []task.Check{{Command: "pnpm lint", Passed: false}}
+	f.claude.turns = []agent.Turn{failed, failed, failed}
+	f.claude.turnErrs = []error{
+		&agent.CheckpointValidationError{Failed: []string{"pnpm lint"}},
+		&agent.CheckpointValidationError{Failed: []string{"pnpm lint"}},
+		&agent.CheckpointValidationError{Failed: []string{"pnpm lint"}},
+	}
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Failed || f.claude.starts != 1 || len(f.claude.resumed) != 2 || got.Usage.ClaudeTurns != 3 {
+		t.Fatalf("state %s starts %d resumes %d usage %+v", got.State, f.claude.starts, len(f.claude.resumed), got.Usage)
+	}
+}
+
 func TestCheckpointVerificationFailureStopsBeforeAnotherSession(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))

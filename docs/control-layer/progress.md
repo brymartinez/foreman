@@ -2,6 +2,13 @@
 
 ## Current stage
 
+Checkpoint validation repair is complete. When an initial implementation
+checkpoint reports failed checks, Foreman resumes the same agent session with
+those commands for up to two repair turns. A passing checkpoint still needs a
+clean, advancing commit. Vet, Go tests, build, and the runner end-to-end scenario
+pass. The full end-to-end run stops in the notification scenario while selecting
+an untriaged fixture issue (#44); that scenario does not exercise checkpoints.
+
 The runner process check now uses an inherited lock file, and the end-to-end
 script signals recorded PIDs. The process checks pass where process-list
 commands are unavailable. Vet, tests, build, and the full end-to-end script pass.
