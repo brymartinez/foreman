@@ -192,8 +192,10 @@ the same commit. The commit message records why it changed.
   dashboard, and a piped `foreman` still prints usage.
 - **One detached runner per task.** `App.Start`, `App.Respond`, `App.Resume`, and the gate spawn
   `foreman __run owner/repo#N` with `Setsid`, so closing the terminal doesn't stop it.
-  A runner is alive when `kill(pid, 0)` succeeds and `ps` shows ` __run `, which guards
-  against pid reuse. A dead runner is reaped only after the gate has read its PR, so a
+  The runner inherits a locked file named for its PID in `log_dir`. A runner is alive
+  when `kill(pid, 0)` succeeds and that file is locked; this guards against PID reuse
+  without process-list access. Older runners without a lock still use `ps`. A dead
+  runner is reaped only after the gate has read its PR, so a
   GitHub outage delays a FAILED verdict instead of risking a wrong one.
 - **The runner owns its log.** `Spawn` passes the log file itself as stdout and stderr,
   and the runner timestamps its own lines. A writer in the launcher needs a pipe, which
