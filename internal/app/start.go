@@ -140,6 +140,9 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		// waiting on the PR keep it for any agent, because the run reads them through
 		// that number and the new agent has to answer them first.
 		sameAgent := prev != nil && prev.Implementer.Agent == req.Agent
+		if sameAgent && prev.Reviewer == req.Agent {
+			cur.Delegation.Reviewer = prev.Reviewer
+		}
 		if sameAgent && prev.Branch == wt.Branch && prev.CheckpointHead == head {
 			cur.Delegation.CheckpointNext = prev.CheckpointNext
 			cur.Delegation.Checkpoints = prev.Checkpoints

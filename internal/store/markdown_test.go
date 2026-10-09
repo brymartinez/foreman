@@ -193,6 +193,22 @@ func TestFileMatchesDesignDocShape(t *testing.T) {
 	}
 }
 
+func TestFileKeepsSameAgentReviewerAfterFallback(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	rec := delegated()
+	rec.Delegation.Reviewer = rec.Delegation.Implementer.Agent
+	if err := s.Save(ctx, rec); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, rec.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Delegation.Reviewer != rec.Delegation.Reviewer {
+		t.Fatalf("reviewer after reload = %v, err %v", got.Delegation.Reviewer, err)
+	}
+}
+
 func TestSavePreservesUserFrontmatterAndBody(t *testing.T) {
 	s := Markdown{Dir: t.TempDir()}
 	rec := delegated()

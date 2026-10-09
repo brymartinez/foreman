@@ -337,8 +337,11 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 		if fm.Profile != nil && fm.Profile.Agent != impl {
 			return nil, fmt.Errorf("profile %q is for %q, but implementation_agent is %q", fm.Profile.Name, fm.Profile.Agent, impl)
 		}
-		if fm.ReviewAgent != "" && fm.ReviewAgent != impl.Reviewer() {
-			return nil, fmt.Errorf("review_agent must be the competing agent %q, got %q", impl.Reviewer(), fm.ReviewAgent)
+		if fm.ReviewAgent != "" && fm.ReviewAgent != impl.Reviewer() && fm.ReviewAgent != impl {
+			return nil, fmt.Errorf("review_agent must be %q or %q, got %q", impl.Reviewer(), impl, fm.ReviewAgent)
+		}
+		if fm.ReviewAgent != "" {
+			rec.Delegation.Reviewer = fm.ReviewAgent
 		}
 	}
 	if fm.GitHub != nil {

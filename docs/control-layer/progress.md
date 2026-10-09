@@ -2,6 +2,14 @@
 
 ## Current stage
 
+Reviewer availability fallback is complete. A fresh quota-axi report can move a
+review to the implementer's agent when the competing agent is confirmed not set up
+or exhausted. An authentication failure also triggers a fresh review session with
+the implementer's agent. Foreman records that reviewer and keeps it on resume.
+Vet, Go tests, and build pass. The end-to-end run passes the runner, review,
+resume, and routing scenarios, but its notification scenario cannot bind a local
+socket in this environment and reports six notification failures.
+
 Checkpoint validation repair is complete. When an initial implementation
 checkpoint reports failed checks, Foreman resumes the same agent session with
 those commands for up to two repair turns. A passing checkpoint still needs a

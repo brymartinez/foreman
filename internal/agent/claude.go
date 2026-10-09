@@ -136,7 +136,7 @@ func (c Claude) exec(ctx context.Context, in StartInput, args []string) (json.Ra
 	}
 	raw, err := parseClaudeResult(result, in.Log)
 	if err != nil && runErr != nil {
-		return nil, 0, fmt.Errorf("claude exited: %w (%v)", runErr, err)
+		return nil, 0, fmt.Errorf("claude exited: %w (%w)", runErr, err)
 	}
 	return raw, r.TotalCostUSD, err
 }
@@ -199,6 +199,9 @@ func parseClaudeResult(result []byte, log io.Writer) (json.RawMessage, error) {
 		for _, d := range r.PermissionDenials {
 			fmt.Fprintf(log, "claude: denied %s\n", d)
 		}
+	}
+	if r.IsError && strings.Contains(strings.ToLower(r.Result), "failed to authenticate") {
+		return nil, fmt.Errorf("%w: %s", ErrUnavailable, truncate(r.Result, 500))
 	}
 	if r.IsError || len(r.StructuredOutput) == 0 || string(r.StructuredOutput) == "null" {
 		return nil, fmt.Errorf("claude ended without a structured outcome (%s): %s", r.Subtype, truncate(r.Result, 500))

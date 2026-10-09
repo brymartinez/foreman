@@ -205,6 +205,17 @@ func TestClaudeStartWithoutStructuredOutputFails(t *testing.T) {
 	}
 }
 
+func TestClaudeAuthenticationFailureReportsUnavailable(t *testing.T) {
+	exec := func(_ context.Context, c Command) error {
+		io.WriteString(c.Stdout, `{"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate: OAuth session expired and could not be refreshed"}`)
+		return errors.New("exit status 1")
+	}
+	_, err := (Claude{Bin: "claude", Exec: exec}).Review(context.Background(), StartInput{Worktree: "/wt"})
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("authentication failure = %v, want unavailable", err)
+	}
+}
+
 func TestCodexStart(t *testing.T) {
 	var got Command
 	exec := func(_ context.Context, c Command) error {

@@ -314,7 +314,7 @@ type Record struct {
 	Usage          Usage
 	// Validation is what the implementation agent reported with its PR.
 	Validation []Check
-	// Reviews are the competing agent's review rounds, oldest first.
+	// Reviews are the review rounds, oldest first.
 	Reviews []Review
 	// Plan holds the planning documents posted on the issue, in PlanDocs order.
 	Plan []PlanComment

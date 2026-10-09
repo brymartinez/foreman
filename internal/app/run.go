@@ -224,8 +224,9 @@ func (r *taskRun) review() (step, error) {
 		return stepDone, err
 	}
 	r.rec = rec
-	review, reviewErr := a.review(r.ctx, rec, r.log)
+	review, reviewer, reviewErr := a.review(r.ctx, rec, r.log)
 	if rec, err = a.update(r.final, rec.Key, existing(func(cur *task.Record) {
+		cur.Delegation.Reviewer = reviewer
 		applyReview(cur, review, reviewErr, a.Now())
 		if reviewErr != nil {
 			applyStop(r.ctx, cur, "review", r.log, a.Now())
@@ -461,25 +462,37 @@ func applyFeedbackTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runEr
 	}
 }
 
-// review runs the competing agent in a fresh, read-only session.
-func (a App) review(ctx context.Context, rec *task.Record, log io.Writer) (agent.ReviewOutcome, error) {
+// review runs a fresh, read-only session. When the competing agent is unavailable,
+// the implementer's agent reviews in a separate session.
+func (a App) review(ctx context.Context, rec *task.Record, log io.Writer) (agent.ReviewOutcome, task.Agent, error) {
 	d := rec.Delegation
-	reviewer, ok := a.Agents[d.Reviewer]
+	chosen := d.Reviewer
+	if chosen != d.Implementer.Agent && a.Quota != nil {
+		if quotas, err := a.Quota.Quota(ctx); err == nil {
+			status := quotas[chosen].Status
+			own := quotas[d.Implementer.Agent].Status
+			if (status == QuotaNotSetUp || status == QuotaExhausted) && own != QuotaNotSetUp && own != QuotaExhausted {
+				fmt.Fprintf(log, "foreman: %s unavailable according to quota-axi; using %s for review\n", chosen, d.Implementer.Agent)
+				chosen = d.Implementer.Agent
+			}
+		}
+	}
+	reviewer, ok := a.Agents[chosen]
 	if !ok {
-		return agent.ReviewOutcome{}, fmt.Errorf("reviewer %s is not configured", d.Reviewer)
+		return agent.ReviewOutcome{}, chosen, fmt.Errorf("reviewer %s is not configured", chosen)
 	}
 	// The PR description is the reviewer's only statement of requirements, so a review
 	// without one cannot pass.
 	pr, err := a.GitHub.GetPullRequest(ctx, task.Key{Repo: rec.Repo, Number: d.PR})
 	if err != nil {
-		return agent.ReviewOutcome{}, fmt.Errorf("review PR #%d: %w", d.PR, err)
+		return agent.ReviewOutcome{}, chosen, fmt.Errorf("review PR #%d: %w", d.PR, err)
 	}
 	if strings.TrimSpace(pr.Body) == "" {
-		return agent.ReviewOutcome{}, fmt.Errorf("review PR #%d: the pull request description is empty", d.PR)
+		return agent.ReviewOutcome{}, chosen, fmt.Errorf("review PR #%d: the pull request description is empty", d.PR)
 	}
 	instructions, err := a.Stages.Resolve(d.Worktree, task.StageReview)
 	if err != nil {
-		return agent.ReviewOutcome{}, err
+		return agent.ReviewOutcome{}, chosen, err
 	}
 	brief := agent.ReviewBrief{Key: rec.Key, PR: d.PR, PRBody: pr.Body, Branch: d.Branch, BaseBranch: strings.TrimPrefix(d.BaseRef, "origin/"),
 		StageInstructions: instructions.Content(), Previous: rec.Reviews, Passes: a.reviewRounds()}
@@ -491,16 +504,28 @@ func (a App) review(ctx context.Context, rec *task.Record, log io.Writer) (agent
 		brief.Comments = feedbackItems(slices.DeleteFunc(comments, func(c PRComment) bool { return strings.TrimSpace(c.Body) == "" }))
 	}
 	if err := a.startAttempt(ctx, rec); err != nil {
-		return agent.ReviewOutcome{}, err
+		return agent.ReviewOutcome{}, chosen, err
 	}
-	fmt.Fprintf(log, "foreman: %s reviewing PR #%d (round %d)\n", reviewer.Name(), d.PR, len(rec.Reviews)+1)
-	return reviewer.Review(ctx, agent.StartInput{
+	in := agent.StartInput{
 		Worktree:     d.Worktree,
 		Log:          log,
 		MaxBudgetUSD: a.ReviewerBudgetUSD,
 		Prompt:       agent.ReviewPrompt(brief),
 		Step:         agent.StepReview,
-	})
+	}
+	fmt.Fprintf(log, "foreman: %s reviewing PR #%d (round %d)\n", reviewer.Name(), d.PR, len(rec.Reviews)+1)
+	out, err := reviewer.Review(ctx, in)
+	if errors.Is(err, agent.ErrUnavailable) && chosen != d.Implementer.Agent {
+		chosen = d.Implementer.Agent
+		reviewer, ok = a.Agents[chosen]
+		if !ok {
+			return agent.ReviewOutcome{}, chosen, fmt.Errorf("reviewer %s is not configured", chosen)
+		}
+		fmt.Fprintf(log, "foreman: %s unavailable; using %s for review\n", d.Reviewer, chosen)
+		fmt.Fprintf(log, "foreman: %s reviewing PR #%d (round %d)\n", reviewer.Name(), d.PR, len(rec.Reviews)+1)
+		out, err = reviewer.Review(ctx, in)
+	}
+	return out, chosen, err
 }
 
 func addUsage(total *task.Usage, turn task.Usage) {

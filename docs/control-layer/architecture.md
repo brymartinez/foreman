@@ -271,7 +271,8 @@ the same commit. The commit message records why it changed.
 ### Agents
 
 - **Claude and Codex are interchangeable.** Every feature works with either as the
-  implementer and the other as the reviewer.
+  implementer and the other as the initial reviewer. An unavailable reviewer can be
+  replaced by a fresh review session with the implementer's agent.
 - **Headless turns with a structured outcome.** Each turn ends in a final message that
   matches `internal/agent/outcome.schema.json`: `planned`, `checkpoint`, `pr_opened`, `blocked` with
   questions, or `failed`. `agent.ParseOutcome` is the only way an implementer's output
@@ -349,7 +350,7 @@ the same commit. The commit message records why it changed.
   editing either file never changes a running task. The runner writes
   `route:<profile>:<agent>:<reason>` once, before the run's first `agent:model:step`
   line (`route_logged`). A restart with the same agent keeps the profile; another agent
-  drops it. The reviewer stays the competing agent with its review settings.
+  drops it. The reviewer starts as the competing agent and uses its review settings.
 - Rejected: routing inside `app.Start` (a manual start could not confirm first) and in
   the runner (the task is already WORKING, so it could neither wait nor change agents).
 - **Dollar budgets cap Claude only.** Codex reports no cost and its tokens arrive only
@@ -386,8 +387,14 @@ the same commit. The commit message records why it changed.
 
 ### Review
 
-- **The reviewer is the competing agent,** in a disposable session (`--no-session-persistence`
-  / `--ephemeral`) that never sees the implementer's session. It is strictly read-only:
+- **The reviewer starts as the competing agent** in a disposable session
+  (`--no-session-persistence` / `--ephemeral`) that never sees the implementer's
+  session. Before each review, a fresh `quota-axi` report can move the review to
+  the implementer's agent if it confirms the competitor is not set up or exhausted.
+  An authentication failure from the competitor also triggers that fallback, even
+  when quota is unknown. Foreman records the actual reviewer and keeps it on resume.
+  The fallback is a fresh session with the agent's review settings. Reviews are
+  strictly read-only:
   Claude gets only `Read, Grep, Glob` and read-only git, and Codex the read-only
   sandbox. Letting it run tests was rejected, because Claude's Bash has no sandbox.
 - **The PR description is the only requirements.** The prompt carries the description,

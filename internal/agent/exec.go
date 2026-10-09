@@ -53,6 +53,9 @@ func logTurn(w io.Writer, a task.Agent, model, step string) {
 // usually means the session is gone, and a fresh turn from durable state is safe.
 var ErrNoSession = errors.New("agent produced no session")
 
+// ErrUnavailable means the agent cannot authenticate and did not run a turn.
+var ErrUnavailable = errors.New("agent unavailable")
+
 type Turn struct {
 	Session task.Session
 	Outcome Outcome

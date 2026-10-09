@@ -177,6 +177,39 @@ func TestCodexImplementationIsReviewedByClaude(t *testing.T) {
 	}
 }
 
+func TestCodexPRUsesCodexReviewWhenAxiConfirmsClaudeNotSetUp(t *testing.T) {
+	f := newFixture()
+	f.app.Quota = fakeQuota{q: map[task.Agent]Quota{task.Claude: {Status: QuotaNotSetUp}}}
+	req := startReq(t)
+	req.Agent = task.Codex
+	key := started(t, f, req)
+	f.codex.turn = agent.Turn{Session: task.Session{Agent: task.Codex, ID: "th-1"}, Outcome: prTurn("").Outcome}
+	f.app.RunTask(context.Background(), key, 4242, io.Discard)
+	got := f.store.recs[key]
+	if got.State != task.Reviewing || len(f.codex.reviewed) != 1 || len(f.claude.reviewed) != 0 || got.Reviews[0].Reviewer != task.Codex || got.Delegation.Reviewer != task.Codex {
+		t.Fatalf("state %s reviewer %s reviews %+v; codex %d claude %d", got.State, got.Delegation.Reviewer, got.Reviews, len(f.codex.reviewed), len(f.claude.reviewed))
+	}
+}
+
+func TestCodexPRFallsBackToCodexReviewWhenClaudeAuthenticationFails(t *testing.T) {
+	f := newFixture()
+	req := startReq(t)
+	req.Agent = task.Codex
+	key := started(t, f, req)
+	f.codex.turn = agent.Turn{Session: task.Session{Agent: task.Codex, ID: "th-1"}, Outcome: prTurn("").Outcome}
+	f.claude.reviewErr = fmt.Errorf("OAuth session expired: %w", agent.ErrUnavailable)
+	f.app.RunTask(context.Background(), key, 4242, io.Discard)
+	got := f.store.recs[key]
+	if got.State != task.Reviewing || len(f.claude.reviewed) != 1 || len(f.codex.reviewed) != 1 || got.Reviews[0].Reviewer != task.Codex || got.Delegation.Reviewer != task.Codex {
+		t.Fatalf("state %s reviewer %s reviews %+v; codex %d claude %d", got.State, got.Delegation.Reviewer, got.Reviews, len(f.codex.reviewed), len(f.claude.reviewed))
+	}
+	got.State = task.Failed
+	resumed := started(t, f, req)
+	if f.store.recs[resumed].Delegation.Reviewer != task.Codex {
+		t.Fatalf("resumed reviewer = %s, want codex", f.store.recs[resumed].Delegation.Reviewer)
+	}
+}
+
 func TestFreshTurnCarriesOpenFindingsWhenSessionIsGone(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
@@ -293,7 +326,7 @@ func TestReviewStopsWhenPRCannotBeRead(t *testing.T) {
 	d := *rec.Delegation
 	d.PR, d.Reviewer = 913, task.Codex
 	rec.Delegation = &d
-	_, err := f.app.review(context.Background(), &rec, io.Discard)
+	_, _, err := f.app.review(context.Background(), &rec, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "no pull requests found") || len(f.codex.reviewed) != 0 {
 		t.Errorf("err %v reviews %d", err, len(f.codex.reviewed))
 	}
