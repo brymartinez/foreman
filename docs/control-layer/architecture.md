@@ -123,13 +123,11 @@ foreman [-a|--auto|--no-auto]
                          ? -> the keys and the version; any key closes it
                          c on a running task     -> confirm, app.Cancel
                          a -> toggle auto mode, saved in state.json (D144)
-                         v -> toggle the inbox between the configured repositories
-                           and all of them, this session only, and refresh
                          auto mode, after each successful refresh, finished start,
                            and 1s tick: app.Start with auto.agent for assigned,
                            triaged, never delegated issues, oldest first, while fewer
-                           than auto.max_concurrent runs are active (D144). A GitHub
-                           refresh in progress or failed blocks auto starts. With routing
+                           than auto.max_concurrent runs are active (D144). A selected
+                           source refresh in progress or failed blocks auto starts. With routing
                            on: app.Route, then app.Start with the profile, no
                            confirmation; a wait holds the issue until the next refresh
 
@@ -192,7 +190,8 @@ the same commit. The commit message records why it changed.
   The gate, liveness checks, and cleanup run on each dashboard refresh. Rejected: a
   daemon, a watcher, or a runner that waits for CI.
 - **The dashboard is the only interface.** Bare `foreman` opens it; `-a`/`--auto` and
-  `--no-auto` set auto mode for the session, and `-c` edits the config. The only other
+  `--no-auto` set auto mode for the session, `-s github|linear` selects an inbox source,
+  and `-c` edits the config. The only other
   verb is the hidden `__run`. Task subcommands were dropped because they duplicated the
   dashboard, and a piped `foreman` still prints usage.
 - **One detached runner per task.** `App.Start`, `App.Respond`, `App.Resume`, and the gate spawn
@@ -463,22 +462,24 @@ the same commit. The commit message records why it changed.
   needs the developer.
 - **Auto mode requires current triage.** A never-delegated, open, assigned issue needs
   the exact `triaged` label for auto mode. Without it, the inbox shows "awaiting triage"
-  and still allows manual start. Labels come from GitHub on each refresh, including
+  and still allows manual start. Labels come from the selected tracker on each refresh, including
   tracked-item lookups; they are not task-file state. Auto mode uses them only after a
-  successful GitHub refresh. Starting a refresh or failing one blocks auto starts from
+  successful selected-source refresh. Starting a refresh or failing one blocks auto starts from
   the retained inbox until another refresh succeeds. The auto start's existing issue
   fetch checks the label again before making a worktree, so removal after the refresh
   also stops the start.
-- **Repository filter.** A nonempty `include_repositories` shows only those
+- **Repository and source filters.** A nonempty `include_repositories` shows only those
   repositories and overrides `exclude_repositories`; otherwise the exclude list hides
-  its repositories. `App.InboxView` drops filtered items and stored records before
+  its repositories. Mapped repositories discover issues through Linear, and unmapped
+  repositories discover issues through GitHub. `-s github` and `-s linear` limit inbox
+  discovery to one tracker. A missing Linear key blocks startup only when a visible
+  repository needs it. A failed source leaves successful results and a warning, while
+  auto mode waits for all selected sources to refresh successfully. The inbox groups
+  selectable issues under GITHUB and LINEAR. `App.InboxSources` drops filtered items before
   `Reconcile`, so the configured view writes no records for them and reports no waiting
-  task from them, and `fetchTracked` skips tracked items outside the view. `v` in the dashboard passes `allRepos`, which
-  bypasses both lists for the session; the searches, involvement reasons, and
-  `mentions` are the same in either view. In the dashboard, `v` empties INBOX until the
-  new view's refresh lands, so no row from the old view stays selectable. Auto mode
-  starts nothing in the all view, so a look outside the filter never spends a run there.
-  DELEGATED WORK reads the task store, so tasks in any repository stay reachable.
+  task from them, and tracked lookups skip items outside the repository filter.
+  DELEGATED WORK reads the task store, so delegated tasks remain reachable across
+  source filters.
 - **Lookup failures warn and retry** next refresh without blocking other items. A 404
   or 410 on an undelegated item is reported once and then no longer checked.
 - **Delegation doesn't need a checkout:** foreman keeps a clone under

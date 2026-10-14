@@ -127,6 +127,7 @@ type Model struct {
 	Refreshing  bool
 	RefreshedAt time.Time
 	Warnings    []error
+	IssueSource task.Source // empty selects both issue sources
 
 	// AutoOn starts eligible INBOX issues with AutoAgent while fewer than AutoMax
 	// runs are active.
@@ -258,6 +259,15 @@ func (m *Model) SetInbox(entries []app.InboxEntry) {
 	if cur := m.selectedEntry(); cur != nil {
 		selected = cur.Item.Key
 	}
+	slices.SortStableFunc(entries, func(a, b app.InboxEntry) int {
+		if a.Item.Key.Source == task.Linear && b.Item.Key.Source != task.Linear {
+			return 1
+		}
+		if a.Item.Key.Source != task.Linear && b.Item.Key.Source == task.Linear {
+			return -1
+		}
+		return 0
+	})
 	m.Inbox = entries
 	m.InboxCursor = clamp(indexOfEntry(entries, selected, m.InboxCursor), len(entries))
 }
@@ -355,13 +365,6 @@ func (m *Model) browse(k Key) Action {
 		// Cleaned and raw lines do not line up, so the new view starts at the tail.
 		m.LogPath, m.LogOffset = "", 0
 		return Action{Kind: ActionReadLog}
-	case k.Kind == KeyRune && k.Rune == 'v':
-		m.AllRepos = !m.AllRepos
-		m.githubFresh = false
-		// The rows belong to the view just left, so none stays selectable until the
-		// new view's refresh fills the pane.
-		m.SetInbox(nil)
-		return Action{Kind: ActionToggleView}
 	case k.Kind == KeyTab:
 		m.Focus = (m.Focus + 1) % 2
 	case k.Kind == KeyLeft || (k.Kind == KeyRune && k.Rune == 'h'):

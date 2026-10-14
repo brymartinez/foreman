@@ -25,9 +25,10 @@ import (
 var logChunk int64 = 128 << 10
 
 type Options struct {
-	In     *os.File
-	Out    *os.File
-	Source Source
+	In          *os.File
+	Out         *os.File
+	Source      Source
+	IssueSource task.Source
 	// GitHubEvery is how often the searches, the gate, and the cleanup run.
 	GitHubEvery time.Duration
 	// LocalEvery is how often the task files and the selected log are re-read.
@@ -103,6 +104,7 @@ func Run(ctx context.Context, o Options) (err error) {
 	m.Width, m.Height = size(o.Out)
 	m.SetAuto(o.Auto)
 	m.RouteOn, m.Version = o.Route, o.Version
+	m.IssueSource = o.IssueSource
 
 	keys := make(chan Key, 64)
 	go readKeys(ctx, o.In, keys, escapeWait)
@@ -128,7 +130,7 @@ func Run(ctx context.Context, o Options) (err error) {
 		m.beginRefresh()
 		allRepos := m.AllRepos
 		go func() {
-			report, err := o.Source.InboxView(ctx, allRepos)
+			report, err := o.Source.InboxSources(ctx, o.IssueSource)
 			results <- result{report: &report, err: err, allRepos: allRepos}
 		}()
 	}
@@ -330,11 +332,18 @@ func apply(m *Model, r result) {
 	if r.report != nil {
 		m.Refreshing = false
 		m.RefreshedAt = time.Now()
-		m.githubFresh = r.err == nil
+		m.githubFresh = r.err == nil && r.report.SourcesFresh
 		if r.err == nil {
 			m.SetInbox(app.Delegable(*r.report))
 			m.Warnings = r.report.Warnings
-			m.retryWaiting()
+			if !r.report.SourcesFresh && len(r.report.Warnings) > 0 {
+				m.Message = "! " + r.report.Warnings[0].Error()
+			} else {
+				if strings.HasPrefix(m.Message, "! Linear refresh:") || strings.HasPrefix(m.Message, "! GitHub refresh:") {
+					m.Message = ""
+				}
+				m.retryWaiting()
+			}
 		}
 	}
 	if r.auto && r.finished {

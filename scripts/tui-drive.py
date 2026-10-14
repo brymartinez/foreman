@@ -102,8 +102,12 @@ class Dashboard:
     def pick(self, text):
         for _ in range(40):
             self.press(b"k")
+        self.settle()
         for _ in range(40):
-            if re.search(r"(^|[\s│])> " + re.escape(text), self.screen(), re.M):
+            self.settle()
+            if re.search(r"(^|[\s│])> " + re.escape(text), self.screen(), re.M) or re.search(
+                r"(^|[\s│])> (?:GITHUB|LINEAR)[^\n]*\n\s*" + re.escape(text), self.screen(), re.M
+            ):
                 return
             self.press(b"j")
         self.fail(f"no row starts with {text}")

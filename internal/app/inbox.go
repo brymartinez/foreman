@@ -38,11 +38,15 @@ type InboxReport struct {
 	// Truncated lists searches that hit the result limit.
 	Truncated []string
 	Warnings  []error
+	// SourcesFresh is false when any selected issue source failed to refresh.
+	SourcesFresh bool
 }
 
 type App struct {
 	Store                TaskStore
 	GitHub               GitHubClient
+	Linear               IssueTracker
+	LinearProjects       map[task.Repo]string
 	Repositories         RepositoryManager
 	Worktrees            WorktreeManager
 	Agents               map[task.Agent]AgentAdapter
@@ -84,12 +88,21 @@ func (a App) Inbox(ctx context.Context) (InboxReport, error) {
 	return a.InboxView(ctx, false)
 }
 
+// InboxSources selects issue discovery for the dashboard. An empty source selects both.
+func (a App) InboxSources(ctx context.Context, source task.Source) (InboxReport, error) {
+	return a.inboxView(ctx, false, source)
+}
+
 // InboxView fetches GitHub state, reports what changed since the last run, and
 // records the new state as seen. Only records that changed are rewritten. allRepos
 // ignores the include and exclude lists. Items and records outside the view are
 // dropped before Reconcile, so no record is written for them and no waiting task
 // from them is reported.
 func (a App) InboxView(ctx context.Context, allRepos bool) (InboxReport, error) {
+	return a.inboxView(ctx, allRepos, "")
+}
+
+func (a App) inboxView(ctx context.Context, allRepos bool, source task.Source) (InboxReport, error) {
 	recs, err := a.Store.List(ctx)
 	if err != nil {
 		return InboxReport{}, err
@@ -105,12 +118,15 @@ func (a App) InboxView(ctx context.Context, allRepos bool) (InboxReport, error) 
 	if err := a.reap(ctx, recs, reapable(recs, dead, checked)); err != nil {
 		return InboxReport{}, err
 	}
-	search, err := a.GitHub.InboxItems(ctx)
+	items, truncated, sourceWarnings, available, err := a.discoverSources(ctx, source, allRepos)
 	if err != nil {
 		return InboxReport{}, err
 	}
-	items := a.visibleItems(search.Items, allRepos)
-	tracked, gone, refreshWarnings, err := a.fetchTracked(ctx, recs, items, allRepos)
+	if len(sourceWarnings) > 0 && len(available) == 0 {
+		return InboxReport{}, errors.Join(sourceWarnings...)
+	}
+	fresh := len(sourceWarnings) == 0
+	tracked, gone, refreshWarnings, err := a.fetchTrackedSources(ctx, recs, items, allRepos, source, available)
 	if err != nil {
 		return InboxReport{}, err
 	}
@@ -125,9 +141,10 @@ func (a App) InboxView(ctx context.Context, allRepos bool) (InboxReport, error) 
 	}
 	// Taken before Reconcile, which calls observe and rewrites these in place.
 	stored := storedReasons(recs)
-	report, dirty := Reconcile(append(items, tracked...), a.visibleRecords(recs, allRepos), notes, len(search.Truncated) == 0, a.Now())
-	report.Truncated = search.Truncated
-	report.Warnings = append(warnings, refreshWarnings...)
+	report, dirty := Reconcile(append(items, tracked...), a.visibleRecords(recs, allRepos), notes, fresh && len(truncated) == 0, a.Now())
+	report.Truncated = truncated
+	report.SourcesFresh = fresh
+	report.Warnings = append(append(sourceWarnings, warnings...), refreshWarnings...)
 	for _, seen := range dirty {
 		if _, err := a.update(ctx, seen.Key, func(cur *task.Record) (*task.Record, error) {
 			return mergeObserved(cur, seen), nil
@@ -169,6 +186,49 @@ func (a App) InboxView(ctx context.Context, allRepos bool) (InboxReport, error) 
 }
 
 const goneNote = "no longer on GitHub or no longer accessible; foreman stopped checking it"
+
+func (a App) discoverSources(ctx context.Context, source task.Source, allRepos bool) ([]InboxItem, []string, []error, map[task.Source]bool, error) {
+	var items []InboxItem
+	var truncated []string
+	var warnings []error
+	available := map[task.Source]bool{}
+	if source == "" || source == task.GitHub {
+		search, err := a.GitHub.InboxItems(ctx)
+		if err != nil {
+			warnings = append(warnings, fmt.Errorf("GitHub refresh: %w", err))
+		} else {
+			available[task.GitHub] = true
+			truncated = search.Truncated
+			for _, item := range search.Items {
+				if _, mapped := a.LinearProjects[item.Key.Repo]; !mapped && a.repoVisible(item.Key.Repo, allRepos) {
+					items = append(items, item)
+				}
+			}
+		}
+	}
+	if source == "" || source == task.Linear {
+		projects := map[task.Repo]string{}
+		for repo, url := range a.LinearProjects {
+			if a.repoVisible(repo, allRepos) {
+				projects[repo] = url
+			}
+		}
+		if len(projects) > 0 {
+			if a.Linear == nil {
+				warnings = append(warnings, errors.New("Linear refresh: set LINEAR_API_KEY to use Linear issues"))
+			} else if found, err := a.Linear.AssignedIssues(ctx, projects); err != nil {
+				warnings = append(warnings, fmt.Errorf("Linear refresh: %w", err))
+			} else {
+				available[task.Linear] = true
+				items = append(items, a.visibleItems(found, allRepos)...)
+			}
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, nil, nil, err
+	}
+	return items, truncated, warnings, available, nil
+}
 
 // hideMentionOnly drops the items a search returned only because they mention the
 // developer, for issues and pull requests alike. The searches still run and the
@@ -293,6 +353,10 @@ func closedItems(items []InboxItem) map[task.Key]bool {
 // involvement reasons have not yet been cleared by a complete refresh. gone lists
 // undelegated items GitHub no longer has; any other lookup failure is a warning.
 func (a App) fetchTracked(ctx context.Context, recs []*task.Record, found []InboxItem, allRepos bool) (items []InboxItem, gone []task.Key, warnings []error, err error) {
+	return a.fetchTrackedSources(ctx, recs, found, allRepos, "", map[task.Source]bool{task.GitHub: true})
+}
+
+func (a App) fetchTrackedSources(ctx context.Context, recs []*task.Record, found []InboxItem, allRepos bool, source task.Source, available map[task.Source]bool) (items []InboxItem, gone []task.Key, warnings []error, err error) {
 	inSearch := map[task.Key]bool{}
 	for _, it := range found {
 		inSearch[it.Key] = true
@@ -301,6 +365,13 @@ func (a App) fetchTracked(ctx context.Context, recs []*task.Record, found []Inbo
 	delegated := map[task.Key]bool{}
 	for _, r := range recs {
 		delegated[r.Key] = r.Delegation != nil
+		issueSource := r.Key.Source
+		if issueSource == "" {
+			issueSource = task.GitHub
+		}
+		if !available[issueSource] || (source != "" && source != issueSource && r.Delegation == nil) {
+			continue
+		}
 		if r.Delegation == nil && r.GitHub != nil && len(r.GitHub.Reasons) == 0 {
 			continue
 		}
@@ -318,7 +389,15 @@ func (a App) fetchTracked(ctx context.Context, recs []*task.Record, found []Inbo
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			out[i], errs[i] = a.GitHub.GetItem(ctx, k)
+			if k.Source == task.Linear {
+				var issue Issue
+				issue, errs[i] = a.Linear.GetIssue(ctx, k)
+				if errs[i] == nil {
+					out[i] = InboxItem{Key: k, Identifier: issue.Identifier, Kind: task.Issue, Title: issue.Title, URL: issue.URL, State: issue.State, UpdatedAt: issue.UpdatedAt, Labels: issue.Labels, Reasons: []task.InboxReason{task.Tracked}}
+				}
+			} else {
+				out[i], errs[i] = a.GitHub.GetItem(ctx, k)
+			}
 		}()
 	}
 	wg.Wait()
@@ -332,7 +411,11 @@ func (a App) fetchTracked(ctx context.Context, recs []*task.Record, found []Inbo
 		case errors.Is(err, ErrGone) && !delegated[keys[i]]:
 			gone = append(gone, keys[i])
 		default:
-			warnings = append(warnings, fmt.Errorf("refresh %s#%d: %w", keys[i].Repo, keys[i].Number, err))
+			if keys[i].Source == task.Linear {
+				warnings = append(warnings, fmt.Errorf("refresh %s: %w", keys[i].ExternalID, err))
+			} else {
+				warnings = append(warnings, fmt.Errorf("refresh %s#%d: %w", keys[i].Repo, keys[i].Number, err))
+			}
 		}
 	}
 	return items, gone, warnings, nil
@@ -454,11 +537,15 @@ func needsHuman(r *task.Record) bool {
 }
 
 func discovered(it InboxItem, now time.Time) *task.Record {
+	identifier := fmt.Sprintf("#%d", it.Key.Number)
+	if it.Identifier != "" {
+		identifier = it.Identifier
+	}
 	rec := &task.Record{
 		Key:   it.Key,
 		Kind:  it.Kind,
 		State: task.Discovered,
-		Body:  fmt.Sprintf("# #%d %s\n\n## Notes\n\n", it.Key.Number, it.Title),
+		Body:  fmt.Sprintf("# %s %s\n\n## Notes\n\n", identifier, it.Title),
 	}
 	observe(rec, it, true, now)
 	return rec
@@ -476,7 +563,7 @@ func observe(rec *task.Record, it InboxItem, complete bool, now time.Time) {
 			reasons = rec.GitHub.Reasons
 		}
 	}
-	rec.Title, rec.URL, rec.Kind = it.Title, it.URL, it.Kind
+	rec.Title, rec.URL, rec.Kind, rec.Identifier = it.Title, it.URL, it.Kind, it.Identifier
 	rec.GitHub = &task.Snapshot{UpdatedAt: it.UpdatedAt, State: it.State, Reasons: reasons}
 	rec.LastGitHubSync = now
 	finish(rec, it)

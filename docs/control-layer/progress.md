@@ -2,14 +2,14 @@
 
 ## Current stage
 
-Issue 58 is in progress. Configuration now validates per-repository Linear project
-URLs and rejects duplicate project mappings. Task keys and Markdown records can
-store Linear's stable issue ID, display identifier, and string comment IDs while
-legacy GitHub records keep their existing filename and identity. The Linear GraphQL adapter reads assigned
-project issues, issue details, labels, states, and comments, and creates or edits
-comments using string IDs. It is not wired into refresh or the task lifecycle yet.
-Mixed inbox and source-aware lifecycle remain for later
-checkpoints.
+Issue 58 is in progress. Configuration validates Linear project mappings. Source-qualified
+task records and the Linear GraphQL adapter are complete. The dashboard now discovers
+GitHub and Linear inbox issues, filters by `-s`, groups source rows, warns when one
+source fails, and pauses auto starts until both selected sources refresh. GitHub-only
+selection works without a Linear key. The `v` repository toggle is gone. Source-aware
+start, runner, comments, and PR behavior remain for the next checkpoint. The end-to-end
+scenario and README updates remain for the final stage. Vet, Go tests, build, and the
+existing full end-to-end script pass.
 
 Reviewer availability fallback is complete. A fresh quota-axi report can move a
 review to the implementer's agent when the competing agent is confirmed not set up

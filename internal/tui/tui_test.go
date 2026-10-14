@@ -24,7 +24,10 @@ type stubSource struct {
 }
 
 func (s stubSource) InboxView(context.Context, bool) (app.InboxReport, error) { return s.report, s.err }
-func (s stubSource) Tasks(context.Context) ([]*task.Record, error)            { return s.recs, s.err }
+func (s stubSource) InboxSources(context.Context, task.Source) (app.InboxReport, error) {
+	return s.report, s.err
+}
+func (s stubSource) Tasks(context.Context) ([]*task.Record, error) { return s.recs, s.err }
 func (s stubSource) Start(context.Context, app.StartRequest) (*task.Record, error) {
 	return s.rec, s.err
 }
@@ -81,6 +84,25 @@ func TestFailedRefreshKeepsTriagedIssueVisibleButStopsAutoStart(t *testing.T) {
 	}
 	if got := m.AutoStarts(); len(got) != 0 {
 		t.Fatalf("auto started %v from labels retained after a failed refresh", startedKeys(got))
+	}
+}
+
+func TestPartialSourceRefreshShowsSuccessfulIssuesAndStopsAutoStart(t *testing.T) {
+	e := assigned("a/b", 1, 0)
+	m := autoModel(1)
+	apply(&m, result{report: &app.InboxReport{Current: []app.InboxEntry{e}, Warnings: []error{errors.New("Linear refresh: rate limited")}}})
+	if len(m.Inbox) != 1 || len(m.Warnings) != 1 {
+		t.Fatalf("inbox = %+v, warnings = %v", m.Inbox, m.Warnings)
+	}
+	if !strings.Contains(m.Message, "Linear refresh: rate limited") {
+		t.Fatalf("warning message = %q", m.Message)
+	}
+	if got := m.AutoStarts(); len(got) != 0 {
+		t.Fatalf("auto started %v after a partial refresh", got)
+	}
+	apply(&m, result{report: &app.InboxReport{Current: []app.InboxEntry{e}, SourcesFresh: true}})
+	if got := m.AutoStarts(); len(got) != 1 {
+		t.Fatalf("auto starts after recovery = %v", got)
 	}
 }
 
@@ -378,7 +400,7 @@ func (s autoSource) Start(_ context.Context, req app.StartRequest) (*task.Record
 }
 
 func refreshed(entries ...app.InboxEntry) result {
-	return result{report: &app.InboxReport{Current: entries}}
+	return result{report: &app.InboxReport{Current: entries, SourcesFresh: true}}
 }
 
 func receive(t *testing.T, results <-chan result) result {

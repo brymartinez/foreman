@@ -208,19 +208,11 @@ func TestHistoryShowsWhyItHasNoRows(t *testing.T) {
 	}
 }
 
-func TestVInHistorySwitchesTheRepositoryViewAndReloads(t *testing.T) {
+func TestVInHistoryDoesNotSwitchRepositoryView(t *testing.T) {
 	m := openHistory(t, historyRows(3), 30)
 	a := m.Key(Key{Kind: KeyRune, Rune: 'v'})
-	if a.Kind != ActionToggleView || !m.AllRepos || len(m.History) != 0 || !m.HistoryLoading {
+	if a.Kind != ActionNone || m.AllRepos || len(m.History) != 3 || m.HistoryLoading {
 		t.Fatalf("v = %+v all %v rows %d loading %v", a, m.AllRepos, len(m.History), m.HistoryLoading)
-	}
-	apply(&m, result{history: historyRows(2), historyLoad: true, historySeq: m.historySeq - 1})
-	if len(m.History) != 0 {
-		t.Fatal("a load for the view just left filled the list")
-	}
-	apply(&m, result{history: historyRows(2), historyLoad: true, historySeq: m.historySeq, allRepos: true})
-	if len(m.History) != 2 || m.HistoryLoading {
-		t.Fatalf("rows %d loading %v after the current view's load", len(m.History), m.HistoryLoading)
 	}
 }
 

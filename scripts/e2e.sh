@@ -520,8 +520,8 @@ scenario_inbox() {
 	check "the include list beats the exclude list" contains "$sandbox/include.txt" "acme/ignored#7"
 	check "the include list hides other repositories" bash -c "! grep -q 'acme/widgets#43' '$sandbox/include.txt'"
 	check "the inbox names the configured view" contains "$sandbox/include.txt" "INBOX · configured repos"
-	dash -- refreshed keys=v "wait=INBOX · all repos" refreshed print >"$sandbox/view.txt" 2>/dev/null
-	check "v lists every repository" contains "$sandbox/view.txt" "acme/widgets#43"
+	dash -- refreshed keys=v print >"$sandbox/view.txt" 2>/dev/null
+	check "v keeps the configured repository filter" bash -c "! grep -q 'acme/widgets#43' '$sandbox/view.txt'"
 	cp "$sandbox/config.exclude" "$sandbox/config.yaml"
 	check "searches ask for gh's maximum" contains "$state/gh.log" "--limit=1000"
 

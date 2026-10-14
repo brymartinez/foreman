@@ -3,7 +3,30 @@ package cli
 import (
 	"strings"
 	"testing"
+
+	"github.com/brymartinez/foreman/internal/task"
 )
+
+func TestSourceFlagSelectsGitHubOrLinearInbox(t *testing.T) {
+	for _, tc := range []struct {
+		args   []string
+		source task.Source
+	}{
+		{[]string{"-s", "github"}, task.GitHub},
+		{[]string{"-s", "linear"}, task.Linear},
+		{[]string{"--source", "linear", "-a"}, task.Linear},
+	} {
+		got, err := Parse(tc.args)
+		if err != nil || got.Name != TUI || got.Source != tc.source {
+			t.Fatalf("Parse(%v) = %+v, %v", tc.args, got, err)
+		}
+	}
+	for _, args := range [][]string{{"-s"}, {"-s", "other"}, {"-c", "-s", "linear"}} {
+		if _, err := Parse(args); err == nil {
+			t.Fatalf("Parse(%v) accepted invalid source flags", args)
+		}
+	}
+}
 
 func TestParseOpensTheDashboardWithTheGivenAutoMode(t *testing.T) {
 	for name, tc := range map[string]struct {
