@@ -9,6 +9,7 @@ internal/render       terminal formatting of app results
 internal/tui          the dashboard: pure Model and Frame, one terminal loop
 internal/app          orchestration + ports.go (the interfaces below)
   ├── github          GitHubClient and RepositoryManager over `gh`
+  ├── linear          IssueTracker over Linear GraphQL using a personal API key
   ├── store           TaskStore over Markdown + YAML frontmatter
   ├── worktree        WorktreeManager over `git worktree`
   ├── agent           outcome contract, prompt, claude.go / codex.go adapters, selector
@@ -20,6 +21,10 @@ internal/task         the durable model: Record, State, Delegation, Decision, At
 
 `app` depends only on the interfaces in `internal/app/ports.go`. Presentation stays in
 `cmd/foreman`, and process handling stays in `runner` and the adapters.
+`IssueTracker` carries source display identifiers and string comment IDs. Linear
+queries resolve configured project URLs to project IDs, then page through issues
+assigned to the authenticated user. Issue state types `completed` and `canceled`
+map to closed; repository and PR operations remain on `GitHubClient`.
 
 ## Execution model
 
