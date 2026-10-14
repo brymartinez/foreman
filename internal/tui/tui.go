@@ -307,7 +307,7 @@ func launchAutoFresh(ctx context.Context, s Source, m *Model, results chan<- res
 func launchAuto(ctx context.Context, s Source, m *Model, results chan<- result) int {
 	reqs := m.AutoStarts()
 	for _, req := range reqs {
-		prior := m.prior(task.Key{Repo: req.Repo, Number: req.Issue})
+		prior := m.prior(requestKey(req))
 		go func() { results <- autoStart(ctx, s, req, prior) }()
 	}
 	return len(reqs)
@@ -373,10 +373,7 @@ func apply(m *Model, r result) {
 
 func start(ctx context.Context, s Source, req app.StartRequest, auto bool) result {
 	r := startResult(ctx, s, req)
-	r.key = req.Key
-	if r.key == (task.Key{}) {
-		r.key = task.Key{Repo: req.Repo, Number: req.Issue}
-	}
+	r.key = requestKey(req)
 	r.auto, r.finished = auto, true
 	if !auto {
 		return r
@@ -389,6 +386,13 @@ func start(ctx context.Context, s Source, req app.StartRequest, auto bool) resul
 		r.message = "auto: " + r.message
 	}
 	return r
+}
+
+func requestKey(req app.StartRequest) task.Key {
+	if req.Key != (task.Key{}) {
+		return req.Key
+	}
+	return task.Key{Repo: req.Repo, Number: req.Issue}
 }
 
 // route asks App.Route for a manual start's profile. It writes nothing, so it is not
@@ -407,10 +411,7 @@ func autoStart(ctx context.Context, s Source, req app.StartRequest, prior *agent
 	if req.Agent != "" {
 		return start(ctx, s, req, true)
 	}
-	key := req.Key
-	if key == (task.Key{}) {
-		key = task.Key{Repo: req.Repo, Number: req.Issue}
-	}
+	key := requestKey(req)
 	d, err := s.Route(ctx, app.RouteRequest{Key: req.Key, Repo: req.Repo, Issue: req.Issue, Prior: prior})
 	switch {
 	case err != nil:

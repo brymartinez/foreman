@@ -347,7 +347,11 @@ func (c Client) query(ctx context.Context, query string, variables map[string]an
 		return fmt.Errorf("decode Linear GraphQL response: %w", err)
 	}
 	if len(envelope.Errors) > 0 {
-		return fmt.Errorf("Linear GraphQL: %s", envelope.Errors[0].Message)
+		message := envelope.Errors[0].Message
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(message)), "entity not found") {
+			return fmt.Errorf("Linear GraphQL: %s: %w", message, app.ErrGone)
+		}
+		return fmt.Errorf("Linear GraphQL: %s", message)
 	}
 	if len(envelope.Data) == 0 || string(envelope.Data) == "null" {
 		return errors.New("Linear GraphQL returned no data")

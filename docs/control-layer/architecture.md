@@ -24,7 +24,8 @@ internal/task         the durable model: Record, State, Delegation, Decision, At
 `IssueTracker` carries source display identifiers and string comment IDs. Linear
 queries resolve configured project URLs to project IDs, then page through issues
 assigned to the authenticated user. Issue state types `completed` and `canceled`
-map to closed; repository and PR operations remain on `GitHubClient`.
+map to closed; Linear's `Entity not found` errors map to `ErrGone` for tracked
+issues and planning comments. Repository and PR operations remain on `GitHubClient`.
 The detached runner receives `owner/repo#linear:<issue ID>` for Linear tasks and
 `owner/repo#<number>` for GitHub tasks. Linear runner logs use the stable issue ID,
 so tasks in one repository cannot share a `#0` log. The end-to-end fixture points
@@ -474,7 +475,9 @@ the same commit. The commit message records why it changed.
   so removal after the refresh also stops the start. Manual starts skip this label
   check. Dashboard start and routing requests carry the source-qualified key from
   the selected inbox item, including Linear's stable issue ID. Routing reads the
-  issue and recent comments from that tracker. A Linear branch uses its display
+  issue and recent comments from that tracker. In-flight starts and auto routing
+  retries use the same key to release slots and retain routing selections.
+  A Linear branch uses its display
   identifier and title; GitHub branches keep their numeric issue name.
 - **Runner issue source.** A runner reads the issue through the source stored on
   the task. Planning documents are posted through that source and retain its
@@ -484,8 +487,9 @@ the same commit. The commit message records why it changed.
   their closing keyword.
 - **Repository and source filters.** A nonempty `include_repositories` shows only those
   repositories and overrides `exclude_repositories`; otherwise the exclude list hides
-  its repositories. Mapped repositories discover issues through Linear, and unmapped
-  repositories discover issues through GitHub. `-s github` and `-s linear` limit inbox
+  its repositories. Mapped repositories discover issues through Linear, while their
+  GitHub PR search results remain in the refresh report. Unmapped repositories discover
+  issues through GitHub. `-s github` and `-s linear` limit inbox
   discovery to one tracker. A missing Linear key blocks startup only when a visible
   repository needs it. A failed source leaves successful results and a warning, while
   auto mode waits for all selected sources to refresh successfully. The inbox groups

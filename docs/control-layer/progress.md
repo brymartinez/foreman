@@ -9,6 +9,9 @@ tasks keep their source and issue ID across runner starts and source filters. Pl
 comments go to Linear, while branches, PRs, reviews, and CI stay on GitHub. The mixed
 end-to-end scenario covers filtering, delegation through clean PR review, and failed
 refresh gating. Vet, Go tests, build, and the full end-to-end script pass.
+Review round 1 fixes keep manual Linear starts from holding auto slots, retain GitHub
+PR search hits for mapped repositories, and map missing Linear entities to `ErrGone`.
+The posted PRD requires removal of the `v` all-repositories toggle.
 
 Reviewer availability fallback is complete. A fresh quota-axi report can move a
 review to the implementer's agent when the competing agent is confirmed not set up

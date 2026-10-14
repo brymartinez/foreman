@@ -200,7 +200,7 @@ func sourceEntries(entries []InboxEntry, source task.Source) []InboxEntry {
 	})
 }
 
-const goneNote = "no longer on GitHub or no longer accessible; foreman stopped checking it"
+const goneNote = "no longer exists or is inaccessible; foreman stopped checking it"
 
 func (a App) discoverSources(ctx context.Context, source task.Source, allRepos bool) ([]InboxItem, []string, []error, map[task.Source]bool, error) {
 	var items []InboxItem
@@ -215,7 +215,8 @@ func (a App) discoverSources(ctx context.Context, source task.Source, allRepos b
 			available[task.GitHub] = true
 			truncated = search.Truncated
 			for _, item := range search.Items {
-				if _, mapped := a.LinearProjects[item.Key.Repo]; !mapped && a.repoVisible(item.Key.Repo, allRepos) {
+				_, mapped := a.LinearProjects[item.Key.Repo]
+				if (item.Kind != task.Issue || !mapped) && a.repoVisible(item.Key.Repo, allRepos) {
 					items = append(items, item)
 				}
 			}

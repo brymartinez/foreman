@@ -731,7 +731,7 @@ func (m *Model) typeContext(k Key) Action {
 }
 
 func (m *Model) startPending(req app.StartRequest) Action {
-	k := task.Key{Repo: req.Repo, Number: req.Issue}
+	k := requestKey(req)
 	m.tried, m.starting = mark(m.tried, k), mark(m.starting, k)
 	return Action{Kind: ActionStart, Start: req}
 }

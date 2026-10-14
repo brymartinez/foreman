@@ -65,6 +65,19 @@ func TestMixedInboxShowsGitHubAndMappedLinearIssuesWithoutMappedGitHubIssues(t *
 	}
 }
 
+func TestMappedRepositoryKeepsGitHubPullRequestsInTheMixedReport(t *testing.T) {
+	pr := repoItem("acme/web", 9, task.ReviewRequested)
+	pr.Kind = task.PullRequest
+	a := App{Store: &fakeStore{recs: map[task.Key]*task.Record{}}, GitHub: &fakeGitHub{items: []InboxItem{repoItem("acme/web", 2, task.Assigned), pr}}, Linear: &inboxTracker{}, LinearProjects: map[task.Repo]string{"acme/web": "https://linear.app/acme/project/web-123"}, Runners: &fakeRunners{}, Now: func() time.Time { return now }}
+	report, err := a.InboxSources(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Current) != 1 || report.Current[0].Item.Key != pr.Key || report.Current[0].Item.Kind != task.PullRequest {
+		t.Fatalf("mixed report = %+v", report.Current)
+	}
+}
+
 func TestGitHubInboxSelectionSkipsLinearAndDoesNotRequireItsKey(t *testing.T) {
 	a := App{Store: &fakeStore{recs: map[task.Key]*task.Record{}}, GitHub: &fakeGitHub{items: []InboxItem{repoItem("acme/api", 1, task.Assigned), repoItem("acme/web", 2, task.Assigned)}}, LinearProjects: map[task.Repo]string{"acme/web": "https://linear.app/acme/project/web-123"}, Runners: &fakeRunners{}, Now: func() time.Time { return now }}
 	report, err := a.InboxSources(context.Background(), task.GitHub)

@@ -3,11 +3,13 @@ package linear
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/brymartinez/foreman/internal/app"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -36,6 +38,32 @@ func testClient(t *testing.T, handle func(string, map[string]json.RawMessage) st
 	c.Endpoint = srv.URL
 	c.HTTP = srv.Client()
 	return c
+}
+
+func TestEntityNotFoundGraphQLErrorsReturnErrGoneForReadsAndCommentEdits(t *testing.T) {
+	c := testClient(t, func(string, map[string]json.RawMessage) string {
+		return `{"errors":[{"message":"Entity not found"}]}`
+	})
+	key := task.Key{Repo: "acme/web", Source: task.Linear, ExternalID: issueID}
+	checks := []struct {
+		name string
+		read func() error
+	}{
+		{"missing issue read returns ErrGone", func() error { _, err := c.GetIssue(context.Background(), key); return err }},
+		{"missing issue comments return ErrGone", func() error { _, err := c.IssueComments(context.Background(), key); return err }},
+		{"missing comment read returns ErrGone", func() error { _, err := c.GetIssueComment(context.Background(), "deleted-comment"); return err }},
+		{"deleted planning comment edit returns ErrGone", func() error {
+			_, err := c.PostIssueComment(context.Background(), key, "deleted-comment", "plan")
+			return err
+		}},
+	}
+	for _, check := range checks {
+		t.Run(check.name, func(t *testing.T) {
+			if err := check.read(); !errors.Is(err, app.ErrGone) {
+				t.Fatalf("error = %v, want ErrGone", err)
+			}
+		})
+	}
 }
 
 func TestAssignedIssuesReturnsOnlyCurrentUsersOpenProjectIssues(t *testing.T) {
