@@ -487,9 +487,12 @@ the same commit. The commit message records why it changed.
   auto mode waits for all selected sources to refresh successfully. The inbox groups
   selectable issues under GITHUB and LINEAR. `App.InboxSources` drops filtered items before
   `Reconcile`, so the configured view writes no records for them and reports no waiting
-  task from them, and tracked lookups skip items outside the repository filter.
-  DELEGATED WORK reads the task store, so delegated tasks remain reachable across
-  source filters.
+  task from them. Tracked lookups skip items outside the repository filter. Within the
+  repository view, delegated tasks refresh through their stored source even when the inbox
+  selects another source, and the selected source still controls which issues appear in
+  INBOX. DELEGATED WORK reads the task store, so delegated tasks remain reachable across
+  source filters. Linear completed and canceled issues map to closed; a stopped task
+  becomes DONE on refresh. A merged GitHub PR also completes a task.
 - **Lookup failures warn and retry** next refresh without blocking other items. A 404
   or 410 on an undelegated item is reported once and then no longer checked.
 - **Delegation doesn't need a checkout:** foreman keeps a clone under

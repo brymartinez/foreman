@@ -142,6 +142,11 @@ func (a App) inboxView(ctx context.Context, allRepos bool, source task.Source) (
 	// Taken before Reconcile, which calls observe and rewrites these in place.
 	stored := storedReasons(recs)
 	report, dirty := Reconcile(append(items, tracked...), a.visibleRecords(recs, allRepos), notes, fresh && len(truncated) == 0, a.Now())
+	if source != "" {
+		report.Current = sourceEntries(report.Current, source)
+		report.New = sourceEntries(report.New, source)
+		report.Changed = sourceEntries(report.Changed, source)
+	}
 	report.Truncated = truncated
 	report.SourcesFresh = fresh
 	report.Warnings = append(append(sourceWarnings, warnings...), refreshWarnings...)
@@ -183,6 +188,16 @@ func (a App) inboxView(ctx context.Context, allRepos bool, source task.Source) (
 		hideMentionOnly(&report, stored)
 	}
 	return report, nil
+}
+
+func sourceEntries(entries []InboxEntry, source task.Source) []InboxEntry {
+	return slices.DeleteFunc(entries, func(entry InboxEntry) bool {
+		issueSource := entry.Item.Key.Source
+		if issueSource == "" {
+			issueSource = task.GitHub
+		}
+		return issueSource != source
+	})
 }
 
 const goneNote = "no longer on GitHub or no longer accessible; foreman stopped checking it"
@@ -369,7 +384,10 @@ func (a App) fetchTrackedSources(ctx context.Context, recs []*task.Record, found
 		if issueSource == "" {
 			issueSource = task.GitHub
 		}
-		if !available[issueSource] || (source != "" && source != issueSource && r.Delegation == nil) {
+		if r.Delegation == nil && (!available[issueSource] || (source != "" && source != issueSource)) {
+			continue
+		}
+		if r.Delegation != nil && issueSource == task.Linear && a.Linear == nil {
 			continue
 		}
 		if r.Delegation == nil && r.GitHub != nil && len(r.GitHub.Reasons) == 0 {

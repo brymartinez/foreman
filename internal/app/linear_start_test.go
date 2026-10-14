@@ -136,3 +136,53 @@ func TestLinearReplanningRepostsDeletedCommentAndEditsOtherComments(t *testing.T
 		t.Fatalf("plan = %+v, post IDs = %v", f.store.recs[key].Plan, tracker.postIDs)
 	}
 }
+
+func TestClosedLinearIssueFinishesDelegatedTaskInGitHubOnlyView(t *testing.T) {
+	f := newFixture()
+	key := task.Key{Repo: f.gh.repo.Repo, Source: task.Linear, ExternalID: "uuid-42"}
+	tracker := &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", State: "open"}}
+	f.app.Linear = tracker
+	f.app.LinearProjects = map[task.Repo]string{key.Repo: "https://linear.app/acme/project/web-123"}
+	started(t, f, StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude})
+	f.store.recs[key].State = task.Failed
+	f.store.recs[key].Delegation.RunnerPID = 0
+	tracker.issue.State = "closed"
+	report, err := f.app.InboxSources(context.Background(), task.GitHub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.store.recs[key].State != task.Done || len(tracker.reads) != 2 || tracker.reads[1] != key {
+		t.Fatalf("refresh: state %s, reads %+v", f.store.recs[key].State, tracker.reads)
+	}
+	if len(report.Current) != 0 || len(Delegable(report)) != 0 {
+		t.Fatalf("refresh: current %+v", report.Current)
+	}
+}
+
+func TestLinearTaskRefreshesAndResumesAfterGitHubOnlyLaunch(t *testing.T) {
+	f := newFixture()
+	key := task.Key{Repo: f.gh.repo.Repo, Source: task.Linear, ExternalID: "uuid-42"}
+	tracker := &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", State: "open"}}
+	f.app.Linear = tracker
+	f.app.LinearProjects = map[task.Repo]string{key.Repo: "https://linear.app/acme/project/web-123"}
+	started(t, f, StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude})
+	rec := f.store.recs[key]
+	rec.State = task.Reviewed
+	rec.Delegation.PR = 912
+	rec.Delegation.RunnerPID = 0
+	report, err := f.app.InboxSources(context.Background(), task.GitHub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Current) != 0 || len(tracker.reads) != 2 || tracker.reads[1] != key {
+		t.Fatalf("GitHub-only refresh: current %+v, Linear reads %+v", report.Current, tracker.reads)
+	}
+	tasks, err := f.app.Tasks(context.Background())
+	if err != nil || len(tasks) != 1 || tasks[0].Key != key {
+		t.Fatalf("delegated tasks = %+v, %v", tasks, err)
+	}
+	resumed, err := f.app.Resume(context.Background(), tasks[0].Key)
+	if err != nil || resumed.State != task.Working || len(f.runners.spawned) != 2 || f.runners.spawned[1] != key {
+		t.Fatalf("resume = %+v, %v; spawned %+v", resumed, err, f.runners.spawned)
+	}
+}

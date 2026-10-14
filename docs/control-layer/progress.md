@@ -10,9 +10,12 @@ start and routing now carry the Linear key, read Linear issues and comments, and
 recheck the exact `triaged` label for auto starts. Manual starts skip that check.
 The runner now reads the stored issue source and posts or edits planning comments
 there. Linear PR prompts require the identifier in the title and issue URL in the
-body, without a GitHub closing keyword. Linear terminal-state coverage, cross-filter
-refresh and resume, documentation, and the end-to-end scenario remain for the next
-checkpoints.
+body, without a GitHub closing keyword. Delegated tasks refresh through their stored
+source across inbox filters. A stopped Linear task becomes DONE when its issue closes,
+including completed and canceled Linear states. Linear tasks remain available for
+resume in a GitHub-only view, and legacy GitHub tasks in mapped repositories refresh
+in a Linear-only view. The mixed-source end-to-end scenario and README remain for the
+next checkpoint.
 
 Reviewer availability fallback is complete. A fresh quota-axi report can move a
 review to the implementer's agent when the competing agent is confirmed not set up

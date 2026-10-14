@@ -18,6 +18,14 @@ type inboxTracker struct {
 
 type failingInboxGitHub struct{ *fakeGitHub }
 
+type mappedGitHub struct{ *fakeGitHub }
+
+func (g mappedGitHub) GetItem(ctx context.Context, key task.Key) (InboxItem, error) {
+	item, err := g.fakeGitHub.GetItem(ctx, key)
+	item.Key = key
+	return item, err
+}
+
 func (f failingInboxGitHub) InboxItems(context.Context) (InboxSearch, error) {
 	return InboxSearch{}, errors.New("rate limited")
 }
@@ -113,5 +121,24 @@ func TestLinearInboxSelectionAppliesRepositoryFilters(t *testing.T) {
 	}
 	if len(report.Current) != 1 || len(tracker.projects) != 1 || tracker.projects["acme/web"] == "" {
 		t.Fatalf("current = %+v, projects = %v", report.Current, tracker.projects)
+	}
+}
+
+func TestMappedRepositoryRefreshesLegacyGitHubDelegationInLinearView(t *testing.T) {
+	rec := seen(7, task.Failed, "open", t0, task.Assigned)
+	rec.Key.Repo = "acme/web"
+	rec.Delegation = &task.Delegation{}
+	store := &fakeStore{recs: map[task.Key]*task.Record{rec.Key: rec}}
+	gh := &fakeGitHub{}
+	a := App{Store: store, GitHub: mappedGitHub{gh}, Linear: &inboxTracker{}, LinearProjects: map[task.Repo]string{"acme/web": "https://linear.app/acme/project/web-123"}, Runners: &fakeRunners{}, Now: func() time.Time { return now }}
+	report, err := a.InboxSources(context.Background(), task.Linear)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gh.fetched) != 1 || gh.fetched[0] != rec.Key || store.recs[rec.Key].State != task.Done {
+		t.Fatalf("GitHub refresh = %+v, task = %+v", gh.fetched, store.recs[rec.Key])
+	}
+	if len(report.Current) != 0 {
+		t.Fatalf("Linear inbox includes GitHub issue: %+v", report.Current)
 	}
 }
