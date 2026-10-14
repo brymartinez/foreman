@@ -242,8 +242,10 @@ the same commit. The commit message records why it changed.
 - **One Markdown file per source-qualified issue**, named `<owner>-<repo>-<number>.md`
   for GitHub or `<owner>-<repo>-linear-<issue UUID>.md` for Linear. Legacy files
   without `issue_source` still identify GitHub issues. Linear files also store the
-  display identifier separately from the stable UUID. The
-  tasks directory can be an Obsidian vault. Frontmatter holds machine state. Saves
+  display identifier separately from the stable UUID. Planning comments store
+  Linear's string ID in `external_comment_id`; legacy GitHub comments retain
+  their numeric `comment_id`. The tasks directory can be an Obsidian vault.
+  Frontmatter holds machine state. Saves
   replace only the keys foreman owns (snake_case) through a `yaml.Node`, so user keys
   and comments keep their place. The body is the user's: foreman's only edit is
   appending a line to `## Decisions` when an answer is recorded.

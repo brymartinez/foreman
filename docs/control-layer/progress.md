@@ -4,11 +4,11 @@
 
 Issue 58 is in progress. Configuration now validates per-repository Linear project
 URLs and rejects duplicate project mappings. Task keys and Markdown records can
-store Linear's stable issue ID and display identifier while legacy GitHub records
-keep their existing filename and identity. The Linear GraphQL adapter reads assigned
+store Linear's stable issue ID, display identifier, and string comment IDs while
+legacy GitHub records keep their existing filename and identity. The Linear GraphQL adapter reads assigned
 project issues, issue details, labels, states, and comments, and creates or edits
 comments using string IDs. It is not wired into refresh or the task lifecycle yet.
-Mixed inbox, source-aware lifecycle, and comment ID persistence remain for later
+Mixed inbox and source-aware lifecycle remain for later
 checkpoints.
 
 Reviewer availability fallback is complete. A fresh quota-axi report can move a

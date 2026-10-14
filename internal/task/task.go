@@ -377,9 +377,10 @@ func (d PlanDoc) Title() string {
 
 // PlanComment is a document foreman posted on the issue as its own comment.
 type PlanComment struct {
-	Doc       PlanDoc `yaml:"doc"`
-	CommentID int64   `yaml:"comment_id"`
-	URL       string  `yaml:"url"`
+	Doc               PlanDoc `yaml:"doc"`
+	CommentID         int64   `yaml:"comment_id,omitempty"`
+	ExternalCommentID string  `yaml:"external_comment_id,omitempty"`
+	URL               string  `yaml:"url"`
 }
 
 // PlanComment returns the posted comment for doc, or nil.

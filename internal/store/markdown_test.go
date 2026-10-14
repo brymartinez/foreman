@@ -117,6 +117,23 @@ func TestLinearTaskKeepsSourceAndStableIssueIdentity(t *testing.T) {
 	}
 }
 
+func TestLinearPlanCommentKeepsStringID(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	key := task.Key{Repo: "acme/web", Source: task.Linear, ExternalID: "123e4567-e89b-12d3-a456-426614174000"}
+	rec := &task.Record{Key: key, Identifier: "WEB-42", Kind: task.Issue, Title: "Fix sign in", URL: "https://linear.app/acme/issue/WEB-42", State: task.Discovered}
+	rec.SetPlanComment(task.PlanComment{Doc: task.Analysis, ExternalCommentID: "abc-123", URL: "https://linear.app/acme/issue/WEB-42#comment-abc-123"})
+	if err := s.Save(ctx, rec); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Plan, rec.Plan) {
+		t.Fatalf("plan comments = %+v, want %+v", got.Plan, rec.Plan)
+	}
+}
+
 func TestLegacyTaskKeepsGitHubIdentity(t *testing.T) {
 	s := Markdown{Dir: t.TempDir()}
 	rec := delegated()
