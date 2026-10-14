@@ -63,9 +63,18 @@ func ParseRepo(s string) (Repo, error) {
 }
 
 type Key struct {
-	Repo   Repo
-	Number int
+	Repo       Repo
+	Number     int
+	Source     Source
+	ExternalID string
 }
+
+type Source string
+
+const (
+	GitHub Source = "github"
+	Linear Source = "linear"
+)
 
 type Kind string
 
@@ -302,6 +311,7 @@ func (r *Record) Undelivered() []Decision {
 
 type Record struct {
 	Key
+	Identifier     string
 	Kind           Kind
 	Title          string
 	URL            string
@@ -328,6 +338,13 @@ type Record struct {
 	Attempts []Attempt
 	// Body is the Markdown below the frontmatter, round-tripped untouched so human edits survive.
 	Body string
+}
+
+func (r *Record) IssueSource() Source {
+	if r.Source == Linear {
+		return Linear
+	}
+	return GitHub
 }
 
 // PlanDoc is one planning document the implementer writes before any code.

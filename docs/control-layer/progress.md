@@ -2,6 +2,12 @@
 
 ## Current stage
 
+Issue 58 is in progress. Configuration now validates per-repository Linear project
+URLs and rejects duplicate project mappings. Task keys and Markdown records can
+store Linear's stable issue ID and display identifier while legacy GitHub records
+keep their existing filename and identity. The Linear adapter, mixed inbox, and
+source-aware lifecycle remain for later checkpoints.
+
 Reviewer availability fallback is complete. A fresh quota-axi report can move a
 review to the implementer's agent when the competing agent is confirmed not set up
 or exhausted. An authentication failure also triggers a fresh review session with
