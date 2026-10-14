@@ -2,6 +2,17 @@
 
 ## Current stage
 
+Stage 58 (per-repository Linear issue sources) is complete. Configuration maps GitHub
+repositories to Linear projects. The dashboard selects GitHub, Linear, or both issue
+sources, groups inbox rows, and pauses auto starts after a partial refresh. Linear
+tasks keep their source and issue ID across runner starts and source filters. Planning
+comments go to Linear, while branches, PRs, reviews, and CI stay on GitHub. The mixed
+end-to-end scenario covers filtering, delegation through clean PR review, and failed
+refresh gating. Vet, Go tests, build, and the full end-to-end script pass.
+Review round 1 fixes keep manual Linear starts from holding auto slots, retain GitHub
+PR search hits for mapped repositories, and map missing Linear entities to `ErrGone`.
+The posted PRD requires removal of the `v` all-repositories toggle.
+
 Reviewer availability fallback is complete. A fresh quota-axi report can move a
 review to the implementer's agent when the competing agent is confirmed not set up
 or exhausted. An authentication failure also triggers a fresh review session with

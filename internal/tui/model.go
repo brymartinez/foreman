@@ -127,6 +127,7 @@ type Model struct {
 	Refreshing  bool
 	RefreshedAt time.Time
 	Warnings    []error
+	IssueSource task.Source // empty selects both issue sources
 
 	// AutoOn starts eligible INBOX issues with AutoAgent while fewer than AutoMax
 	// runs are active.
@@ -258,6 +259,15 @@ func (m *Model) SetInbox(entries []app.InboxEntry) {
 	if cur := m.selectedEntry(); cur != nil {
 		selected = cur.Item.Key
 	}
+	slices.SortStableFunc(entries, func(a, b app.InboxEntry) int {
+		if a.Item.Key.Source == task.Linear && b.Item.Key.Source != task.Linear {
+			return 1
+		}
+		if a.Item.Key.Source != task.Linear && b.Item.Key.Source == task.Linear {
+			return -1
+		}
+		return 0
+	})
 	m.Inbox = entries
 	m.InboxCursor = clamp(indexOfEntry(entries, selected, m.InboxCursor), len(entries))
 }
@@ -355,13 +365,6 @@ func (m *Model) browse(k Key) Action {
 		// Cleaned and raw lines do not line up, so the new view starts at the tail.
 		m.LogPath, m.LogOffset = "", 0
 		return Action{Kind: ActionReadLog}
-	case k.Kind == KeyRune && k.Rune == 'v':
-		m.AllRepos = !m.AllRepos
-		m.githubFresh = false
-		// The rows belong to the view just left, so none stays selectable until the
-		// new view's refresh fills the pane.
-		m.SetInbox(nil)
-		return Action{Kind: ActionToggleView}
 	case k.Kind == KeyTab:
 		m.Focus = (m.Focus + 1) % 2
 	case k.Kind == KeyLeft || (k.Kind == KeyRune && k.Rune == 'h'):
@@ -530,6 +533,9 @@ func (m *Model) enter() Action {
 			return Action{Kind: ActionResume, Resume: e.Item.Key}
 		}
 		m.pending = app.StartRequest{Repo: e.Item.Key.Repo, Issue: e.Item.Key.Number}
+		if e.Item.Key.Source == task.Linear {
+			m.pending.Key = e.Item.Key
+		}
 		m.pendingNew = !e.Delegated
 		m.Mode, m.Input = ChoosingAgent, ""
 		return Action{}
@@ -711,7 +717,7 @@ func (m *Model) typeContext(k Key) Action {
 		m.pending.ContextFile = strings.TrimSpace(m.Input)
 		m.Mode, m.Input = Routing, ""
 		m.routeSeq++
-		req := app.RouteRequest{Repo: m.pending.Repo, Issue: m.pending.Issue, ContextFile: m.pending.ContextFile}
+		req := app.RouteRequest{Key: m.pending.Key, Repo: m.pending.Repo, Issue: m.pending.Issue, ContextFile: m.pending.ContextFile}
 		return Action{Kind: ActionRoute, Route: req, RouteSeq: m.routeSeq}
 	case k.Kind == KeyEnter:
 		req := m.pending
@@ -725,7 +731,7 @@ func (m *Model) typeContext(k Key) Action {
 }
 
 func (m *Model) startPending(req app.StartRequest) Action {
-	k := task.Key{Repo: req.Repo, Number: req.Issue}
+	k := requestKey(req)
 	m.tried, m.starting = mark(m.tried, k), mark(m.starting, k)
 	return Action{Kind: ActionStart, Start: req}
 }

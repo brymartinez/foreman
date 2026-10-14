@@ -11,7 +11,7 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/foreman-e2e.XXXXXX")
 listeners=
-trap '[ -z "$listeners" ] || kill $listeners 2>/dev/null; [ -n "${E2E_KEEP:-}" ] && echo "kept $work" || rm -rf "$work"' EXIT
+trap '[ -z "$listeners" ] || { kill $listeners 2>/dev/null; wait $listeners 2>/dev/null || true; }; if [ -n "${E2E_KEEP:-}" ]; then echo "kept $work"; else for i in 1 2 3 4 5; do rm -rf "$work" 2>/dev/null && break; sleep 0.1; done; fi' EXIT
 failures=0
 
 go build -o "$work/foreman" "$root/cmd/foreman"
@@ -145,7 +145,9 @@ EOF
 echo "gh $*" >>"$E2E_STATE/gh.log"
 s=$E2E_STATE
 case "$1 $2" in
-"repo view") echo '{"nameWithOwner":"acme/widgets","defaultBranchRef":{"name":"main"}}' ;;
+"repo view")
+	case "$PWD" in *acme-linear*) repo=acme/linear ;; *) repo=acme/widgets ;; esac
+	printf '{"nameWithOwner":"%s","defaultBranchRef":{"name":"main"}}\n' "$repo" ;;
 "repo clone") git clone -q "$E2E_ORIGIN" "$4" ;;
 "issue view") cat "$s/issue-$3.json" ;;
 "pr view") cat "$s/pr-$3.json" ;;
@@ -292,8 +294,16 @@ if [ -f "$E2E_STATE/main-moves" ]; then
 	rm -rf "$m" "$E2E_STATE/main-moves"
 fi
 issue=${branch#*/}
-pr=$((900 + ${issue%%-*}))
-printf '{"number":%s,"url":"https://github.com/acme/widgets/pull/%s","state":"OPEN","headRefName":"%s","headRefOid":"%s","baseRefName":"main","isCrossRepository":false,"body":"Retry 5xx only.\\n\\nCloses #42"}\n' "$pr" "$pr" "$branch" "$(git rev-parse HEAD)" >"$E2E_STATE/pr-$pr.json"
+if [[ "$issue" == linear-* ]]; then
+	pr=947
+	pr_repo=acme/linear
+	body='Add search for LIN-7.\n\nhttps://linear.app/acme/issue/LIN-7/add-search'
+else
+	pr=$((900 + ${issue%%-*}))
+	pr_repo=acme/widgets
+	body='Retry 5xx only.\n\nCloses #42'
+fi
+printf '{"number":%s,"url":"https://github.com/%s/pull/%s","state":"OPEN","headRefName":"%s","headRefOid":"%s","baseRefName":"main","isCrossRepository":false,"body":"%s"}\n' "$pr" "$pr_repo" "$pr" "$branch" "$(git rev-parse HEAD)" "$body" >"$E2E_STATE/pr-$pr.json"
 echo "claude stderr progress" >&2
 echo '{"type":"system","subtype":"init","session_id":"s1"}'
 echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"go test ./...","description":"Run the tests"}}]}}'
@@ -520,8 +530,8 @@ scenario_inbox() {
 	check "the include list beats the exclude list" contains "$sandbox/include.txt" "acme/ignored#7"
 	check "the include list hides other repositories" bash -c "! grep -q 'acme/widgets#43' '$sandbox/include.txt'"
 	check "the inbox names the configured view" contains "$sandbox/include.txt" "INBOX · configured repos"
-	dash -- refreshed keys=v "wait=INBOX · all repos" refreshed print >"$sandbox/view.txt" 2>/dev/null
-	check "v lists every repository" contains "$sandbox/view.txt" "acme/widgets#43"
+	dash -- refreshed keys=v print >"$sandbox/view.txt" 2>/dev/null
+	check "v keeps the configured repository filter" bash -c "! grep -q 'acme/widgets#43' '$sandbox/view.txt'"
 	cp "$sandbox/config.exclude" "$sandbox/config.yaml"
 	check "searches ask for gh's maximum" contains "$state/gh.log" "--limit=1000"
 
@@ -538,6 +548,54 @@ scenario_inbox() {
 	chmod +x "$sandbox/bin/fixer"
 	check "-c still opens an invalid config" bash -c "cd '$sandbox' && EDITOR=fixer VISUAL= '$work/foreman' -c 2>'$sandbox/edit-err.txt' </dev/null && grep -qF 'so you can fix it' '$sandbox/edit-err.txt'"
 	check "and the fixed config opens the dashboard" dash -- refreshed
+}
+
+scenario_linear() {
+	echo "linear: mixed issue sources, filters, delegation, and failed refresh"
+	setup linear
+	python3 "$root/scripts/linear-stub.py" "$state" &
+	listeners="$listeners $!"
+	eventually 5 test -s "$state/linear-port"
+	export LINEAR_API_KEY=e2e-personal-key
+	export FOREMAN_LINEAR_ENDPOINT="http://127.0.0.1:$(cat "$state/linear-port")/graphql"
+	cat >>"$sandbox/config.yaml" <<'EOF'
+linear_projects:
+  acme/linear: https://linear.app/acme/project/linear-work-123
+EOF
+	issue 43 "GitHub work" '[{"name":"triaged"}]'
+	echo "[$(hit acme/widgets 43 'GitHub work'),$(hit acme/linear 44 'Mapped GitHub work')]" >"$state/search-issues-assignee.json"
+	dash -- refreshed print >"$sandbox/mixed.txt" 2>/dev/null
+	check "the mixed inbox shows the GitHub section" contains "$sandbox/mixed.txt" "GITHUB"
+	check "the mixed inbox shows the Linear section" contains "$sandbox/mixed.txt" "LINEAR"
+	check "the mixed inbox shows both issues" bash -c "grep -qF 'acme/widgets#43' '$sandbox/mixed.txt' && grep -qF 'acme/linear · LIN-7' '$sandbox/mixed.txt'"
+	check "the mapped repository hides GitHub issues" bash -c "! grep -qF 'acme/linear#44' '$sandbox/mixed.txt'"
+	dash --no-auto -s github -- refreshed print >"$sandbox/github.txt" 2>/dev/null
+	check "the GitHub filter hides Linear issues" bash -c "grep -qF 'acme/widgets#43' '$sandbox/github.txt' && ! grep -qF 'LIN-7' '$sandbox/github.txt'"
+	dash --no-auto -s linear -- refreshed print >"$sandbox/linear.txt" 2>/dev/null
+	check "the Linear filter hides GitHub inbox issues" bash -c "grep -qF 'LIN-7' '$sandbox/linear.txt' && ! grep -qF 'GITHUB' '$sandbox/linear.txt'"
+	touch "$state/linear-fail"
+	dash --auto -- refreshed print >"$sandbox/failed.txt" 2>/dev/null
+	check "a failed Linear refresh keeps GitHub results with a warning" bash -c "grep -qF 'acme/widgets#43' '$sandbox/failed.txt' && grep -qF 'warning' '$sandbox/failed.txt'"
+	check "a failed mixed refresh blocks all auto starts" grep -q '^state: DISCOVERED' "$sandbox/tasks/acme-widgets-43.md"
+	rm -f "$state/linear-fail"
+	check "a GitHub issue can be delegated" dash --no-auto -s github -- refreshed "pick=acme/widgets#43" 'keys=\r1\r' "wait=Started acme/widgets#43"
+	check "the GitHub task keeps its issue number" grep -q '^number: 43' "$sandbox/tasks/acme-widgets-43.md"
+	if dash --no-auto -s linear -- refreshed "pick=acme/linear · LIN-7" 'keys=\r1\r' "wait=Started acme/linear · LIN-7" >"$sandbox/linear-start.txt" 2>&1; then
+		pass "a Linear issue can be delegated"
+	else
+		fail "a Linear issue can be delegated"
+	fi
+	check "the Linear task keeps its issue ID" grep -q '11111111-1111-4111-8111-111111111111' "$sandbox/tasks/acme-linear-linear-11111111-1111-4111-8111-111111111111.md"
+	check "the runner posts planning comments to Linear" eventually 10 test -f "$state/linear-comment-4"
+	check "the Linear task reaches a clean GitHub PR review" eventually 15 grep -q 'verdict: clean' "$sandbox/tasks/acme-linear-linear-11111111-1111-4111-8111-111111111111.md"
+	check "the Linear PR stays in its GitHub repository and links its issue" bash -c "grep -qF 'github.com/acme/linear/pull/947' '$state/pr-947.json' && grep -qF 'LIN-7/add-search' '$state/pr-947.json' && ! grep -qF 'Closes #' '$state/pr-947.json'"
+	check "the Linear PR prompt names its issue link rule" contains "$state/plan-posted-prompt.txt" "Put LIN-7 in the pull request title"
+	dash --no-auto -s github -- refreshed print >"$sandbox/github-delegated.txt" 2>/dev/null
+	check "the GitHub-only view keeps delegated Linear work" contains "$sandbox/github-delegated.txt" "LIN-7"
+	unset LINEAR_API_KEY
+	check "GitHub-only use needs no Linear key" dash --no-auto -s github -- refreshed
+	check "mixed use without a Linear key gives a setup error" bash -c "! dash -- 2>'$sandbox/missing-key.txt' && grep -qF LINEAR_API_KEY '$sandbox/missing-key.txt'"
+	unset FOREMAN_LINEAR_ENDPOINT
 }
 
 scenario_inbox_lifecycle() {
@@ -840,7 +898,7 @@ scenario_history() {
 	check "esc returns to the dashboard" dash -- refreshed keys=p "wait=#907" 'keys=\x1b' "wait=DELEGATED WORK"
 }
 
-scenarios=${*:-runner notify logs inbox inbox_lifecycle rereview conflicts respond cancel feedback conflict tui routing history}
+scenarios=${*:-runner notify logs inbox inbox_lifecycle rereview conflicts respond cancel feedback conflict tui routing history linear}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"

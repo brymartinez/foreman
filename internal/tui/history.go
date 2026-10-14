@@ -86,14 +86,6 @@ func (m *Model) historyKey(k Key) Action {
 		m.HistoryLoading = true
 		m.historySeq++
 		return Action{Kind: ActionLoadHistory}
-	case k.Kind == KeyRune && k.Rune == 'v':
-		m.AllRepos = !m.AllRepos
-		// Both lists belong to the view just left, so neither stays until its load.
-		m.SetInbox(nil)
-		m.History, m.HistoryCursor, m.HistoryTop = nil, 0, 0
-		m.HistoryLogFocus, m.HistoryLoading = false, true
-		m.historySeq++
-		return Action{Kind: ActionToggleView}
 	case k.Kind == KeyEnter && m.selectedHistory() != nil:
 		m.HistoryLogFocus = true
 	case k.Kind == KeyTab:

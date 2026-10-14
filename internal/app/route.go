@@ -32,6 +32,7 @@ const (
 )
 
 type RouteRequest struct {
+	Key         task.Key // source-qualified inbox identity; legacy callers use Repo and Issue
 	Repo        task.Repo
 	Issue       int
 	ContextFile string
@@ -141,26 +142,29 @@ func (a App) Route(ctx context.Context, req RouteRequest) (Decision, error) {
 // routePrompt asks the selector for a rule number, giving it the rules, the issue,
 // its recent comments, and the context file, each cut to its own budget.
 func (a App) routePrompt(ctx context.Context, req RouteRequest) (string, error) {
-	key := task.Key{Repo: req.Repo, Number: req.Issue}
-	issue, err := a.GitHub.GetIssue(ctx, key)
+	key := req.Key
+	if key == (task.Key{}) {
+		key = task.Key{Repo: req.Repo, Number: req.Issue}
+	}
+	issue, err := a.issue(ctx, key)
 	if err != nil {
 		return "", err
 	}
 	var b strings.Builder
-	b.WriteString("Pick the routing rule that fits this GitHub issue. The rules are in order. Answer with the number of the first rule whose description fits the work, or 0 if none fits or you are unsure. Give a reason of at most ten words. Do not use any tools.\n\nRules:\n")
+	b.WriteString("Pick the routing rule that fits this issue. The rules are in order. Answer with the number of the first rule whose description fits the work, or 0 if none fits or you are unsure. Give a reason of at most ten words. Do not use any tools.\n\nRules:\n")
 	b.WriteString(a.Routing.RulesText())
-	fmt.Fprintf(&b, "\nRepository: %s\nIssue: #%d %s\n", req.Repo, req.Issue, clip(oneLine(issue.Title), routeTitleRunes))
+	fmt.Fprintf(&b, "\nRepository: %s\nIssue: %s %s\n", key.Repo, issueLabel(key, issue.Identifier), clip(oneLine(issue.Title), routeTitleRunes))
 	if len(issue.Labels) > 0 {
 		fmt.Fprintf(&b, "Labels: %s\n", clip(strings.Join(issue.Labels, ", "), routeLabelsRunes))
 	}
 	fmt.Fprintf(&b, "\nBody:\n%s\n", clip(issue.Body, routeBodyRunes))
 	// Routing details often live in the comments, so a failed read stops the route
 	// rather than choosing from part of the issue.
-	comments, err := a.GitHub.IssueComments(ctx, key)
+	comments, err := a.issueComments(ctx, key)
 	if err != nil {
 		return "", fmt.Errorf("read the issue's comments: %w", err)
 	}
-	comments = slices.DeleteFunc(comments, func(c IssueComment) bool {
+	comments = slices.DeleteFunc(comments, func(c TrackerComment) bool {
 		return strings.HasPrefix(strings.TrimSpace(c.Body), "<!-- foreman:")
 	})
 	// The newest comments are kept, as many as fit the count and the budget.

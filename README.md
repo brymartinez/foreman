@@ -1,7 +1,7 @@
 # foreman
 
-A local CLI that hands GitHub issues to Claude Code or Codex, and gives the PR back to
-you only once it is ready for your review.
+A local CLI that hands GitHub or Linear issues to Claude Code or Codex. It gives the
+PR back to you once it is ready for your review.
 
 ```
 foreman  →  pick issue #825 in the inbox, choose Claude
@@ -68,6 +68,8 @@ Foreman is a dashboard. Everything you do with a task happens there.
 foreman              # open the dashboard: inbox, delegated work, and logs
 foreman -a           # open it with auto mode on for this session (also --auto)
 foreman --no-auto    # open it with auto mode off for this session
+foreman -s github    # show only GitHub issues in the inbox
+foreman -s linear    # show only Linear issues in the inbox
 foreman -c           # edit the config in $VISUAL, $EDITOR, or vi
 foreman --help
 foreman --version
@@ -122,8 +124,7 @@ task's state. The selected row is drawn in reverse video with no color inside it
 | `enter` on a task | open its log below, or the waiting question on a `NEEDS_DECISION` task |
 | `c` | cancel the highlighted delegated task, after a `y`/`n` confirm |
 | `a` | turn auto mode on or off; the choice is kept for the next launch |
-| `v` | switch the inbox between your configured repositories and all of them, for this session |
-| `r` | refresh from GitHub now |
+| `r` | refresh the selected issue sources now |
 | `u` `d` with a log open | scroll up or down one page |
 | `ctrl+u` `ctrl+d` with a log open | scroll up or down half a page |
 | `g` `G` with a log open | jump to the log's first line or follow the tail |
@@ -135,8 +136,8 @@ task's state. The selected row is drawn in reverse video with no color inside it
 | `q`, `ctrl+c` | quit |
 
 Delegated work is re-read from the task files every second, so a state change shows up
-on its own. GitHub is refreshed every `refresh` seconds, 60 by default, and when you
-press `r`. A refresh runs the searches, the readiness gate, and the DONE cleanup. The
+on its own. The selected issue sources refresh every `refresh` seconds, 60 by default,
+and when you press `r`. A refresh runs the searches, the readiness gate, and the DONE cleanup. The
 dashboard refreshes only while it is open and starts no background process.
 
 The dashboard needs a terminal at least
@@ -155,8 +156,10 @@ task whose log is open switches to its question on its own when it needs a decis
 Auto mode is on by default. While the dashboard is open, it starts open issues
 assigned to you that foreman has never delegated, oldest first, with `auto.agent` and
 no context file. It looks after the first refresh, after each successful refresh, and
-when a run leaves WORKING or REVIEWING. Mentions, FAILED tasks, and REVIEWED tasks
-never start on their own. At most `auto.max_concurrent` runs are active at once, and
+when a run leaves WORKING or REVIEWING. Only issues with the exact `triaged` label
+start automatically; you can start an unlabelled issue by hand. Mentions, FAILED
+tasks, and REVIEWED tasks never start on their own. At most `auto.max_concurrent`
+runs are active at once, and
 runs you start by hand count toward that limit. Issues in one repository start one
 at a time, because they share its checkout. You can still start an issue by hand
 when the limit is full. The header shows `auto on 1/3` (active runs and the limit) or
@@ -172,8 +175,11 @@ unless you launch with `-a` or `--no-auto`. A
 start that fails is shown on the message line and is not retried until you reopen the
 dashboard. An issue that lacks detail goes through the usual decision flow.
 
-The inbox searches for open issues assigned to you, open issues and PRs that mention
-you, and PRs that request your review. INBOX lists the issues you can delegate, with
+For GitHub repositories, the inbox searches for open issues assigned to you, open
+issues and PRs that mention you, and PRs that request your review. For repositories
+mapped to Linear, it lists open,
+nonterminal issues assigned to the Linear user named by `LINEAR_API_KEY`. INBOX groups
+delegatable issues under GITHUB and LINEAR, with
 what changed since the last refresh beneath each one. Each search returns up to 1000
 results.
 
@@ -190,9 +196,9 @@ Missing undelegated items are checked until a successful
 refresh with complete searches clears their involvement reasons, then stop being
 refetched. Delegated work stays tracked. Missing items are not offered for new
 delegation. A failed item lookup warns without aborting the inbox, keeps its stored
-state, and retries next time. An issue you never delegated that GitHub no longer has,
-or that you can no longer see, is dropped and then not checked again. Failed PR or CI
-lookups are counted as warnings in the header.
+state, and retries next time. An undelegated issue that no longer exists or is
+inaccessible in its source is dropped and not checked again. Failed PR or CI lookups
+are counted as warnings in the header.
 
 Local builds show the commit in `foreman --version` and in the `?` help, for example
 `foreman 0.1.0-dev (72a70ce12345-dirty)`. The `dirty` suffix means the build included
@@ -390,7 +396,7 @@ log_dir: ~/.local/share/foreman/logs
 review_rounds: 3                     # reviewer passes over the whole PR per review
 fix_rounds: 3                        # fix and re-review cycles before foreman asks you
 mentions: true                       # show items found only because they mention you
-refresh: 60                          # seconds between the dashboard's GitHub refreshes
+refresh: 60                          # seconds between dashboard issue-source refreshes
 auto:                                # the dashboard's auto mode; press a to turn it off
   agent: claude                      # claude or codex
   max_concurrent: 3                  # active runs, manual ones included
@@ -415,12 +421,34 @@ codex:
   review_reasoning_effort: ""        # "" uses reasoning_effort
 include_repositories: []             # exact owner/name; when set, the inbox shows only these
 exclude_repositories: []             # exact owner/name hidden from the inbox when include is empty
+linear_projects: {}                   # GitHub owner/name -> Linear project URL
 cleanup:
   on_done: true                   # each refresh removes DONE tasks' worktrees
   delete_merged_branch: true      # and the local branch, once the PR is merged
 ```
 
 `FOREMAN_TASKS_DIR` overrides `tasks_dir`.
+
+To use Linear issues for a repository, map it to one Linear project URL and set a
+personal API key before starting Foreman:
+
+```yaml
+linear_projects:
+  acme/web: https://linear.app/acme/project/web-site-123
+```
+
+```bash
+export LINEAR_API_KEY=your-personal-linear-api-key
+foreman
+```
+
+Repositories without a mapping continue to use GitHub issues. A Linear project can
+belong to only one repository. `foreman -s github` uses only GitHub issues and does
+not need `LINEAR_API_KEY`. A view that includes a mapped repository needs the key.
+Foreman reads and comments on Linear issues but does not change their status.
+Branches and pull requests stay on GitHub. A Linear task's PR title includes its
+Linear identifier, and its body links to the Linear issue instead of using a GitHub
+`Closes #N` line.
 
 Planning, implementation, and review can use separate models. PR creation is part of
 implementation. The agent chosen for the task plans and implements; the competing
@@ -442,16 +470,16 @@ codex:
 
 `refresh` must be at least 5 seconds; foreman refuses to start with a smaller value.
 Task files and the open log are re-read every second regardless, and `r` refreshes
-GitHub whenever you ask.
+the selected issue sources whenever you ask.
 
 `include_repositories` and `exclude_repositories` accept exact repository names such as
 `acme/widgets`. A nonempty include list limits the inbox to those repositories and the
 exclude list is then ignored. With an empty include list, the exclude list hides its
-repositories. The filter applies to fresh inbox results and tracked-task refreshes.
-Press `v` in the dashboard to see every repository for the rest of the session;
-`mentions` still applies. Auto mode pauses while the dashboard shows every repository,
-so it only starts work from your configured repositories. DELEGATED WORK lists every
-task whatever its repository.
+repositories. The filter applies to fresh inbox results and tracked-task refreshes
+from GitHub and Linear alike. DELEGATED WORK lists every delegated
+task, even when `-s` selects the other source. A failed refresh of either selected
+source keeps results from the successful source visible with a warning and pauses all
+automatic starts until both sources refresh successfully.
 
 ## Routing
 

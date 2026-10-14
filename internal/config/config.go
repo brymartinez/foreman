@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,8 +35,9 @@ type Config struct {
 	Auto          Auto          `yaml:"auto"`
 	// IncludedRepos, when nonempty, limits the inbox to these repositories and
 	// overrides ExcludedRepos.
-	IncludedRepos []task.Repo `yaml:"include_repositories"`
-	ExcludedRepos []task.Repo `yaml:"exclude_repositories"`
+	IncludedRepos  []task.Repo          `yaml:"include_repositories"`
+	ExcludedRepos  []task.Repo          `yaml:"exclude_repositories"`
+	LinearProjects map[task.Repo]string `yaml:"linear_projects"`
 	// Path is the resolved config file used by config show/edit.
 	Path string `yaml:"-"`
 	// StagesDir holds the global stage instructions: stages/ next to the config file,
@@ -155,7 +157,41 @@ func Load() (Config, error) {
 	if err := parseRepoList("exclude_repositories", cfg.ExcludedRepos); err != nil {
 		return Config{}, err
 	}
+	seenProjects := make(map[string]task.Repo)
+	for repo, projectURL := range cfg.LinearProjects {
+		if _, err := task.ParseRepo(string(repo)); err != nil {
+			return Config{}, fmt.Errorf("linear_projects: %w", err)
+		}
+		canonical, err := linearProjectURL(projectURL)
+		if err != nil {
+			return Config{}, fmt.Errorf("linear_projects[%s]: %w", repo, err)
+		}
+		if other, ok := seenProjects[canonical]; ok {
+			return Config{}, fmt.Errorf("linear project %s mapped to both %s and %s", canonical, other, repo)
+		}
+		seenProjects[canonical] = repo
+		cfg.LinearProjects[repo] = canonical
+	}
 	return cfg, nil
+}
+
+func (c Config) IssueSource(repo task.Repo) task.Source {
+	if _, ok := c.LinearProjects[repo]; ok {
+		return task.Linear
+	}
+	return task.GitHub
+}
+
+func linearProjectURL(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.Host != "linear.app" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("invalid Linear project URL %q", raw)
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) < 3 || len(parts) > 4 || parts[0] == "" || parts[1] != "project" || parts[2] == "" || (len(parts) == 4 && parts[3] != "overview" && parts[3] != "issues") {
+		return "", fmt.Errorf("invalid Linear project URL %q", raw)
+	}
+	return "https://linear.app/" + strings.Join(parts[:3], "/"), nil
 }
 
 // parseRepoList validates each entry of the config list key and stores the parsed form in place.

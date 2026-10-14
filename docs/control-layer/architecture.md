@@ -9,6 +9,7 @@ internal/render       terminal formatting of app results
 internal/tui          the dashboard: pure Model and Frame, one terminal loop
 internal/app          orchestration + ports.go (the interfaces below)
   ├── github          GitHubClient and RepositoryManager over `gh`
+  ├── linear          IssueTracker over Linear GraphQL using a personal API key
   ├── store           TaskStore over Markdown + YAML frontmatter
   ├── worktree        WorktreeManager over `git worktree`
   ├── agent           outcome contract, prompt, claude.go / codex.go adapters, selector
@@ -20,6 +21,15 @@ internal/task         the durable model: Record, State, Delegation, Decision, At
 
 `app` depends only on the interfaces in `internal/app/ports.go`. Presentation stays in
 `cmd/foreman`, and process handling stays in `runner` and the adapters.
+`IssueTracker` carries source display identifiers and string comment IDs. Linear
+queries resolve configured project URLs to project IDs, then page through issues
+assigned to the authenticated user. Issue state types `completed` and `canceled`
+map to closed; Linear's `Entity not found` errors map to `ErrGone` for tracked
+issues and planning comments. Repository and PR operations remain on `GitHubClient`.
+The detached runner receives `owner/repo#linear:<issue ID>` for Linear tasks and
+`owner/repo#<number>` for GitHub tasks. Linear runner logs use the stable issue ID,
+so tasks in one repository cannot share a `#0` log. The end-to-end fixture points
+`FOREMAN_LINEAR_ENDPOINT` at a local GraphQL stand-in.
 
 ## Execution model
 
@@ -118,13 +128,11 @@ foreman [-a|--auto|--no-auto]
                          ? -> the keys and the version; any key closes it
                          c on a running task     -> confirm, app.Cancel
                          a -> toggle auto mode, saved in state.json (D144)
-                         v -> toggle the inbox between the configured repositories
-                           and all of them, this session only, and refresh
                          auto mode, after each successful refresh, finished start,
                            and 1s tick: app.Start with auto.agent for assigned,
                            triaged, never delegated issues, oldest first, while fewer
-                           than auto.max_concurrent runs are active (D144). A GitHub
-                           refresh in progress or failed blocks auto starts. With routing
+                           than auto.max_concurrent runs are active (D144). A selected
+                           source refresh in progress or failed blocks auto starts. With routing
                            on: app.Route, then app.Start with the profile, no
                            confirmation; a wait holds the issue until the next refresh
 
@@ -187,7 +195,8 @@ the same commit. The commit message records why it changed.
   The gate, liveness checks, and cleanup run on each dashboard refresh. Rejected: a
   daemon, a watcher, or a runner that waits for CI.
 - **The dashboard is the only interface.** Bare `foreman` opens it; `-a`/`--auto` and
-  `--no-auto` set auto mode for the session, and `-c` edits the config. The only other
+  `--no-auto` set auto mode for the session, `-s github|linear` selects an inbox source,
+  and `-c` edits the config. The only other
   verb is the hidden `__run`. Task subcommands were dropped because they duplicated the
   dashboard, and a piped `foreman` still prints usage.
 - **One detached runner per task.** `App.Start`, `App.Respond`, `App.Resume`, and the gate spawn
@@ -234,8 +243,13 @@ the same commit. The commit message records why it changed.
 
 ### Task files
 
-- **One Markdown file per `repo + number`**, named `<owner>-<repo>-<number>.md`, so the
-  tasks directory can be an Obsidian vault. Frontmatter holds machine state. Saves
+- **One Markdown file per source-qualified issue**, named `<owner>-<repo>-<number>.md`
+  for GitHub or `<owner>-<repo>-linear-<issue UUID>.md` for Linear. Legacy files
+  without `issue_source` still identify GitHub issues. Linear files also store the
+  display identifier separately from the stable UUID. Planning comments store
+  Linear's string ID in `external_comment_id`; legacy GitHub comments retain
+  their numeric `comment_id`. The tasks directory can be an Obsidian vault.
+  Frontmatter holds machine state. Saves
   replace only the keys foreman owns (snake_case) through a `yaml.Node`, so user keys
   and comments keep their place. The body is the user's: foreman's only edit is
   appending a line to `## Decisions` when an answer is recorded.
@@ -453,22 +467,40 @@ the same commit. The commit message records why it changed.
   needs the developer.
 - **Auto mode requires current triage.** A never-delegated, open, assigned issue needs
   the exact `triaged` label for auto mode. Without it, the inbox shows "awaiting triage"
-  and still allows manual start. Labels come from GitHub on each refresh, including
+  and still allows manual start. Labels come from the selected tracker on each refresh, including
   tracked-item lookups; they are not task-file state. Auto mode uses them only after a
-  successful GitHub refresh. Starting a refresh or failing one blocks auto starts from
+  successful selected-source refresh. Starting a refresh or failing one blocks auto starts from
   the retained inbox until another refresh succeeds. The auto start's existing issue
-  fetch checks the label again before making a worktree, so removal after the refresh
-  also stops the start.
-- **Repository filter.** A nonempty `include_repositories` shows only those
+  fetch checks the label again through the issue's source before making a worktree,
+  so removal after the refresh also stops the start. Manual starts skip this label
+  check. Dashboard start and routing requests carry the source-qualified key from
+  the selected inbox item, including Linear's stable issue ID. Routing reads the
+  issue and recent comments from that tracker. In-flight starts and auto routing
+  retries use the same key to release slots and retain routing selections.
+  A Linear branch uses its display
+  identifier and title; GitHub branches keep their numeric issue name.
+- **Runner issue source.** A runner reads the issue through the source stored on
+  the task. Planning documents are posted through that source and retain its
+  comment IDs for later edits. A Linear task still opens its PR on GitHub; the
+  implementation prompt requires its Linear identifier in the PR title and its
+  issue URL in the body, with no GitHub closing keyword. GitHub tasks retain
+  their closing keyword.
+- **Repository and source filters.** A nonempty `include_repositories` shows only those
   repositories and overrides `exclude_repositories`; otherwise the exclude list hides
-  its repositories. `App.InboxView` drops filtered items and stored records before
+  its repositories. Mapped repositories discover issues through Linear, while their
+  GitHub PR search results remain in the refresh report. Unmapped repositories discover
+  issues through GitHub. `-s github` and `-s linear` limit inbox
+  discovery to one tracker. A missing Linear key blocks startup only when a visible
+  repository needs it. A failed source leaves successful results and a warning, while
+  auto mode waits for all selected sources to refresh successfully. The inbox groups
+  selectable issues under GITHUB and LINEAR. `App.InboxSources` drops filtered items before
   `Reconcile`, so the configured view writes no records for them and reports no waiting
-  task from them, and `fetchTracked` skips tracked items outside the view. `v` in the dashboard passes `allRepos`, which
-  bypasses both lists for the session; the searches, involvement reasons, and
-  `mentions` are the same in either view. In the dashboard, `v` empties INBOX until the
-  new view's refresh lands, so no row from the old view stays selectable. Auto mode
-  starts nothing in the all view, so a look outside the filter never spends a run there.
-  DELEGATED WORK reads the task store, so tasks in any repository stay reachable.
+  task from them. Tracked lookups skip items outside the repository filter. Within the
+  repository view, delegated tasks refresh through their stored source even when the inbox
+  selects another source, and the selected source still controls which issues appear in
+  INBOX. DELEGATED WORK reads the task store, so delegated tasks remain reachable across
+  source filters. Linear completed and canceled issues map to closed; a stopped task
+  becomes DONE on refresh. A merged GitHub PR also completes a task.
 - **Lookup failures warn and retry** next refresh without blocking other items. A 404
   or 410 on an undelegated item is reported once and then no longer checked.
 - **Delegation doesn't need a checkout:** foreman keeps a clone under

@@ -690,18 +690,31 @@ func TestInboxTitleShowsView(t *testing.T) {
 	if got := screen(m); !strings.Contains(got, "INBOX · configured repos") {
 		t.Errorf("a %d-column frame does not name the configured view:\n%s", minWidth, got)
 	}
-	m.AllRepos = true
-	if got := screen(m); !strings.Contains(got, "INBOX · all repos") {
-		t.Errorf("a %d-column frame does not name the all view:\n%s", minWidth, got)
+	m.IssueSource = task.Linear
+	if got := screen(m); !strings.Contains(got, "INBOX · LINEAR") {
+		t.Errorf("a %d-column frame does not name the Linear view:\n%s", minWidth, got)
 	}
 }
 
-func TestHintsOfferTheViewToggle(t *testing.T) {
+func TestMixedInboxGroupsGitHubAndLinearIssuesBySource(t *testing.T) {
+	m := Model{Width: 100, Height: 30}
+	linear := entry("acme/web", 0, "Linear work")
+	linear.Item.Key.Source = task.Linear
+	linear.Item.Key.ExternalID = "uuid-42"
+	linear.Item.Identifier = "WEB-42"
+	m.SetInbox([]app.InboxEntry{linear, entry("acme/api", 1, "GitHub work")})
+	rows := inboxPane(m).rows
+	if len(rows) != 2 || rows[0].lines[0] != "GITHUB" || rows[1].lines[0] != "LINEAR" || !strings.Contains(rows[1].lines[1], "WEB-42") {
+		t.Fatalf("source rows = %+v", rows)
+	}
+}
+
+func TestHintsDoNotOfferTheRemovedViewToggle(t *testing.T) {
 	m := model()
 	for _, width := range []int{minWidth, 200} {
 		m.Width = width
-		if got := footer(m); !strings.Contains(got, "v view") || textWidth(got) > width {
-			t.Errorf("%d-column hints = %q; want v view within the width", width, got)
+		if got := footer(m); strings.Contains(got, "v view") || textWidth(got) > width {
+			t.Errorf("%d-column hints = %q; want no view toggle within the width", width, got)
 		}
 	}
 }

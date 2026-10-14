@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"syscall"
@@ -27,6 +28,9 @@ type Markdown struct {
 }
 
 func (m Markdown) path(key task.Key) string {
+	if key.Source == task.Linear {
+		return filepath.Join(m.Dir, fmt.Sprintf("%s-linear-%s.md", strings.ReplaceAll(string(key.Repo), "/", "-"), key.ExternalID))
+	}
 	return filepath.Join(m.Dir, fmt.Sprintf("%s-%d.md", strings.ReplaceAll(string(key.Repo), "/", "-"), key.Number))
 }
 
@@ -50,6 +54,9 @@ func (m Markdown) Get(_ context.Context, key task.Key) (*task.Record, error) {
 }
 
 func (m Markdown) Save(_ context.Context, rec *task.Record) error {
+	if rec.Source == task.Linear && (!linearIssueID.MatchString(rec.ExternalID) || rec.Identifier == "") {
+		return fmt.Errorf("linear issue needs a stable ID and identifier")
+	}
 	if err := os.MkdirAll(m.Dir, 0o755); err != nil {
 		return err
 	}
@@ -135,6 +142,12 @@ func (m Markdown) List(_ context.Context) ([]*task.Record, error) {
 		if recs[i].Repo != recs[j].Repo {
 			return recs[i].Repo < recs[j].Repo
 		}
+		if recs[i].Source != recs[j].Source {
+			return recs[i].Source < recs[j].Source
+		}
+		if recs[i].Source == task.Linear {
+			return recs[i].ExternalID < recs[j].ExternalID
+		}
 		return recs[i].Number < recs[j].Number
 	})
 	return recs, nil
@@ -143,6 +156,9 @@ func (m Markdown) List(_ context.Context) ([]*task.Record, error) {
 type frontmatter struct {
 	Repo                string                 `yaml:"repo"`
 	Number              int                    `yaml:"number"`
+	Source              task.Source            `yaml:"issue_source,omitempty"`
+	ExternalID          string                 `yaml:"external_issue_id,omitempty"`
+	Identifier          string                 `yaml:"issue_identifier,omitempty"`
 	Kind                task.Kind              `yaml:"kind"`
 	Title               string                 `yaml:"title"`
 	URL                 string                 `yaml:"url"`
@@ -181,6 +197,8 @@ type frontmatter struct {
 	CI                  *ciFM                  `yaml:"ci,omitempty"`
 	Attempts            []task.Attempt         `yaml:"attempts,omitempty"`
 }
+
+var linearIssueID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 type feedbackFM struct {
 	Kind      task.CommentKind `yaml:"kind"`
@@ -285,8 +303,17 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 	if err != nil {
 		return nil, err
 	}
-	if fm.Number <= 0 {
+	if fm.Source == task.Linear {
+		if !linearIssueID.MatchString(fm.ExternalID) || fm.Identifier == "" {
+			return nil, fmt.Errorf("linear issue needs a stable ID and identifier")
+		}
+	} else if fm.Source != "" && fm.Source != task.GitHub {
+		return nil, fmt.Errorf("unknown issue source %q", fm.Source)
+	} else if fm.Number <= 0 {
 		return nil, fmt.Errorf("number must be positive, got %d", fm.Number)
+	}
+	if fm.Source == task.GitHub {
+		fm.Source = ""
 	}
 	if fm.Kind != task.Issue && fm.Kind != task.PullRequest {
 		return nil, fmt.Errorf("kind must be issue or pr, got %q", fm.Kind)
@@ -295,12 +322,13 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 		return nil, fmt.Errorf("unknown state %q", fm.State)
 	}
 	rec := &task.Record{
-		Key:   task.Key{Repo: repo, Number: fm.Number},
-		Kind:  fm.Kind,
-		Title: fm.Title,
-		URL:   fm.URL,
-		State: fm.State,
-		Body:  body,
+		Key:        task.Key{Repo: repo, Number: fm.Number, Source: fm.Source, ExternalID: fm.ExternalID},
+		Identifier: fm.Identifier,
+		Kind:       fm.Kind,
+		Title:      fm.Title,
+		URL:        fm.URL,
+		State:      fm.State,
+		Body:       body,
 	}
 	if fm.ImplementationAgent != "" {
 		impl, err := task.ParseAgent(string(fm.ImplementationAgent))
@@ -413,12 +441,15 @@ func validState(s task.State) bool {
 
 func fromRecord(rec *task.Record) frontmatter {
 	fm := frontmatter{
-		Repo:   string(rec.Repo),
-		Number: rec.Number,
-		Kind:   rec.Kind,
-		Title:  rec.Title,
-		URL:    rec.URL,
-		State:  rec.State,
+		Repo:       string(rec.Repo),
+		Number:     rec.Number,
+		Source:     rec.Source,
+		ExternalID: rec.ExternalID,
+		Identifier: rec.Identifier,
+		Kind:       rec.Kind,
+		Title:      rec.Title,
+		URL:        rec.URL,
+		State:      rec.State,
 	}
 	if d := rec.Delegation; d != nil {
 		fm.ImplementationAgent = d.Implementer.Agent

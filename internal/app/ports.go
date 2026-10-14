@@ -22,25 +22,27 @@ type TaskStore interface {
 }
 
 type InboxItem struct {
-	Key       task.Key
-	Kind      task.Kind
-	Title     string
-	URL       string
-	State     string // open, closed, merged
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	Reasons   []task.InboxReason
-	Labels    []string
+	Key        task.Key
+	Identifier string // source display ID, e.g. ACME-42
+	Kind       task.Kind
+	Title      string
+	URL        string
+	State      string // open, closed, merged
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	Reasons    []task.InboxReason
+	Labels     []string
 }
 
 type Issue struct {
-	Key       task.Key
-	Title     string
-	Body      string
-	Labels    []string
-	URL       string
-	State     string
-	UpdatedAt time.Time
+	Key        task.Key
+	Identifier string
+	Title      string
+	Body       string
+	Labels     []string
+	URL        string
+	State      string
+	UpdatedAt  time.Time
 }
 
 type PullRequest struct {
@@ -94,8 +96,8 @@ type InboxSearch struct {
 	Truncated []string
 }
 
-// ErrGone means GitHub reports an item deleted or out of reach (HTTP 404 or 410).
-var ErrGone = errors.New("not found on GitHub, or no longer accessible")
+// ErrGone means a tracker reports an item deleted or out of reach.
+var ErrGone = errors.New("item not found or no longer accessible")
 
 type GitHubClient interface {
 	InboxItems(ctx context.Context) (InboxSearch, error)
@@ -129,6 +131,22 @@ type IssueComment struct {
 	ID   int64
 	URL  string
 	Body string
+}
+
+// TrackerComment keeps external comment IDs intact across issue trackers.
+type TrackerComment struct {
+	ID   string
+	URL  string
+	Body string
+}
+
+// IssueTracker owns issue operations. Repository and PR operations stay on GitHubClient.
+type IssueTracker interface {
+	AssignedIssues(ctx context.Context, projects map[task.Repo]string) ([]InboxItem, error)
+	GetIssue(ctx context.Context, key task.Key) (Issue, error)
+	IssueComments(ctx context.Context, key task.Key) ([]TrackerComment, error)
+	GetIssueComment(ctx context.Context, id string) (TrackerComment, error)
+	PostIssueComment(ctx context.Context, key task.Key, id, body string) (TrackerComment, error)
 }
 
 // RepositoryManager provides a local source checkout for repository-independent

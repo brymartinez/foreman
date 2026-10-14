@@ -787,24 +787,18 @@ func TestSetTasksClearsTypedTextWhenTheQuestionIsAnsweredElsewhere(t *testing.T)
 	}
 }
 
-func TestViewKeyClearsTheOtherViewsRows(t *testing.T) {
+func TestRemovedViewKeyKeepsInboxRows(t *testing.T) {
 	m := Model{Width: 100, Height: 30}
 	m.SetInbox([]app.InboxEntry{entry("a/b", 1, "Outside the filter")})
 	press(&m, rune_('v'))
-	if len(m.Inbox) != 0 {
-		t.Fatalf("inbox = %+v; want no rows until the new view's refresh", m.Inbox)
-	}
-	if a := press(&m, Key{Kind: KeyEnter}); a.Kind != ActionNone || m.Mode != Browsing {
-		t.Errorf("enter after v = %+v, mode %v; want nothing to start", a, m.Mode)
+	if len(m.Inbox) != 1 {
+		t.Fatalf("inbox = %+v; want the current rows", m.Inbox)
 	}
 }
 
-func TestBrowseViewKeyTogglesView(t *testing.T) {
+func TestBrowseViewKeyDoesNothing(t *testing.T) {
 	var m Model
-	if a := press(&m, rune_('v')); a.Kind != ActionToggleView || !m.AllRepos {
-		t.Fatalf("first v = %+v, all repos %t; want the all view and a refresh", a, m.AllRepos)
-	}
-	if a := press(&m, rune_('v')); a.Kind != ActionToggleView || m.AllRepos {
-		t.Fatalf("second v = %+v, all repos %t; want the configured view and a refresh", a, m.AllRepos)
+	if a := press(&m, rune_('v')); a.Kind != ActionNone || m.AllRepos {
+		t.Fatalf("v = %+v, all repos %t; want no view change", a, m.AllRepos)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -579,7 +580,7 @@ func (a App) notify(key task.Key, rec *task.Record) {
 // brief gathers the durable task context the implementation prompt is built from.
 func (a App) brief(ctx context.Context, rec *task.Record) (agent.TaskBrief, error) {
 	d := rec.Delegation
-	issue, err := a.GitHub.GetIssue(ctx, rec.Key)
+	issue, err := a.issue(ctx, rec.Key)
 	if err != nil {
 		return agent.TaskBrief{}, err
 	}
@@ -591,6 +592,7 @@ func (a App) brief(ctx context.Context, rec *task.Record) (agent.TaskBrief, erro
 	}
 	return agent.TaskBrief{
 		Key:        rec.Key,
+		Identifier: issue.Identifier,
 		Title:      issue.Title,
 		URL:        issue.URL,
 		IssueBody:  issue.Body,
@@ -696,14 +698,18 @@ func applyStop(ctx context.Context, rec *task.Record, during string, log io.Writ
 // it is posted. A failed post fails the task; restarting it plans again.
 func (a App) postPlan(ctx, final context.Context, rec *task.Record, docs map[task.PlanDoc]string, log io.Writer) (*task.Record, error) {
 	for _, doc := range task.PlanDocs {
-		var id int64
+		var id string
 		if c := rec.PlanComment(doc); c != nil {
-			id = c.CommentID
+			if rec.IssueSource() == task.Linear {
+				id = c.ExternalCommentID
+			} else if c.CommentID > 0 {
+				id = strconv.FormatInt(c.CommentID, 10)
+			}
 		}
 		body := planCommentBody(doc, docs[doc])
-		posted, err := a.GitHub.PostIssueComment(ctx, rec.Key, id, body)
-		if errors.Is(err, ErrGone) && id > 0 {
-			posted, err = a.GitHub.PostIssueComment(ctx, rec.Key, 0, body)
+		posted, err := a.postIssueComment(ctx, rec.Key, id, body)
+		if errors.Is(err, ErrGone) && id != "" {
+			posted, err = a.postIssueComment(ctx, rec.Key, "", body)
 		}
 		var updateErr error
 		if rec, updateErr = a.update(final, rec.Key, existing(func(cur *task.Record) {
@@ -712,7 +718,13 @@ func (a App) postPlan(ctx, final context.Context, rec *task.Record, docs map[tas
 				applyStop(ctx, cur, "planning", log, a.Now())
 				return
 			}
-			cur.SetPlanComment(task.PlanComment{Doc: doc, CommentID: posted.ID, URL: posted.URL})
+			comment := task.PlanComment{Doc: doc, URL: posted.URL}
+			if rec.IssueSource() == task.Linear {
+				comment.ExternalCommentID = posted.ID
+			} else {
+				comment.CommentID, _ = strconv.ParseInt(posted.ID, 10, 64)
+			}
+			cur.SetPlanComment(comment)
 		})); updateErr != nil || err != nil {
 			return rec, updateErr
 		}

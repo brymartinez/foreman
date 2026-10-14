@@ -33,10 +33,12 @@ const (
 )
 
 type Command struct {
-	Name  Name
-	Repo  task.Repo // set for __run, given as owner/repo#825
-	Issue int
-	Auto  AutoMode
+	Name       Name
+	Repo       task.Repo // set for __run, given as owner/repo#825
+	Issue      int
+	ExternalID string
+	Auto       AutoMode
+	Source     task.Source // empty selects both issue sources
 }
 
 const Usage = `foreman: delegate GitHub issues to Claude Code or Codex
@@ -45,6 +47,7 @@ Usage:
   foreman             Open the dashboard: inbox, delegated work, and logs
   foreman -a, --auto  Open the dashboard with auto mode on for this session
   foreman --no-auto   Open the dashboard with auto mode off for this session
+  foreman -s github|linear  Show only the selected issue source in the inbox
   foreman -c          Edit the configuration file
   foreman -h, --help  Show this help
   foreman --version   Show the version
@@ -72,6 +75,16 @@ func Parse(argv []string) (Command, error) {
 		}
 		return Command{Name: Version}, nil
 	case string(Run):
+		if len(rest) == 1 {
+			repoPart, id, found := strings.Cut(rest[0], "#linear:")
+			if found {
+				repo, err := task.ParseRepo(repoPart)
+				if err != nil || id == "" || strings.ContainsAny(id, "/#:") {
+					return Command{}, usagef("%s needs owner/repo#linear:ID", name)
+				}
+				return Command{Name: Run, Repo: repo, Source: task.Linear, ExternalID: id}, nil
+			}
+		}
 		repo, n, err := issueArg(name, rest)
 		if err == nil && repo == "" {
 			err = usagef("%s needs owner/repo#N", name)
@@ -86,7 +99,23 @@ func Parse(argv []string) (Command, error) {
 func parseFlags(argv []string) (Command, error) {
 	cmd := Command{Name: TUI}
 	edit := false
-	for _, arg := range argv {
+	for i := 0; i < len(argv); i++ {
+		arg := argv[i]
+		if arg == "-s" || arg == "--source" {
+			i++
+			if i >= len(argv) {
+				return Command{}, usagef("%s needs github or linear", arg)
+			}
+			chosen := task.Source(argv[i])
+			if chosen != task.GitHub && chosen != task.Linear {
+				return Command{}, usagef("unknown issue source %q (want github or linear)", argv[i])
+			}
+			if cmd.Source != "" && cmd.Source != chosen {
+				return Command{}, usagef("conflicting issue sources")
+			}
+			cmd.Source = chosen
+			continue
+		}
 		var mode AutoMode
 		switch arg {
 		case "-a", "--auto":
@@ -108,8 +137,8 @@ func parseFlags(argv []string) (Command, error) {
 		cmd.Auto = mode
 	}
 	if edit {
-		if cmd.Auto != AutoSaved {
-			return Command{}, usagef("-c cannot be used with --auto or --no-auto")
+		if cmd.Auto != AutoSaved || cmd.Source != "" {
+			return Command{}, usagef("-c cannot be used with launch flags")
 		}
 		return Command{Name: Edit}, nil
 	}

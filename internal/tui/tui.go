@@ -25,9 +25,10 @@ import (
 var logChunk int64 = 128 << 10
 
 type Options struct {
-	In     *os.File
-	Out    *os.File
-	Source Source
+	In          *os.File
+	Out         *os.File
+	Source      Source
+	IssueSource task.Source
 	// GitHubEvery is how often the searches, the gate, and the cleanup run.
 	GitHubEvery time.Duration
 	// LocalEvery is how often the task files and the selected log are re-read.
@@ -103,6 +104,7 @@ func Run(ctx context.Context, o Options) (err error) {
 	m.Width, m.Height = size(o.Out)
 	m.SetAuto(o.Auto)
 	m.RouteOn, m.Version = o.Route, o.Version
+	m.IssueSource = o.IssueSource
 
 	keys := make(chan Key, 64)
 	go readKeys(ctx, o.In, keys, escapeWait)
@@ -128,7 +130,7 @@ func Run(ctx context.Context, o Options) (err error) {
 		m.beginRefresh()
 		allRepos := m.AllRepos
 		go func() {
-			report, err := o.Source.InboxView(ctx, allRepos)
+			report, err := o.Source.InboxSources(ctx, o.IssueSource)
 			results <- result{report: &report, err: err, allRepos: allRepos}
 		}()
 	}
@@ -305,7 +307,7 @@ func launchAutoFresh(ctx context.Context, s Source, m *Model, results chan<- res
 func launchAuto(ctx context.Context, s Source, m *Model, results chan<- result) int {
 	reqs := m.AutoStarts()
 	for _, req := range reqs {
-		prior := m.prior(task.Key{Repo: req.Repo, Number: req.Issue})
+		prior := m.prior(requestKey(req))
 		go func() { results <- autoStart(ctx, s, req, prior) }()
 	}
 	return len(reqs)
@@ -330,11 +332,18 @@ func apply(m *Model, r result) {
 	if r.report != nil {
 		m.Refreshing = false
 		m.RefreshedAt = time.Now()
-		m.githubFresh = r.err == nil
+		m.githubFresh = r.err == nil && r.report.SourcesFresh
 		if r.err == nil {
 			m.SetInbox(app.Delegable(*r.report))
 			m.Warnings = r.report.Warnings
-			m.retryWaiting()
+			if !r.report.SourcesFresh && len(r.report.Warnings) > 0 {
+				m.Message = "! " + r.report.Warnings[0].Error()
+			} else {
+				if strings.HasPrefix(m.Message, "! Linear refresh:") || strings.HasPrefix(m.Message, "! GitHub refresh:") {
+					m.Message = ""
+				}
+				m.retryWaiting()
+			}
 		}
 	}
 	if r.auto && r.finished {
@@ -364,7 +373,8 @@ func apply(m *Model, r result) {
 
 func start(ctx context.Context, s Source, req app.StartRequest, auto bool) result {
 	r := startResult(ctx, s, req)
-	r.key, r.auto, r.finished = task.Key{Repo: req.Repo, Number: req.Issue}, auto, true
+	r.key = requestKey(req)
+	r.auto, r.finished = auto, true
 	if !auto {
 		return r
 	}
@@ -376,6 +386,13 @@ func start(ctx context.Context, s Source, req app.StartRequest, auto bool) resul
 		r.message = "auto: " + r.message
 	}
 	return r
+}
+
+func requestKey(req app.StartRequest) task.Key {
+	if req.Key != (task.Key{}) {
+		return req.Key
+	}
+	return task.Key{Repo: req.Repo, Number: req.Issue}
 }
 
 // route asks App.Route for a manual start's profile. It writes nothing, so it is not
@@ -394,8 +411,8 @@ func autoStart(ctx context.Context, s Source, req app.StartRequest, prior *agent
 	if req.Agent != "" {
 		return start(ctx, s, req, true)
 	}
-	key := task.Key{Repo: req.Repo, Number: req.Issue}
-	d, err := s.Route(ctx, app.RouteRequest{Repo: req.Repo, Issue: req.Issue, Prior: prior})
+	key := requestKey(req)
+	d, err := s.Route(ctx, app.RouteRequest{Key: req.Key, Repo: req.Repo, Issue: req.Issue, Prior: prior})
 	switch {
 	case err != nil:
 		return result{err: fmt.Errorf("auto: route %s#%d: %w", req.Repo, req.Issue, err), key: key, auto: true, finished: true}
@@ -421,12 +438,19 @@ func startResult(ctx context.Context, s Source, req app.StartRequest) result {
 		return result{err: fmt.Errorf("start %s#%d: %w", req.Repo, req.Issue, err), finished: true}
 	}
 	if rec.State == task.Failed {
-		return result{message: fmt.Sprintf("! %s#%d could not start: %s", rec.Repo, rec.Number, rec.LastOutcome.Summary), finished: true}
+		return result{message: fmt.Sprintf("! %s could not start: %s", recordRef(rec), rec.LastOutcome.Summary), finished: true}
 	}
 	if p := rec.Delegation.Profile; p != nil {
-		return result{message: fmt.Sprintf("Started %s#%d with profile %s on %s", rec.Repo, rec.Number, p.Name, rec.Delegation.Branch), finished: true}
+		return result{message: fmt.Sprintf("Started %s with profile %s on %s", recordRef(rec), p.Name, rec.Delegation.Branch), finished: true}
 	}
-	return result{message: fmt.Sprintf("Started %s#%d on %s", rec.Repo, rec.Number, rec.Delegation.Branch), finished: true}
+	return result{message: fmt.Sprintf("Started %s on %s", recordRef(rec), rec.Delegation.Branch), finished: true}
+}
+
+func recordRef(rec *task.Record) string {
+	if rec.Source == task.Linear {
+		return fmt.Sprintf("%s · %s", rec.Repo, rec.Identifier)
+	}
+	return fmt.Sprintf("%s#%d", rec.Repo, rec.Number)
 }
 
 // resume puts a REVIEWED task back to work on the comments on its pull request. Like

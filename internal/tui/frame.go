@@ -124,11 +124,16 @@ type pane struct {
 
 func inboxPane(m Model) pane {
 	p := pane{title: "INBOX · configured repos", empty: "Nothing to delegate. Press r to refresh."}
-	if m.AllRepos {
-		p.title = "INBOX · all repos"
+	if m.IssueSource != "" {
+		p.title = "INBOX · " + strings.ToUpper(string(m.IssueSource))
 	}
-	for _, e := range m.Inbox {
+	var previous task.Source
+	for i, e := range m.Inbox {
 		k := e.Item.Key
+		issueSource := k.Source
+		if issueSource == "" {
+			issueSource = task.GitHub
+		}
 		detail := strings.Join(e.Changes, ", ")
 		if awaitingTriage(e) {
 			detail = render.JoinFacts("awaiting triage", detail)
@@ -136,7 +141,15 @@ func inboxPane(m Model) pane {
 		if w, ok := m.waiting[k]; ok {
 			detail = render.JoinFacts("waiting: "+w.reason, detail)
 		}
-		r := row{lines: []string{fmt.Sprintf("%s#%d  %s", k.Repo, k.Number, e.Item.Title)}}
+		identity := fmt.Sprintf("%s#%d  %s", k.Repo, k.Number, e.Item.Title)
+		if issueSource == task.Linear {
+			identity = fmt.Sprintf("%s · %s  %s", k.Repo, e.Item.Identifier, e.Item.Title)
+		}
+		r := row{lines: []string{identity}}
+		if i == 0 || issueSource != previous {
+			r.lines = append([]string{strings.ToUpper(string(issueSource))}, r.lines...)
+		}
+		previous = issueSource
 		if e.Delegated {
 			// INBOX only ever offers delegated work the developer can move, so its state
 			// says which key is waiting: start again, or answer the PR.
@@ -394,8 +407,7 @@ var helpKeys = []helpKey{
 	{"p", "open the PR history of merged and closed PRs; esc returns", "p PR history"},
 	{"ctrl-f/ctrl-b", "PR history: move a full page", "ctrl-f/b page"},
 	{"a", "turn auto mode on or off, kept for the next launch", "a auto"},
-	{"v", "show the inbox for the configured repos or all repos", "v view"},
-	{"r", "refresh from GitHub", "r refresh"},
+	{"r", "refresh selected issue sources", "r refresh"},
 	{"?", "show this help", "? help"},
 	{"q, ctrl-c", "quit", "q quit"},
 }
@@ -610,15 +622,15 @@ func answerHints(m Model) string {
 const (
 	hintsAnswerLong  = "type an option label or an answer · enter to record · up/down scroll · esc close"
 	hintsAnswerShort = "label or answer · enter · up/down · esc close"
-	hintsLong        = "j/k move · h/l pane · enter select · c cancel · a auto · v view · r refresh · ? help · q quit"
-	hintsShort       = "j/k move · h/l pane · enter · v view · ? help · q quit"
+	hintsLong        = "j/k move · h/l pane · enter select · c cancel · a auto · r refresh · ? help · q quit"
+	hintsShort       = "j/k move · h/l pane · enter · ? help · q quit"
 	hintsLogLong     = "j/k task · u/d log page · ctrl-u/d half page · g/G ends · s show/log · R raw · esc close · ? help"
 	hintsLogShort    = "j/k task · u/d log · g/G ends · s show/log · ? help"
 	// hintsOpen are for INBOX focus while the pane is open, where s still switches it.
-	hintsOpenLong  = "j/k move · h/l pane · enter select · s show/log · R raw · esc close · c cancel · a auto · v view · ? help · q quit"
+	hintsOpenLong  = "j/k move · h/l pane · enter select · s show/log · R raw · esc close · c cancel · a auto · ? help · q quit"
 	hintsOpenShort = "j/k move · h/l pane · s show/log · esc close · ? help"
 
-	hintsHistoryLong     = "j/k move · ctrl-f/b page · ctrl-d/u half page · enter/tab log · v view · r reload · esc back · ? help · q quit"
+	hintsHistoryLong     = "j/k move · ctrl-f/b page · ctrl-d/u half page · enter/tab log · r reload · esc back · ? help · q quit"
 	hintsHistoryShort    = "j/k move · ctrl-f/b page · enter/tab log · esc back · ? help"
 	hintsHistoryLogLong  = "j/k line · u/d page · ctrl-u/d half page · g/G ends · tab rows · R raw · esc close · ? help"
 	hintsHistoryLogShort = "j/k line · u/d page · g/G ends · tab rows · esc close"

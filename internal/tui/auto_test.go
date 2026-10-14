@@ -69,7 +69,7 @@ func TestAwaitingTriageIssueShowsStatusAndCanStartManually(t *testing.T) {
 	e := own(1, 0)
 	e.Item.Labels = nil
 	m := autoModel(1, e)
-	if detail := inboxPane(m).rows[0].lines[1]; !strings.Contains(detail, "awaiting triage") {
+	if detail := strings.Join(inboxPane(m).rows[0].lines, " "); !strings.Contains(detail, "awaiting triage") {
 		t.Fatalf("inbox detail = %q; want awaiting triage", detail)
 	}
 	if action := press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter}); action.Kind != ActionStart {
@@ -327,11 +327,13 @@ func TestAutoStartsNothingInTheAllView(t *testing.T) {
 	}
 
 	// Back in the configured view, nothing starts until its refresh fills the inbox.
-	press(&m, rune_('v'))
+	m.AllRepos = false
+	m.SetInbox(nil)
+	m.githubFresh = false
 	if got := m.AutoStarts(); len(got) != 0 {
 		t.Fatalf("auto starts = %v; want none before the configured view's refresh", startedKeys(got))
 	}
-	configured := app.InboxReport{Current: []app.InboxEntry{assigned("a/b", 1, 0)}}
+	configured := app.InboxReport{Current: []app.InboxEntry{assigned("a/b", 1, 0)}, SourcesFresh: true}
 	apply(&m, result{report: &configured})
 	if got := m.AutoStarts(); len(got) != 1 {
 		t.Errorf("auto starts = %v; want the configured view's issue", startedKeys(got))

@@ -17,6 +17,7 @@ import (
 	"github.com/brymartinez/foreman/internal/cli"
 	"github.com/brymartinez/foreman/internal/config"
 	"github.com/brymartinez/foreman/internal/github"
+	"github.com/brymartinez/foreman/internal/linear"
 	"github.com/brymartinez/foreman/internal/logs"
 	"github.com/brymartinez/foreman/internal/notifications"
 	"github.com/brymartinez/foreman/internal/quota"
@@ -82,6 +83,9 @@ func run(argv []string) int {
 	if err := (stages.Files{GlobalDir: cfg.StagesDir}).RequireGlobal(); err != nil {
 		return fail(err)
 	}
+	if cmd.Name == cli.TUI && linearSelected(cfg, cmd.Source) && os.Getenv("LINEAR_API_KEY") == "" {
+		return fail(fmt.Errorf("set LINEAR_API_KEY to use Linear issues; use -s github for GitHub only"))
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 	claude := agent.Claude{Bin: cfg.Claude.Command, Model: cfg.Claude.Model, PlanModel: cfg.Claude.PlanModel, ReviewModel: cfg.Claude.ReviewModel, Exec: agent.RunCommand}
@@ -89,14 +93,20 @@ func run(argv []string) int {
 		ReasoningEffort: cfg.Codex.ReasoningEffort, PlanReasoningEffort: cfg.Codex.PlanReasoningEffort, ReviewReasoningEffort: cfg.Codex.ReviewReasoningEffort, Exec: agent.RunCommand}
 	// A routing.yaml that fails to load stops only the dashboard starts that route.
 	routes, routesErr := routing.Load(routing.Path(cfg.Path))
+	linearClient := linear.New(os.Getenv("LINEAR_API_KEY"))
+	if endpoint := os.Getenv("FOREMAN_LINEAR_ENDPOINT"); endpoint != "" {
+		linearClient.Endpoint = endpoint
+	}
 	a := app.App{
-		Store:        store.Markdown{Dir: cfg.TasksDir},
-		GitHub:       github.New(),
-		Repositories: github.New(),
-		Worktrees:    worktree.Git{},
-		Agents:       map[task.Agent]app.AgentAdapter{task.Claude: claude, task.Codex: codex},
-		Routing:      routes,
-		RoutingErr:   routesErr,
+		Store:          store.Markdown{Dir: cfg.TasksDir},
+		GitHub:         github.New(),
+		Linear:         linearClient,
+		LinearProjects: cfg.LinearProjects,
+		Repositories:   github.New(),
+		Worktrees:      worktree.Git{},
+		Agents:         map[task.Agent]app.AgentAdapter{task.Claude: claude, task.Codex: codex},
+		Routing:        routes,
+		RoutingErr:     routesErr,
 		RoutingDefaults: routing.Defaults{
 			task.Claude: {Model: cfg.Claude.Model, PlanModel: cfg.Claude.PlanModel},
 			task.Codex:  {Model: cfg.Codex.Model, PlanModel: cfg.Codex.PlanModel, ReasoningEffort: cfg.Codex.ReasoningEffort, PlanReasoningEffort: cfg.Codex.PlanReasoningEffort},
@@ -132,6 +142,7 @@ func run(argv []string) int {
 		}
 		if err := tui.Run(ctx, tui.Options{
 			In: os.Stdin, Out: os.Stdout, Source: a,
+			IssueSource: cmd.Source,
 			GitHubEvery: time.Duration(cfg.Refresh) * time.Second, LocalEvery: localRefresh,
 			Auto:    autoMode(cfg.Auto, cmd.Auto),
 			Route:   routes != nil || routesErr != nil,
@@ -143,13 +154,40 @@ func run(argv []string) int {
 		log := &logs.Writer{W: os.Stdout}
 		defer log.Flush()
 		fmt.Fprintf(log, "foreman: runner %d started\n", os.Getpid())
-		if err := a.RunTask(ctx, task.Key{Repo: cmd.Repo, Number: cmd.Issue}, os.Getpid(), log); err != nil {
+		if err := a.RunTask(ctx, task.Key{Repo: cmd.Repo, Number: cmd.Issue, Source: cmd.Source, ExternalID: cmd.ExternalID}, os.Getpid(), log); err != nil {
 			fmt.Fprintf(log, "foreman: %v\n", err)
 			return 1
 		}
 		fmt.Fprintf(log, "foreman: runner %d finished\n", os.Getpid())
 	}
 	return 0
+}
+
+func linearSelected(cfg config.Config, source task.Source) bool {
+	if source == task.GitHub {
+		return false
+	}
+	for repo := range cfg.LinearProjects {
+		if len(cfg.IncludedRepos) > 0 {
+			for _, included := range cfg.IncludedRepos {
+				if included == repo {
+					return true
+				}
+			}
+			continue
+		}
+		excluded := false
+		for _, entry := range cfg.ExcludedRepos {
+			if entry == repo {
+				excluded = true
+				break
+			}
+		}
+		if !excluded {
+			return true
+		}
+	}
+	return false
 }
 
 // autoMode reads the saved auto mode choice. A state file that cannot be read

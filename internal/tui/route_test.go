@@ -237,7 +237,7 @@ func TestAutoModeWaitReleasesSlotAndRetriesNextRefresh(t *testing.T) {
 	if got := m.AutoStarts(); len(got) != 0 {
 		t.Fatalf("retried %v before the next GitHub refresh", got)
 	}
-	apply(&m, result{report: &app.InboxReport{Current: []app.InboxEntry{assigned("a/b", 1, 0)}}})
+	apply(&m, result{report: &app.InboxReport{Current: []app.InboxEntry{assigned("a/b", 1, 0)}, SourcesFresh: true}})
 	got := m.AutoStarts()
 	if len(got) != 1 {
 		t.Fatalf("auto starts after refresh = %v", got)
