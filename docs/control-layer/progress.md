@@ -2,14 +2,14 @@
 
 ## Current stage
 
-Issue 58 is in progress. Configuration validates Linear project mappings. Source-qualified
-task records and the Linear GraphQL adapter are complete. The dashboard now discovers
-GitHub and Linear inbox issues, filters by `-s`, groups source rows, warns when one
-source fails, and pauses auto starts until both selected sources refresh. GitHub-only
-selection works without a Linear key. The `v` repository toggle is gone. Source-aware
-start, runner, comments, and PR behavior remain for the next checkpoint. The end-to-end
-scenario and README updates remain for the final stage. Vet, Go tests, build, and the
-existing full end-to-end script pass.
+Issue 58 is in progress. Configuration, source-qualified task records, the Linear
+GraphQL adapter, and mixed inbox refresh are complete. The dashboard filters with
+`-s`, groups source rows, warns on partial refresh, and pauses auto starts until all
+selected sources refresh. GitHub-only selection works without a Linear key. Dashboard
+start and routing now carry the Linear key, read Linear issues and comments, and
+recheck the exact `triaged` label for auto starts. Manual starts skip that check.
+Source-aware runner and planning comments, Linear PR instructions, and the final
+end-to-end scenario remain for the next checkpoints.
 
 Reviewer availability fallback is complete. A fresh quota-axi report can move a
 review to the implementer's agent when the competing agent is confirmed not set up

@@ -466,8 +466,12 @@ the same commit. The commit message records why it changed.
   tracked-item lookups; they are not task-file state. Auto mode uses them only after a
   successful selected-source refresh. Starting a refresh or failing one blocks auto starts from
   the retained inbox until another refresh succeeds. The auto start's existing issue
-  fetch checks the label again before making a worktree, so removal after the refresh
-  also stops the start.
+  fetch checks the label again through the issue's source before making a worktree,
+  so removal after the refresh also stops the start. Manual starts skip this label
+  check. Dashboard start and routing requests carry the source-qualified key from
+  the selected inbox item, including Linear's stable issue ID. Routing reads the
+  issue and recent comments from that tracker. A Linear branch uses its display
+  identifier and title; GitHub branches keep their numeric issue name.
 - **Repository and source filters.** A nonempty `include_repositories` shows only those
   repositories and overrides `exclude_repositories`; otherwise the exclude list hides
   its repositories. Mapped repositories discover issues through Linear, and unmapped

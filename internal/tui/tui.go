@@ -373,7 +373,11 @@ func apply(m *Model, r result) {
 
 func start(ctx context.Context, s Source, req app.StartRequest, auto bool) result {
 	r := startResult(ctx, s, req)
-	r.key, r.auto, r.finished = task.Key{Repo: req.Repo, Number: req.Issue}, auto, true
+	r.key = req.Key
+	if r.key == (task.Key{}) {
+		r.key = task.Key{Repo: req.Repo, Number: req.Issue}
+	}
+	r.auto, r.finished = auto, true
 	if !auto {
 		return r
 	}
@@ -403,8 +407,11 @@ func autoStart(ctx context.Context, s Source, req app.StartRequest, prior *agent
 	if req.Agent != "" {
 		return start(ctx, s, req, true)
 	}
-	key := task.Key{Repo: req.Repo, Number: req.Issue}
-	d, err := s.Route(ctx, app.RouteRequest{Repo: req.Repo, Issue: req.Issue, Prior: prior})
+	key := req.Key
+	if key == (task.Key{}) {
+		key = task.Key{Repo: req.Repo, Number: req.Issue}
+	}
+	d, err := s.Route(ctx, app.RouteRequest{Key: req.Key, Repo: req.Repo, Issue: req.Issue, Prior: prior})
 	switch {
 	case err != nil:
 		return result{err: fmt.Errorf("auto: route %s#%d: %w", req.Repo, req.Issue, err), key: key, auto: true, finished: true}

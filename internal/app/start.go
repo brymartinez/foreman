@@ -12,6 +12,7 @@ import (
 )
 
 type StartRequest struct {
+	Key         task.Key  // source-qualified inbox identity; legacy callers use Repo and Issue
 	Repo        task.Repo // optional with Dir; required when starting from a managed checkout
 	Issue       int
 	Agent       task.Agent
@@ -40,7 +41,13 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 	if err != nil {
 		return nil, err
 	}
-	key := task.Key{Repo: info.Repo, Number: req.Issue}
+	key := req.Key
+	if key == (task.Key{}) {
+		key = task.Key{Repo: info.Repo, Number: req.Issue}
+	}
+	if key.Repo != info.Repo {
+		return nil, fmt.Errorf("issue belongs to %s, not %s", key.Repo, info.Repo)
+	}
 	existing, err := a.Store.Get(ctx, key)
 	if err != nil {
 		return nil, err
@@ -67,22 +74,26 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			return nil, fmt.Errorf("context file: %w", err)
 		}
 	}
-	issue, err := a.GitHub.GetIssue(ctx, key)
+	issue, err := a.issue(ctx, key)
 	if err != nil {
 		return nil, err
 	}
 	if issue.State != "open" {
-		return nil, fmt.Errorf("%s#%d is %s", key.Repo, key.Number, issue.State)
+		return nil, fmt.Errorf("%s is %s", issueLabel(key, issue.Identifier), issue.State)
 	}
 	if req.NewOnly && !slices.Contains(issue.Labels, "triaged") {
-		return nil, fmt.Errorf("%s#%d no longer has the triaged label", key.Repo, key.Number)
+		return nil, fmt.Errorf("%s no longer has the triaged label", issueLabel(key, issue.Identifier))
 	}
 
 	branchType := req.BranchType
 	if branchType == "" {
 		branchType = task.BranchTypeFor(issue.Title, issue.Labels)
 	}
-	branch := task.BranchName(branchType, task.WorkName(key.Number, issue.Title))
+	work := task.WorkName(key.Number, issue.Title)
+	if key.Source == task.Linear {
+		work = "linear-" + task.Slug(issue.Identifier) + "-" + task.Slug(issue.Title)
+	}
+	branch := task.BranchName(branchType, work)
 	if existing != nil && existing.Delegation != nil && existing.Delegation.Branch != "" {
 		branch = existing.Delegation.Branch
 	}
@@ -104,7 +115,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 	now := a.Now()
 	_, err = a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
 		if cur == nil {
-			cur = &task.Record{Key: key, State: task.Discovered, Body: fmt.Sprintf("# #%d %s\n\n## Notes\n\n", key.Number, issue.Title)}
+			cur = &task.Record{Key: key, State: task.Discovered, Body: fmt.Sprintf("# %s %s\n\n## Notes\n\n", issueLabel(key, issue.Identifier), issue.Title)}
 		}
 		if err := a.startable(cur); err != nil {
 			return nil, err
@@ -116,6 +127,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		}
 		was := cur.State
 		cur.Kind, cur.Title, cur.URL, cur.State = task.Issue, issue.Title, issue.URL, task.Working
+		cur.Identifier = issue.Identifier
 		if cur.GitHub == nil {
 			cur.GitHub = &task.Snapshot{UpdatedAt: issue.UpdatedAt, State: issue.State}
 			cur.LastGitHubSync = now

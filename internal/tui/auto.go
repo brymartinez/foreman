@@ -115,6 +115,9 @@ func (m *Model) AutoStarts() []app.StartRequest {
 		// can see that another command delegated this issue since the refresh. With
 		// routing on, the agent is left empty for autoStart to route.
 		req := app.StartRequest{Repo: it.Key.Repo, Issue: it.Key.Number, Agent: m.AutoAgent, NewOnly: true}
+		if it.Key.Source == task.Linear {
+			req.Key = it.Key
+		}
 		if m.RouteOn {
 			req.Agent = ""
 		}

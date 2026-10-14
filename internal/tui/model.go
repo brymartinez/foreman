@@ -533,6 +533,9 @@ func (m *Model) enter() Action {
 			return Action{Kind: ActionResume, Resume: e.Item.Key}
 		}
 		m.pending = app.StartRequest{Repo: e.Item.Key.Repo, Issue: e.Item.Key.Number}
+		if e.Item.Key.Source == task.Linear {
+			m.pending.Key = e.Item.Key
+		}
 		m.pendingNew = !e.Delegated
 		m.Mode, m.Input = ChoosingAgent, ""
 		return Action{}
@@ -714,7 +717,7 @@ func (m *Model) typeContext(k Key) Action {
 		m.pending.ContextFile = strings.TrimSpace(m.Input)
 		m.Mode, m.Input = Routing, ""
 		m.routeSeq++
-		req := app.RouteRequest{Repo: m.pending.Repo, Issue: m.pending.Issue, ContextFile: m.pending.ContextFile}
+		req := app.RouteRequest{Key: m.pending.Key, Repo: m.pending.Repo, Issue: m.pending.Issue, ContextFile: m.pending.ContextFile}
 		return Action{Kind: ActionRoute, Route: req, RouteSeq: m.routeSeq}
 	case k.Kind == KeyEnter:
 		req := m.pending
