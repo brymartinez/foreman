@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/brymartinez/foreman/internal/task"
 )
@@ -40,4 +41,23 @@ func issueLabel(key task.Key, identifier string) string {
 		return identifier
 	}
 	return fmt.Sprintf("#%d", key.Number)
+}
+
+func (a App) postIssueComment(ctx context.Context, key task.Key, id, body string) (TrackerComment, error) {
+	if key.Source == task.Linear {
+		if a.Linear == nil {
+			return TrackerComment{}, fmt.Errorf("Linear issue source is not configured")
+		}
+		return a.Linear.PostIssueComment(ctx, key, id, body)
+	}
+	number := int64(0)
+	if id != "" {
+		var err error
+		number, err = strconv.ParseInt(id, 10, 64)
+		if err != nil {
+			return TrackerComment{}, fmt.Errorf("invalid GitHub comment ID %q: %w", id, err)
+		}
+	}
+	comment, err := a.GitHub.PostIssueComment(ctx, key, number, body)
+	return TrackerComment{ID: strconv.FormatInt(comment.ID, 10), URL: comment.URL, Body: comment.Body}, err
 }

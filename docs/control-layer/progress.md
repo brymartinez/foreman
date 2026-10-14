@@ -8,8 +8,11 @@ GraphQL adapter, and mixed inbox refresh are complete. The dashboard filters wit
 selected sources refresh. GitHub-only selection works without a Linear key. Dashboard
 start and routing now carry the Linear key, read Linear issues and comments, and
 recheck the exact `triaged` label for auto starts. Manual starts skip that check.
-Source-aware runner and planning comments, Linear PR instructions, and the final
-end-to-end scenario remain for the next checkpoints.
+The runner now reads the stored issue source and posts or edits planning comments
+there. Linear PR prompts require the identifier in the title and issue URL in the
+body, without a GitHub closing keyword. Linear terminal-state coverage, cross-filter
+refresh and resume, documentation, and the end-to-end scenario remain for the next
+checkpoints.
 
 Reviewer availability fallback is complete. A fresh quota-axi report can move a
 review to the implementer's agent when the competing agent is confirmed not set up

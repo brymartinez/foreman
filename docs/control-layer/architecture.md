@@ -472,6 +472,12 @@ the same commit. The commit message records why it changed.
   the selected inbox item, including Linear's stable issue ID. Routing reads the
   issue and recent comments from that tracker. A Linear branch uses its display
   identifier and title; GitHub branches keep their numeric issue name.
+- **Runner issue source.** A runner reads the issue through the source stored on
+  the task. Planning documents are posted through that source and retain its
+  comment IDs for later edits. A Linear task still opens its PR on GitHub; the
+  implementation prompt requires its Linear identifier in the PR title and its
+  issue URL in the body, with no GitHub closing keyword. GitHub tasks retain
+  their closing keyword.
 - **Repository and source filters.** A nonempty `include_repositories` shows only those
   repositories and overrides `exclude_repositories`; otherwise the exclude list hides
   its repositories. Mapped repositories discover issues through Linear, and unmapped

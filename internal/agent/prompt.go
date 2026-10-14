@@ -14,11 +14,12 @@ import (
 const ReplyMarker = "<!-- foreman:reply -->"
 
 type TaskBrief struct {
-	Key       task.Key
-	Title     string
-	URL       string
-	IssueBody string
-	Context   string // contents of the --context Markdown file, if any
+	Key        task.Key
+	Identifier string
+	Title      string
+	URL        string
+	IssueBody  string
+	Context    string // contents of the --context Markdown file, if any
 	// StageInstructions is the developer's instructions for the stage this prompt is
 	// for (implement, review), global then repo. Callers set only that stage's.
 	StageInstructions string
@@ -64,7 +65,11 @@ type MergeBrief struct {
 // It carries everything durable; the agent never depends on a prior conversation.
 func ImplementationPrompt(b TaskBrief) string {
 	var s strings.Builder
-	fmt.Fprintf(&s, "You are the implementation agent for GitHub issue %s#%d. You are working unattended; nobody will answer questions during this turn.\n\n", b.Key.Repo, b.Key.Number)
+	if b.Key.Source == task.Linear {
+		fmt.Fprintf(&s, "You are the implementation agent for Linear issue %s in %s. You are working unattended; nobody will answer questions during this turn.\n\n", b.Identifier, b.Key.Repo)
+	} else {
+		fmt.Fprintf(&s, "You are the implementation agent for GitHub issue %s#%d. You are working unattended; nobody will answer questions during this turn.\n\n", b.Key.Repo, b.Key.Number)
+	}
 
 	fmt.Fprintf(&s, "## Issue\n\n%s\n%s\n\n", b.Title, b.URL)
 	if b.NextObjective == "" {
@@ -141,6 +146,9 @@ The next session receives the commit and nextObjective, not this transcript. Kee
 
 `)
 	}
+	if b.Key.Source == task.Linear {
+		s.WriteString("GitHub hosts the pull request. Put " + b.Identifier + " in the pull request title and " + b.URL + " in the pull request body. Do not add a GitHub Closes #N line. These issue link rules override conflicting developer PR instructions below.\n\n")
+	}
 
 	fmt.Fprintf(&s, `## Workspace
 
@@ -149,7 +157,7 @@ Only change files inside this worktree. Commit your work to %s. Do not switch br
 
 ## Opening the pull request
 
-- When the change is review-ready: commit everything (the worktree must be clean), push with `+"`git push -u origin %s`"+`, then open a pull request with `+"`gh pr create --base %s --head %s`"+`. If a pull request for this branch already exists (`+"`gh pr view %s`"+`), push to it instead of opening another. The pull request body must include "Closes #%d"%s.
+- When the change is review-ready: commit everything (the worktree must be clean), push with `+"`git push -u origin %s`"+`, then open a pull request with `+"`gh pr create --base %s --head %s`"+`. If a pull request for this branch already exists (`+"`gh pr view %s`"+`), push to it instead of opening another. %s
 - Take prNumber and prUrl from `+"`gh pr view --json number,url`"+` after pushing; do not guess them.
 %s
 ## When you need a decision
@@ -170,8 +178,15 @@ Reply with JSON matching the provided schema:
 %s- "blocked" when you need a decision, as described above.
 - "failed" when you cannot complete the task: say why in summary.
 Set nextObjective to null except for "checkpoint". Set fields that do not apply to null, or [] for validation and questions. %s
-`, b.Worktree, b.Branch, b.BaseBranch, b.Branch, b.Branch, b.BaseBranch, b.Branch, b.Branch, b.Key.Number, prBodyRule(b.PRInstructions), prSection(b.PRInstructions), plannedStatus(b.Planning), checkpointStatus(b), documentsRule(b.Planning))
+`, b.Worktree, b.Branch, b.BaseBranch, b.Branch, b.Branch, b.BaseBranch, b.Branch, b.Branch, prIssueRule(b), prSection(b.PRInstructions), plannedStatus(b.Planning), checkpointStatus(b), documentsRule(b.Planning))
 	return s.String()
+}
+
+func prIssueRule(b TaskBrief) string {
+	if b.Key.Source == task.Linear {
+		return "The pull request title must include " + b.Identifier + ", and its body must link " + b.URL + ". Do not add a GitHub Closes #N line."
+	}
+	return fmt.Sprintf("The pull request body must include \"Closes #%d\"%s.", b.Key.Number, prBodyRule(b.PRInstructions))
 }
 
 // planningSection turns the first turn into planning only: foreman posts the
