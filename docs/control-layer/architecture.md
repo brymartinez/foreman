@@ -25,6 +25,10 @@ internal/task         the durable model: Record, State, Delegation, Decision, At
 queries resolve configured project URLs to project IDs, then page through issues
 assigned to the authenticated user. Issue state types `completed` and `canceled`
 map to closed; repository and PR operations remain on `GitHubClient`.
+The detached runner receives `owner/repo#linear:<issue ID>` for Linear tasks and
+`owner/repo#<number>` for GitHub tasks. Linear runner logs use the stable issue ID,
+so tasks in one repository cannot share a `#0` log. The end-to-end fixture points
+`FOREMAN_LINEAR_ENDPOINT` at a local GraphQL stand-in.
 
 ## Execution model
 

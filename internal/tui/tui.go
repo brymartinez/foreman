@@ -437,12 +437,19 @@ func startResult(ctx context.Context, s Source, req app.StartRequest) result {
 		return result{err: fmt.Errorf("start %s#%d: %w", req.Repo, req.Issue, err), finished: true}
 	}
 	if rec.State == task.Failed {
-		return result{message: fmt.Sprintf("! %s#%d could not start: %s", rec.Repo, rec.Number, rec.LastOutcome.Summary), finished: true}
+		return result{message: fmt.Sprintf("! %s could not start: %s", recordRef(rec), rec.LastOutcome.Summary), finished: true}
 	}
 	if p := rec.Delegation.Profile; p != nil {
-		return result{message: fmt.Sprintf("Started %s#%d with profile %s on %s", rec.Repo, rec.Number, p.Name, rec.Delegation.Branch), finished: true}
+		return result{message: fmt.Sprintf("Started %s with profile %s on %s", recordRef(rec), p.Name, rec.Delegation.Branch), finished: true}
 	}
-	return result{message: fmt.Sprintf("Started %s#%d on %s", rec.Repo, rec.Number, rec.Delegation.Branch), finished: true}
+	return result{message: fmt.Sprintf("Started %s on %s", recordRef(rec), rec.Delegation.Branch), finished: true}
+}
+
+func recordRef(rec *task.Record) string {
+	if rec.Source == task.Linear {
+		return fmt.Sprintf("%s · %s", rec.Repo, rec.Identifier)
+	}
+	return fmt.Sprintf("%s#%d", rec.Repo, rec.Number)
 }
 
 // resume puts a REVIEWED task back to work on the comments on its pull request. Like

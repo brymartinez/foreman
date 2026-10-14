@@ -93,10 +93,14 @@ func run(argv []string) int {
 		ReasoningEffort: cfg.Codex.ReasoningEffort, PlanReasoningEffort: cfg.Codex.PlanReasoningEffort, ReviewReasoningEffort: cfg.Codex.ReviewReasoningEffort, Exec: agent.RunCommand}
 	// A routing.yaml that fails to load stops only the dashboard starts that route.
 	routes, routesErr := routing.Load(routing.Path(cfg.Path))
+	linearClient := linear.New(os.Getenv("LINEAR_API_KEY"))
+	if endpoint := os.Getenv("FOREMAN_LINEAR_ENDPOINT"); endpoint != "" {
+		linearClient.Endpoint = endpoint
+	}
 	a := app.App{
 		Store:          store.Markdown{Dir: cfg.TasksDir},
 		GitHub:         github.New(),
-		Linear:         linear.New(os.Getenv("LINEAR_API_KEY")),
+		Linear:         linearClient,
 		LinearProjects: cfg.LinearProjects,
 		Repositories:   github.New(),
 		Worktrees:      worktree.Git{},
@@ -150,7 +154,7 @@ func run(argv []string) int {
 		log := &logs.Writer{W: os.Stdout}
 		defer log.Flush()
 		fmt.Fprintf(log, "foreman: runner %d started\n", os.Getpid())
-		if err := a.RunTask(ctx, task.Key{Repo: cmd.Repo, Number: cmd.Issue}, os.Getpid(), log); err != nil {
+		if err := a.RunTask(ctx, task.Key{Repo: cmd.Repo, Number: cmd.Issue, Source: cmd.Source, ExternalID: cmd.ExternalID}, os.Getpid(), log); err != nil {
 			fmt.Fprintf(log, "foreman: %v\n", err)
 			return 1
 		}

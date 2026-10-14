@@ -26,6 +26,9 @@ type Processes struct {
 }
 
 func (p Processes) logPath(key task.Key) string {
+	if key.Source == task.Linear {
+		return filepath.Join(p.LogDir, fmt.Sprintf("%s-linear-%s.log", strings.ReplaceAll(string(key.Repo), "/", "-"), key.ExternalID))
+	}
 	return filepath.Join(p.LogDir, fmt.Sprintf("%s-%d.log", strings.ReplaceAll(string(key.Repo), "/", "-"), key.Number))
 }
 
@@ -58,7 +61,11 @@ func (p Processes) Spawn(key task.Key) (int, string, error) {
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
 		return 0, "", err
 	}
-	cmd := exec.Command(exe, RunCommand, fmt.Sprintf("%s#%d", key.Repo, key.Number))
+	issueArg := fmt.Sprintf("%s#%d", key.Repo, key.Number)
+	if key.Source == task.Linear {
+		issueArg = fmt.Sprintf("%s#linear:%s", key.Repo, key.ExternalID)
+	}
+	cmd := exec.Command(exe, RunCommand, issueArg)
 	// The log must be the file itself. Any other writer makes this process copy
 	// the output through a pipe, and the runner dies once this process exits.
 	cmd.Stdout, cmd.Stderr = log, log

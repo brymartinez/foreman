@@ -12,7 +12,12 @@ import (
 	"github.com/brymartinez/foreman/internal/task"
 )
 
-func issueLabel(k task.Key) string { return fmt.Sprintf("%s#%d", k.Repo, k.Number) }
+func issueLabel(k task.Key, identifier string) string {
+	if k.Source == task.Linear {
+		return fmt.Sprintf("%s · %s", k.Repo, identifier)
+	}
+	return fmt.Sprintf("%s#%d", k.Repo, k.Number)
+}
 
 func mark(ok bool) string {
 	if ok {
@@ -112,7 +117,7 @@ func JoinFacts(facts ...string) string {
 // pane takes them apart, because the padding is wider than a narrow pane and the
 // state is what a truncation would cut.
 func TaskHead(r *task.Record) (identity, agent, state string) {
-	return issueLabel(r.Key), agentName(r.Delegation.Implementer.Agent), string(r.State)
+	return issueLabel(r.Key, r.Identifier), agentName(r.Delegation.Implementer.Agent), string(r.State)
 }
 
 func reviewBadge(r *task.Record) string {
@@ -141,7 +146,7 @@ func reviewState(r *task.Record) string {
 }
 
 func Show(w io.Writer, r *task.Record) {
-	fmt.Fprintf(w, "%s %s\n%s · %s\n\n", issueLabel(r.Key), r.Title, r.Repo, r.URL)
+	fmt.Fprintf(w, "%s %s\n%s · %s\n\n", issueLabel(r.Key, r.Identifier), r.Title, r.Repo, r.URL)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	row := func(k, v string) { fmt.Fprintf(tw, "%s\t%s\n", k, orDash(v)) }
 	row("State", string(r.State))

@@ -2,20 +2,13 @@
 
 ## Current stage
 
-Issue 58 is in progress. Configuration, source-qualified task records, the Linear
-GraphQL adapter, and mixed inbox refresh are complete. The dashboard filters with
-`-s`, groups source rows, warns on partial refresh, and pauses auto starts until all
-selected sources refresh. GitHub-only selection works without a Linear key. Dashboard
-start and routing now carry the Linear key, read Linear issues and comments, and
-recheck the exact `triaged` label for auto starts. Manual starts skip that check.
-The runner now reads the stored issue source and posts or edits planning comments
-there. Linear PR prompts require the identifier in the title and issue URL in the
-body, without a GitHub closing keyword. Delegated tasks refresh through their stored
-source across inbox filters. A stopped Linear task becomes DONE when its issue closes,
-including completed and canceled Linear states. Linear tasks remain available for
-resume in a GitHub-only view, and legacy GitHub tasks in mapped repositories refresh
-in a Linear-only view. The mixed-source end-to-end scenario and README remain for the
-next checkpoint.
+Stage 58 (per-repository Linear issue sources) is complete. Configuration maps GitHub
+repositories to Linear projects. The dashboard selects GitHub, Linear, or both issue
+sources, groups inbox rows, and pauses auto starts after a partial refresh. Linear
+tasks keep their source and issue ID across runner starts and source filters. Planning
+comments go to Linear, while branches, PRs, reviews, and CI stay on GitHub. The mixed
+end-to-end scenario covers filtering, delegation through clean PR review, and failed
+refresh gating. Vet, Go tests, build, and the full end-to-end script pass.
 
 Reviewer availability fallback is complete. A fresh quota-axi report can move a
 review to the implementer's agent when the competing agent is confirmed not set up

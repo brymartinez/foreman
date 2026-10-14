@@ -94,6 +94,14 @@ func TestParseRunNeedsAQualifiedIssue(t *testing.T) {
 	}
 }
 
+func TestParseRunKeepsLinearIssueIdentity(t *testing.T) {
+	got, err := Parse([]string{"__run", "a/b#linear:11111111-1111-4111-8111-111111111111"})
+	want := Command{Name: Run, Repo: "a/b", Source: task.Linear, ExternalID: "11111111-1111-4111-8111-111111111111"}
+	if err != nil || got != want {
+		t.Fatalf("Parse Linear runner key = %+v, %v; want %+v", got, err, want)
+	}
+}
+
 func TestUsageListsOnlyTheLaunchFlags(t *testing.T) {
 	for _, flag := range []string{"-a, --auto", "--no-auto", "-c", "-h, --help", "--version"} {
 		if !strings.Contains(Usage, flag) {

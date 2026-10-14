@@ -33,11 +33,12 @@ const (
 )
 
 type Command struct {
-	Name   Name
-	Repo   task.Repo // set for __run, given as owner/repo#825
-	Issue  int
-	Auto   AutoMode
-	Source task.Source // empty selects both issue sources
+	Name       Name
+	Repo       task.Repo // set for __run, given as owner/repo#825
+	Issue      int
+	ExternalID string
+	Auto       AutoMode
+	Source     task.Source // empty selects both issue sources
 }
 
 const Usage = `foreman: delegate GitHub issues to Claude Code or Codex
@@ -74,6 +75,16 @@ func Parse(argv []string) (Command, error) {
 		}
 		return Command{Name: Version}, nil
 	case string(Run):
+		if len(rest) == 1 {
+			repoPart, id, found := strings.Cut(rest[0], "#linear:")
+			if found {
+				repo, err := task.ParseRepo(repoPart)
+				if err != nil || id == "" || strings.ContainsAny(id, "/#:") {
+					return Command{}, usagef("%s needs owner/repo#linear:ID", name)
+				}
+				return Command{Name: Run, Repo: repo, Source: task.Linear, ExternalID: id}, nil
+			}
+		}
 		repo, n, err := issueArg(name, rest)
 		if err == nil && repo == "" {
 			err = usagef("%s needs owner/repo#N", name)
