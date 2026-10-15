@@ -27,6 +27,33 @@ type fakeWorktrees struct {
 	checks    []MergeCheck
 	conflicts [][]string // consumed one per check; clean once empty
 	checkErr  error
+	// identities records each ConfigureIdentity call as "dir name <email>".
+	identities  []string
+	identityErr error
+}
+
+func (f *fakeWorktrees) ConfigureIdentity(_ context.Context, dir, name, email string) error {
+	f.identities = append(f.identities, dir+" "+name+" <"+email+">")
+	return f.identityErr
+}
+
+// fakeAccounts plays gh's active account and the SSH key's account. Both start as
+// octo-work, the account most tests pin.
+type fakeAccounts struct {
+	active  Account
+	err     error
+	ssh     []SSHAccount
+	sshErr  error
+	lookups int
+}
+
+func (f *fakeAccounts) ActiveAccount(context.Context) (Account, error) {
+	f.lookups++
+	return f.active, f.err
+}
+
+func (f *fakeAccounts) PushAccounts(context.Context, string) ([]SSHAccount, error) {
+	return f.ssh, f.sshErr
 }
 
 func (f *fakeWorktrees) Head(_ context.Context, _ string) (string, error) {
@@ -225,6 +252,7 @@ type fixture struct {
 	claude  *fakeAgent
 	codex   *fakeAgent
 	notes   *fakeNotifier
+	accts   *fakeAccounts
 }
 
 func newFixture() fixture {
@@ -246,10 +274,14 @@ func newFixture() fixture {
 		claude:  &fakeAgent{name: task.Claude},
 		codex:   &fakeAgent{name: task.Codex},
 		notes:   &fakeNotifier{},
+		accts: &fakeAccounts{
+			active: Account{Login: "octo-work", ID: 42},
+			ssh:    []SSHAccount{{Host: "git@github-work", Login: "octo-work"}},
+		},
 	}
 	f.app = App{
-		Notifier: f.notes,
-		Store:    f.store, GitHub: f.gh, Worktrees: f.wt, Runners: f.runners, Stages: f.stages,
+		Notifier: f.notes, Accounts: f.accts, RemoteAuth: f.accts,
+		Store: f.store, GitHub: f.gh, Worktrees: f.wt, Runners: f.runners, Stages: f.stages,
 		Agents:       map[task.Agent]AgentAdapter{task.Claude: f.claude, task.Codex: f.codex},
 		WorktreesDir: "/wt", Repositories: f.repos, RepositoriesDir: "/repos",
 		Now: func() time.Time { return now },

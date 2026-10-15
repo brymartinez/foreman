@@ -153,6 +153,10 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			RouteReason:    req.RouteReason,
 			CheckpointHead: head,
 		}
+		// The pin belongs to the task, not the agent, so every restart keeps it.
+		if prev != nil {
+			cur.Delegation.Account, cur.Delegation.AccountEmail = prev.Account, prev.AccountEmail
+		}
 		// The same branch has the same PR, so a restart can pick up at its review.
 		// Another implementer starts over: its reviewer wrote the existing PR. A
 		// PR_CLOSED task's PR cannot be picked up, and keeping its number would have
@@ -237,6 +241,9 @@ func (a App) launch(ctx context.Context, key task.Key) (*task.Record, error) {
 	var logPath string
 	spawnErr := a.restoreWorktree(ctx, key)
 	if spawnErr == nil {
+		spawnErr = a.launchAccount(ctx, key)
+	}
+	if spawnErr == nil {
 		pid, logPath, spawnErr = a.Runners.Spawn(key)
 	}
 	return a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
@@ -281,6 +288,16 @@ func (a App) restoreWorktree(ctx context.Context, key task.Key) error {
 		return cur, nil
 	})
 	return err
+}
+
+// launchAccount checks the task's account before a runner starts, so a mismatch
+// fails the task without spending a runner on it.
+func (a App) launchAccount(ctx context.Context, key task.Key) error {
+	rec, err := a.Store.Get(ctx, key)
+	if err != nil || rec == nil || rec.Delegation == nil {
+		return err
+	}
+	return a.checkAccount(ctx, rec)
 }
 
 // logSize is where the next attempt's lines start in the task log. The runner has not

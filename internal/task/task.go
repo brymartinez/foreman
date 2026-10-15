@@ -137,9 +137,14 @@ type Delegation struct {
 	RouteLogged bool
 	StartedAt   time.Time
 	Reviewer    Agent
-	Branch      string
-	BaseRef     string
-	Worktree    string
+	// Account is the GitHub login active in gh when the task first launched. Every
+	// commit, push, and PR action of the task runs as it. AccountEmail is its noreply
+	// address. Tasks started before pinning have neither until their next launch.
+	Account      string
+	AccountEmail string
+	Branch       string
+	BaseRef      string
+	Worktree     string
 	// WorktreeRemovedAt is set once cleanup removed the worktree; the branch may remain.
 	WorktreeRemovedAt time.Time
 	ContextFile       string

@@ -8,10 +8,10 @@ internal/routing      routing.yaml: profiles, rules, default, and their validati
 internal/render       terminal formatting of app results
 internal/tui          the dashboard: pure Model and Frame, one terminal loop
 internal/app          orchestration + ports.go (the interfaces below)
-  ├── github          GitHubClient and RepositoryManager over `gh`
+  ├── github          GitHubClient, RepositoryManager, and AccountProvider over `gh`
   ├── linear          IssueTracker over Linear GraphQL using a personal API key
   ├── store           TaskStore over Markdown + YAML frontmatter
-  ├── worktree        WorktreeManager over `git worktree`
+  ├── worktree        WorktreeManager over `git worktree`; RemoteAuth over `ssh -T`
   ├── agent           outcome contract, prompt, claude.go / codex.go adapters, selector
   ├── quota           QuotaChecker over the optional `quota-axi`
   ├── runner          spawns and checks the detached `foreman __run` process
@@ -41,6 +41,8 @@ app.Start, from the dashboard (enter on an inbox issue, or auto mode)
   ├─ gh: repo + default branch of the managed clone, fetch issue
   ├─ git: ensure worktree <root>/<owner>-<repo>/825-<slug> on branch <type>/825-<slug>
   ├─ store: task file, state WORKING, session id
+  ├─ pin: the active gh account (kept on restarts), worktree commit identity, SSH
+  │       push account check; a mismatch is FAILED and nothing launches
   └─ spawn detached `foreman __run owner/repo#825` (pid + log recorded), exit
 
 runner (one process per task, exits when the task leaves WORKING/REVIEWING):
@@ -236,6 +238,24 @@ the same commit. The commit message records why it changed.
   `finishTurn` (one write through the uncancelled context, the cancel outcome, and
   usage). Each caller passes its own mapping: `applyTurn`, `applyFeedbackTurn`, or the
   conflict repair's. The code is in `internal/app/run.go` and `internal/app/turn.go`.
+- **Each task runs as one GitHub account.** The first launch stores the login and
+  noreply address (`<id>+<login>@users.noreply.github.com`) that `gh api user` reports
+  as `account` and `account_email`. Restarts and resumes keep the pin. A task file
+  from before pinning takes the active account at its next launch. `checkAccount`
+  runs before every launch, in `runTurn` before every implementer turn, and before
+  each checkpoint repair resume, because the agent commits, pushes, and opens PRs
+  itself and `gh auth switch` can happen at any time. It fails the task when gh is on
+  another login, and sets `user.name` and `user.email` with `git config --worktree`
+  (`extensions.worktreeConfig`). Then, for each SSH URL in
+  `git remote get-url --push --all origin`, it runs `ssh -T` against the URL's host
+  with the SSH command git push uses (`GIT_SSH_COMMAND`, `core.sshCommand`, `GIT_SSH`,
+  then `ssh`), so `~/.ssh/config` and any `-i` pick the same key. It fails the task
+  when GitHub's greeting names another login. A failed lookup also fails the task. The
+  error names both accounts and the fix. Rejected: plain `git config`, which linked
+  worktrees share with the main checkout; `GIT_AUTHOR_*` environment, which a commit
+  made in the worktree outside the runner would not get; and asking the agent to
+  check, which cannot be enforced. Published commits are never rewritten. HTTPS push
+  URLs get the identity but no push check.
 - **Idempotent steps.** Creating the worktree and the task file each check whether the
   thing already exists, and so does the agent's PR step (`gh pr view` before
   `gh pr create`). That lets a crashed runner be restarted from the
