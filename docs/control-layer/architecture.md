@@ -636,16 +636,20 @@ the same commit. The commit message records why it changed.
   - A `reusable` proposal backed by a maintainer (a recorded decision or a developer's
     PR comment) is active at once. An `observed` one is a candidate until evidence
     from two tasks backs it.
-  - The evaluator's `source: maintainer` counts only when the task has an answered
-    decision or a human PR comment (`Evaluation.MaintainerEvidence`). Otherwise Go
-    treats it as observed and logs it, so a model cannot invent a correction.
+  - The prompt numbers the task's answered decisions (D1...) and human PR comments
+    (C1...). A `source: maintainer` item must cite some of them in `cites`, and
+    nothing else (`Evaluation.MaintainerRefs`). Otherwise Go treats it as observed
+    and logs it, so a model cannot invent a correction. The evaluator still judges
+    whether the cited item says what it claims; the citations, kept in the evidence,
+    make that judgment auditable.
   - A maintainer revision or retirement applies at once. An observed one applies only
     when its task started after the learning's latest evidence from other tasks.
   - Observed work cannot revive a retired learning; a maintainer proposal can.
   - Re-evaluating a task first removes that task's earlier evidence, so it never
     counts twice.
 - **Learnings are generic.** `knowledge.Sanitize` rejects text with issue, PR, or
-  commit references, URLs, emails, absolute paths, tokens or keys, or more than 300 characters,
+  commit references (including Linear or Jira keys such as `ABC-12`, but not names
+  such as `UTF-8` or `SHA-256`), URLs, emails, absolute paths, tokens or keys, or more than 300 characters,
   and logs the item number and reason, never the text. `knowledge.md` carries no ids,
   issue or PR numbers, or evidence. Repository-relative paths and plain numbers
   stay, because "keep functions under 80 lines" or "internal/app depends only on its
@@ -673,7 +677,8 @@ the same commit. The commit message records why it changed.
   instructions, the issue, decisions, context, and verified facts. Review, selector,
   conflict, and merge prompts never carry it, so review stays independent. A read
   error drops the section and logs a line.
-- **Learning is a side job.** `learning.enabled: false` stops new evaluations;
+- **Learning is a side job.** `learning.enabled: false` stops new evaluations, even
+  from a learner spawned before the change, because `App.Learn` checks it too;
   prompts still read the knowledge already stored. `learning.budget_usd` (default
   0.50) caps one Claude evaluation. Codex reports no cost, so its evaluations have no
   cap, like its other turns. Evaluation errors go to `learning.log` and never

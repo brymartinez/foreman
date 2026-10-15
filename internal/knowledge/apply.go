@@ -2,6 +2,7 @@ package knowledge
 
 import (
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -11,8 +12,9 @@ import (
 //
 // The rules, in order:
 //   - The task's earlier evidence is withdrawn, so a re-evaluation replaces it.
-//   - Without maintainer evidence on the task, a claimed maintainer source counts as
-//     observed: the evaluator cannot invent a correction.
+//   - A maintainer source counts only when it cites the task's own decisions or
+//     comments and nothing else. Otherwise it counts as observed, so the evaluator
+//     cannot invent a correction.
 //   - A one-off proposal stays in the evaluation only.
 //   - A reusable proposal reinforces the learning it supports or repeats, or starts a
 //     new candidate. Observed work cannot revive a retired learning.
@@ -28,9 +30,7 @@ func (s Store) apply(f *learningsFile, ev Evaluation) Evaluation {
 	for i := range f.Learnings {
 		withdraw(&f.Learnings[i], ev.Task)
 	}
-	if !ev.MaintainerEvidence {
-		s.demote(&ev)
-	}
+	s.demote(&ev)
 
 	var kept []Proposal
 	for i, p := range ev.Proposals {
@@ -44,7 +44,7 @@ func (s Store) apply(f *learningsFile, ev Evaluation) Evaluation {
 		if p.Scope != Reusable {
 			continue
 		}
-		evidence := Evidence{Task: ev.Task, At: ev.TaskAt, Source: p.Source, Note: p.Why}
+		evidence := Evidence{Task: ev.Task, At: ev.TaskAt, Source: p.Source, Note: p.Why, Cites: p.Cites}
 		l := find(f, p)
 		switch {
 		case l == nil:
@@ -98,25 +98,38 @@ func (s Store) apply(f *learningsFile, ev Evaluation) Evaluation {
 	return ev
 }
 
-// demote turns maintainer sources into observed ones and logs each by position.
+// demote turns each maintainer source without a valid citation into an observed one
+// and logs it by position. The evaluator still judges whether the cited decision or
+// comment says what it claims; the citation keeps that judgment auditable.
 func (s Store) demote(ev *Evaluation) {
 	for i := range ev.Proposals {
-		if ev.Proposals[i].Source == Maintainer {
-			ev.Proposals[i].Source = Observed
+		p := &ev.Proposals[i]
+		if p.Source == Maintainer && !cited(p.Cites, ev.MaintainerRefs) {
+			p.Source, p.Cites = Observed, nil
 			s.note("proposal", i+1)
 		}
 	}
 	for i := range ev.Revisions {
-		if ev.Revisions[i].Source == Maintainer {
-			ev.Revisions[i].Source = Observed
+		r := &ev.Revisions[i]
+		if r.Source == Maintainer && !cited(r.Cites, ev.MaintainerRefs) {
+			r.Source, r.Cites = Observed, nil
 			s.note("revision", i+1)
 		}
 	}
 }
 
+func cited(cites, refs []string) bool {
+	for _, c := range cites {
+		if !slices.Contains(refs, c) {
+			return false
+		}
+	}
+	return len(cites) > 0
+}
+
 func (s Store) note(what string, n int) {
 	if s.Log != nil {
-		fmt.Fprintf(s.Log, "knowledge: %s %d claims a maintainer source but the task has no maintainer evidence; treated as observed\n", what, n)
+		fmt.Fprintf(s.Log, "knowledge: %s %d claims a maintainer source but cites no maintainer evidence of this task; treated as observed\n", what, n)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -36,7 +37,7 @@ func learnFixture(t *testing.T) (fixture, *fakeEvaluator, knowledge.Store) {
 	f := newFixture()
 	ks := knowledge.Store{Dir: t.TempDir()}
 	ev := &fakeEvaluator{out: agent.Evaluation{Assessment: "went fine", Proposals: []knowledge.Proposal{proposal("Run make lint before pushing.")}}}
-	f.app.Knowledge, f.app.Evaluator, f.app.LearningBudgetUSD = ks, ev, 0.75
+	f.app.Knowledge, f.app.Evaluator, f.app.LearningBudgetUSD, f.app.Learning = ks, ev, 0.75, true
 	f.store.recs[learnKey] = &task.Record{
 		Key: learnKey, Kind: task.Issue, Title: "Add retries", State: task.ReadyForHuman,
 		Delegation: &task.Delegation{
@@ -310,32 +311,50 @@ func TestLearnLeavesOutCommentsFromBots(t *testing.T) {
 	}
 }
 
-func TestLearnMarksMaintainerEvidenceOnlyWhenTheTaskHasDecisionsOrComments(t *testing.T) {
-	t.Run("answered decision", func(t *testing.T) {
-		f, _, ks := learnFixture(t)
-		if err := f.app.Learn(context.Background(), learnKey, io.Discard); err != nil {
-			t.Fatal(err)
+func TestLearnLabelsDecisionsAndCommentsAndStoresTheirIDs(t *testing.T) {
+	f, ev, ks := learnFixture(t)
+	if err := f.app.Learn(context.Background(), learnKey, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	p := ev.calls[0].Prompt
+	for _, want := range []string{"D1. Which backoff should retries use?", "C1: please keep the old flag"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt lacks %q:\n%s", want, p)
 		}
-		if stored, _ := ks.Evaluation("acme/api", "41"); stored == nil || !stored.MaintainerEvidence {
-			t.Errorf("stored = %+v, want maintainer evidence", stored)
-		}
-	})
-	t.Run("no decisions or comments", func(t *testing.T) {
-		f, ev, ks := learnFixture(t)
-		f.store.recs[learnKey].Decisions = nil
-		f.gh.prComments = nil
-		p := proposal("Claimed by the evaluator.")
-		p.Source = knowledge.Maintainer
-		ev.out.Proposals = []knowledge.Proposal{p}
-		if err := f.app.Learn(context.Background(), learnKey, io.Discard); err != nil {
-			t.Fatal(err)
-		}
-		stored, _ := ks.Evaluation("acme/api", "41")
-		if stored == nil || stored.MaintainerEvidence {
-			t.Errorf("stored = %+v, want no maintainer evidence", stored)
-		}
-		if ls, _ := ks.Learnings("acme/api"); len(ls) != 1 || ls[0].Status != knowledge.Candidate {
-			t.Errorf("learnings = %+v, want a candidate", ls)
-		}
-	})
+	}
+	stored, _ := ks.Evaluation("acme/api", "41")
+	if stored == nil || !slices.Equal(stored.MaintainerRefs, []string{"D1", "C1"}) {
+		t.Errorf("stored = %+v, want refs D1 and C1", stored)
+	}
+}
+
+func TestLearnTreatsAMaintainerClaimCitingNothingRealAsObserved(t *testing.T) {
+	f, ev, ks := learnFixture(t)
+	p := proposal("Claimed by the evaluator.")
+	p.Source, p.Cites = knowledge.Maintainer, []string{"C4"}
+	ev.out.Proposals = []knowledge.Proposal{p}
+	if err := f.app.Learn(context.Background(), learnKey, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if ls, _ := ks.Learnings("acme/api"); len(ls) != 1 || ls[0].Status != knowledge.Candidate {
+		t.Errorf("learnings = %+v, want a candidate", ls)
+	}
+}
+
+func TestLearnDoesNothingWhileLearningIsOff(t *testing.T) {
+	f, ev, ks := learnFixture(t)
+	f.app.Learning = false
+	var log strings.Builder
+	if err := f.app.Learn(context.Background(), learnKey, &log); err != nil {
+		t.Fatal(err)
+	}
+	if len(ev.calls) != 0 {
+		t.Errorf("evaluator ran %d times with learning off", len(ev.calls))
+	}
+	if at, _ := ks.Attempt("acme/api", "41"); at != nil {
+		t.Errorf("recorded an attempt with learning off: %+v", at)
+	}
+	if !strings.Contains(log.String(), "learning is off") {
+		t.Errorf("log = %q", log.String())
+	}
 }

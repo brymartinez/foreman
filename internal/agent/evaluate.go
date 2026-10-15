@@ -47,6 +47,7 @@ func ParseEvaluation(raw []byte) (Evaluation, error) {
 			Text   *string          `json:"text"`
 			Reason string           `json:"reason"`
 			Source knowledge.Source `json:"source"`
+			Cites  []string         `json:"cites"`
 		} `json:"revisions"`
 	}
 	if err := json.Unmarshal(raw, &w); err != nil {
@@ -70,10 +71,16 @@ func ParseEvaluation(raw []byte) (Evaluation, error) {
 		if len(p.Supports) == 0 {
 			p.Supports = nil
 		}
+		if len(p.Cites) == 0 {
+			p.Cites = nil
+		}
 		out.Proposals = append(out.Proposals, p)
 	}
 	for i, r := range w.Revisions {
 		rev := knowledge.Revision{ID: strings.TrimSpace(r.ID), Action: r.Action, Reason: r.Reason, Source: r.Source}
+		if len(r.Cites) > 0 {
+			rev.Cites = r.Cites
+		}
 		if r.Text != nil {
 			rev.Text = *r.Text
 		}
@@ -221,6 +228,19 @@ type EvidenceReview struct {
 	HeadAdvanced bool
 }
 
+// MaintainerRefs are the ids EvaluationPrompt gives the decisions and comments, the
+// only ones a maintainer source may cite.
+func (b EvaluationBrief) MaintainerRefs() []string {
+	var refs []string
+	for i := range b.Decisions {
+		refs = append(refs, fmt.Sprintf("D%d", i+1))
+	}
+	for i := range b.Feedback {
+		refs = append(refs, fmt.Sprintf("C%d", i+1))
+	}
+	return refs
+}
+
 func EvaluationPrompt(b EvaluationBrief) string {
 	var s strings.Builder
 	fmt.Fprintf(&s, `You evaluate one finished task foreman delegated in the repository %s, so later tasks in this repository go better.
@@ -231,10 +251,11 @@ Read the evidence below and answer with the JSON the schema asks for:
 - signals: short notes on what in the evidence drove the assessment.
 - proposals: learnings this task supports. Each has a kind (convention: how this repository wants code written; fact: something true about this repository; practice: how to work on it), short generic text, a scope, why, a source, and the ids of current learnings it supports.
   - scope reusable means the learning helps future tasks in this repository; one_off means it applies to this task only.
-  - source maintainer means a recorded decision or a developer's PR comment backs it; observed means you inferred it from the work.
+  - source maintainer means a recorded decision or a developer's PR comment says it; observed means you inferred it from the work.
+  - cites lists the ids of the decisions (D1) and comments (C1) below that say it. A maintainer source needs at least one, and only ones that say it; otherwise foreman treats it as observed. Use an empty list for observed.
   - Text must be generic: no issue, PR, or commit numbers, no URLs, no file paths outside the repository, no names, no secrets. One sentence.
   - Prefer supporting an existing learning over proposing a near duplicate.
-- revisions: changes to current learnings this task contradicts. action revise rewrites the text; retire removes it. Give the learning's id, a reason, and a source. Use null text for retire.
+- revisions: changes to current learnings this task contradicts. action revise rewrites the text; retire removes it. Give the learning's id, a reason, a source, and cites as for proposals. Use null text for retire.
 
 Time and cost are context, not a score. A long or expensive task is not a failure by itself. CI results are not evidence and are left out. Propose nothing when the evidence shows nothing reusable.
 
@@ -249,7 +270,7 @@ PR outcome: %s
 		s.WriteString("None.\n")
 	}
 	for i, d := range b.Decisions {
-		fmt.Fprintf(&s, "%d. %s\n   Options: %s\n   Recommended: %s. Answer: %s.", i+1, d.Question, strings.Join(d.Options, "; "), d.Recommendation, d.Answer)
+		fmt.Fprintf(&s, "D%d. %s\n   Options: %s\n   Recommended: %s. Answer: %s.", i+1, d.Question, strings.Join(d.Options, "; "), d.Recommendation, d.Answer)
 		if d.Overrode {
 			s.WriteString(" The developer overrode the recommendation.")
 		}
@@ -279,8 +300,8 @@ PR outcome: %s
 	if len(b.Feedback) == 0 {
 		s.WriteString("None.\n")
 	}
-	for _, f := range b.Feedback {
-		fmt.Fprintf(&s, "- %s\n", f)
+	for i, f := range b.Feedback {
+		fmt.Fprintf(&s, "C%d: %s\n", i+1, f)
 	}
 
 	s.WriteString("\n## Time and cost (context, not a score)\n\n")

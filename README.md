@@ -412,11 +412,12 @@ What it learns is kept per repository under `knowledge_dir`:
 ```
 
 A learning becomes active when the developer backs it, through a decision answer or a
-PR comment, or when two tasks support it. A task with neither cannot back one on the
-developer's behalf. One task's observation stays a candidate.
+PR comment, or when two tasks support it. The evaluator must cite the decision or
+comment by id; a claim without a real citation from the task counts as one task's
+observation. One task's observation stays a candidate.
 The developer's correction retires or rewrites a learning at once; observed work does
 so only from a newer task. Learnings are short and generic: foreman drops any with
-issue or PR numbers, commit hashes, URLs, emails, absolute paths, or secret-shaped
+issue or PR numbers, issue keys such as `ABC-12`, commit hashes, URLs, emails, absolute paths, or secret-shaped
 text. Paths inside the repository are kept.
 
 Planning and implementation prompts carry up to 8 active learnings in a section of

@@ -16,9 +16,9 @@ const fixtureRepo = "ridezoomo/armada-backend"
 // learn stores texts as active learnings of repo, backed by a maintainer.
 func learn(t *testing.T, ks knowledge.Store, repo, taskID string, texts ...string) {
 	t.Helper()
-	ev := knowledge.Evaluation{Task: taskID, TaskAt: t0, At: t0, Fingerprint: "fp", Assessment: "ok", MaintainerEvidence: true}
+	ev := knowledge.Evaluation{Task: taskID, TaskAt: t0, At: t0, Fingerprint: "fp", Assessment: "ok", MaintainerRefs: []string{"D1"}}
 	for _, text := range texts {
-		ev.Proposals = append(ev.Proposals, knowledge.Proposal{Kind: knowledge.Convention, Text: text, Scope: knowledge.Reusable, Source: knowledge.Maintainer})
+		ev.Proposals = append(ev.Proposals, knowledge.Proposal{Kind: knowledge.Convention, Text: text, Scope: knowledge.Reusable, Source: knowledge.Maintainer, Cites: []string{"D1"}})
 	}
 	if err := ks.Apply(repo, ev); err != nil {
 		t.Fatal(err)

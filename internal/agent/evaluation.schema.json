@@ -1,23 +1,77 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["assessment", "signals", "proposals", "revisions"],
+  "required": [
+    "assessment",
+    "signals",
+    "proposals",
+    "revisions"
+  ],
   "properties": {
-    "assessment": { "type": "string" },
-    "signals": { "type": "array", "items": { "type": "string" } },
+    "assessment": {
+      "type": "string"
+    },
+    "signals": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "proposals": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["kind", "text", "scope", "why", "source", "supports"],
+        "required": [
+          "kind",
+          "text",
+          "scope",
+          "why",
+          "source",
+          "supports",
+          "cites"
+        ],
         "properties": {
-          "kind": { "type": "string", "enum": ["convention", "fact", "practice"] },
-          "text": { "type": "string" },
-          "scope": { "type": "string", "enum": ["reusable", "one_off"] },
-          "why": { "type": "string" },
-          "source": { "type": "string", "enum": ["maintainer", "observed"] },
-          "supports": { "type": "array", "items": { "type": "string" } }
+          "kind": {
+            "type": "string",
+            "enum": [
+              "convention",
+              "fact",
+              "practice"
+            ]
+          },
+          "text": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "reusable",
+              "one_off"
+            ]
+          },
+          "why": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "maintainer",
+              "observed"
+            ]
+          },
+          "supports": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cites": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
         }
       }
     },
@@ -26,13 +80,47 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "action", "text", "reason", "source"],
+        "required": [
+          "id",
+          "action",
+          "text",
+          "reason",
+          "source",
+          "cites"
+        ],
         "properties": {
-          "id": { "type": "string" },
-          "action": { "type": "string", "enum": ["revise", "retire"] },
-          "text": { "type": ["string", "null"] },
-          "reason": { "type": "string" },
-          "source": { "type": "string", "enum": ["maintainer", "observed"] }
+          "id": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "revise",
+              "retire"
+            ]
+          },
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "maintainer",
+              "observed"
+            ]
+          },
+          "cites": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
         }
       }
     }

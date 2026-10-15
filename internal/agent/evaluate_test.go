@@ -19,11 +19,11 @@ const evaluationJSON = `{
 	"assessment": "the plan held up",
 	"signals": ["two review rounds"],
 	"proposals": [
-		{"kind": "convention", "text": "Run make lint before pushing.", "scope": "reusable", "why": "the reviewer flagged lint twice", "source": "observed", "supports": ["L2"]},
-		{"kind": "fact", "text": "The fixture needs a token.", "scope": "one_off", "why": "only this task", "source": "maintainer", "supports": []}
+		{"kind": "convention", "text": "Run make lint before pushing.", "scope": "reusable", "why": "the reviewer flagged lint twice", "source": "observed", "supports": ["L2"], "cites": []},
+		{"kind": "fact", "text": "The fixture needs a token.", "scope": "one_off", "why": "only this task", "source": "maintainer", "supports": [], "cites": ["D1"]}
 	],
 	"revisions": [
-		{"id": "L1", "action": "retire", "text": null, "reason": "the maintainer chose otherwise", "source": "maintainer"}
+		{"id": "L1", "action": "retire", "text": null, "reason": "the maintainer chose otherwise", "source": "maintainer", "cites": ["C2"]}
 	]
 }`
 
@@ -46,18 +46,19 @@ func TestParseEvaluationReadsProposalsAndRevisions(t *testing.T) {
 	}
 	want := []knowledge.Proposal{
 		{Kind: knowledge.Convention, Text: "Run make lint before pushing.", Scope: knowledge.Reusable, Why: "the reviewer flagged lint twice", Source: knowledge.Observed, Supports: []string{"L2"}},
-		{Kind: knowledge.Fact, Text: "The fixture needs a token.", Scope: knowledge.OneOff, Why: "only this task", Source: knowledge.Maintainer},
+		{Kind: knowledge.Fact, Text: "The fixture needs a token.", Scope: knowledge.OneOff, Why: "only this task", Source: knowledge.Maintainer, Cites: []string{"D1"}},
 	}
 	if len(got.Proposals) != 2 {
 		t.Fatalf("proposals = %+v", got.Proposals)
 	}
 	for i, p := range got.Proposals {
 		w := want[i]
-		if p.Kind != w.Kind || p.Text != w.Text || p.Scope != w.Scope || p.Why != w.Why || p.Source != w.Source || !slices.Equal(p.Supports, w.Supports) {
+		if p.Kind != w.Kind || p.Text != w.Text || p.Scope != w.Scope || p.Why != w.Why || p.Source != w.Source || !slices.Equal(p.Supports, w.Supports) || !slices.Equal(p.Cites, w.Cites) {
 			t.Errorf("proposal %d = %+v, want %+v", i, p, w)
 		}
 	}
-	if len(got.Revisions) != 1 || got.Revisions[0] != (knowledge.Revision{ID: "L1", Action: knowledge.Retire, Reason: "the maintainer chose otherwise", Source: knowledge.Maintainer}) {
+	if r := got.Revisions; len(r) != 1 || r[0].ID != "L1" || r[0].Action != knowledge.Retire || r[0].Reason != "the maintainer chose otherwise" ||
+		r[0].Source != knowledge.Maintainer || !slices.Equal(r[0].Cites, []string{"C2"}) {
 		t.Errorf("revisions = %+v", got.Revisions)
 	}
 }
@@ -204,6 +205,7 @@ func TestEvaluationPromptHoldsTheEvidenceAndLabelsTimeAndCostAsContext(t *testin
 		"planning: 10m", "review: 25m", "$1.50", "2000 input", "Bash: 7", "Read: 3", "merged",
 		"L1", "Use fixed backoff.", "smooth",
 		"context, not a score", "CI", "one_off", "maintainer", "observed",
+		"D1. Which backoff?", "C1: please keep the old flag", "cites",
 	} {
 		if !strings.Contains(p, want) {
 			t.Errorf("prompt lacks %q:\n%s", want, p)

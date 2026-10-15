@@ -951,7 +951,7 @@ evaluated() {
 # propose <title> writes the evaluator's answer for that issue: one reusable,
 # observed practice.
 propose() {
-	printf '{"assessment":"went fine","signals":[],"proposals":[{"kind":"practice","text":"Run go vet before each commit.","scope":"reusable","why":"vet caught a mistake","source":"observed","supports":[]}],"revisions":[]}' >"$state/evaluation-$1.json"
+	printf '{"assessment":"went fine","signals":[],"proposals":[{"kind":"practice","text":"Run go vet before each commit.","scope":"reusable","why":"vet caught a mistake","source":"observed","supports":[],"cites":[]}],"revisions":[]}' >"$state/evaluation-$1.json"
 }
 
 scenario_learning() {
@@ -962,7 +962,7 @@ scenario_learning() {
 	issue 44 "Drop the old flag"
 	propose "Add retries"
 	propose "Fix pagination"
-	printf '{"assessment":"the developer corrected the plan","signals":[],"proposals":[],"revisions":[{"id":"L1","action":"retire","text":null,"reason":"the developer said vet runs in CI only","source":"maintainer"}]}' >"$state/evaluation-Drop the old flag.json"
+	printf '{"assessment":"the developer corrected the plan","signals":[],"proposals":[],"revisions":[{"id":"L1","action":"retire","text":null,"reason":"the developer said vet runs in CI only","source":"maintainer","cites":["C1"]}]}' >"$state/evaluation-Drop the old flag.json"
 
 	start 42 >/dev/null
 	check "the first task reaches a clean review" reviewed 42 20
@@ -993,7 +993,7 @@ scenario_learning() {
 	check "its planning prompt carries the learning" contains "$state/prompt.txt" "Run go vet before each commit."
 	check "under the repository knowledge heading" contains "$state/prompt.txt" "## Repository knowledge"
 	check "and is evaluated" evaluated acme/widgets 44
-	check "the developer's comment counts as maintainer evidence" eventually 10 grep -q 'maintainer_evidence: true' "$k/evaluations/44.yaml"
+	check "the developer's comment is citable maintainer evidence" eventually 10 grep -q -- '- C1' "$k/evaluations/44.yaml"
 	check "a maintainer contradiction retires the learning" eventually 5 grep -q 'status: retired' "$k/learnings.yaml"
 	check "the retired learning leaves knowledge.md" bash -c "! grep -qF 'go vet' '$k/knowledge.md'"
 	check "the learner evaluated every finished task" bash -c "[ \"\$(grep -c '^claude evaluate' '$state/evaluations.log')\" -ge 4 ]"

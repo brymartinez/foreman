@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -18,7 +19,7 @@ var t0 = time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 func day(n int) time.Time { return t0.Add(time.Duration(n) * 24 * time.Hour) }
 
 func eval(task string, startedDay int, props ...Proposal) Evaluation {
-	return Evaluation{Task: task, TaskAt: day(startedDay), At: day(startedDay + 1), Fingerprint: "fp-" + task, Assessment: "fine", Proposals: props, MaintainerEvidence: true}
+	return Evaluation{Task: task, TaskAt: day(startedDay), At: day(startedDay + 1), Fingerprint: "fp-" + task, Assessment: "fine", Proposals: props, MaintainerRefs: []string{"D1", "C1"}}
 }
 
 func observed(kind Kind, text string, supports ...string) Proposal {
@@ -112,7 +113,7 @@ func TestReevaluatingOneTaskNeverCountsAsTwoTasks(t *testing.T) {
 func TestMaintainerSourcedLearningIsActiveAtOnce(t *testing.T) {
 	s, _ := newStore(t)
 	p := observed(Convention, "Commit subjects use conventional prefixes.")
-	p.Source = Maintainer
+	p.Source, p.Cites = Maintainer, []string{"D1"}
 	mustApply(t, s, repo, eval("1", 0, p))
 	if ls := learnings(t, s, repo); len(ls) != 1 || ls[0].Status != Active {
 		t.Fatalf("got %+v", ls)
@@ -134,7 +135,7 @@ func TestMaintainerDecisionRetiresALearningAndKeepsWhy(t *testing.T) {
 	s, _ := newStore(t)
 	l := activeLearning(t, s)
 	ev := eval("0", -5)
-	ev.Revisions = []Revision{{ID: l.ID, Action: Retire, Reason: "Maintainer said the e2e script is optional now.", Source: Maintainer}}
+	ev.Revisions = []Revision{{ID: l.ID, Action: Retire, Reason: "Maintainer said the e2e script is optional now.", Source: Maintainer, Cites: []string{"C1"}}}
 	mustApply(t, s, repo, ev)
 	got := learnings(t, s, repo)[0]
 	if got.Status != Retired {
@@ -153,7 +154,7 @@ func TestMaintainerDecisionRevisesTextAndKeepsThePreviousText(t *testing.T) {
 	s, _ := newStore(t)
 	l := activeLearning(t, s)
 	ev := eval("3", 4)
-	ev.Revisions = []Revision{{ID: l.ID, Action: Revise, Text: "Run the e2e script before opening a pull request.", Reason: "Maintainer narrowed it.", Source: Maintainer}}
+	ev.Revisions = []Revision{{ID: l.ID, Action: Revise, Text: "Run the e2e script before opening a pull request.", Reason: "Maintainer narrowed it.", Source: Maintainer, Cites: []string{"C1"}}}
 	mustApply(t, s, repo, ev)
 	got := learnings(t, s, repo)[0]
 	if got.Status != Active || got.Text != "Run the e2e script before opening a pull request." {
@@ -218,7 +219,7 @@ func TestObservedSupportCannotReviveAMaintainerRetirement(t *testing.T) {
 	s, _ := newStore(t)
 	l := activeLearning(t, s)
 	ev := eval("3", 4)
-	ev.Revisions = []Revision{{ID: l.ID, Action: Retire, Reason: "No longer wanted.", Source: Maintainer}}
+	ev.Revisions = []Revision{{ID: l.ID, Action: Retire, Reason: "No longer wanted.", Source: Maintainer, Cites: []string{"C1"}}}
 	mustApply(t, s, repo, ev)
 	mustApply(t, s, repo, eval("4", 5, observed(Practice, "Run the e2e script before pushing.", l.ID)))
 	mustApply(t, s, repo, eval("5", 6, observed(Practice, "Run the e2e script before pushing.")))
@@ -257,7 +258,7 @@ func TestKnowledgeFileStatesFallibilityAndCarriesNoIDsOrNumbers(t *testing.T) {
 	s, _ := newStore(t)
 	for i, text := range []string{"Use table-driven tests.", "Errors wrap the operation name."} {
 		p := observed(Convention, text)
-		p.Source = Maintainer
+		p.Source, p.Cites = Maintainer, []string{"D1"}
 		mustApply(t, s, repo, eval(string(rune('1'+i)), i, p))
 	}
 	mustApply(t, s, repo, eval("7", 7, observed(Fact, "Candidates stay out.")))
@@ -283,7 +284,7 @@ func TestSelectReturnsActiveLearningsRankedByRelevanceWithinCaps(t *testing.T) {
 	}
 	for i, text := range texts {
 		p := observed(Convention, text)
-		p.Source = Maintainer
+		p.Source, p.Cites = Maintainer, []string{"D1"}
 		mustApply(t, s, repo, eval(string(rune('a'+i)), i, p))
 	}
 	mustApply(t, s, repo, eval("z", 9, observed(Fact, "Dashboard candidates never appear.")))
@@ -322,7 +323,7 @@ func TestSelectWithNoStoreIsEmpty(t *testing.T) {
 func TestRepositoriesKeepSeparateStores(t *testing.T) {
 	s, _ := newStore(t)
 	p := observed(Convention, "Shared words about widgets.")
-	p.Source = Maintainer
+	p.Source, p.Cites = Maintainer, []string{"D1"}
 	mustApply(t, s, repo, eval("1", 0, p))
 	if got, _ := s.Select("acme/gadgets", "widgets", 8, 2000); len(got) != 0 {
 		t.Fatalf("other repository saw %+v", got)
@@ -438,26 +439,42 @@ func TestApplyThatFailsToWriteTheLearningsStoresNoEvaluation(t *testing.T) {
 	}
 }
 
-func TestMaintainerSourceWithoutMaintainerEvidenceCountsAsObserved(t *testing.T) {
-	s, log := newStore(t)
-	p := observed(Convention, "Wrap errors with context.")
-	p.Source = Maintainer
-	ev := eval("1", 0, p)
-	ev.MaintainerEvidence = false
-	mustApply(t, s, repo, ev)
-	if ls := learnings(t, s, repo); len(ls) != 1 || ls[0].Status != Candidate || ls[0].Evidence[0].Source != Observed {
-		t.Fatalf("learnings = %+v, want one observed candidate", ls)
-	}
+func TestMaintainerSourceWithoutAValidCitationCountsAsObserved(t *testing.T) {
+	for name, cites := range map[string][]string{
+		"no citation":               nil,
+		"a decision the task lacks": {"D7"},
+		"one valid, one invented":   {"C1", "C9"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, log := newStore(t)
+			p := observed(Convention, "Wrap errors with context.")
+			p.Source, p.Cites = Maintainer, cites
+			mustApply(t, s, repo, eval("1", 0, p))
+			if ls := learnings(t, s, repo); len(ls) != 1 || ls[0].Status != Candidate || ls[0].Evidence[0].Source != Observed {
+				t.Fatalf("learnings = %+v, want one observed candidate", ls)
+			}
 
-	mustApply(t, s, repo, eval("2", 2, observed(Convention, "Wrap errors with context.")))
-	retire := eval("3", 1)
-	retire.MaintainerEvidence = false
-	retire.Revisions = []Revision{{ID: "L1", Action: Retire, Reason: "claimed", Source: Maintainer}}
-	mustApply(t, s, repo, retire)
-	if ls := learnings(t, s, repo); ls[0].Status != Active {
-		t.Errorf("an older task without maintainer evidence retired the learning: %+v", ls[0])
+			mustApply(t, s, repo, eval("2", 2, observed(Convention, "Wrap errors with context.")))
+			retire := eval("3", 1)
+			retire.Revisions = []Revision{{ID: "L1", Action: Retire, Reason: "claimed", Source: Maintainer, Cites: cites}}
+			mustApply(t, s, repo, retire)
+			if ls := learnings(t, s, repo); ls[0].Status != Active {
+				t.Errorf("an older task's uncited correction retired the learning: %+v", ls[0])
+			}
+			if !strings.Contains(log.String(), "cites no maintainer evidence") {
+				t.Errorf("log does not note the downgrade:\n%s", log.String())
+			}
+		})
 	}
-	if !strings.Contains(log.String(), "no maintainer evidence") {
-		t.Errorf("log does not note the downgrade:\n%s", log.String())
+}
+
+func TestMaintainerEvidenceKeepsItsCitations(t *testing.T) {
+	s, _ := newStore(t)
+	p := observed(Convention, "Wrap errors with context.")
+	p.Source, p.Cites = Maintainer, []string{"C1"}
+	mustApply(t, s, repo, eval("1", 0, p))
+	ls := learnings(t, s, repo)
+	if len(ls) != 1 || ls[0].Status != Active || !slices.Equal(ls[0].Evidence[0].Cites, []string{"C1"}) {
+		t.Fatalf("learnings = %+v, want an active learning citing C1", ls)
 	}
 }

@@ -58,15 +58,18 @@ type Proposal struct {
 	Why      string   `yaml:"why,omitempty" json:"why"`
 	Source   Source   `yaml:"source" json:"source"`
 	Supports []string `yaml:"supports,omitempty" json:"supports"`
+	// Cites names the decisions (D1) and PR comments (C1) behind a maintainer source.
+	Cites []string `yaml:"cites,omitempty" json:"cites"`
 }
 
 // Revision asks to rewrite or retire an existing learning.
 type Revision struct {
-	ID     string `yaml:"id" json:"id"`
-	Action string `yaml:"action" json:"action"`
-	Text   string `yaml:"text,omitempty" json:"text"`
-	Reason string `yaml:"reason" json:"reason"`
-	Source Source `yaml:"source" json:"source"`
+	ID     string   `yaml:"id" json:"id"`
+	Action string   `yaml:"action" json:"action"`
+	Text   string   `yaml:"text,omitempty" json:"text"`
+	Reason string   `yaml:"reason" json:"reason"`
+	Source Source   `yaml:"source" json:"source"`
+	Cites  []string `yaml:"cites,omitempty" json:"cites"`
 }
 
 // Evaluation is one judgment of one task. TaskAt is when the task's work started;
@@ -81,9 +84,10 @@ type Evaluation struct {
 	Signals     []string   `yaml:"signals,omitempty"`
 	Proposals   []Proposal `yaml:"proposals,omitempty"`
 	Revisions   []Revision `yaml:"revisions,omitempty"`
-	// MaintainerEvidence says the task has an answered decision or a developer's PR
-	// comment. Without it, a maintainer source the evaluator claims counts as observed.
-	MaintainerEvidence bool `yaml:"maintainer_evidence,omitempty"`
+	// MaintainerRefs are the ids of the task's answered decisions (D1...) and human PR
+	// comments (C1...). A maintainer source counts only when it cites some of them
+	// and nothing else.
+	MaintainerRefs []string `yaml:"maintainer_refs,omitempty"`
 	// Dropped lists rejected proposals and revisions by position and reason, never
 	// their text.
 	Dropped []string `yaml:"dropped,omitempty"`
@@ -94,6 +98,7 @@ type Evidence struct {
 	At     time.Time `yaml:"at"`
 	Source Source    `yaml:"source"`
 	Note   string    `yaml:"note,omitempty"`
+	Cites  []string  `yaml:"cites,omitempty"`
 }
 
 // Change is one entry in a learning's history: a promotion, demotion, revision, or

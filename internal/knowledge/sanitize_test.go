@@ -36,6 +36,8 @@ func TestSanitizeRejectsReferencesPathsAndSecrets(t *testing.T) {
 		"slack token":         "Post with xoxb-1234-5678-abcdefgh.",
 		"private key":         "Paste -----BEGIN PRIVATE KEY----- here.",
 		"pull request number": "pull request #7 shows the way",
+		"linear identifier":   "Follow the approach from KUB-129 for flags.",
+		"jira-style key":      "As agreed in OPS-7, pin the image.",
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got, err := Sanitize(text); err == nil {
@@ -53,6 +55,7 @@ func TestSanitizeKeepsOrdinaryWordsAndNumbers(t *testing.T) {
 		"internal/app depends only on ports.go interfaces.",
 		"Update docs/control-layer/architecture.md with each design change.",
 		"Use and/or sparingly in error messages.",
+		"Write files as UTF-8 and hash them with SHA-256.",
 	} {
 		if _, err := Sanitize(text); err != nil {
 			t.Errorf("rejected %q: %v", text, err)

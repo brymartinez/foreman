@@ -33,6 +33,14 @@ func (a App) Learn(ctx context.Context, key task.Key, log io.Writer) error {
 	if a.Knowledge == nil || a.Evaluator == nil {
 		return errors.New("learning is not configured")
 	}
+	if log == nil {
+		log = io.Discard
+	}
+	// A learner spawned before learning.enabled was turned off starts nothing new.
+	if !a.Learning {
+		fmt.Fprintf(log, "learn: learning is off; %s#%d is not evaluated\n", key.Repo, key.Number)
+		return nil
+	}
 	rec, err := a.Store.Get(ctx, key)
 	if err != nil {
 		return err
@@ -87,15 +95,12 @@ func (a App) Learn(ctx context.Context, key task.Key, log io.Writer) error {
 	}
 	ev := knowledge.Evaluation{
 		Task: id, TaskAt: taskStart(rec), At: a.Now(), Agent: string(in.Agent),
-		Fingerprint:        fingerprint(rec),
-		MaintainerEvidence: len(brief.Decisions) > 0 || len(brief.Feedback) > 0,
-		Assessment:         out.Assessment, Signals: out.Signals, Proposals: out.Proposals, Revisions: out.Revisions,
+		Fingerprint:    fingerprint(rec),
+		MaintainerRefs: brief.MaintainerRefs(),
+		Assessment:     out.Assessment, Signals: out.Signals, Proposals: out.Proposals, Revisions: out.Revisions,
 	}
 	if err := a.Knowledge.Apply(repo, ev); err != nil {
 		return err
-	}
-	if log == nil {
-		log = io.Discard
 	}
 	fmt.Fprintf(log, "learn: evaluated %s task %s: %d proposals, %d revisions\n", repo, id, len(out.Proposals), len(out.Revisions))
 	return nil

@@ -122,6 +122,7 @@ func TestRefreshStartsNoLearnerForARunningTask(t *testing.T) {
 
 func TestRefreshStartsNoLearnerWhenLearningIsOff(t *testing.T) {
 	f, _, _ := learnFixture(t)
+	f.app.Learning = false
 	f.app.startLearners([]*task.Record{f.store.recs[learnKey]})
 	if len(f.runners.learned) != 0 {
 		t.Fatalf("learning off started %v; want none", f.runners.learned)
