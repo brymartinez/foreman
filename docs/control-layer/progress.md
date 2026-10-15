@@ -2,19 +2,19 @@
 
 ## Current stage
 
-Stage 61 (per-repository evaluation and learning) is in progress. Done: tool-call
-counts in task usage (plan task 1) and the `internal/knowledge` store with
-sanitizing, promotion, revision, selection, and the repository lock (plan task 2),
-the evaluator turn with `App.Learn` and `App.LearningDue` (plan task 3), and the
-triggers (plan task 4): `knowledge_dir` and `learning` config, the detached
-`foreman __learn` writing to `learning.log`, a spawn when a run ends on a clean
-review, and a refresh spawn on changed evidence. The refresh waits an hour before
-retrying a failed evaluation of the same evidence, and does not start first
-evaluations of merged or closed tasks. Plan task 5 is done: planning and
-implementation prompts, including fresh-session fallbacks and checkpoints, carry a
-`## Repository knowledge` section of at most 8 learnings and 2000 characters from
-the task's repository. Review, selector, conflict, and merge prompts do not. Next:
-plan task 6, docs and the end-to-end scenarios.
+Stage 61 (per-repository evaluation and learning, for issue #61) is complete.
+Task usage records tool-call counts by name. A detached `foreman __learn` evaluates a
+task when its run ends on a clean review, and a refresh starts it again when the
+task's evidence changes. One evaluator turn proposes learnings; `internal/knowledge`
+sanitizes them, promotes a learning after two tasks or a maintainer source, and
+retires it on a maintainer correction or a newer task's observation. Each repository
+keeps its own `learnings.yaml`, evaluations, and rendered `knowledge.md` under
+`knowledge_dir`. Planning and implementation prompts carry up to 8 learnings and 2000
+characters from the task's repository; review and selector prompts carry none.
+`learning.enabled` and `learning.budget_usd` control it. The `learning` end-to-end
+scenario covers promotion over two tasks, a maintainer retirement, and a second
+repository that learns nothing. Vet, Go tests, build, and the end-to-end script
+pass.
 
 Linear branch naming uses the name supplied by Linear for new Linear tasks when
 available. GitHub issues and Linear issues without a supplied name keep the

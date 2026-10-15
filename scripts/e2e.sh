@@ -205,10 +205,14 @@ EOF
 	cat >"$sandbox/bin/claude" <<'EOF'
 #!/usr/bin/env bash
 for arg in "$@"; do case "$arg" in sonnet|opus) echo "claude model=$arg" >>"$E2E_STATE/models.log" ;; esac; done
-# The learner's evaluator turn: record it apart from the task's agents and learn nothing.
+# The learner's evaluator turn: record it apart from the task's agents. It answers
+# with evaluation-<issue title>.json when the scenario wrote one, else learns nothing.
 if [[ "$*" == *"You evaluate one finished task"* ]]; then
-	echo "claude evaluate" >>"$E2E_STATE/evaluations.log"
-	echo '{"type":"result","session_id":"e1","subtype":"success","total_cost_usd":0.01,"structured_output":{"assessment":"went fine","signals":[],"proposals":[],"revisions":[]}}'
+	title=$(printf '%s\n' "$*" | sed -n 's/^Title: //p' | head -n 1)
+	echo "claude evaluate $title" >>"$E2E_STATE/evaluations.log"
+	out='{"assessment":"went fine","signals":[],"proposals":[],"revisions":[]}'
+	[ ! -f "$E2E_STATE/evaluation-$title.json" ] || out=$(cat "$E2E_STATE/evaluation-$title.json")
+	printf '{"type":"result","session_id":"e1","subtype":"success","total_cost_usd":0.01,"structured_output":%s}\n' "$out"
 	exit 0
 fi
 if [[ " $* " == *" --no-session-persistence "* ]]; then
@@ -919,7 +923,66 @@ scenario_history() {
 	check "esc returns to the dashboard" dash -- refreshed keys=p "wait=#907" 'keys=\x1b' "wait=DELEGATED WORK"
 }
 
-scenarios=${*:-runner notify logs inbox inbox_lifecycle rereview conflicts respond cancel feedback conflict tui routing history linear}
+# evaluated <repo dir> <n> [seconds] waits for task #n's evaluation, refreshing so a
+# learner that lost the repository lock is started again.
+evaluated() {
+	local end=$((SECONDS + ${3:-15}))
+	until [ -f "$sandbox/knowledge/$1/evaluations/$2.yaml" ]; do
+		[ $SECONDS -lt $end ] || return 1
+		screen >/dev/null
+		sleep 0.1
+	done
+}
+
+# propose <title> writes the evaluator's answer for that issue: one reusable,
+# observed practice.
+propose() {
+	printf '{"assessment":"went fine","signals":[],"proposals":[{"kind":"practice","text":"Run go vet before each commit.","scope":"reusable","why":"vet caught a mistake","source":"observed","supports":[]}],"revisions":[]}' >"$state/evaluation-$1.json"
+}
+
+scenario_learning() {
+	echo "learning: finished tasks teach later tasks in the same repository only"
+	setup learning
+	local k=$sandbox/knowledge/acme/widgets
+	issue 43 "Fix pagination"
+	issue 44 "Drop the old flag"
+	propose "Add retries"
+	propose "Fix pagination"
+	printf '{"assessment":"the developer corrected the plan","signals":[],"proposals":[],"revisions":[{"id":"L1","action":"retire","text":null,"reason":"the developer said vet runs in CI only","source":"maintainer"}]}' >"$state/evaluation-Drop the old flag.json"
+
+	start 42 >/dev/null
+	check "the first task reaches a clean review" reviewed 42 20
+	check "and is evaluated" evaluated acme/widgets 42
+	check "one task's learning stays a candidate" eventually 5 grep -q 'status: candidate' "$k/learnings.yaml"
+	check "a candidate stays out of knowledge.md" bash -c "! grep -qF 'go vet' '$k/knowledge.md'"
+
+	start 43 >/dev/null
+	check "the second task reaches a clean review" reviewed 43 20
+	check "and is evaluated" evaluated acme/widgets 43
+	check "a second task promotes the learning" eventually 5 grep -qF 'Run go vet before each commit.' "$k/knowledge.md"
+	check "knowledge.md names no issue" bash -c "! grep -qE '#[0-9]|acme/' '$k/knowledge.md'"
+
+	# A task in another repository: same origin, but foreman keys it as acme/linear.
+	echo "[$(hit acme/linear 45 'Other repo work')]" >"$state/search-issues-assignee.json"
+	issue 45 "Other repo work"
+	dash -- refreshed "pick=acme/linear#45" 'keys=\r1\r' "wait=Started acme/linear#45" >/dev/null 2>&1 || true
+	check "the other repository's task reaches a clean review" eventually 20 grep -q 'verdict: clean' "$sandbox/tasks/acme-linear-45.md"
+	check "its prompt carries no knowledge from acme/widgets" bash -c "! grep -qF 'go vet' '$state/prompt.txt'"
+	check "and has no knowledge section" bash -c "! grep -qF '## Repository knowledge' '$state/prompt.txt'"
+	check "it is evaluated in its own store" evaluated acme/linear 45
+	check "the other repository learns nothing" bash -c "! grep -qF 'go vet' '$sandbox/knowledge/acme/linear/knowledge.md'"
+
+	start 44 >/dev/null
+	check "the third task reaches a clean review" reviewed 44 20
+	check "its planning prompt carries the learning" contains "$state/prompt.txt" "Run go vet before each commit."
+	check "under the repository knowledge heading" contains "$state/prompt.txt" "## Repository knowledge"
+	check "and is evaluated" evaluated acme/widgets 44
+	check "a maintainer contradiction retires the learning" eventually 5 grep -q 'status: retired' "$k/learnings.yaml"
+	check "the retired learning leaves knowledge.md" bash -c "! grep -qF 'go vet' '$k/knowledge.md'"
+	check "the learner evaluated every finished task" bash -c "[ \"\$(grep -c '^claude evaluate' '$state/evaluations.log')\" -ge 4 ]"
+}
+
+scenarios=${*:-runner notify logs inbox inbox_lifecycle rereview conflicts respond cancel feedback conflict tui routing history linear learning}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"
