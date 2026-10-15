@@ -473,6 +473,23 @@ func (c Client) BranchHead(ctx context.Context, repo task.Repo, branch string) (
 	return sha, nil
 }
 
+// ActiveAccount asks the API who gh is, because gh api runs as the active account
+// and gh auth status output is not meant for parsing.
+func (c Client) ActiveAccount(ctx context.Context) (app.Account, error) {
+	out, err := c.Run(ctx, "", "api", "user", "--jq", "{login,id}")
+	if err != nil {
+		return app.Account{}, fmt.Errorf("read the active gh account: %w", err)
+	}
+	var acct app.Account
+	if err := json.Unmarshal(out, &acct); err != nil {
+		return app.Account{}, fmt.Errorf("read the active gh account: %w", err)
+	}
+	if acct.Login == "" || acct.ID == 0 {
+		return app.Account{}, errors.New("gh reported no active account")
+	}
+	return acct, nil
+}
+
 func (c Client) GetPullRequest(ctx context.Context, key task.Key) (app.PullRequest, error) {
 	out, err := c.Run(ctx, "", "pr", "view", fmt.Sprint(key.Number), "--repo", string(key.Repo), "--json", prFields)
 	if err != nil {

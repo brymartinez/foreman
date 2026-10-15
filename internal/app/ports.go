@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/brymartinez/foreman/internal/agent"
@@ -126,6 +127,30 @@ type GitHubClient interface {
 	IssueComments(ctx context.Context, issue task.Key) ([]IssueComment, error)
 	// BranchHead returns the commit a branch points at on GitHub.
 	BranchHead(ctx context.Context, repo task.Repo, branch string) (string, error)
+}
+
+// Account is a GitHub user. ID is the numeric user id that GitHub's noreply
+// commit address needs.
+type Account struct {
+	Login string
+	ID    int64
+}
+
+// Email is the account's GitHub noreply address, which attributes commits to it
+// without exposing a private email.
+func (a Account) Email() string {
+	return fmt.Sprintf("%d+%s@users.noreply.github.com", a.ID, a.Login)
+}
+
+// AccountProvider reads the GitHub account active in gh, which opens the task's PRs.
+type AccountProvider interface {
+	ActiveAccount(ctx context.Context) (Account, error)
+}
+
+// RemoteAuth reports the GitHub login that pushes to the origin of the checkout at
+// dir. checked is false when the remote is not SSH, so no push account can be probed.
+type RemoteAuth interface {
+	PushAccount(ctx context.Context, dir string) (login string, checked bool, err error)
 }
 
 type IssueComment struct {
