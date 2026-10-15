@@ -97,6 +97,11 @@ func (a App) repairFailedCheckpoint(ctx context.Context, rec *task.Record, req t
 		if adapter == nil {
 			return turn, fmt.Errorf("agent %s is not configured", rec.Delegation.Implementer.Agent)
 		}
+		// A repair is another implementer turn, and the account may have changed
+		// during the one before it.
+		if err := a.checkAccount(ctx, rec); err != nil {
+			return turn, err
+		}
 		fmt.Fprintf(log, "foreman: checkpoint validation failed; resuming %s session %s for repair (%d/%d)\n", adapter.Name(), turn.Session.ID, attempt+1, maxCheckpointValidationRepairs)
 		in := agent.StartInput{
 			Worktree: rec.Delegation.Worktree,

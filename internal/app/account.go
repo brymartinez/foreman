@@ -67,12 +67,14 @@ func (a App) checkAccount(ctx context.Context, rec *task.Record) error {
 	if a.RemoteAuth == nil {
 		return nil
 	}
-	push, err := a.RemoteAuth.PushAccount(ctx, d.Worktree)
+	pushes, err := a.RemoteAuth.PushAccounts(ctx, d.Worktree)
 	if err != nil {
 		return fmt.Errorf("check the SSH push account: %w", err)
 	}
-	if push.Host != "" && !strings.EqualFold(push.Login, d.Account) {
-		return &AccountError{Pinned: d.Account, Observed: push.Login, Host: push.Host}
+	for _, push := range pushes {
+		if !strings.EqualFold(push.Login, d.Account) {
+			return &AccountError{Pinned: d.Account, Observed: push.Login, Host: push.Host}
+		}
 	}
 	return nil
 }

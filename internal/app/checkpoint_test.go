@@ -142,3 +142,21 @@ func TestRetryPreservesCheckpointOnlyWhenBranchHeadMatches(t *testing.T) {
 		t.Fatalf("changed head kept stale checkpoint: %+v", got.Delegation)
 	}
 }
+
+func TestCheckpointRepairStopsBeforeResumingWhenGHSwitchesAccounts(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	postedPlan(f.store.recs[key])
+	failed := checkpointTurn("first-session", "Continue work")
+	failed.Outcome.Validation = []task.Check{{Command: "pnpm lint", Passed: false}}
+	f.claude.turns = []agent.Turn{failed, checkpointTurn("first-session", "Continue work")}
+	f.claude.turnErrs = []error{&agent.CheckpointValidationError{Failed: []string{"pnpm lint"}}, nil}
+	f.claude.during = func() { f.accts.active = Account{Login: "octo-home", ID: 7} }
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Failed || len(f.claude.resumed) != 0 || !strings.Contains(got.LastOutcome.Summary, "gh auth switch") {
+		t.Fatalf("state %s resumes %v outcome %+v", got.State, f.claude.resumed, got.LastOutcome)
+	}
+}

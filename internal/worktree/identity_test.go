@@ -49,6 +49,10 @@ func stubSSH(t *testing.T, out string) (argsFile string) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	for _, k := range []string{"GIT_SSH_COMMAND", "GIT_SSH"} {
+		t.Setenv(k, "")
+		os.Unsetenv(k)
+	}
 	return argsFile
 }
 
@@ -61,9 +65,9 @@ func cloneWithOrigin(t *testing.T, url string) string {
 func TestPushAccountReadsTheLoginGitHubGreetsOverSSH(t *testing.T) {
 	args := stubSSH(t, "Hi octo-work! You've successfully authenticated, but GitHub does not provide shell access.")
 	dir := cloneWithOrigin(t, "ssh://git@github-work:2222/a/b.git")
-	acct, err := Git{}.PushAccount(context.Background(), dir)
-	if err != nil || acct != (app.SSHAccount{Host: "git@github-work", Login: "octo-work"}) {
-		t.Fatalf("push account = %+v, %v", acct, err)
+	accts, err := Git{}.PushAccounts(context.Background(), dir)
+	if err != nil || len(accts) != 1 || accts[0] != (app.SSHAccount{Host: "git@github-work", Login: "octo-work"}) {
+		t.Fatalf("push accounts = %+v, %v", accts, err)
 	}
 	raw, _ := os.ReadFile(args)
 	if got := strings.TrimSpace(string(raw)); got != "-T -o BatchMode=yes -p 2222 git@github-work" {
@@ -75,16 +79,61 @@ func TestPushAccountProbesThePushURL(t *testing.T) {
 	stubSSH(t, "Hi octo-work!")
 	dir := cloneWithOrigin(t, "https://github.com/a/b.git")
 	run(t, dir, "remote", "set-url", "--push", "origin", "git@github-work:a/b.git")
-	acct, err := Git{}.PushAccount(context.Background(), dir)
-	if err != nil || acct.Host != "git@github-work" {
-		t.Fatalf("push account = %+v, %v", acct, err)
+	accts, err := Git{}.PushAccounts(context.Background(), dir)
+	if err != nil || len(accts) != 1 || accts[0].Host != "git@github-work" {
+		t.Fatalf("push accounts = %+v, %v", accts, err)
 	}
+}
+
+func TestPushAccountProbesEveryPushURL(t *testing.T) {
+	stubSSH(t, "Hi octo-work!")
+	dir := cloneWithOrigin(t, "https://github.com/a/b.git")
+	run(t, dir, "remote", "set-url", "--add", "--push", "origin", "git@github-work:a/b.git")
+	run(t, dir, "remote", "set-url", "--add", "--push", "origin", "git@github-home:a/b.git")
+	accts, err := Git{}.PushAccounts(context.Background(), dir)
+	if err != nil || len(accts) != 2 || accts[0].Host != "git@github-work" || accts[1].Host != "git@github-home" {
+		t.Fatalf("push accounts = %+v, %v", accts, err)
+	}
+}
+
+// sshScript writes an executable that greets as login, for core.sshCommand and
+// GIT_SSH_COMMAND, and returns its path.
+func sshScript(t *testing.T, login string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "other-ssh")
+	script := "#!/bin/sh\necho \"Hi " + login + "!\" >&2\nexit 1\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestPushAccountUsesTheSSHCommandGitPushUses(t *testing.T) {
+	t.Run("core.sshCommand", func(t *testing.T) {
+		stubSSH(t, "Hi octo-work!")
+		dir := cloneWithOrigin(t, "git@github.com:a/b.git")
+		run(t, dir, "config", "core.sshCommand", sshScript(t, "octo-home")+" -i /keys/home")
+		accts, err := Git{}.PushAccounts(context.Background(), dir)
+		if err != nil || len(accts) != 1 || accts[0].Login != "octo-home" {
+			t.Fatalf("push accounts = %+v, %v", accts, err)
+		}
+	})
+	t.Run("GIT_SSH_COMMAND overrides core.sshCommand", func(t *testing.T) {
+		stubSSH(t, "Hi octo-work!")
+		dir := cloneWithOrigin(t, "git@github.com:a/b.git")
+		run(t, dir, "config", "core.sshCommand", sshScript(t, "octo-home"))
+		t.Setenv("GIT_SSH_COMMAND", sshScript(t, "octo-env"))
+		accts, err := Git{}.PushAccounts(context.Background(), dir)
+		if err != nil || len(accts) != 1 || accts[0].Login != "octo-env" {
+			t.Fatalf("push accounts = %+v, %v", accts, err)
+		}
+	})
 }
 
 func TestPushAccountReportsAnSSHFailure(t *testing.T) {
 	stubSSH(t, "git@github.com: Permission denied (publickey).")
 	dir := cloneWithOrigin(t, "git@github.com:a/b.git")
-	_, err := Git{}.PushAccount(context.Background(), dir)
+	_, err := Git{}.PushAccounts(context.Background(), dir)
 	if err == nil || !strings.Contains(err.Error(), "Permission denied") || !strings.Contains(err.Error(), "git@github.com") {
 		t.Errorf("err = %v", err)
 	}
@@ -93,9 +142,9 @@ func TestPushAccountReportsAnSSHFailure(t *testing.T) {
 func TestPushAccountSkipsANonSSHRemote(t *testing.T) {
 	args := stubSSH(t, "Hi someone!")
 	dir := cloneWithOrigin(t, "https://github.com/a/b.git")
-	acct, err := Git{}.PushAccount(context.Background(), dir)
-	if err != nil || acct != (app.SSHAccount{}) {
-		t.Fatalf("push account = %+v, %v", acct, err)
+	accts, err := Git{}.PushAccounts(context.Background(), dir)
+	if err != nil || len(accts) != 0 {
+		t.Fatalf("push accounts = %+v, %v", accts, err)
 	}
 	if _, err := os.Stat(args); err == nil {
 		t.Error("ssh ran for an HTTPS remote")

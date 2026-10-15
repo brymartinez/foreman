@@ -154,10 +154,11 @@ type SSHAccount struct {
 	Login string
 }
 
-// RemoteAuth reports who pushes to the origin of the checkout at dir. A remote that
-// is not SSH returns the zero SSHAccount, because no push account can be probed.
+// RemoteAuth reports who pushes to the origin of the checkout at dir: one account per
+// SSH push URL. Push URLs that are not SSH are skipped, because no push account can
+// be probed.
 type RemoteAuth interface {
-	PushAccount(ctx context.Context, dir string) (SSHAccount, error)
+	PushAccounts(ctx context.Context, dir string) ([]SSHAccount, error)
 }
 
 type IssueComment struct {

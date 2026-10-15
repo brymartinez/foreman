@@ -42,7 +42,7 @@ func (f *fakeWorktrees) ConfigureIdentity(_ context.Context, dir, name, email st
 type fakeAccounts struct {
 	active  Account
 	err     error
-	ssh     SSHAccount
+	ssh     []SSHAccount
 	sshErr  error
 	lookups int
 }
@@ -52,7 +52,7 @@ func (f *fakeAccounts) ActiveAccount(context.Context) (Account, error) {
 	return f.active, f.err
 }
 
-func (f *fakeAccounts) PushAccount(context.Context, string) (SSHAccount, error) {
+func (f *fakeAccounts) PushAccounts(context.Context, string) ([]SSHAccount, error) {
 	return f.ssh, f.sshErr
 }
 
@@ -276,7 +276,7 @@ func newFixture() fixture {
 		notes:   &fakeNotifier{},
 		accts: &fakeAccounts{
 			active: Account{Login: "octo-work", ID: 42},
-			ssh:    SSHAccount{Host: "git@github-work", Login: "octo-work"},
+			ssh:    []SSHAccount{{Host: "git@github-work", Login: "octo-work"}},
 		},
 	}
 	f.app = App{

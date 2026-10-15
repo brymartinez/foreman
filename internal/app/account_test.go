@@ -94,10 +94,10 @@ func TestRunStopsBeforeTheAgentTurnWhenGHSwitchesAccounts(t *testing.T) {
 	}
 }
 
-func TestRunStopsBeforeTheAgentTurnWhenSSHPushesAsAnotherAccount(t *testing.T) {
+func TestRunStopsBeforeTheAgentTurnWhenAnySSHPushURLPushesAsAnotherAccount(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
-	f.accts.ssh = SSHAccount{Host: "git@github-home", Login: "octo-home"}
+	f.accts.ssh = []SSHAccount{{Host: "git@github-work", Login: "octo-work"}, {Host: "git@github-home", Login: "octo-home"}}
 	f.claude.turn = prTurn("sid-1")
 	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
@@ -116,7 +116,7 @@ func TestRunStopsBeforeTheAgentTurnWhenSSHPushesAsAnotherAccount(t *testing.T) {
 
 func TestStartWithANonSSHRemoteSkipsThePushCheck(t *testing.T) {
 	f := newFixture()
-	f.accts.ssh = SSHAccount{}
+	f.accts.ssh = nil
 	key := started(t, f, startReq(t))
 	if got := f.store.recs[key]; got.State != task.Working || got.Delegation.Account != "octo-work" {
 		t.Fatalf("state %s account %q", got.State, got.Delegation.Account)
@@ -150,7 +150,7 @@ func TestATaskStartedBeforePinningPinsTheActiveAccountAtItsNextLaunch(t *testing
 	d := f.store.recs[key].Delegation
 	d.Account, d.AccountEmail = "", ""
 	f.accts.active = Account{Login: "octo-home", ID: 7}
-	f.accts.ssh = SSHAccount{Host: "git@github-home", Login: "octo-home"}
+	f.accts.ssh = []SSHAccount{{Host: "git@github-home", Login: "octo-home"}}
 	rec, err := f.app.Start(context.Background(), startReq(t))
 	if err != nil {
 		t.Fatal(err)
@@ -162,7 +162,7 @@ func TestATaskStartedBeforePinningPinsTheActiveAccountAtItsNextLaunch(t *testing
 
 func TestAccountMatchingIgnoresLoginCase(t *testing.T) {
 	f := newFixture()
-	f.accts.ssh = SSHAccount{Host: "git@github.com", Login: "Octo-Work"}
+	f.accts.ssh = []SSHAccount{{Host: "git@github.com", Login: "Octo-Work"}}
 	key := started(t, f, startReq(t))
 	if got := f.store.recs[key]; got.State != task.Working {
 		t.Fatalf("state %s: %+v", got.State, got.LastOutcome)

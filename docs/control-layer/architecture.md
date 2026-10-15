@@ -242,16 +242,20 @@ the same commit. The commit message records why it changed.
   noreply address (`<id>+<login>@users.noreply.github.com`) that `gh api user` reports
   as `account` and `account_email`. Restarts and resumes keep the pin. A task file
   from before pinning takes the active account at its next launch. `checkAccount`
-  runs before every launch and in `runTurn` before every implementer turn, because the
-  agent commits, pushes, and opens PRs itself and `gh auth switch` can happen at any
-  time. It fails the task when gh is on another login, sets `user.name` and
-  `user.email` with `git config --worktree` (`extensions.worktreeConfig`), and, for an
-  SSH origin, runs `ssh -T` against the remote's host so `~/.ssh/config` picks the key,
-  and fails the task when GitHub's greeting names another login. A failed lookup also
-  fails the task. The error names both accounts and the fix. Rejected: plain
-  `git config`, which linked worktrees share with the main checkout; `GIT_AUTHOR_*`
-  environment, which a commit made in the worktree outside the runner would not get; and asking the agent to check, which cannot be enforced. Published commits are
-  never rewritten. HTTPS remotes get the identity but no push check.
+  runs before every launch, in `runTurn` before every implementer turn, and before
+  each checkpoint repair resume, because the agent commits, pushes, and opens PRs
+  itself and `gh auth switch` can happen at any time. It fails the task when gh is on
+  another login, and sets `user.name` and `user.email` with `git config --worktree`
+  (`extensions.worktreeConfig`). Then, for each SSH URL in
+  `git remote get-url --push --all origin`, it runs `ssh -T` against the URL's host
+  with the SSH command git push uses (`GIT_SSH_COMMAND`, `core.sshCommand`, `GIT_SSH`,
+  then `ssh`), so `~/.ssh/config` and any `-i` pick the same key. It fails the task
+  when GitHub's greeting names another login. A failed lookup also fails the task. The
+  error names both accounts and the fix. Rejected: plain `git config`, which linked
+  worktrees share with the main checkout; `GIT_AUTHOR_*` environment, which a commit
+  made in the worktree outside the runner would not get; and asking the agent to
+  check, which cannot be enforced. Published commits are never rewritten. HTTPS push
+  URLs get the identity but no push check.
 - **Idempotent steps.** Creating the worktree and the task file each check whether the
   thing already exists, and so does the agent's PR step (`gh pr view` before
   `gh pr create`). That lets a crashed runner be restarted from the
