@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+	"time"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -237,4 +238,51 @@ func normalize(text string) string {
 func nextID(f *learningsFile) string {
 	f.NextID = cmp.Or(f.NextID, len(f.Learnings)) + 1
 	return fmt.Sprintf("L%d", f.NextID)
+}
+
+// Attempt is when an evaluation of a task last started and the evidence it started
+// from. A refresh reads it to wait before retrying an evaluation that keeps failing.
+type Attempt struct {
+	Fingerprint string    `yaml:"fingerprint"`
+	At          time.Time `yaml:"at"`
+}
+
+// Attempt returns the task's last evaluation attempt, or nil.
+func (s Store) Attempt(repo, task string) (*Attempt, error) {
+	path, err := s.attemptPath(repo, task)
+	if err != nil {
+		return nil, err
+	}
+	var at Attempt
+	err = readYAML(path, &at)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &at, nil
+}
+
+// RecordAttempt stores the task's latest evaluation attempt, replacing the last one.
+func (s Store) RecordAttempt(repo, task string, at Attempt) error {
+	path, err := s.attemptPath(repo, task)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return writeYAML(path, at)
+}
+
+func (s Store) attemptPath(repo, task string) (string, error) {
+	dir, err := s.repoDir(repo)
+	if err != nil {
+		return "", err
+	}
+	if !validName(task, taskID) {
+		return "", errTask(task)
+	}
+	return filepath.Join(dir, "attempts", task+".yaml"), nil
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -17,6 +18,7 @@ import (
 	"github.com/brymartinez/foreman/internal/cli"
 	"github.com/brymartinez/foreman/internal/config"
 	"github.com/brymartinez/foreman/internal/github"
+	"github.com/brymartinez/foreman/internal/knowledge"
 	"github.com/brymartinez/foreman/internal/linear"
 	"github.com/brymartinez/foreman/internal/logs"
 	"github.com/brymartinez/foreman/internal/notifications"
@@ -74,8 +76,8 @@ func run(argv []string) int {
 	if err != nil {
 		return fail(err)
 	}
-	// The detached runner has no one to read its stderr.
-	if cmd.Name != cli.Run {
+	// The detached runner and learner have no one to read their stderr.
+	if cmd.Name != cli.Run && cmd.Name != cli.Learn {
 		for _, problem := range cfg.WebhookProblems() {
 			fmt.Fprintf(os.Stderr, "foreman: %s\n", problem)
 		}
@@ -112,6 +114,10 @@ func run(argv []string) int {
 			task.Codex:  {Model: cfg.Codex.Model, PlanModel: cfg.Codex.PlanModel, ReasoningEffort: cfg.Codex.ReasoningEffort, PlanReasoningEffort: cfg.Codex.PlanReasoningEffort},
 		},
 		Selector:             agent.Selectors{Claude: claude, Codex: codex},
+		Knowledge:            knowledge.Store{Dir: cfg.KnowledgeDir},
+		Evaluator:            agent.Evaluators{Claude: claude, Codex: codex},
+		Learning:             cfg.Learning.Enabled,
+		LearningBudgetUSD:    cfg.Learning.BudgetUSD,
 		Quota:                quota.Axi{Command: "quota-axi", Exec: agent.RunCommand},
 		Runners:              runner.Processes{LogDir: cfg.LogDir},
 		Stages:               stages.Files{GlobalDir: cfg.StagesDir},
@@ -159,6 +165,25 @@ func run(argv []string) int {
 			return 1
 		}
 		fmt.Fprintf(log, "foreman: runner %d finished\n", os.Getpid())
+	case cli.Learn:
+		// Every learner shares learning.log, so each line names the task. A failure
+		// here is the log's alone: the task, its alerts, and its runner never see it.
+		log := &logs.Writer{W: os.Stdout}
+		defer log.Flush()
+		key := task.Key{Repo: cmd.Repo, Number: cmd.Issue, Source: cmd.Source, ExternalID: cmd.ExternalID}
+		name := fmt.Sprintf("%s#%d", key.Repo, key.Number)
+		if key.Source == task.Linear {
+			name = fmt.Sprintf("%s#linear:%s", key.Repo, key.ExternalID)
+		}
+		a.Knowledge = knowledge.Store{Dir: cfg.KnowledgeDir, Log: log}
+		err := a.Learn(ctx, key, log)
+		switch {
+		case errors.Is(err, knowledge.ErrLocked):
+			fmt.Fprintf(log, "learn: %s: %s is being evaluated already; a later refresh retries\n", name, key.Repo)
+		case err != nil:
+			fmt.Fprintf(log, "learn: %s: %v\n", name, err)
+			return 1
+		}
 	}
 	return 0
 }

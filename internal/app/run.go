@@ -58,7 +58,11 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 		return err
 	}
 	r := &taskRun{a: a, ctx: ctx, final: final, log: log, rec: rec, feedback: feedback}
-	return r.loop(firstStep(rec, len(feedback)))
+	if err := r.loop(firstStep(rec, len(feedback))); err != nil {
+		return err
+	}
+	a.learnAfterRun(r.rec, log)
+	return nil
 }
 
 // logRoute writes the route line once per routing decision, ahead of the run's

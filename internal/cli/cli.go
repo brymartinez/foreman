@@ -20,6 +20,9 @@ const (
 	Edit Name = "edit"
 	// Run is the hidden verb the detached runner process executes (see internal/runner).
 	Run Name = "__run"
+	// Learn is the hidden verb the detached learner process executes. It takes the
+	// same task key as Run.
+	Learn Name = "__learn"
 )
 
 // AutoMode is a launch override for the dashboard's auto mode. AutoSaved keeps the
@@ -34,7 +37,7 @@ const (
 
 type Command struct {
 	Name       Name
-	Repo       task.Repo // set for __run, given as owner/repo#825
+	Repo       task.Repo // set for __run and __learn, given as owner/repo#825
 	Issue      int
 	ExternalID string
 	Auto       AutoMode
@@ -74,7 +77,8 @@ func Parse(argv []string) (Command, error) {
 			return Command{}, usagef("%s takes no arguments", name)
 		}
 		return Command{Name: Version}, nil
-	case string(Run):
+	case string(Run), string(Learn):
+		verb := Name(name)
 		if len(rest) == 1 {
 			repoPart, id, found := strings.Cut(rest[0], "#linear:")
 			if found {
@@ -82,14 +86,14 @@ func Parse(argv []string) (Command, error) {
 				if err != nil || id == "" || strings.ContainsAny(id, "/#:") {
 					return Command{}, usagef("%s needs owner/repo#linear:ID", name)
 				}
-				return Command{Name: Run, Repo: repo, Source: task.Linear, ExternalID: id}, nil
+				return Command{Name: verb, Repo: repo, Source: task.Linear, ExternalID: id}, nil
 			}
 		}
 		repo, n, err := issueArg(name, rest)
 		if err == nil && repo == "" {
 			err = usagef("%s needs owner/repo#N", name)
 		}
-		return Command{Name: Run, Repo: repo, Issue: n}, err
+		return Command{Name: verb, Repo: repo, Issue: n}, err
 	}
 	return parseFlags(argv)
 }

@@ -21,13 +21,16 @@ type Config struct {
 	WorktreesDir    string `yaml:"worktrees_dir"`
 	RepositoriesDir string `yaml:"repositories_dir"`
 	LogDir          string `yaml:"log_dir"`
-	ReviewRounds    int    `yaml:"review_rounds"` // reviewer passes per review; 0 means 3
-	FixRounds       int    `yaml:"fix_rounds"`    // fix and re-review cycles before asking; 0 means 3
+	// KnowledgeDir holds what foreman learns, one directory per repository.
+	KnowledgeDir string `yaml:"knowledge_dir"`
+	ReviewRounds int    `yaml:"review_rounds"` // reviewer passes per review; 0 means 3
+	FixRounds    int    `yaml:"fix_rounds"`    // fix and re-review cycles before asking; 0 means 3
 	// Mentions shows items the searches found only because they mention you.
 	Mentions bool `yaml:"mentions"`
 	// Refresh is how often the dashboard reads GitHub, in seconds.
 	Refresh       int           `yaml:"refresh"`
 	Budgets       Budgets       `yaml:"budgets"`
+	Learning      Learning      `yaml:"learning"`
 	Notifications Notifications `yaml:"notifications"`
 	Claude        Claude        `yaml:"claude"`
 	Codex         Codex         `yaml:"codex"`
@@ -56,6 +59,14 @@ const (
 type Budgets struct {
 	ImplementerUSD float64 `yaml:"implementer_usd"`
 	ReviewerUSD    float64 `yaml:"reviewer_usd"`
+}
+
+// Learning controls the evaluation of finished tasks. Off stops new evaluations;
+// prompts still read the knowledge already learned.
+type Learning struct {
+	Enabled bool `yaml:"enabled"`
+	// BudgetUSD caps one Claude evaluation's spend; 0 sets no cap.
+	BudgetUSD float64 `yaml:"budget_usd"`
 }
 
 type Notifications struct {
@@ -110,6 +121,7 @@ func Load() (Config, error) {
 		WorktreesDir:    filepath.Join(data, "worktrees"),
 		RepositoriesDir: filepath.Join(data, "repositories"),
 		LogDir:          filepath.Join(data, "logs"),
+		KnowledgeDir:    filepath.Join(data, "knowledge"),
 		ReviewRounds:    3,
 		FixRounds:       3,
 		Mentions:        true,
@@ -118,6 +130,7 @@ func Load() (Config, error) {
 		Codex:           Codex{Command: "codex", Model: "gpt-6-sol"},
 		Cleanup:         Cleanup{OnDone: true, DeleteMergedBranch: true},
 		Budgets:         Budgets{ImplementerUSD: 3, ReviewerUSD: 1},
+		Learning:        Learning{Enabled: true, BudgetUSD: 0.5},
 		Notifications:   Notifications{Enabled: true},
 		Auto:            Auto{Agent: task.Claude, MaxConcurrent: 3},
 	}
@@ -139,11 +152,14 @@ func Load() (Config, error) {
 	if env := os.Getenv("FOREMAN_TASKS_DIR"); env != "" {
 		cfg.TasksDir = env
 	}
-	for _, p := range []*string{&cfg.TasksDir, &cfg.WorktreesDir, &cfg.RepositoriesDir, &cfg.LogDir} {
+	for _, p := range []*string{&cfg.TasksDir, &cfg.WorktreesDir, &cfg.RepositoriesDir, &cfg.LogDir, &cfg.KnowledgeDir} {
 		*p = expandHome(*p, home)
 	}
 	if cfg.Refresh < MinRefresh {
 		return Config{}, fmt.Errorf("%s: refresh is %d seconds; the minimum is %d", path, cfg.Refresh, MinRefresh)
+	}
+	if cfg.Learning.BudgetUSD < 0 {
+		return Config{}, fmt.Errorf("%s: learning.budget_usd is %g; it cannot be negative", path, cfg.Learning.BudgetUSD)
 	}
 	if _, err := task.ParseAgent(string(cfg.Auto.Agent)); err != nil {
 		return Config{}, fmt.Errorf("%s: auto.agent: %w", path, err)

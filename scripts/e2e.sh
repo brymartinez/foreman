@@ -111,6 +111,7 @@ tasks_dir: $sandbox/tasks
 worktrees_dir: $sandbox/worktrees
 repositories_dir: $sandbox/repositories
 log_dir: $sandbox/logs
+knowledge_dir: $sandbox/knowledge
 claude:
   command: $sandbox/bin/claude
   model: opus
@@ -204,6 +205,12 @@ EOF
 	cat >"$sandbox/bin/claude" <<'EOF'
 #!/usr/bin/env bash
 for arg in "$@"; do case "$arg" in sonnet|opus) echo "claude model=$arg" >>"$E2E_STATE/models.log" ;; esac; done
+# The learner's evaluator turn: record it apart from the task's agents and learn nothing.
+if [[ "$*" == *"You evaluate one finished task"* ]]; then
+	echo "claude evaluate" >>"$E2E_STATE/evaluations.log"
+	echo '{"type":"result","session_id":"e1","subtype":"success","total_cost_usd":0.01,"structured_output":{"assessment":"went fine","signals":[],"proposals":[],"revisions":[]}}'
+	exit 0
+fi
 if [[ " $* " == *" --no-session-persistence "* ]]; then
 	echo "claude review" >>"$E2E_STATE/agents.log"
 	echo '{"type":"result","session_id":"r1","subtype":"success","total_cost_usd":0.05,"structured_output":{"verdict":"clean","summary":"looks right","findings":[]}}'
@@ -314,6 +321,16 @@ EOF
 	cat >"$sandbox/bin/codex" <<'EOF'
 #!/usr/bin/env bash
 for arg in "$@"; do case "$arg" in gpt-6-luna|gpt-6-sol) echo "codex model=$arg" >>"$E2E_STATE/models.log" ;; model_reasoning_effort=*) echo "codex $arg" >>"$E2E_STATE/models.log" ;; esac; done
+prompt=${@: -1}
+if [[ "$prompt" == *"You evaluate one finished task"* ]]; then
+	echo "codex evaluate" >>"$E2E_STATE/evaluations.log"
+	last=
+	while [ $# -gt 0 ]; do [ "$1" = -o ] && last=$2; shift; done
+	echo '{"type":"thread.started","thread_id":"e1"}'
+	echo '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}'
+	echo '{"assessment":"went fine","signals":[],"proposals":[],"revisions":[]}' >"$last"
+	exit 0
+fi
 if [[ " $* " == *" --ephemeral "* ]]; then echo "codex review"; printf '%s' "${@: -1}" >"$E2E_STATE/review-prompt.txt"; else echo "codex implement"; fi >>"$E2E_STATE/agents.log"
 last=
 while [ $# -gt 0 ]; do [ "$1" = -o ] && last=$2; shift; done
@@ -383,11 +400,14 @@ scenario_runner() {
 	check "the dashboard delegates #42" start 42
 	check "the runner reaches a clean review" wait_status "review ✓"
 	local log
-	log=$(ls "$sandbox"/logs/*.log)
+	log=$(ls "$sandbox"/logs/acme-widgets-42.log)
 	check "log has the runner's finish line" contains "$log" "finished"
 	check "log lines are timestamped" grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$log"
 	check "agent stderr reached the log" contains "$log" "claude stderr progress"
 	check "no line is stamped twice" bash -c "! grep -qE '^[^ ]+ [0-9]{4}-[0-9]{2}-[0-9]{2}T' '$log'"
+	check "the clean review starts the learner" eventually 10 test -f "$sandbox/knowledge/acme/widgets/evaluations/42.yaml"
+	check "the learner evaluates with the implementer's agent" contains "$state/evaluations.log" "claude evaluate"
+	check "the learner logs to learning.log" contains "$sandbox/logs/learning.log" "learn: evaluated acme/widgets task 42"
 	check "the prompt carries the implement stage file" contains "$state/prompt.txt" "Add or update tests when behavior changes."
 	check "the first turn plans" contains "$state/prompt.txt" "## Plan first"
 	check "the four documents are posted on the issue" test "$(grep -c 'api --method POST repos/acme/widgets/issues/42/comments' "$state/gh.log")" = 4
@@ -718,7 +738,7 @@ scenario_cancel() {
 	check "the task is FAILED" wait_status "FAILED" 1
 	check "no runner or agent is left" processes_gone "$pid" implement
 	local log
-	log=$(ls "$sandbox"/logs/*.log)
+	log=$(ls "$sandbox"/logs/acme-widgets-42.log)
 	check "the log shows who stopped it" contains "$log" "foreman: cancel requested; stopping runner"
 	check "a second cancel has nothing to stop" dash -- refreshed keys=l pick=acme/widgets#42 keys=c "wait=acme/widgets#42 is FAILED with no runner; nothing to cancel"
 	start 42 >/dev/null
@@ -794,7 +814,7 @@ EOF2
 	check "a retry with the same agent starts" start 42
 	check "the run reaches a clean review" wait_status "review ✓"
 	local log
-	log=$(ls "$sandbox"/logs/*.log)
+	log=$(ls "$sandbox"/logs/acme-widgets-42.log)
 	check "the log has the route line" contains "$log" "route:deep:claude:broad or ambiguous design work"
 	check "the route line comes before the first turn" bash -c "grep -nE 'route:|claude:[a-z]+:plan' '$log' | head -1 | grep -qF route:"
 	check "planning uses the profile's model" bash -c "! grep -qF 'claude model=sonnet' '$state/models.log'"

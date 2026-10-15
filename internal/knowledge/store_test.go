@@ -398,3 +398,27 @@ func TestLockAllowsOneEvaluationPerRepository(t *testing.T) {
 	}
 	again()
 }
+
+func TestRecordAttemptRoundTripsAndStaysOutOfEvaluations(t *testing.T) {
+	s, _ := newStore(t)
+	if got, err := s.Attempt(repo, "7"); err != nil || got != nil {
+		t.Fatalf("no attempt yet: %+v %v", got, err)
+	}
+	if err := s.RecordAttempt(repo, "7", Attempt{Fingerprint: "fp-7", At: t0}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Attempt(repo, "7")
+	if err != nil || got == nil || got.Fingerprint != "fp-7" || !got.At.Equal(t0) {
+		t.Fatalf("attempt = %+v %v", got, err)
+	}
+	if evs, err := s.Evaluations(repo, 0); err != nil || len(evs) != 0 {
+		t.Fatalf("an attempt must not read as an evaluation: %+v %v", evs, err)
+	}
+}
+
+func TestRecordAttemptRejectsAnInvalidTaskID(t *testing.T) {
+	s, _ := newStore(t)
+	if err := s.RecordAttempt(repo, "../7", Attempt{Fingerprint: "fp", At: t0}); err == nil {
+		t.Fatal("RecordAttempt accepted a task id that leaves the repository directory")
+	}
+}

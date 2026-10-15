@@ -20,6 +20,10 @@ import (
 // evaluator sees, so the prompt stays bounded as a repository's history grows.
 const earlierEvaluations = 12
 
+// learnRetryAfter is how long a refresh waits before it retries an evaluation that
+// failed on the same evidence.
+const learnRetryAfter = time.Hour
+
 // Learn evaluates one task and folds the result into its repository's knowledge. It
 // holds the repository's lock for the whole evaluation and returns
 // knowledge.ErrLocked when another evaluation holds it. A failed or invalid
@@ -45,6 +49,9 @@ func (a App) Learn(ctx context.Context, key task.Key, log io.Writer) error {
 		return err
 	}
 	defer unlock()
+	if err := a.Knowledge.RecordAttempt(repo, id, knowledge.Attempt{Fingerprint: fingerprint(rec), At: a.Now()}); err != nil {
+		return err
+	}
 
 	learnings, err := a.Knowledge.Learnings(repo)
 	if err != nil {
@@ -244,4 +251,62 @@ func (a App) feedbackBodies(ctx context.Context, rec *task.Record) ([]string, er
 		}
 	}
 	return out, nil
+}
+
+// startLearners starts an evaluation of each finished task whose evidence changed
+// since its stored evaluation, at most one per repository. A task a runner still
+// drives is the runner's to start, a repository with an evaluation running waits,
+// and holdLearning says which other due tasks wait.
+func (a App) startLearners(recs []*task.Record) {
+	if !a.Learning || a.Knowledge == nil {
+		return
+	}
+	started := map[task.Repo]bool{}
+	for _, r := range recs {
+		if r.State == task.Working || r.State == task.Reviewing || started[r.Repo] {
+			continue
+		}
+		if due, err := a.LearningDue(r); err != nil || !due || a.holdLearning(r) || a.Knowledge.Busy(string(r.Repo)) {
+			continue
+		}
+		// A learner that fails to start is tried again on the next refresh.
+		if a.Runners.SpawnLearn(r.Key) == nil {
+			started[r.Repo] = true
+		}
+	}
+}
+
+// holdLearning reports whether a due task waits for a later refresh. An evaluation
+// that failed on the same evidence waits learnRetryAfter, so a failing evaluator is
+// not paid for on every refresh. A merged or closed task never tried before
+// predates learning, and evaluating that backlog would spend on old work.
+func (a App) holdLearning(rec *task.Record) bool {
+	at, err := a.Knowledge.Attempt(string(rec.Repo), learnTaskID(rec.Key))
+	switch {
+	case err != nil:
+		return true
+	case at == nil:
+		return rec.State == task.Done || rec.State == task.PRClosed
+	}
+	return at.Fingerprint == fingerprint(rec) && a.Now().Sub(at.At) < learnRetryAfter
+}
+
+// learnAfterRun starts the task's evaluation when its run ends on a clean review.
+// Learning is a side job: a learner that fails to start is noted in the task log,
+// and the refresh starts it later.
+func (a App) learnAfterRun(rec *task.Record, log io.Writer) {
+	if !a.Learning || a.Knowledge == nil {
+		return
+	}
+	if r := rec.LatestReview(); r == nil || !r.Clean {
+		return
+	}
+	if due, err := a.LearningDue(rec); err != nil || !due {
+		return
+	}
+	if err := a.Runners.SpawnLearn(rec.Key); err != nil {
+		fmt.Fprintf(log, "foreman: learning not started: %v\n", err)
+		return
+	}
+	fmt.Fprintln(log, "foreman: learning from this task in the background")
 }
