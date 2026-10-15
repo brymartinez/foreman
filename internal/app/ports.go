@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/brymartinez/foreman/internal/agent"
+	"github.com/brymartinez/foreman/internal/knowledge"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -264,6 +265,26 @@ type Notifier interface {
 // Selector reads an issue against the routing rules and picks one.
 type Selector interface {
 	Select(ctx context.Context, in agent.SelectInput) (agent.Selection, error)
+}
+
+// Evaluator judges one finished task from its evidence packet.
+type Evaluator interface {
+	Evaluate(ctx context.Context, in agent.EvaluateInput) (agent.Evaluation, error)
+}
+
+// KnowledgeStore keeps each repository's evaluations and learnings. repo is
+// "owner/name"; the store rejects anything that could reach another repository.
+type KnowledgeStore interface {
+	// Lock takes the repository's evaluation lock without waiting, or returns
+	// knowledge.ErrLocked.
+	Lock(repo string) (func(), error)
+	Learnings(repo string) ([]knowledge.Learning, error)
+	// Evaluation returns one task's stored evaluation, or nil.
+	Evaluation(repo, task string) (*knowledge.Evaluation, error)
+	// Evaluations returns up to limit evaluations, newest task first.
+	Evaluations(repo string, limit int) ([]knowledge.Evaluation, error)
+	// Apply stores ev, replacing the task's earlier evaluation and evidence.
+	Apply(repo string, ev knowledge.Evaluation) error
 }
 
 type QuotaStatus int

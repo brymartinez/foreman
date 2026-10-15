@@ -76,6 +76,11 @@ type App struct {
 	RoutingErr      error
 	RoutingDefaults routing.Defaults
 	Selector        Selector
+	// Knowledge and Evaluator learn from finished tasks. A nil Knowledge turns
+	// learning off.
+	Knowledge         KnowledgeStore
+	Evaluator         Evaluator
+	LearningBudgetUSD float64
 	// Quota may be nil, which makes every agent's quota unknown.
 	Quota QuotaChecker
 	// LogDir holds the task logs. History scans it for PRs from older tasks.

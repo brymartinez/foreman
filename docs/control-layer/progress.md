@@ -4,8 +4,10 @@
 
 Stage 61 (per-repository evaluation and learning) is in progress. Done: tool-call
 counts in task usage (plan task 1) and the `internal/knowledge` store with
-sanitizing, promotion, revision, selection, and the repository lock (plan task 2).
-Next: plan task 3, the evaluator turn and `App.Learn`.
+sanitizing, promotion, revision, selection, and the repository lock (plan task 2),
+and the evaluator turn with `App.Learn` and `App.LearningDue` (plan task 3).
+Next: plan task 4, the `learning` config, `foreman __learn`, and the runner and
+refresh triggers.
 
 Linear branch naming uses the name supplied by Linear for new Linear tasks when
 available. GitHub issues and Linear issues without a supplied name keep the
