@@ -1,0 +1,40 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["assessment", "signals", "proposals", "revisions"],
+  "properties": {
+    "assessment": { "type": "string" },
+    "signals": { "type": "array", "items": { "type": "string" } },
+    "proposals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "text", "scope", "why", "source", "supports"],
+        "properties": {
+          "kind": { "type": "string", "enum": ["convention", "fact", "practice"] },
+          "text": { "type": "string" },
+          "scope": { "type": "string", "enum": ["reusable", "one_off"] },
+          "why": { "type": "string" },
+          "source": { "type": "string", "enum": ["maintainer", "observed"] },
+          "supports": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "revisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "action", "text", "reason", "source"],
+        "properties": {
+          "id": { "type": "string" },
+          "action": { "type": "string", "enum": ["revise", "retire"] },
+          "text": { "type": ["string", "null"] },
+          "reason": { "type": "string" },
+          "source": { "type": "string", "enum": ["maintainer", "observed"] }
+        }
+      }
+    }
+  }
+}
