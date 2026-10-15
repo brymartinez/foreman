@@ -292,6 +292,9 @@ type KnowledgeStore interface {
 	RecordAttempt(repo, task string, at knowledge.Attempt) error
 	// Apply stores ev, replacing the task's earlier evaluation and evidence.
 	Apply(repo string, ev knowledge.Evaluation) error
+	// Select returns at most limit active learnings, totalling at most maxChars of
+	// text, ranked by relevance to query.
+	Select(repo, query string, limit, maxChars int) ([]knowledge.Learning, error)
 }
 
 type QuotaStatus int

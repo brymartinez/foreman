@@ -10,8 +10,11 @@ triggers (plan task 4): `knowledge_dir` and `learning` config, the detached
 `foreman __learn` writing to `learning.log`, a spawn when a run ends on a clean
 review, and a refresh spawn on changed evidence. The refresh waits an hour before
 retrying a failed evaluation of the same evidence, and does not start first
-evaluations of merged or closed tasks. Next: plan task 5, repository knowledge
-in planning and implementation prompts.
+evaluations of merged or closed tasks. Plan task 5 is done: planning and
+implementation prompts, including fresh-session fallbacks and checkpoints, carry a
+`## Repository knowledge` section of at most 8 learnings and 2000 characters from
+the task's repository. Review, selector, conflict, and merge prompts do not. Next:
+plan task 6, docs and the end-to-end scenarios.
 
 Linear branch naming uses the name supplied by Linear for new Linear tasks when
 available. GitHub issues and Linear issues without a supplied name keep the

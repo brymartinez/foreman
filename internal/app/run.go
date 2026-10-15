@@ -363,7 +363,7 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 		}
 		fmt.Fprintf(log, "foreman: session is gone (%v); starting a fresh turn rebuilt from the task file\n", err)
 	}
-	brief, err := a.brief(ctx, rec)
+	brief, err := a.brief(ctx, rec, log)
 	if err != nil {
 		return agent.Turn{}, err
 	}
@@ -588,7 +588,7 @@ func (a App) notify(key task.Key, rec *task.Record) {
 }
 
 // brief gathers the durable task context the implementation prompt is built from.
-func (a App) brief(ctx context.Context, rec *task.Record) (agent.TaskBrief, error) {
+func (a App) brief(ctx context.Context, rec *task.Record, log io.Writer) (agent.TaskBrief, error) {
 	d := rec.Delegation
 	issue, err := a.issue(ctx, rec.Key)
 	if err != nil {
@@ -612,7 +612,34 @@ func (a App) brief(ctx context.Context, rec *task.Record) (agent.TaskBrief, erro
 		Worktree:   d.Worktree,
 		Decisions:  rec.Decisions,
 		Plan:       rec.Plan,
+		Knowledge:  a.repoKnowledge(rec.Repo, issue, log),
 	}, nil
+}
+
+// Prompts carry at most this much repository knowledge, so learnings never crowd
+// out the issue and the developer's instructions.
+const (
+	promptLearnings = 8
+	promptKnowledge = 2000
+)
+
+// repoKnowledge is the repository's learnings that best match the issue, as Markdown
+// bullets. Knowledge is advisory, so a read error only drops it from the prompt.
+func (a App) repoKnowledge(repo task.Repo, issue Issue, log io.Writer) string {
+	if a.Knowledge == nil {
+		return ""
+	}
+	query := strings.Join(append([]string{issue.Title, issue.Body}, issue.Labels...), "\n")
+	ls, err := a.Knowledge.Select(string(repo), query, promptLearnings, promptKnowledge)
+	if err != nil {
+		fmt.Fprintf(log, "foreman: starting without repository knowledge: %v\n", err)
+		return ""
+	}
+	var s strings.Builder
+	for _, l := range ls {
+		s.WriteString("- " + l.Text + "\n")
+	}
+	return s.String()
 }
 
 // verifyPR checks the agent's pr_opened claim against GitHub: the PR must be open,

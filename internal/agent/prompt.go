@@ -53,6 +53,9 @@ type TaskBrief struct {
 	Conflict *Conflict
 	// Merge is set when the PR conflicts with its base and a fresh turn has to merge it.
 	Merge *MergeBrief
+	// Knowledge is the repository's learnings selected for this issue, one Markdown
+	// bullet each. Learned from earlier tasks, so it ranks below every other input.
+	Knowledge string
 }
 
 // MergeBrief is the base branch a PR conflicts with and the files that conflict.
@@ -94,6 +97,10 @@ func ImplementationPrompt(b TaskBrief) string {
 	}
 	if b.NextObjective != "" {
 		fmt.Fprintf(&s, "## Continue from checkpoint\n\nThe branch is clean at commit %s. This is a new session; inspect the committed code and issue only as needed. Your next objective is: %s\n\nDo not reconstruct or request the earlier session transcript.\n\n", b.CheckpointHead, b.NextObjective)
+	}
+
+	if b.Conflict == nil && b.Merge == nil {
+		knowledgeSection(&s, b.Knowledge)
 	}
 
 	if ctx := strings.TrimSpace(b.Context); ctx != "" {
@@ -242,6 +249,16 @@ Nobody reads this session while it runs, and every word you write costs output t
 This applies only to text between tool calls. Keep full detail in the final response, the questions you ask, the planning documents, the pull request title and body, review findings, and any text a tool or command needs.
 
 `)
+}
+
+// knowledgeSection passes on what earlier tasks in the repository taught. An
+// evaluator inferred it, so it must never override a source the developer controls.
+func knowledgeSection(s *strings.Builder, text string) {
+	if text = strings.TrimSpace(text); text == "" {
+		return
+	}
+	s.WriteString("## Repository knowledge\n\nForeman learned these from earlier tasks in this repository. They may be wrong or out of date. The repository's own instructions, the issue, the developer's decisions and context, and facts you verify take precedence. Where one of them disagrees, follow it and ignore the learning.\n\n")
+	s.WriteString(text + "\n\n")
 }
 
 func plannedStatus(planning bool) string {
