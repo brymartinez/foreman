@@ -7,8 +7,8 @@ import (
 	"unicode"
 )
 
-// Select returns up to limit active learnings for repo, whose texts total at most
-// maxChars. Learnings sharing more words with query come first, then those backed by
+// Select returns up to limit active learnings for repo that total at most maxChars
+// as Markdown bullets, each text plus "- " and a newline. Learnings sharing more words with query come first, then those backed by
 // more tasks, then the most recently supported. Learnings that share no words still
 // qualify, because a convention applies whatever the issue is about.
 func (s Store) Select(repo, query string, limit, maxChars int) ([]Learning, error) {
@@ -55,10 +55,11 @@ func (s Store) Select(repo, query string, limit, maxChars int) ([]Learning, erro
 		if len(out) == limit {
 			break
 		}
-		if total+len(r.l.Text) > maxChars {
+		n := len(r.l.Text) + len("- \n")
+		if total+n > maxChars {
 			continue
 		}
-		total += len(r.l.Text)
+		total += n
 		out = append(out, r.l)
 	}
 	return out, nil

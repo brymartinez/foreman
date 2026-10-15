@@ -11,6 +11,8 @@ import (
 //
 // The rules, in order:
 //   - The task's earlier evidence is withdrawn, so a re-evaluation replaces it.
+//   - Without maintainer evidence on the task, a claimed maintainer source counts as
+//     observed: the evaluator cannot invent a correction.
 //   - A one-off proposal stays in the evaluation only.
 //   - A reusable proposal reinforces the learning it supports or repeats, or starts a
 //     new candidate. Observed work cannot revive a retired learning.
@@ -25,6 +27,9 @@ func (s Store) apply(f *learningsFile, ev Evaluation) Evaluation {
 	}
 	for i := range f.Learnings {
 		withdraw(&f.Learnings[i], ev.Task)
+	}
+	if !ev.MaintainerEvidence {
+		s.demote(&ev)
 	}
 
 	var kept []Proposal
@@ -91,6 +96,28 @@ func (s Store) apply(f *learningsFile, ev Evaluation) Evaluation {
 		settle(&f.Learnings[i], ev)
 	}
 	return ev
+}
+
+// demote turns maintainer sources into observed ones and logs each by position.
+func (s Store) demote(ev *Evaluation) {
+	for i := range ev.Proposals {
+		if ev.Proposals[i].Source == Maintainer {
+			ev.Proposals[i].Source = Observed
+			s.note("proposal", i+1)
+		}
+	}
+	for i := range ev.Revisions {
+		if ev.Revisions[i].Source == Maintainer {
+			ev.Revisions[i].Source = Observed
+			s.note("revision", i+1)
+		}
+	}
+}
+
+func (s Store) note(what string, n int) {
+	if s.Log != nil {
+		fmt.Fprintf(s.Log, "knowledge: %s %d claims a maintainer source but the task has no maintainer evidence; treated as observed\n", what, n)
+	}
 }
 
 func (s Store) check(kind Kind, text string, source Source) (string, error) {

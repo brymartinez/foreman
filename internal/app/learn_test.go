@@ -298,3 +298,44 @@ func TestLearnReadsPRCommentsWhenTheTaskRecordedNone(t *testing.T) {
 		t.Errorf("prompt comments wrong:\n%s", p)
 	}
 }
+
+func TestLearnLeavesOutCommentsFromBots(t *testing.T) {
+	f, ev, _ := learnFixture(t)
+	f.gh.addPRComment(77, PRComment{Kind: task.ReviewComment, ID: 10, Author: "dependabot[bot]", Body: "BOT-SAYS-BUMP-DEPENDENCIES"})
+	if err := f.app.Learn(context.Background(), learnKey, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if p := ev.calls[0].Prompt; strings.Contains(p, "BOT-SAYS") || !strings.Contains(p, "please keep the old flag") {
+		t.Errorf("prompt comments wrong:\n%s", p)
+	}
+}
+
+func TestLearnMarksMaintainerEvidenceOnlyWhenTheTaskHasDecisionsOrComments(t *testing.T) {
+	t.Run("answered decision", func(t *testing.T) {
+		f, _, ks := learnFixture(t)
+		if err := f.app.Learn(context.Background(), learnKey, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		if stored, _ := ks.Evaluation("acme/api", "41"); stored == nil || !stored.MaintainerEvidence {
+			t.Errorf("stored = %+v, want maintainer evidence", stored)
+		}
+	})
+	t.Run("no decisions or comments", func(t *testing.T) {
+		f, ev, ks := learnFixture(t)
+		f.store.recs[learnKey].Decisions = nil
+		f.gh.prComments = nil
+		p := proposal("Claimed by the evaluator.")
+		p.Source = knowledge.Maintainer
+		ev.out.Proposals = []knowledge.Proposal{p}
+		if err := f.app.Learn(context.Background(), learnKey, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		stored, _ := ks.Evaluation("acme/api", "41")
+		if stored == nil || stored.MaintainerEvidence {
+			t.Errorf("stored = %+v, want no maintainer evidence", stored)
+		}
+		if ls, _ := ks.Learnings("acme/api"); len(ls) != 1 || ls[0].Status != knowledge.Candidate {
+			t.Errorf("learnings = %+v, want a candidate", ls)
+		}
+	})
+}

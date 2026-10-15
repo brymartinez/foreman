@@ -16,7 +16,7 @@ const fixtureRepo = "ridezoomo/armada-backend"
 // learn stores texts as active learnings of repo, backed by a maintainer.
 func learn(t *testing.T, ks knowledge.Store, repo, taskID string, texts ...string) {
 	t.Helper()
-	ev := knowledge.Evaluation{Task: taskID, TaskAt: t0, At: t0, Fingerprint: "fp", Assessment: "ok"}
+	ev := knowledge.Evaluation{Task: taskID, TaskAt: t0, At: t0, Fingerprint: "fp", Assessment: "ok", MaintainerEvidence: true}
 	for _, text := range texts {
 		ev.Proposals = append(ev.Proposals, knowledge.Proposal{Kind: knowledge.Convention, Text: text, Scope: knowledge.Reusable, Source: knowledge.Maintainer})
 	}
@@ -87,9 +87,11 @@ func TestRepositoryKnowledgeInPromptsStaysWithinEightItemsAndTwoThousandCharacte
 	if items == 0 || items > 8 {
 		t.Fatalf("items = %d:\n%s", items, got)
 	}
-	text := strings.ReplaceAll(strings.ReplaceAll(got, "- ", ""), "\n", "")
-	if len(text) > 2000 {
-		t.Errorf("knowledge text is %d characters", len(text))
+	// The whole section counts: heading, notice, bullets, and newlines.
+	_, section, _ := strings.Cut(f.claude.prompts[0], "## Repository knowledge")
+	section, _, _ = strings.Cut(section, "\n## ")
+	if n := len("## Repository knowledge" + section); n > 2000 {
+		t.Errorf("knowledge section is %d characters", n)
 	}
 }
 

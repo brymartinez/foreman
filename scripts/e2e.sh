@@ -986,11 +986,14 @@ scenario_learning() {
 	check "it is evaluated in its own store" evaluated acme/linear 45
 	check "the other repository learns nothing" bash -c "! grep -qF 'go vet' '$sandbox/knowledge/acme/linear/knowledge.md'"
 
+	# The developer's PR comment is the maintainer evidence the retirement needs.
+	printf '[[{"id":4402,"html_url":"https://github.com/acme/widgets/pull/944#issuecomment-4402","body":"vet runs in CI only; drop it.","updated_at":"2026-10-01T09:00:00Z","user":{"login":"brymartinez"}}]]\n' >"$state/conv-repos-acme-widgets-issues-944-comments.json"
 	start 44 >/dev/null
 	check "the third task reaches a clean review" reviewed 44 20
 	check "its planning prompt carries the learning" contains "$state/prompt.txt" "Run go vet before each commit."
 	check "under the repository knowledge heading" contains "$state/prompt.txt" "## Repository knowledge"
 	check "and is evaluated" evaluated acme/widgets 44
+	check "the developer's comment counts as maintainer evidence" eventually 10 grep -q 'maintainer_evidence: true' "$k/evaluations/44.yaml"
 	check "a maintainer contradiction retires the learning" eventually 5 grep -q 'status: retired' "$k/learnings.yaml"
 	check "the retired learning leaves knowledge.md" bash -c "! grep -qF 'go vet' '$k/knowledge.md'"
 	check "the learner evaluated every finished task" bash -c "[ \"\$(grep -c '^claude evaluate' '$state/evaluations.log')\" -ge 4 ]"

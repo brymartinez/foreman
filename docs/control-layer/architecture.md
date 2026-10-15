@@ -98,8 +98,10 @@ foreman __learn       -> one evaluation of one task; output goes to <log_dir>/le
   ├─ knowledge: take the repository's lock without waiting; held -> exit 0, a later
   │             refresh retries
   ├─ build the evidence packet from the task file (decisions, review findings,
-  │  phase times, cost or tokens, tool-call counts, PR outcome) and every developer
-  │  comment on the PR from gh; no logs, transcripts, CI, or tool arguments
+  │  phase times, cost or tokens, tool-call counts, PR outcome) and every human
+  │  comment on the PR from gh; no logs, transcripts, CI, or tool arguments. The
+  │  prompt adds the repository's current learnings, which revisions cite by id, and
+  │  its 12 newest other evaluations, so recurrence is visible
   ├─ evaluator turn: the task's implementer agent, no tools, a scratch directory,
   │  learning.budget_usd for Claude; a turn that called a tool is discarded;
   │  agent.ParseEvaluation reads its output
@@ -634,6 +636,9 @@ the same commit. The commit message records why it changed.
   - A `reusable` proposal backed by a maintainer (a recorded decision or a developer's
     PR comment) is active at once. An `observed` one is a candidate until evidence
     from two tasks backs it.
+  - The evaluator's `source: maintainer` counts only when the task has an answered
+    decision or a human PR comment (`Evaluation.MaintainerEvidence`). Otherwise Go
+    treats it as observed and logs it, so a model cannot invent a correction.
   - A maintainer revision or retirement applies at once. An observed one applies only
     when its task started after the learning's latest evidence from other tasks.
   - Observed work cannot revive a retired learning; a maintainer proposal can.
@@ -653,15 +658,16 @@ the same commit. The commit message records why it changed.
   records a tool call is discarded as a failed evaluation. Codex counts every
   completed item other than a message, reasoning, a todo list, or an error as a tool
   call, so a new tool type cannot slip through.
-- **The evaluator reads every developer comment on the PR**, not only those the task
-  file recorded, because the gate stops recording when the PR merges or closes. The
+- **The evaluator reads every human comment on the PR**, not only those the task
+  file recorded, and leaves out logins ending in `[bot]`, because the gate stops recording when the PR merges or closes. The
   merge changes the fingerprint, so the evaluation after it sees comments posted just
   before it. A comment posted after that evaluation starts nothing.
 - **Time and cost are context, not a score.** The evaluator prompt says so, and says
   CI is not evidence. A long or expensive task is not a failure by itself.
 - **Prompts get a bounded selection.** Planning and implementation turns, including
   fresh-session fallbacks and checkpoints, carry a `## Repository knowledge` section:
-  at most 8 active learnings and 2000 characters from the task's repository, ranked
+  at most 8 active learnings and 2000 characters, heading and notice included, from
+  the task's repository, ranked
   by word overlap with the issue title, body, and labels, then by task count, then by
   recency. The section says the learnings may be wrong and lose to repository
   instructions, the issue, decisions, context, and verified facts. Review, selector,

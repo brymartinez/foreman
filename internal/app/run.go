@@ -616,8 +616,8 @@ func (a App) brief(ctx context.Context, rec *task.Record, log io.Writer) (agent.
 	}, nil
 }
 
-// Prompts carry at most this much repository knowledge, so learnings never crowd
-// out the issue and the developer's instructions.
+// Prompts carry at most this much repository knowledge, section heading and notice
+// included, so learnings never crowd out the issue and the developer's instructions.
 const (
 	promptLearnings = 8
 	promptKnowledge = 2000
@@ -630,7 +630,8 @@ func (a App) repoKnowledge(repo task.Repo, issue Issue, log io.Writer) string {
 		return ""
 	}
 	query := strings.Join(append([]string{issue.Title, issue.Body}, issue.Labels...), "\n")
-	ls, err := a.Knowledge.Select(string(repo), query, promptLearnings, promptKnowledge)
+	// knowledgeSection adds the intro and one trailing newline to the bullets.
+	ls, err := a.Knowledge.Select(string(repo), query, promptLearnings, promptKnowledge-len(agent.KnowledgeIntro)-1)
 	if err != nil {
 		fmt.Fprintf(log, "foreman: starting without repository knowledge: %v\n", err)
 		return ""

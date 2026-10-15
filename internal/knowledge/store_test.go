@@ -18,7 +18,7 @@ var t0 = time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 func day(n int) time.Time { return t0.Add(time.Duration(n) * 24 * time.Hour) }
 
 func eval(task string, startedDay int, props ...Proposal) Evaluation {
-	return Evaluation{Task: task, TaskAt: day(startedDay), At: day(startedDay + 1), Fingerprint: "fp-" + task, Assessment: "fine", Proposals: props}
+	return Evaluation{Task: task, TaskAt: day(startedDay), At: day(startedDay + 1), Fingerprint: "fp-" + task, Assessment: "fine", Proposals: props, MaintainerEvidence: true}
 }
 
 func observed(kind Kind, text string, supports ...string) Proposal {
@@ -435,5 +435,29 @@ func TestApplyThatFailsToWriteTheLearningsStoresNoEvaluation(t *testing.T) {
 	ev, err := s.Evaluation(repo, "1")
 	if err != nil || ev != nil {
 		t.Errorf("evaluation = %+v, %v; a failed apply must leave the task due for a retry", ev, err)
+	}
+}
+
+func TestMaintainerSourceWithoutMaintainerEvidenceCountsAsObserved(t *testing.T) {
+	s, log := newStore(t)
+	p := observed(Convention, "Wrap errors with context.")
+	p.Source = Maintainer
+	ev := eval("1", 0, p)
+	ev.MaintainerEvidence = false
+	mustApply(t, s, repo, ev)
+	if ls := learnings(t, s, repo); len(ls) != 1 || ls[0].Status != Candidate || ls[0].Evidence[0].Source != Observed {
+		t.Fatalf("learnings = %+v, want one observed candidate", ls)
+	}
+
+	mustApply(t, s, repo, eval("2", 2, observed(Convention, "Wrap errors with context.")))
+	retire := eval("3", 1)
+	retire.MaintainerEvidence = false
+	retire.Revisions = []Revision{{ID: "L1", Action: Retire, Reason: "claimed", Source: Maintainer}}
+	mustApply(t, s, repo, retire)
+	if ls := learnings(t, s, repo); ls[0].Status != Active {
+		t.Errorf("an older task without maintainer evidence retired the learning: %+v", ls[0])
+	}
+	if !strings.Contains(log.String(), "no maintainer evidence") {
+		t.Errorf("log does not note the downgrade:\n%s", log.String())
 	}
 }

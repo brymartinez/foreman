@@ -394,8 +394,10 @@ Foreman evaluates each task once it has a clean review, and again when new evide
 arrives: a later review, an answered decision, a PR comment, a new PR head, or the PR
 merging or closing. CI results are not evidence. The evaluation is one turn with the
 task's implementer agent, with no tools, run by a detached `foreman __learn` process.
-It reads the task file and the developer's PR comments, never the logs or the agent
-transcripts. A turn that calls a tool anyway is discarded. Its output goes to `<log_dir>/learning.log`. An evaluation that fails
+It reads the task file, the PR's comments from people (not bots), and the
+repository's current learnings and recent evaluations, never the logs or the agent
+transcripts. A turn that calls a tool anyway is discarded. Its output goes to
+`<log_dir>/learning.log`. An evaluation that fails
 never changes the task or sends an alert.
 
 What it learns is kept per repository under `knowledge_dir`:
@@ -410,14 +412,15 @@ What it learns is kept per repository under `knowledge_dir`:
 ```
 
 A learning becomes active when the developer backs it, through a decision answer or a
-PR comment, or when two tasks support it. One task's observation stays a candidate.
+PR comment, or when two tasks support it. A task with neither cannot back one on the
+developer's behalf. One task's observation stays a candidate.
 The developer's correction retires or rewrites a learning at once; observed work does
 so only from a newer task. Learnings are short and generic: foreman drops any with
 issue or PR numbers, commit hashes, URLs, emails, absolute paths, or secret-shaped
 text. Paths inside the repository are kept.
 
-Planning and implementation prompts carry up to 8 active learnings, at most 2000
-characters, from the task's repository only, under `## Repository knowledge`. The
+Planning and implementation prompts carry up to 8 active learnings in a section of
+at most 2000 characters, from the task's repository only, under `## Repository knowledge`. The
 prompt says they may be wrong and that the repository's instructions, the issue, and
 your decisions win. Review prompts never carry them.
 

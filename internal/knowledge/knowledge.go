@@ -81,6 +81,9 @@ type Evaluation struct {
 	Signals     []string   `yaml:"signals,omitempty"`
 	Proposals   []Proposal `yaml:"proposals,omitempty"`
 	Revisions   []Revision `yaml:"revisions,omitempty"`
+	// MaintainerEvidence says the task has an answered decision or a developer's PR
+	// comment. Without it, a maintainer source the evaluator claims counts as observed.
+	MaintainerEvidence bool `yaml:"maintainer_evidence,omitempty"`
 	// Dropped lists rejected proposals and revisions by position and reason, never
 	// their text.
 	Dropped []string `yaml:"dropped,omitempty"`

@@ -257,9 +257,13 @@ func knowledgeSection(s *strings.Builder, text string) {
 	if text = strings.TrimSpace(text); text == "" {
 		return
 	}
-	s.WriteString("## Repository knowledge\n\nForeman learned these from earlier tasks in this repository. They may be wrong or out of date. The repository's own instructions, the issue, the developer's decisions and context, and facts you verify take precedence. Where one of them disagrees, follow it and ignore the learning.\n\n")
+	s.WriteString(KnowledgeIntro)
 	s.WriteString(text + "\n\n")
 }
+
+// KnowledgeIntro opens the repository knowledge section. The section's size limit
+// covers it, so the caller leaves room for it.
+const KnowledgeIntro = "## Repository knowledge\n\nForeman learned these from earlier tasks in this repository. They may be wrong or out of date. The repository's own instructions, the issue, the developer's decisions and context, and facts you verify take precedence. Where one of them disagrees, follow it and ignore the learning.\n\n"
 
 func plannedStatus(planning bool) string {
 	if !planning {

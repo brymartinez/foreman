@@ -87,8 +87,9 @@ func (a App) Learn(ctx context.Context, key task.Key, log io.Writer) error {
 	}
 	ev := knowledge.Evaluation{
 		Task: id, TaskAt: taskStart(rec), At: a.Now(), Agent: string(in.Agent),
-		Fingerprint: fingerprint(rec),
-		Assessment:  out.Assessment, Signals: out.Signals, Proposals: out.Proposals, Revisions: out.Revisions,
+		Fingerprint:        fingerprint(rec),
+		MaintainerEvidence: len(brief.Decisions) > 0 || len(brief.Feedback) > 0,
+		Assessment:         out.Assessment, Signals: out.Signals, Proposals: out.Proposals, Revisions: out.Revisions,
 	}
 	if err := a.Knowledge.Apply(repo, ev); err != nil {
 		return err
@@ -230,8 +231,9 @@ func headAdvanced(rec *task.Record, i int) bool {
 	return rec.Delegation.PRHead != "" && rec.Delegation.PRHead != head
 }
 
-// feedbackBodies reads the developer's comments on the task's PR, the same ones
-// readFeedback counts. It reads all of them, not only those the task file recorded:
+// feedbackBodies reads the people's comments on the task's PR: what readFeedback
+// counts, less bots, whose comments are no maintainer's word. It reads all of them,
+// not only those the task file recorded:
 // the gate stops recording when the PR merges or closes, and the evaluation that
 // follows the merge must still see a comment posted just before it.
 func (a App) feedbackBodies(ctx context.Context, rec *task.Record) ([]string, error) {
@@ -244,7 +246,7 @@ func (a App) feedbackBodies(ctx context.Context, rec *task.Record) ([]string, er
 	}
 	var out []string
 	for _, c := range comments {
-		if strings.TrimSpace(c.Body) != "" && !strings.Contains(c.Body, agent.ReplyMarker) {
+		if strings.TrimSpace(c.Body) != "" && !strings.Contains(c.Body, agent.ReplyMarker) && !strings.HasSuffix(c.Author, "[bot]") {
 			out = append(out, knowledge.Redact(c.Body))
 		}
 	}
