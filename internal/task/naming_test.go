@@ -33,6 +33,19 @@ func TestBranchAndWorktreeShareWorkName(t *testing.T) {
 	}
 }
 
+func TestTrackerBranchNameValidation(t *testing.T) {
+	for _, name := range []string{"bryan/web-42-fix-cache", "team/feature_42"} {
+		if !ValidBranchName(name) {
+			t.Errorf("valid branch %q rejected", name)
+		}
+	}
+	for _, name := range []string{"", "-bad", "../outside", "team//issue", "team/.hidden", "team/name.lock", "team/name..other", "team/a b"} {
+		if ValidBranchName(name) {
+			t.Errorf("invalid branch %q accepted", name)
+		}
+	}
+}
+
 func TestRepositoryPath(t *testing.T) {
 	if got := RepositoryPath("/repos", "ridezoomo/armada-backend"); got != "/repos/ridezoomo-armada-backend" {
 		t.Errorf("repository = %q", got)

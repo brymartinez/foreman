@@ -85,17 +85,25 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		return nil, fmt.Errorf("%s no longer has the triaged label", issueLabel(key, issue.Identifier))
 	}
 
-	branchType := req.BranchType
-	if branchType == "" {
-		branchType = task.BranchTypeFor(issue.Title, issue.Labels)
-	}
-	work := task.WorkName(key.Number, issue.Title)
-	if key.Source == task.Linear {
-		work = "linear-" + task.Slug(issue.Identifier) + "-" + task.Slug(issue.Title)
-	}
-	branch := task.BranchName(branchType, work)
+	branch := ""
 	if existing != nil && existing.Delegation != nil && existing.Delegation.Branch != "" {
 		branch = existing.Delegation.Branch
+	} else {
+		branchType := req.BranchType
+		if branchType == "" {
+			branchType = task.BranchTypeFor(issue.Title, issue.Labels)
+		}
+		work := task.WorkName(key.Number, issue.Title)
+		if key.Source == task.Linear {
+			work = "linear-" + task.Slug(issue.Identifier) + "-" + task.Slug(issue.Title)
+		}
+		branch = task.BranchName(branchType, work)
+		if key.Source == task.Linear && issue.BranchName != "" {
+			if !task.ValidBranchName(issue.BranchName) {
+				return nil, fmt.Errorf("Linear issue %s returned an invalid branch name %q", issue.Identifier, issue.BranchName)
+			}
+			branch = issue.BranchName
+		}
 	}
 	workName := task.WorkNameOf(branch)
 	wt := WorktreeRequest{

@@ -363,5 +363,5 @@ func prSection(text string) string {
 	if text = strings.TrimSpace(text); text == "" {
 		return ""
 	}
-	return "\n## Pull request description\n\nThe developer's instructions for opening the pull request and writing its title and body. Follow them when you open the pull request and whenever you update its description (`gh pr edit --body`). They apply only to the pull request, not to the code.\n\n" + text + "\n"
+	return "\n## Pull request description\n\nRead the repository's AGENTS.md and pull request template before opening or updating the pull request. Follow their title and body rules where they differ from the developer's instructions below. These instructions apply only to the pull request, not to the code.\n\n" + text + "\n"
 }

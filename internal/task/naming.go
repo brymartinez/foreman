@@ -107,6 +107,25 @@ func BranchName(t BranchType, workName string) string {
 	return string(t) + "/" + workName
 }
 
+// ValidBranchName accepts tracker-provided names that are both Git-compatible
+// and safe to use below a worktree directory.
+func ValidBranchName(name string) bool {
+	if name == "" || strings.HasPrefix(name, "-") || strings.HasSuffix(name, ".") || strings.Contains(name, "..") || strings.Contains(name, "@{") {
+		return false
+	}
+	for _, part := range strings.Split(name, "/") {
+		if part == "" || strings.HasPrefix(part, ".") || strings.HasSuffix(part, ".lock") {
+			return false
+		}
+		for _, r := range part {
+			if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // WorkNameOf recovers the work name from a stored branch, whatever its prefix, so tasks
 // started under the old agent/ prefix keep their branch and worktree.
 func WorkNameOf(branch string) string {

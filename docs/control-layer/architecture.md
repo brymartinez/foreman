@@ -277,10 +277,13 @@ the same commit. The commit message records why it changed.
   alert, keeps the branch, and returns to READY_FOR_HUMAN or REVIEWING if the PR is
   reopened. A closed issue takes precedence and makes the task DONE. The runner can't write to a `PR_CLOSED` task, so the stop that
   follows is never saved as a failure.
-- **Names are computed once.** `task.WorkName` is `<issue>-<slug>` (at most 5 words and
-  40 characters, conventional prefix removed). The branch is `<type>/<workName>`, with
-  the type from the title prefix, the labels, then `feat`. Both are stored at the first
-  start, so renaming the issue renames nothing. Old `agent/…` branches still work.
+- **Names are computed once.** `task.WorkName` is `<issue>-<slug>` (at most 5 words
+  and 40 characters, conventional prefix removed). The default branch is
+  `<type>/<workName>`, with the type from the title prefix, the labels, then `feat`.
+  A new Linear task uses Linear's `branchName` when provided; an invalid name stops
+  before worktree creation. Without one, it uses the default branch name. The chosen
+  branch is stored at the first start, so renaming the issue changes nothing. Old
+  `agent/…` branches still work.
 
 ### Agents
 
@@ -379,6 +382,9 @@ the same commit. The commit message records why it changed.
   `review`, and `pr` each resolve `stages/<stage>.md` next to the config file, then the
   committed `.foreman/<stage>.md` in the task's worktree. Foreman never parses them and
   never reads CLAUDE.md or AGENTS.md.
+- **Repository PR conventions take precedence.** The implementation prompt tells the
+  agent to read the repository's `AGENTS.md` and PR template before opening or updating
+  the PR. Their title and body rules override conflicting global `pr.md` defaults.
 - **The global files are required.** The dashboard and the runner fail naming the
   missing files; `foreman -c` and a piped `foreman` don't check them. `make config` (`scripts/install-stages.sh`) installs the defaults from
   `defaults/stages/` and never overwrites an installed file. It names each installed
@@ -477,8 +483,8 @@ the same commit. The commit message records why it changed.
   the selected inbox item, including Linear's stable issue ID. Routing reads the
   issue and recent comments from that tracker. In-flight starts and auto routing
   retries use the same key to release slots and retain routing selections.
-  A Linear branch uses its display
-  identifier and title; GitHub branches keep their numeric issue name.
+  A Linear branch uses the name supplied by Linear when available, otherwise its
+  display identifier and title. GitHub branches keep their numeric issue name.
 - **Runner issue source.** A runner reads the issue through the source stored on
   the task. Planning documents are posted through that source and retain its
   comment IDs for later edits. A Linear task still opens its PR on GitHub; the

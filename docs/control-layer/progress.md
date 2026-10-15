@@ -2,6 +2,12 @@
 
 ## Current stage
 
+Linear branch naming uses the name supplied by Linear for new Linear tasks when
+available. GitHub issues and Linear issues without a supplied name keep the
+conventional type prefix; restarts keep their stored branch. Repository PR
+instructions and templates take precedence over global PR defaults. Vet, Go tests,
+build, and the Linear end-to-end scenario pass.
+
 Stage 58 (per-repository Linear issue sources) is complete. Configuration maps GitHub
 repositories to Linear projects. The dashboard selects GitHub, Linear, or both issue
 sources, groups inbox rows, and pauses auto starts after a partial refresh. Linear

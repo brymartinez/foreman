@@ -294,7 +294,7 @@ if [ -f "$E2E_STATE/main-moves" ]; then
 	rm -rf "$m" "$E2E_STATE/main-moves"
 fi
 issue=${branch#*/}
-if [[ "$issue" == linear-* ]]; then
+if [[ "$PWD" == *acme-linear* ]]; then
 	pr=947
 	pr_repo=acme/linear
 	body='Add search for LIN-7.\n\nhttps://linear.app/acme/issue/LIN-7/add-search'
@@ -586,6 +586,7 @@ EOF
 		fail "a Linear issue can be delegated"
 	fi
 	check "the Linear task keeps its issue ID" grep -q '11111111-1111-4111-8111-111111111111' "$sandbox/tasks/acme-linear-linear-11111111-1111-4111-8111-111111111111.md"
+	check "the Linear task uses the name supplied by Linear" grep -q '^branch: bryan/lin-7-add-search' "$sandbox/tasks/acme-linear-linear-11111111-1111-4111-8111-111111111111.md"
 	check "the runner posts planning comments to Linear" eventually 10 test -f "$state/linear-comment-4"
 	check "the Linear task reaches a clean GitHub PR review" eventually 15 grep -q 'verdict: clean' "$sandbox/tasks/acme-linear-linear-11111111-1111-4111-8111-111111111111.md"
 	check "the Linear PR stays in its GitHub repository and links its issue" bash -c "grep -qF 'github.com/acme/linear/pull/947' '$state/pr-947.json' && grep -qF 'LIN-7/add-search' '$state/pr-947.json' && ! grep -qF 'Closes #' '$state/pr-947.json'"

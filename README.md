@@ -222,6 +222,8 @@ part of the task.
    - The prefix is a conventional-commit type. Foreman takes it from the title's own
      prefix (`fix: …`), otherwise from a label (`bug` → `fix`, `documentation` →
      `docs`, …), otherwise it uses `feat`.
+   - For a Linear issue, Foreman uses the branch name supplied by Linear when
+     available. Existing tasks keep their stored branch.
 2. It launches a detached runner that logs to `~/.local/share/foreman/logs/`. The
    runner keeps going after you quit the dashboard.
 3. The runner has the agent implement the issue, run validation, push, and open a PR
@@ -281,11 +283,14 @@ Foreman never reads or changes those files.
 - Repo files are optional.
 - When both files exist, the agent gets both: global first, then the repo's more
   specific rules.
+- The repository's `AGENTS.md` and PR template take precedence over the global
+  `pr.md` defaults when they give different title or body rules.
 - The task's context file and your recorded decisions take precedence over stage
   instructions.
 - Tasks read `.foreman/` from their worktree, so only the version committed on the base
   branch counts.
-- A PR body always includes `Closes #N`. A review always ends in foreman's JSON format.
+- A GitHub issue PR body includes `Closes #N`; a Linear issue PR links its issue URL.
+  A review always ends in foreman's JSON format.
   Otherwise the text is passed through as written.
 
 ## Cleaning up worktrees
@@ -448,7 +453,8 @@ not need `LINEAR_API_KEY`. A view that includes a mapped repository needs the ke
 Foreman reads and comments on Linear issues but does not change their status.
 Branches and pull requests stay on GitHub. A Linear task's PR title includes its
 Linear identifier, and its body links to the Linear issue instead of using a GitHub
-`Closes #N` line.
+`Closes #N` line. New Linear tasks use Linear's suggested branch name when it is
+available. If Linear returns no name, Foreman uses its conventional type prefix.
 
 Planning, implementation, and review can use separate models. PR creation is part of
 implementation. The agent chosen for the task plans and implements; the competing

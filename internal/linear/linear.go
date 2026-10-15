@@ -38,6 +38,7 @@ type pageInfo struct {
 type issueNode struct {
 	ID          string    `json:"id"`
 	Identifier  string    `json:"identifier"`
+	BranchName  string    `json:"branchName"`
 	Title       string    `json:"title"`
 	Description string    `json:"description"`
 	URL         string    `json:"url"`
@@ -176,7 +177,7 @@ func (c Client) GetIssue(ctx context.Context, key task.Key) (app.Issue, error) {
 	var data struct {
 		Issue *issueNode `json:"issue"`
 	}
-	err := c.query(ctx, `query($id:String!){ issue(id:$id){id identifier title description url updatedAt state{type} labels(first:250){nodes{name}}} }`, map[string]any{"id": key.ExternalID}, &data)
+	err := c.query(ctx, `query($id:String!){ issue(id:$id){id identifier branchName title description url updatedAt state{type} labels(first:250){nodes{name}}} }`, map[string]any{"id": key.ExternalID}, &data)
 	if err != nil {
 		return app.Issue{}, err
 	}
@@ -187,7 +188,7 @@ func (c Client) GetIssue(ctx context.Context, key task.Key) (app.Issue, error) {
 	if n.ID != key.ExternalID || n.state() == "" {
 		return app.Issue{}, fmt.Errorf("Linear issue %s has invalid identity or state", key.ExternalID)
 	}
-	return app.Issue{Key: key, Identifier: n.Identifier, Title: n.Title, Body: n.Description, URL: n.URL, Labels: n.labels(), State: n.state(), UpdatedAt: n.UpdatedAt}, nil
+	return app.Issue{Key: key, Identifier: n.Identifier, BranchName: n.BranchName, Title: n.Title, Body: n.Description, URL: n.URL, Labels: n.labels(), State: n.state(), UpdatedAt: n.UpdatedAt}, nil
 }
 
 type commentNode struct {

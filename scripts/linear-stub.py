@@ -50,7 +50,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def issue(self, discovery):
-        issue = {"id": issue_id, "identifier": "LIN-7", "title": "Add search", "description": "Add search to the widget list", "url": issue_url, "updatedAt": "2026-10-01T10:00:00Z", "state": {"type": "unstarted"}, "labels": {"nodes": [{"name": "triaged"}]}}
+        issue = {"id": issue_id, "identifier": "LIN-7", "branchName": "bryan/lin-7-add-search", "title": "Add search", "description": "Add search to the widget list", "url": issue_url, "updatedAt": "2026-10-01T10:00:00Z", "state": {"type": "unstarted"}, "labels": {"nodes": [{"name": "triaged"}]}}
         if discovery:
             issue.update(createdAt="2026-09-25T10:00:00Z", assignee={"id": "viewer-1"}, project={"id": "project-1"})
         return issue

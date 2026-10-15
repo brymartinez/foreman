@@ -573,6 +573,31 @@ func TestStartPicksBranchTypeFromLabelsOrOverride(t *testing.T) {
 	}
 }
 
+func TestLinearStartUsesTrackerBranchName(t *testing.T) {
+	f := newFixture()
+	key := task.Key{Repo: f.gh.repo.Repo, Source: task.Linear, ExternalID: "uuid-42"}
+	f.app.Linear = &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", BranchName: "bryan/web-42-fix-cache", Title: "Fix cache", State: "open"}}
+	rec, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Delegation.Branch != "bryan/web-42-fix-cache" || f.wt.reqs[0].Branch != rec.Delegation.Branch || f.wt.reqs[0].Path != "/wt/ridezoomo-armada-backend/web-42-fix-cache" {
+		t.Fatalf("branch = %q, worktree = %+v", rec.Delegation.Branch, f.wt.reqs[0])
+	}
+}
+
+func TestLinearStartRejectsUnsafeTrackerBranchName(t *testing.T) {
+	f := newFixture()
+	key := task.Key{Repo: f.gh.repo.Repo, Source: task.Linear, ExternalID: "uuid-42"}
+	f.app.Linear = &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", BranchName: "../outside", Title: "Fix cache", State: "open"}}
+	if _, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude}); err == nil || !strings.Contains(err.Error(), "invalid branch name") {
+		t.Fatalf("start error = %v", err)
+	}
+	if len(f.wt.reqs) != 0 {
+		t.Fatalf("worktree was created: %+v", f.wt.reqs)
+	}
+}
+
 func TestStartNewOnlyRefusesAnIssueAlreadyDelegated(t *testing.T) {
 	// The dashboard's inbox can be a refresh old: another command may have started the
 	// issue, and it may already be PR_CLOSED, which the dashboard's task list leaves out.

@@ -37,6 +37,7 @@ type InboxItem struct {
 type Issue struct {
 	Key        task.Key
 	Identifier string
+	BranchName string // tracker-provided branch name, when available
 	Title      string
 	Body       string
 	Labels     []string

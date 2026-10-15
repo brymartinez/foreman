@@ -75,7 +75,7 @@ func TestLinearManualStartDoesNotRequireTriagedLabel(t *testing.T) {
 	key := task.Key{Repo: f.gh.repo.Repo, Source: task.Linear, ExternalID: "uuid-42"}
 	f.app.Linear = &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", URL: "https://linear.app/acme/issue/WEB-42", State: "open"}}
 	rec, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude})
-	if err != nil || rec == nil || rec.Key != key {
+	if err != nil || rec == nil || rec.Key != key || rec.Delegation.Branch != "feat/linear-web-42-fix-cache" {
 		t.Fatalf("start = %+v, %v", rec, err)
 	}
 }

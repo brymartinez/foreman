@@ -102,16 +102,16 @@ func TestIssueReadMapsLabelsAndTerminalStates(t *testing.T) {
 	for _, state := range []struct{ kind, want string }{{"started", "open"}, {"completed", "closed"}, {"canceled", "closed"}} {
 		t.Run(state.kind, func(t *testing.T) {
 			c := testClient(t, func(q string, v map[string]json.RawMessage) string {
-				if !strings.Contains(q, "issue(") {
+				if !strings.Contains(q, "issue(") || !strings.Contains(q, "branchName") {
 					t.Fatalf("query = %s", q)
 				}
-				return `{"data":{"issue":{"id":"` + issueID + `","identifier":"ACME-42","title":"Fix web","description":"Issue body","url":"https://linear.app/acme/issue/ACME-42/fix-web","updatedAt":"2026-10-11T10:00:00Z","state":{"type":"` + state.kind + `"},"labels":{"nodes":[{"name":"triaged"}]}}}}`
+				return `{"data":{"issue":{"id":"` + issueID + `","identifier":"ACME-42","branchName":"bryan/acme-42-fix-web","title":"Fix web","description":"Issue body","url":"https://linear.app/acme/issue/ACME-42/fix-web","updatedAt":"2026-10-11T10:00:00Z","state":{"type":"` + state.kind + `"},"labels":{"nodes":[{"name":"triaged"}]}}}}`
 			})
 			issue, err := c.GetIssue(context.Background(), task.Key{Repo: "acme/web", Source: task.Linear, ExternalID: issueID})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if issue.State != state.want || issue.Body != "Issue body" || issue.Identifier != "ACME-42" || issue.Key.ExternalID != issueID || len(issue.Labels) != 1 || issue.Labels[0] != "triaged" {
+			if issue.State != state.want || issue.Body != "Issue body" || issue.Identifier != "ACME-42" || issue.BranchName != "bryan/acme-42-fix-web" || issue.Key.ExternalID != issueID || len(issue.Labels) != 1 || issue.Labels[0] != "triaged" {
 				t.Fatalf("issue = %+v", issue)
 			}
 		})

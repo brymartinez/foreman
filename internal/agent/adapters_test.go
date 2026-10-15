@@ -547,7 +547,7 @@ func TestImplementationPromptPRInstructions(t *testing.T) {
 	b := TaskBrief{Key: task.Key{Repo: "a/b", Number: 825}, Branch: "fix/825-x", BaseBranch: "main", PRInstructions: "## Summary\n2-4 bullets."}
 	p := ImplementationPrompt(b)
 	sec, decide := strings.Index(p, "## Pull request description"), strings.Index(p, "## When you need a decision")
-	if sec < 0 || decide < sec || !strings.Contains(p, "## Summary\n2-4 bullets.") || !strings.Contains(p, `must include "Closes #825"; otherwise write it as`) {
+	if sec < 0 || decide < sec || !strings.Contains(p, "## Summary\n2-4 bullets.") || !strings.Contains(p, `must include "Closes #825"; otherwise write it as`) || !strings.Contains(p, "AGENTS.md and pull request template") {
 		t.Errorf("PR instructions must sit with the PR rules and keep Closes #N:\n%s", p)
 	}
 	b.PRInstructions = ""
