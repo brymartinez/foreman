@@ -147,10 +147,17 @@ type AccountProvider interface {
 	ActiveAccount(ctx context.Context) (Account, error)
 }
 
-// RemoteAuth reports the GitHub login that pushes to the origin of the checkout at
-// dir. checked is false when the remote is not SSH, so no push account can be probed.
+// SSHAccount is the GitHub login an SSH host's key authenticates as. Host is the
+// [user@]host from the remote URL, which ~/.ssh/config resolves.
+type SSHAccount struct {
+	Host  string
+	Login string
+}
+
+// RemoteAuth reports who pushes to the origin of the checkout at dir. A remote that
+// is not SSH returns the zero SSHAccount, because no push account can be probed.
 type RemoteAuth interface {
-	PushAccount(ctx context.Context, dir string) (login string, checked bool, err error)
+	PushAccount(ctx context.Context, dir string) (SSHAccount, error)
 }
 
 type IssueComment struct {
@@ -218,6 +225,9 @@ type WorktreeManager interface {
 	// conflict when origin/Base merges into origin/Branch. None means a clean merge. It
 	// changes neither the branch nor the worktree.
 	MergeConflicts(ctx context.Context, check MergeCheck) ([]string, error)
+	// ConfigureIdentity sets the commit author and committer for the worktree at dir
+	// only, leaving the shared repository config and the global config alone.
+	ConfigureIdentity(ctx context.Context, dir, name, email string) error
 }
 
 // MergeCheck names the worktree to fetch in, the PR's head branch, and its base branch.

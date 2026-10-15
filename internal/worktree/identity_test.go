@@ -61,9 +61,9 @@ func cloneWithOrigin(t *testing.T, url string) string {
 func TestPushAccountReadsTheLoginGitHubGreetsOverSSH(t *testing.T) {
 	args := stubSSH(t, "Hi octo-work! You've successfully authenticated, but GitHub does not provide shell access.")
 	dir := cloneWithOrigin(t, "ssh://git@github-work:2222/a/b.git")
-	login, checked, err := Git{}.PushAccount(context.Background(), dir)
-	if err != nil || !checked || login != "octo-work" {
-		t.Fatalf("push account = %q, %v, %v", login, checked, err)
+	acct, err := Git{}.PushAccount(context.Background(), dir)
+	if err != nil || acct != (app.SSHAccount{Host: "git@github-work", Login: "octo-work"}) {
+		t.Fatalf("push account = %+v, %v", acct, err)
 	}
 	raw, _ := os.ReadFile(args)
 	if got := strings.TrimSpace(string(raw)); got != "-T -o BatchMode=yes -p 2222 git@github-work" {
@@ -71,10 +71,20 @@ func TestPushAccountReadsTheLoginGitHubGreetsOverSSH(t *testing.T) {
 	}
 }
 
+func TestPushAccountProbesThePushURL(t *testing.T) {
+	stubSSH(t, "Hi octo-work!")
+	dir := cloneWithOrigin(t, "https://github.com/a/b.git")
+	run(t, dir, "remote", "set-url", "--push", "origin", "git@github-work:a/b.git")
+	acct, err := Git{}.PushAccount(context.Background(), dir)
+	if err != nil || acct.Host != "git@github-work" {
+		t.Fatalf("push account = %+v, %v", acct, err)
+	}
+}
+
 func TestPushAccountReportsAnSSHFailure(t *testing.T) {
 	stubSSH(t, "git@github.com: Permission denied (publickey).")
 	dir := cloneWithOrigin(t, "git@github.com:a/b.git")
-	_, _, err := Git{}.PushAccount(context.Background(), dir)
+	_, err := Git{}.PushAccount(context.Background(), dir)
 	if err == nil || !strings.Contains(err.Error(), "Permission denied") || !strings.Contains(err.Error(), "git@github.com") {
 		t.Errorf("err = %v", err)
 	}
@@ -83,9 +93,9 @@ func TestPushAccountReportsAnSSHFailure(t *testing.T) {
 func TestPushAccountSkipsANonSSHRemote(t *testing.T) {
 	args := stubSSH(t, "Hi someone!")
 	dir := cloneWithOrigin(t, "https://github.com/a/b.git")
-	login, checked, err := Git{}.PushAccount(context.Background(), dir)
-	if err != nil || checked || login != "" {
-		t.Fatalf("push account = %q, %v, %v", login, checked, err)
+	acct, err := Git{}.PushAccount(context.Background(), dir)
+	if err != nil || acct != (app.SSHAccount{}) {
+		t.Fatalf("push account = %+v, %v", acct, err)
 	}
 	if _, err := os.Stat(args); err == nil {
 		t.Error("ssh ran for an HTTPS remote")

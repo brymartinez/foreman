@@ -46,9 +46,13 @@ func (a App) verifiedPR(log io.Writer) prCheck {
 	}
 }
 
-// runTurn runs one implementer turn and checks the PR it reports. Nothing is written
-// to the task file here; finishTurn records the result.
+// runTurn checks the task's account, runs one implementer turn, and checks the PR it
+// reports. Apart from pinning an unpinned account, nothing is written to the task file
+// here; finishTurn records the result.
 func (a App) runTurn(ctx context.Context, rec *task.Record, req turnRequest, check prCheck, log io.Writer) turnResult {
+	if err := a.checkAccount(ctx, rec); err != nil {
+		return turnResult{err: err}
+	}
 	turn, err := a.implement(ctx, rec, req, log)
 	turn, err = a.repairFailedCheckpoint(ctx, rec, req, turn, err, log)
 	if err != nil {

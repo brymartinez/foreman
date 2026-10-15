@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+
+	"github.com/brymartinez/foreman/internal/app"
 )
 
 // ConfigureIdentity sets the commit author and committer in the worktree's own config.
@@ -28,17 +30,17 @@ func (Git) ConfigureIdentity(ctx context.Context, dir, name, email string) error
 
 var greeting = regexp.MustCompile(`Hi ([A-Za-z0-9-]+)!`)
 
-// PushAccount asks GitHub which account the origin's SSH key belongs to. ssh resolves
-// the remote's host through ~/.ssh/config, so a host alias uses its own IdentityFile,
-// as git push does.
-func (Git) PushAccount(ctx context.Context, dir string) (string, bool, error) {
-	out, err := git(ctx, dir, "remote", "get-url", "origin")
+// PushAccount asks GitHub which account the SSH key for origin's push URL belongs
+// to. ssh resolves the remote's host through ~/.ssh/config, so a host alias uses its
+// own IdentityFile, as git push does.
+func (Git) PushAccount(ctx context.Context, dir string) (app.SSHAccount, error) {
+	out, err := git(ctx, dir, "remote", "get-url", "--push", "origin")
 	if err != nil {
-		return "", false, err
+		return app.SSHAccount{}, err
 	}
 	target, port, ok := sshTarget(strings.TrimSpace(string(out)))
 	if !ok {
-		return "", false, nil
+		return app.SSHAccount{}, nil
 	}
 	args := []string{"-T", "-o", "BatchMode=yes"}
 	if port != "" {
@@ -52,12 +54,12 @@ func (Git) PushAccount(ctx context.Context, dir string) (string, bool, error) {
 	// greeting, not the exit status, decides.
 	runErr := cmd.Run()
 	if m := greeting.FindStringSubmatch(combined.String()); m != nil {
-		return m[1], true, nil
+		return app.SSHAccount{Host: target, Login: m[1]}, nil
 	}
 	if runErr == nil {
 		runErr = errors.New("no greeting")
 	}
-	return "", true, fmt.Errorf("ssh -T %s did not name a GitHub account: %w: %s", target, runErr, strings.TrimSpace(combined.String()))
+	return app.SSHAccount{}, fmt.Errorf("ssh -T %s did not name a GitHub account: %w: %s", target, runErr, strings.TrimSpace(combined.String()))
 }
 
 // sshTarget returns the [user@]host and port that git would connect to for an SSH
