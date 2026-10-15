@@ -106,6 +106,8 @@ func run(argv []string) int {
 		LinearProjects: cfg.LinearProjects,
 		Repositories:   github.New(),
 		Worktrees:      worktree.Git{},
+		Accounts:       github.New(),
+		RemoteAuth:     worktree.Git{},
 		Agents:         map[task.Agent]app.AgentAdapter{task.Claude: claude, task.Codex: codex},
 		Routing:        routes,
 		RoutingErr:     routesErr,

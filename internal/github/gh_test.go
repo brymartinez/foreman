@@ -416,3 +416,35 @@ func TestIssueCommentsReadsEveryPage(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 }
+
+func TestActiveAccountReadsTheLoginAndID(t *testing.T) {
+	var got string
+	c := Client{Run: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		got = strings.Join(args, " ")
+		return []byte(`{"login":"octo-work","id":42}` + "\n"), nil
+	}}
+	acct, err := c.ActiveAccount(context.Background())
+	if err != nil || acct != (app.Account{Login: "octo-work", ID: 42}) {
+		t.Fatalf("account = %+v, %v", acct, err)
+	}
+	if got != "api user --jq {login,id}" {
+		t.Errorf("gh call = %q", got)
+	}
+	if acct.Email() != "42+octo-work@users.noreply.github.com" {
+		t.Errorf("email = %q", acct.Email())
+	}
+}
+
+func TestActiveAccountRejectsAnEmptyLogin(t *testing.T) {
+	c := Client{Run: func(context.Context, string, ...string) ([]byte, error) { return []byte(`{"login":"","id":0}`), nil }}
+	if _, err := c.ActiveAccount(context.Background()); err == nil {
+		t.Error("an empty login must be an error")
+	}
+}
+
+func TestActiveAccountReportsAGHFailure(t *testing.T) {
+	c := Client{Run: func(context.Context, string, ...string) ([]byte, error) { return nil, errors.New("not logged in") }}
+	if _, err := c.ActiveAccount(context.Background()); err == nil || !strings.Contains(err.Error(), "not logged in") {
+		t.Errorf("err = %v", err)
+	}
+}

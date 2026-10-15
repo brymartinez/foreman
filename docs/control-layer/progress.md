@@ -16,6 +16,12 @@ scenario covers promotion over two tasks, a maintainer retirement, and a second
 repository that learns nothing. Vet, Go tests, build, and the end-to-end script
 pass.
 
+Stage 62 (pin each task to one GitHub account) is complete. The first launch stores
+the active `gh` login and noreply email on the task. Every launch and implementer turn
+sets the worktree's commit identity, and fails the task before the agent runs when
+`gh` or the SSH origin's key is on another account. The `account` end-to-end scenario
+covers the pin, the commit author, and both mismatches.
+
 Linear branch naming uses the name supplied by Linear for new Linear tasks when
 available. GitHub issues and Linear issues without a supplied name keep the
 conventional type prefix; restarts keep their stored branch. Repository PR

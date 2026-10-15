@@ -84,6 +84,10 @@ type App struct {
 	LearningBudgetUSD float64
 	// Quota may be nil, which makes every agent's quota unknown.
 	Quota QuotaChecker
+	// Accounts and RemoteAuth pin each task to a GitHub account. A nil Accounts turns
+	// the pin and its checks off.
+	Accounts   AccountProvider
+	RemoteAuth RemoteAuth
 	// LogDir holds the task logs. History scans it for PRs from older tasks.
 	LogDir string
 	Now    func() time.Time

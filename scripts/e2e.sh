@@ -149,7 +149,8 @@ case "$1 $2" in
 "repo view")
 	case "$PWD" in *acme-linear*) repo=acme/linear ;; *) repo=acme/widgets ;; esac
 	printf '{"nameWithOwner":"%s","defaultBranchRef":{"name":"main"}}\n' "$repo" ;;
-"repo clone") git clone -q "$E2E_ORIGIN" "$4" ;;
+"repo clone") git clone -q "${E2E_CLONE_URL:-$E2E_ORIGIN}" "$4" ;;
+"api user") cat "$s/gh-user.json" 2>/dev/null || echo '{"login":"octo-work","id":42}' ;;
 "issue view") cat "$s/issue-$3.json" ;;
 "pr view") cat "$s/pr-$3.json" ;;
 "pr list") cat "$s/pr-list.json" 2>/dev/null || echo '[]' ;;
@@ -199,6 +200,18 @@ case "$1 $2" in
 	cat "$s/api-$n.json" ;;
 *) echo "stand-in gh: unhandled $*" >&2; exit 2 ;;
 esac
+EOF
+
+	# Stand-in ssh: ssh -T greets as $E2E_STATE/ssh-user, as GitHub does. Any other
+	# call is git's transport, so the remote command runs locally on the origin.
+	cat >"$sandbox/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+echo "ssh $*" >>"$E2E_STATE/ssh.log"
+if [ "$1" = -T ]; then
+	echo "Hi $(cat "$E2E_STATE/ssh-user" 2>/dev/null || echo octo-work)! You've successfully authenticated, but GitHub does not provide shell access." >&2
+	exit 1
+fi
+exec sh -c "${@: -1}"
 EOF
 
 	# Implementer: commits a change, records an open PR for its branch, and reports it.
@@ -294,7 +307,8 @@ echo "$$" >"$E2E_STATE/implement-agent.pid"
 sleep "${E2E_AGENT_SLEEP:-1}"
 branch=$(git branch --show-current)
 echo "// retries" >>widgets.go
-git -c user.email=e2e@example.com -c user.name=e2e commit -qam "feat: retries"
+# No -c identity: foreman sets the commit author in the worktree's own config.
+git commit -qam "feat: retries"
 git push -q origin "$branch"
 # main-moves is a command that changes main while this turn runs: a change to
 # widgets.go conflicts with the branch, and a new file merges cleanly.
@@ -982,7 +996,49 @@ scenario_learning() {
 	check "the learner evaluated every finished task" bash -c "[ \"\$(grep -c '^claude evaluate' '$state/evaluations.log')\" -ge 4 ]"
 }
 
-scenarios=${*:-runner notify logs inbox inbox_lifecycle rereview conflicts respond cancel feedback conflict tui routing history linear learning}
+scenario_account() {
+	echo "account: a task keeps the gh account it started under for commits and pushes"
+	setup account
+	export E2E_CLONE_URL="e2e-host:$sandbox/origin.git"
+	local file="$sandbox/tasks/acme-widgets-42.md" email=42+octo-work@users.noreply.github.com
+	check "the dashboard delegates #42" start 42
+	check "the runner reaches a clean review" wait_status "review ✓"
+	check "the task pins the active gh account" grep -q '^account: octo-work$' "$file"
+	check "and its noreply email" grep -q "^account_email: $email\$" "$file"
+	check "the managed checkout pushes over SSH" contains "$sandbox/repositories/acme-widgets/.git/config" "e2e-host:"
+	check "the SSH host was asked who it pushes as" contains "$state/ssh.log" "ssh -T -o BatchMode=yes e2e-host"
+	check "the pushed commit is authored and committed by the pinned account" \
+		test "$(git --git-dir="$sandbox/origin.git" log -1 --format='%an <%ae>|%cn <%ce>' --branches='*42-*')" = "octo-work <$email>|octo-work <$email>"
+	check "the main checkout keeps its own identity" test "$(git -C "$sandbox/checkout" config user.name)" = e2e
+
+	issue 43 "Fix pagination"
+	file="$sandbox/tasks/acme-widgets-43.md"
+	E2E_AGENT_SLEEP=30.017 start 43 >/dev/null
+	check "a second task is working" wait_status "WORKING" 5
+	sleep 0.5
+	kill -TERM "$(runner_pid 43)"
+	check "stopping its runner leaves it FAILED" wait_status "FAILED" 5
+	stop_agent implement
+	local turns
+	turns=$(grep -c . "$state/agents.log")
+	echo '{"login":"octo-home","id":7}' >"$state/gh-user.json"
+	start 43 >/dev/null 2>&1 || true
+	check "a restart after gh switches accounts fails" grep -q '^state: FAILED' "$file"
+	check "and says how to switch back" contains "$file" 'gh auth switch --user octo-work'
+	check "and keeps the pin" grep -q '^account: octo-work$' "$file"
+	rm "$state/gh-user.json"
+	echo octo-home >"$state/ssh-user"
+	start 43 >/dev/null 2>&1 || true
+	check "a restart whose SSH key pushes as another account fails" grep -q '^state: FAILED' "$file"
+	check "and names the SSH host" contains "$file" 'SSH host e2e-host pushes as octo-home'
+	check "no agent ran for either restart" test "$(grep -c . "$state/agents.log")" = "$turns"
+	rm "$state/ssh-user"
+	start 43 >/dev/null
+	check "a restart with matching accounts resumes the task" wait_status "review ✓"
+	unset E2E_CLONE_URL
+}
+
+scenarios=${*:-runner notify logs inbox inbox_lifecycle rereview conflicts respond cancel feedback conflict tui routing history linear account learning}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"

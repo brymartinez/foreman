@@ -159,6 +159,14 @@ The user is authenticated through the keyring.
   ignores the exit code whenever JSON came back. This was not probed live on a
   real PR.
 - **Creating PRs.** `gh pr create --title --body --head` can run from inside the worktree.
+- **Active account.** `gh api user --jq '{login,id}'` runs as the account `gh auth switch`
+  made active and prints `{"id":<n>,"login":"<login>"}`. GitHub attributes a commit
+  whose email is `<id>+<login>@users.noreply.github.com` to that account. Probed with
+  gh 2.101.0.
+- **SSH push account.** `ssh -T -o BatchMode=yes git@github.com` prints
+  `Hi <login>! You've successfully authenticated, but GitHub does not provide shell
+  access.` on stderr and exits 1. ssh resolves a host alias through `~/.ssh/config`, so
+  the greeting names the account of that host's key. Probed against github.com.
 - **Issue comments.** `gh api --method POST repos/<owner>/<repo>/issues/<n>/comments -f body=<text>`
   creates a comment, and `--method PATCH repos/<owner>/<repo>/issues/comments/<id>` edits
   one. Both return the REST comment (`id`, `html_url`, `body`). `-f` sends the value as a
@@ -191,6 +199,11 @@ newer) merges in memory and touches neither the index nor the working tree. It e
 for a clean merge and prints the tree id. It exits 1 for a conflict and prints the tree
 id, then one conflicting path per line. Any other exit is an error, such as a missing
 ref. Verified by `internal/worktree/git_test.go` against git 2.50.
+
+`git config extensions.worktreeConfig true` lets `git config --worktree` write to the
+linked worktree's own `config.worktree`. A commit there takes `user.name` and
+`user.email` from it, while the main checkout and other worktrees keep theirs.
+Verified by `internal/worktree/identity_test.go` against git 2.50.
 
 ## Assumptions in the design doc that the tooling doesn't support as written
 

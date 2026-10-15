@@ -46,9 +46,13 @@ func (a App) verifiedPR(log io.Writer) prCheck {
 	}
 }
 
-// runTurn runs one implementer turn and checks the PR it reports. Nothing is written
-// to the task file here; finishTurn records the result.
+// runTurn checks the task's account, runs one implementer turn, and checks the PR it
+// reports. Apart from pinning an unpinned account, nothing is written to the task file
+// here; finishTurn records the result.
 func (a App) runTurn(ctx context.Context, rec *task.Record, req turnRequest, check prCheck, log io.Writer) turnResult {
+	if err := a.checkAccount(ctx, rec); err != nil {
+		return turnResult{err: err}
+	}
 	turn, err := a.implement(ctx, rec, req, log)
 	turn, err = a.repairFailedCheckpoint(ctx, rec, req, turn, err, log)
 	if err != nil {
@@ -92,6 +96,11 @@ func (a App) repairFailedCheckpoint(ctx context.Context, rec *task.Record, req t
 		adapter := a.Agents[rec.Delegation.Implementer.Agent]
 		if adapter == nil {
 			return turn, fmt.Errorf("agent %s is not configured", rec.Delegation.Implementer.Agent)
+		}
+		// A repair is another implementer turn, and the account may have changed
+		// during the one before it.
+		if err := a.checkAccount(ctx, rec); err != nil {
+			return turn, err
 		}
 		fmt.Fprintf(log, "foreman: checkpoint validation failed; resuming %s session %s for repair (%d/%d)\n", adapter.Name(), turn.Session.ID, attempt+1, maxCheckpointValidationRepairs)
 		in := agent.StartInput{

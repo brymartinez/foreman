@@ -514,3 +514,42 @@ func TestOldFileLoadsWithoutToolCallsAndSavesNone(t *testing.T) {
 		t.Errorf("saved an empty tool_calls key:\n%s", raw)
 	}
 }
+
+func TestStoreRoundTripsPinnedAccount(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	want := delegated()
+	want.Delegation.Account = "octo-work"
+	want.Delegation.AccountEmail = "42+octo-work@users.noreply.github.com"
+	if err := s.Save(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, want.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Delegation.Account != want.Delegation.Account || got.Delegation.AccountEmail != want.Delegation.AccountEmail {
+		t.Fatalf("account = %q <%q>", got.Delegation.Account, got.Delegation.AccountEmail)
+	}
+}
+
+func TestOldFileLoadsWithoutAPinnedAccountAndSavesNone(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	old := "---\nrepo: a/b\nnumber: 3\nkind: issue\nstate: FAILED\nimplementation_agent: claude\nbranch: feat/3-x\n---\n"
+	if err := os.WriteFile(filepath.Join(s.Dir, "a-b-3.md"), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, task.Key{Repo: "a/b", Number: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Delegation.Account != "" || got.Delegation.AccountEmail != "" {
+		t.Fatalf("delegation = %+v", got.Delegation)
+	}
+	if err := s.Save(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(s.Dir, "a-b-3.md"))
+	if strings.Contains(string(raw), "account") {
+		t.Errorf("saved empty account fields:\n%s", raw)
+	}
+}
