@@ -113,6 +113,8 @@ type Usage struct {
 	CodexReasoningTokens int64
 	ClaudeTurns          int
 	CodexTurns           int
+	// ToolCalls counts tool calls by name: Claude tool names, or Codex item types.
+	ToolCalls map[string]int
 }
 
 // Profile is the agent, models, and effort routing chose for a task. It is stored

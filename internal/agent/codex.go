@@ -217,7 +217,14 @@ type codexEvent struct {
 	Error    *struct {
 		Message string `json:"message"`
 	} `json:"error"`
+	Item *struct {
+		Type string `json:"type"`
+	} `json:"item"`
 }
+
+// codexToolItems are the item types that record a tool call. Messages, reasoning,
+// and the todo list are not tool calls.
+var codexToolItems = map[string]bool{"command_execution": true, "file_change": true, "web_search": true, "mcp_tool_call": true}
 
 // consume copies the JSONL event stream to the log and reports thread.started immediately.
 func (e *codexEvents) consume(r io.Reader) {
@@ -238,6 +245,13 @@ func (e *codexEvents) consume(r io.Reader) {
 			}
 		case "error":
 			e.lastError = ev.Message
+		case "item.completed":
+			if ev.Item != nil && codexToolItems[ev.Item.Type] {
+				if e.usage.ToolCalls == nil {
+					e.usage.ToolCalls = map[string]int{}
+				}
+				e.usage.ToolCalls[ev.Item.Type]++
+			}
 		case "turn.failed":
 			if ev.Error != nil {
 				e.lastError = ev.Error.Message

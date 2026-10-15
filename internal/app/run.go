@@ -537,6 +537,12 @@ func addUsage(total *task.Usage, turn task.Usage) {
 	total.CodexReasoningTokens += turn.CodexReasoningTokens
 	total.ClaudeTurns += turn.ClaudeTurns
 	total.CodexTurns += turn.CodexTurns
+	for name, n := range turn.ToolCalls {
+		if total.ToolCalls == nil {
+			total.ToolCalls = map[string]int{}
+		}
+		total.ToolCalls[name] += n
+	}
 }
 
 // update is Store.Update plus the developer's notification: a task that moves into

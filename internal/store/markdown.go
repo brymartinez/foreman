@@ -234,13 +234,14 @@ type outcomeFM struct {
 }
 
 type usageFM struct {
-	ClaudeCostUSD        float64 `yaml:"claude_cost_usd,omitempty"`
-	CodexInputTokens     int64   `yaml:"codex_input_tokens,omitempty"`
-	CodexCachedTokens    int64   `yaml:"codex_cached_tokens,omitempty"`
-	CodexOutputTokens    int64   `yaml:"codex_output_tokens,omitempty"`
-	CodexReasoningTokens int64   `yaml:"codex_reasoning_tokens,omitempty"`
-	ClaudeTurns          int     `yaml:"claude_turns,omitempty"`
-	CodexTurns           int     `yaml:"codex_turns,omitempty"`
+	ClaudeCostUSD        float64        `yaml:"claude_cost_usd,omitempty"`
+	CodexInputTokens     int64          `yaml:"codex_input_tokens,omitempty"`
+	CodexCachedTokens    int64          `yaml:"codex_cached_tokens,omitempty"`
+	CodexOutputTokens    int64          `yaml:"codex_output_tokens,omitempty"`
+	CodexReasoningTokens int64          `yaml:"codex_reasoning_tokens,omitempty"`
+	ClaudeTurns          int            `yaml:"claude_turns,omitempty"`
+	CodexTurns           int            `yaml:"codex_turns,omitempty"`
+	ToolCalls            map[string]int `yaml:"tool_calls,omitempty"`
 }
 
 type snapshot struct {
@@ -417,7 +418,7 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 	if o := fm.LastOutcome; o != nil {
 		rec.LastOutcome = &task.Outcome{Status: o.Status, Summary: o.Summary, At: o.At}
 	}
-	rec.Usage = task.Usage{ClaudeCostUSD: fm.Usage.ClaudeCostUSD, CodexInputTokens: fm.Usage.CodexInputTokens, CodexCachedTokens: fm.Usage.CodexCachedTokens, CodexOutputTokens: fm.Usage.CodexOutputTokens, CodexReasoningTokens: fm.Usage.CodexReasoningTokens, ClaudeTurns: fm.Usage.ClaudeTurns, CodexTurns: fm.Usage.CodexTurns}
+	rec.Usage = task.Usage{ClaudeCostUSD: fm.Usage.ClaudeCostUSD, CodexInputTokens: fm.Usage.CodexInputTokens, CodexCachedTokens: fm.Usage.CodexCachedTokens, CodexOutputTokens: fm.Usage.CodexOutputTokens, CodexReasoningTokens: fm.Usage.CodexReasoningTokens, ClaudeTurns: fm.Usage.ClaudeTurns, CodexTurns: fm.Usage.CodexTurns, ToolCalls: fm.Usage.ToolCalls}
 	for _, d := range fm.Decisions {
 		dec := task.Decision{AskedAt: d.AskedAt, Question: d.Question, Answer: d.Answer}
 		if d.AnsweredAt != nil {
@@ -500,7 +501,7 @@ func fromRecord(rec *task.Record) frontmatter {
 	if o := rec.LastOutcome; o != nil {
 		fm.LastOutcome = &outcomeFM{Status: o.Status, Summary: o.Summary, At: o.At}
 	}
-	fm.Usage = usageFM{ClaudeCostUSD: rec.Usage.ClaudeCostUSD, CodexInputTokens: rec.Usage.CodexInputTokens, CodexCachedTokens: rec.Usage.CodexCachedTokens, CodexOutputTokens: rec.Usage.CodexOutputTokens, CodexReasoningTokens: rec.Usage.CodexReasoningTokens, ClaudeTurns: rec.Usage.ClaudeTurns, CodexTurns: rec.Usage.CodexTurns}
+	fm.Usage = usageFM{ClaudeCostUSD: rec.Usage.ClaudeCostUSD, CodexInputTokens: rec.Usage.CodexInputTokens, CodexCachedTokens: rec.Usage.CodexCachedTokens, CodexOutputTokens: rec.Usage.CodexOutputTokens, CodexReasoningTokens: rec.Usage.CodexReasoningTokens, ClaudeTurns: rec.Usage.ClaudeTurns, CodexTurns: rec.Usage.CodexTurns, ToolCalls: rec.Usage.ToolCalls}
 	for _, d := range rec.Decisions {
 		dec := decisionFM{AskedAt: d.AskedAt, Question: d.Question, Answer: d.Answer}
 		if !d.AnsweredAt.IsZero() {
