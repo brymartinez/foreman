@@ -107,6 +107,15 @@ type EvaluateInput struct {
 	Log             io.Writer
 }
 
+// codexEvaluatorOff are the Codex features an evaluator turn turns off: the shell,
+// code mode, subagents, and the app, browser, and image tools. Codex CLI 0.162 has
+// no flag that removes every tool, so Evaluate also rejects a turn that used one.
+var codexEvaluatorOff = []string{
+	"shell_tool", "unified_exec", "code_mode_host", "multi_agent", "apps", "plugins",
+	"memories", "goals", "hooks", "image_generation", "view_image", "browser_use",
+	"computer_use", "in_app_browser",
+}
+
 // Evaluators runs the evaluator with either agent: one disposable turn with no
 // tools, in a scratch directory. It judges the evidence in the prompt alone, so it
 // never reads the repository, the logs, or the transcripts.
@@ -145,19 +154,30 @@ func (e Evaluators) Evaluate(ctx context.Context, in EvaluateInput) (Evaluation,
 		c.Model = cmp.Or(in.Model, c.PlanModel, c.Model)
 		c.ReasoningEffort = cmp.Or(in.ReasoningEffort, c.PlanReasoningEffort, c.ReasoningEffort)
 		_, raw, usage, err = c.exec(ctx, start, EvaluationSchema, func(schema, last string) []string {
-			return []string{
+			args := []string{
 				"exec", "--json", "--ephemeral", "--skip-git-repo-check",
+				"--ignore-user-config", "--ignore-rules",
 				"-C", dir,
 				"-s", "read-only",
+				"-c", `web_search="disabled"`,
 				"--output-schema", schema,
 				"-o", last,
 			}
+			for _, f := range codexEvaluatorOff {
+				args = append(args, "-c", "features."+f+"=false")
+			}
+			return args
 		}, "", func(task.Session) {})
 	default:
 		return Evaluation{}, fmt.Errorf("unknown evaluator agent %q", in.Agent)
 	}
 	if err != nil {
 		return Evaluation{Usage: usage}, err
+	}
+	// Codex has no switch that turns every tool off, so a turn that used one anyway
+	// may have read beyond the evidence, and its answer is not trusted.
+	if len(usage.ToolCalls) > 0 {
+		return Evaluation{Usage: usage}, fmt.Errorf("the evaluator called tools %v; its answer is discarded", usage.ToolCalls)
 	}
 	out, err := ParseEvaluation(raw)
 	out.Usage = usage

@@ -32,7 +32,9 @@ var secretPatterns = []pattern{
 	{regexp.MustCompile(`-----BEGIN [A-Z ]*KEY-----`), 0, "secret"},
 	{regexp.MustCompile(`\b(gh[pousr]_|github_pat_|sk-|xox[abprs]-|AKIA|glpat-)[A-Za-z0-9_-]{8,}`), 0, "secret"},
 	{regexp.MustCompile(`[\w.+-]+@[\w-]+\.[\w.-]+`), 0, "email"},
-	{regexp.MustCompile(`(~|/Users|/home|/root|[A-Za-z]:\\Users)[/\\]\S*`), 0, "local path"},
+	// Absolute paths: home, root-level, and drive paths. A slash inside a word, as in
+	// internal/app or and/or, is a repository path or plain text and stays.
+	{regexp.MustCompile(`\B~[/\\]\S*|\B/[\w.-]\S*|\b[A-Za-z]:\\\S*`), 0, "local path"},
 	// Long runs mixing letters and digits: tokens, keys, base64 blobs.
 	{regexp.MustCompile(`[A-Za-z0-9+/_-]*(?:[0-9][A-Za-z+/_-]|[A-Za-z+/_-][0-9])[A-Za-z0-9+/_-]*={0,2}`), 20, "token"},
 }

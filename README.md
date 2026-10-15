@@ -395,7 +395,7 @@ arrives: a later review, an answered decision, a PR comment, a new PR head, or t
 merging or closing. CI results are not evidence. The evaluation is one turn with the
 task's implementer agent, with no tools, run by a detached `foreman __learn` process.
 It reads the task file and the developer's PR comments, never the logs or the agent
-transcripts. Its output goes to `<log_dir>/learning.log`. An evaluation that fails
+transcripts. A turn that calls a tool anyway is discarded. Its output goes to `<log_dir>/learning.log`. An evaluation that fails
 never changes the task or sends an alert.
 
 What it learns is kept per repository under `knowledge_dir`:
@@ -413,7 +413,8 @@ A learning becomes active when the developer backs it, through a decision answer
 PR comment, or when two tasks support it. One task's observation stays a candidate.
 The developer's correction retires or rewrites a learning at once; observed work does
 so only from a newer task. Learnings are short and generic: foreman drops any with
-issue or PR numbers, commit hashes, URLs, emails, local paths, or secret-shaped text.
+issue or PR numbers, commit hashes, URLs, emails, absolute paths, or secret-shaped
+text. Paths inside the repository are kept.
 
 Planning and implementation prompts carry up to 8 active learnings, at most 2000
 characters, from the task's repository only, under `## Repository knowledge`. The
@@ -429,7 +430,7 @@ next evaluation rewrites `knowledge.md`.
 It starts with a `# Repository knowledge` heading and a line saying the learnings are
 fallible, then has up to three sections, `## Conventions`, `## Repository facts`,
 and `## Working practices`, each a list of one-sentence bullets. It holds no ids,
-numbers, or evidence. A reader should pick the file by the verified target
+issue or PR numbers, or evidence. A reader should pick the file by the verified target
 repository, use the bullets that fit the issue, and not publish the file wholesale.
 
 ## Configuration
@@ -455,7 +456,7 @@ budgets:                             # Claude only: Codex reports no cost, so it
   reviewer_usd: 1.00                 # Claude maximum per review turn
 learning:
   enabled: true                      # evaluate finished tasks; off keeps existing knowledge in prompts
-  budget_usd: 0.50                   # Claude maximum per evaluation; 0 sets no cap
+  budget_usd: 0.50                   # Claude maximum per evaluation; 0 sets no cap; Codex has none
 notifications:
   enabled: true                      # decision, failure, readiness, and feedback alerts
   webhook_url: ""                    # Discord webhook URL; a secret, keep this file chmod 600

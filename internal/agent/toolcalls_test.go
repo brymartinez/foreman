@@ -60,4 +60,24 @@ func TestCodexTurnCountsCompletedToolItemsByTypeAndRecordsNoCost(t *testing.T) {
 	}
 }
 
+func TestCodexTurnCountsAnUnknownCompletedItemAsAToolCall(t *testing.T) {
+	stream := strings.Join([]string{
+		`{"type":"thread.started","thread_id":"th-1"}`,
+		`{"type":"item.completed","item":{"id":"1","type":"collab_tool_call","tool":"spawn_agent"}}`,
+		`{"type":"item.completed","item":{"id":"2","type":"todo_list","items":[]}}`,
+		`{"type":"item.completed","item":{"id":"3","type":"error","message":"x"}}`,
+	}, "\n") + "\n"
+	exec := func(_ context.Context, c Command) error {
+		io.WriteString(c.Stdout, stream)
+		return os.WriteFile(argValue(c.Args, "-o"), []byte(prOpened), 0o600)
+	}
+	turn, err := Codex{Bin: "codex", Exec: exec}.Start(context.Background(), StartInput{Prompt: "x"}, noSession)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]int{"collab_tool_call": 1}; !maps.Equal(turn.Usage.ToolCalls, want) {
+		t.Errorf("tool calls = %v, want %v", turn.Usage.ToolCalls, want)
+	}
+}
+
 func noSession(task.Session) {}

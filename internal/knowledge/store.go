@@ -119,13 +119,16 @@ func (s Store) Apply(repo string, ev Evaluation) error {
 	if err := os.MkdirAll(filepath.Join(dir, "evaluations"), 0o700); err != nil {
 		return err
 	}
-	if err := writeYAML(filepath.Join(dir, "evaluations", ev.Task+".yaml"), ev); err != nil {
-		return err
-	}
 	if err := writeYAML(filepath.Join(dir, "learnings.yaml"), f); err != nil {
 		return err
 	}
-	return writeFile(filepath.Join(dir, "knowledge.md"), []byte(render(f.Learnings)))
+	if err := writeFile(filepath.Join(dir, "knowledge.md"), []byte(render(f.Learnings))); err != nil {
+		return err
+	}
+	// The evaluation goes last: its fingerprint tells the refresh the task is done,
+	// so a failed write above leaves the task due. Re-applying is safe, because apply
+	// first withdraws the task's earlier evidence.
+	return writeYAML(filepath.Join(dir, "evaluations", ev.Task+".yaml"), ev)
 }
 
 // Lock takes the repository's evaluation lock without waiting. It returns ErrLocked

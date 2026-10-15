@@ -96,10 +96,11 @@ foreman __learn       -> one evaluation of one task; output goes to <log_dir>/le
   ├─ knowledge: take the repository's lock without waiting; held -> exit 0, a later
   │             refresh retries
   ├─ build the evidence packet from the task file (decisions, review findings,
-  │  phase times, cost or tokens, tool-call counts, PR outcome) and the developer's
-  │  PR comment bodies from gh; no logs, transcripts, CI, or tool arguments
+  │  phase times, cost or tokens, tool-call counts, PR outcome) and every developer
+  │  comment on the PR from gh; no logs, transcripts, CI, or tool arguments
   ├─ evaluator turn: the task's implementer agent, no tools, a scratch directory,
-  │  learning.budget_usd; agent.ParseEvaluation reads its output
+  │  learning.budget_usd for Claude; a turn that called a tool is discarded;
+  │  agent.ParseEvaluation reads its output
   └─ knowledge.Apply: store the evaluation, fold its proposals and revisions into
      learnings.yaml, rewrite knowledge.md. A failed turn writes nothing, and never
      changes the task, its alerts, or the runner's exit code
@@ -591,7 +592,9 @@ the same commit. The commit message records why it changed.
   `learnings.yaml` is the source of truth (id, kind, text, status, evidence entries,
   and history), `evaluations/<task>.yaml` holds each task's evaluation and evidence
   fingerprint, `attempts/<task>.yaml` the last attempt, `learning.lock` the
-  repository lock, and `knowledge.md` the active learnings rendered for people. Paths
+  repository lock, and `knowledge.md` the active learnings rendered for people.
+  `Apply` writes the evaluation last, so a failed write leaves the task due for a
+  retry. Paths
   come from a validated `owner/repo`, so one repository cannot reach another's
   directory. Writes use a temp file and rename.
 - **Two triggers, no daemon.** The runner spawns `foreman __learn` when its loop ends
@@ -617,9 +620,23 @@ the same commit. The commit message records why it changed.
   - Re-evaluating a task first removes that task's earlier evidence, so it never
     counts twice.
 - **Learnings are generic.** `knowledge.Sanitize` rejects text with issue, PR, or
-  commit references, URLs, emails, local paths, tokens or keys, or more than 300 characters,
+  commit references, URLs, emails, absolute paths, tokens or keys, or more than 300 characters,
   and logs the item number and reason, never the text. `knowledge.md` carries no ids,
-  numbers, or evidence. Evidence notes in the YAML are redacted the same way.
+  issue or PR numbers, or evidence. Repository-relative paths and plain numbers
+  stay, because "keep functions under 80 lines" or "internal/app depends only on its
+  ports" is the kind of guidance a repository needs. Evidence notes in the YAML are
+  redacted the same way.
+- **The evaluator has no tools.** Claude runs with `--tools ""`. Codex has no switch
+  that removes every tool, so its turn runs read-only with `--ignore-user-config`
+  (no user MCP servers or plugins), `--ignore-rules`, web search off, and the shell,
+  code mode, subagent, app, browser, and image features off. Either way, a turn that
+  records a tool call is discarded as a failed evaluation. Codex counts every
+  completed item other than a message, reasoning, a todo list, or an error as a tool
+  call, so a new tool type cannot slip through.
+- **The evaluator reads every developer comment on the PR**, not only those the task
+  file recorded, because the gate stops recording when the PR merges or closes. The
+  merge changes the fingerprint, so the evaluation after it sees comments posted just
+  before it. A comment posted after that evaluation starts nothing.
 - **Time and cost are context, not a score.** The evaluator prompt says so, and says
   CI is not evidence. A long or expensive task is not a failure by itself.
 - **Prompts get a bounded selection.** Planning and implementation turns, including
@@ -632,7 +649,8 @@ the same commit. The commit message records why it changed.
   error drops the section and logs a line.
 - **Learning is a side job.** `learning.enabled: false` stops new evaluations;
   prompts still read the knowledge already stored. `learning.budget_usd` (default
-  0.50) caps one Claude evaluation. Evaluation errors go to `learning.log` and never
+  0.50) caps one Claude evaluation. Codex reports no cost, so its evaluations have no
+  cap, like its other turns. Evaluation errors go to `learning.log` and never
   change a task, an alert, or an exit code.
 
 ### Notifications

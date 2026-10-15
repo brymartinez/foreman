@@ -153,6 +153,8 @@ Findings 1 to 4 were fixed in stage 28.
 - An agent that leaves the reply marker off reads its own reply as new feedback. That
   costs one extra round, bounded by the per-run cap.
 - PR feedback has been checked against the stand-in `gh` and fixtures, not a live PR.
+- A PR comment posted after a merged or closed task's last evaluation is not learned,
+  because nothing watches finished PRs. Codex evaluations have no spend cap.
 - The release workflow has not run: the repo has no GitHub remote yet.
 - Conflict repair is checked against the stand-in `gh` and fixtures, not a live
   conflicting PR. GitHub reports UNKNOWN until it has computed mergeability, so a

@@ -23,6 +23,9 @@ func TestSanitizeRejectsReferencesPathsAndSecrets(t *testing.T) {
 		"home path":           "Config lives in /Users/alice/.config/x.",
 		"linux home":          "Config lives in /home/bob/app.",
 		"tilde path":          "Edit ~/.local/share/foreman/config.yaml first.",
+		"system path":         "Read /etc/passwd for the user list.",
+		"root-level path":     "Write scratch files to /tmp/build first.",
+		"windows path":        "Builds go to D:\\agents\\out first.",
 		"commit sha":          "Revert commit 3f9a2c7d1e to fix it.",
 		"github token":        "Use ghp_abcdefghijklmnopqrstuvwxyz0123456789 to push.",
 		"openai key":          "Set sk-proj-abc123def456ghi789jkl012 in env.",
@@ -48,6 +51,8 @@ func TestSanitizeKeepsOrdinaryWordsAndNumbers(t *testing.T) {
 		"Tests use table-driven subtests with t.Run.",
 		"The deadbeef helper is deprecated.",
 		"internal/app depends only on ports.go interfaces.",
+		"Update docs/control-layer/architecture.md with each design change.",
+		"Use and/or sparingly in error messages.",
 	} {
 		if _, err := Sanitize(text); err != nil {
 			t.Errorf("rejected %q: %v", text, err)

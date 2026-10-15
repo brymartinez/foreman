@@ -273,3 +273,28 @@ func TestLearningDue(t *testing.T) {
 		}
 	})
 }
+
+func TestLearnReadsPRCommentsTheTaskNeverRecorded(t *testing.T) {
+	f, ev, _ := learnFixture(t)
+	// The gate stops recording comments once the PR merges, so one posted just before
+	// the merge is on GitHub but not in the task file.
+	f.store.recs[learnKey].State = task.Done
+	f.gh.addPRComment(77, PRComment{Kind: task.IssueComment, ID: 9, Body: "next time split the migration out"})
+	if err := f.app.Learn(context.Background(), learnKey, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if p := ev.calls[0].Prompt; !strings.Contains(p, "next time split the migration out") || !strings.Contains(p, "please keep the old flag") {
+		t.Errorf("prompt lacks a developer comment:\n%s", p)
+	}
+}
+
+func TestLearnReadsPRCommentsWhenTheTaskRecordedNone(t *testing.T) {
+	f, ev, _ := learnFixture(t)
+	f.store.recs[learnKey].Feedback = nil
+	if err := f.app.Learn(context.Background(), learnKey, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if p := ev.calls[0].Prompt; !strings.Contains(p, "please keep the old flag") || strings.Contains(p, agent.ReplyMarker) {
+		t.Errorf("prompt comments wrong:\n%s", p)
+	}
+}

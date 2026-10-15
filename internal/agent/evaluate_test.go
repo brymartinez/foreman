@@ -210,3 +210,52 @@ func TestEvaluationPromptHoldsTheEvidenceAndLabelsTimeAndCostAsContext(t *testin
 		}
 	}
 }
+
+func TestEvaluatorCodexTurnsOffToolsAndTheUsersConfig(t *testing.T) {
+	var got Command
+	exec := func(_ context.Context, c Command) error {
+		got = c
+		fmt.Fprintln(c.Stdout, `{"type":"thread.started","thread_id":"th-1"}`)
+		return os.WriteFile(argValue(c.Args, "-o"), []byte(evaluationJSON), 0o600)
+	}
+	e := Evaluators{Codex: Codex{Bin: "codex", Exec: exec}}
+	if _, err := e.Evaluate(context.Background(), EvaluateInput{Agent: task.Codex, Prompt: "judge"}); err != nil {
+		t.Fatal(err)
+	}
+	// The user's config adds MCP servers and plugins; the features are Codex's own tools.
+	for _, want := range []string{"--ignore-user-config", "--ignore-rules", `web_search="disabled"`} {
+		if !slices.Contains(got.Args, want) {
+			t.Errorf("argv lacks %s: %q", want, got.Args)
+		}
+	}
+	for _, feature := range codexEvaluatorOff {
+		if !slices.Contains(got.Args, "features."+feature+"=false") {
+			t.Errorf("argv leaves %s on: %q", feature, got.Args)
+		}
+	}
+}
+
+func TestEvaluatorDiscardsAnAnswerFromATurnThatUsedTools(t *testing.T) {
+	t.Run("codex", func(t *testing.T) {
+		exec := func(_ context.Context, c Command) error {
+			fmt.Fprintln(c.Stdout, `{"type":"thread.started","thread_id":"th-1"}`)
+			fmt.Fprintln(c.Stdout, `{"type":"item.completed","item":{"id":"1","type":"mcp_tool_call","server":"node_repl","tool":"js"}}`)
+			return os.WriteFile(argValue(c.Args, "-o"), []byte(evaluationJSON), 0o600)
+		}
+		e := Evaluators{Codex: Codex{Bin: "codex", Exec: exec}}
+		if _, err := e.Evaluate(context.Background(), EvaluateInput{Agent: task.Codex, Prompt: "judge"}); err == nil || !strings.Contains(err.Error(), "tool") {
+			t.Fatalf("err = %v, want a tool use error", err)
+		}
+	})
+	t.Run("claude", func(t *testing.T) {
+		exec := func(_ context.Context, c Command) error {
+			fmt.Fprintln(c.Stdout, `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{}}]}}`)
+			fmt.Fprintf(c.Stdout, `{"type":"result","subtype":"success","structured_output":%s}`+"\n", compactEvaluation(t))
+			return nil
+		}
+		e := Evaluators{Claude: Claude{Bin: "claude", Exec: exec}}
+		if _, err := e.Evaluate(context.Background(), EvaluateInput{Agent: task.Claude, Prompt: "judge"}); err == nil || !strings.Contains(err.Error(), "tool") {
+			t.Fatalf("err = %v, want a tool use error", err)
+		}
+	})
+}

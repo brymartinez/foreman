@@ -422,3 +422,18 @@ func TestRecordAttemptRejectsAnInvalidTaskID(t *testing.T) {
 		t.Fatal("RecordAttempt accepted a task id that leaves the repository directory")
 	}
 }
+
+func TestApplyThatFailsToWriteTheLearningsStoresNoEvaluation(t *testing.T) {
+	s, _ := newStore(t)
+	// A directory where knowledge.md goes makes its write fail after the YAML.
+	if err := os.MkdirAll(filepath.Join(s.Dir, repo, "knowledge.md", "x"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Apply(repo, eval("1", 0, observed(Practice, "Run go vet first."))); err == nil {
+		t.Fatal("want an error")
+	}
+	ev, err := s.Evaluation(repo, "1")
+	if err != nil || ev != nil {
+		t.Errorf("evaluation = %+v, %v; a failed apply must leave the task due for a retry", ev, err)
+	}
+}

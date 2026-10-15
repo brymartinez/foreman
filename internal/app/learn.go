@@ -230,23 +230,21 @@ func headAdvanced(rec *task.Record, i int) bool {
 	return rec.Delegation.PRHead != "" && rec.Delegation.PRHead != head
 }
 
-// feedbackBodies reads the text of the developer's PR comments the task recorded.
-// The task file keeps only their identity, so the text comes from GitHub.
+// feedbackBodies reads the developer's comments on the task's PR, the same ones
+// readFeedback counts. It reads all of them, not only those the task file recorded:
+// the gate stops recording when the PR merges or closes, and the evaluation that
+// follows the merge must still see a comment posted just before it.
 func (a App) feedbackBodies(ctx context.Context, rec *task.Record) ([]string, error) {
-	if rec.Delegation.PR == 0 || len(rec.Feedback) == 0 {
+	if rec.Delegation.PR == 0 {
 		return nil, nil
 	}
 	comments, err := a.GitHub.PullRequestComments(ctx, task.Key{Repo: rec.Repo, Number: rec.Delegation.PR})
 	if err != nil {
 		return nil, fmt.Errorf("read %s#%d PR comments: %w", rec.Repo, rec.Delegation.PR, err)
 	}
-	recorded := map[commentKey]bool{}
-	for _, f := range rec.Feedback {
-		recorded[commentKey{f.Kind, f.ID}] = true
-	}
 	var out []string
 	for _, c := range comments {
-		if recorded[commentKey{c.Kind, c.ID}] && !strings.Contains(c.Body, agent.ReplyMarker) {
+		if strings.TrimSpace(c.Body) != "" && !strings.Contains(c.Body, agent.ReplyMarker) {
 			out = append(out, knowledge.Redact(c.Body))
 		}
 	}
