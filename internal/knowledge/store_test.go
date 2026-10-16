@@ -540,3 +540,38 @@ func TestReevaluationKeepsALaterTasksRetirement(t *testing.T) {
 		t.Fatalf("withdrawing task 8 undid task 9's retirement: %+v", got)
 	}
 }
+
+func TestReevaluatingTwoRewritingTasksRestoresTheOriginalText(t *testing.T) {
+	s, _ := newStore(t)
+	l := activeLearning(t, s)
+	rewrite := func(task string, day int, text string) Evaluation {
+		ev := eval(task, day)
+		ev.Revisions = []Revision{{ID: l.ID, Action: Revise, Text: text, Reason: "changed", Source: Maintainer, Cites: []string{"C1"}}}
+		return ev
+	}
+	mustApply(t, s, repo, rewrite("8", 10, "Run the e2e script nightly."))
+	mustApply(t, s, repo, rewrite("9", 11, "Run the e2e script weekly."))
+
+	mustApply(t, s, repo, eval("8", 10))
+	if got := learnings(t, s, repo)[0].Text; got != "Run the e2e script weekly." {
+		t.Fatalf("after withdrawing task 8's rewrite, text = %q", got)
+	}
+	mustApply(t, s, repo, eval("9", 11))
+	if got := learnings(t, s, repo)[0].Text; got != l.Text {
+		t.Fatalf("after withdrawing both rewrites, text = %q, want %q", got, l.Text)
+	}
+}
+
+func TestWithdrawingTheLaterRewriteRestoresTheEarlierOne(t *testing.T) {
+	s, _ := newStore(t)
+	l := activeLearning(t, s)
+	for _, r := range []struct{ task, text string }{{"8", "Run the e2e script nightly."}, {"9", "Run the e2e script weekly."}} {
+		ev := eval(r.task, 10)
+		ev.Revisions = []Revision{{ID: l.ID, Action: Revise, Text: r.text, Reason: "changed", Source: Maintainer, Cites: []string{"C1"}}}
+		mustApply(t, s, repo, ev)
+	}
+	mustApply(t, s, repo, eval("9", 10))
+	if got := learnings(t, s, repo)[0].Text; got != "Run the e2e script nightly." {
+		t.Fatalf("text = %q, want task 8's rewrite", got)
+	}
+}

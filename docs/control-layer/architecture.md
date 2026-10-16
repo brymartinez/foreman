@@ -648,7 +648,9 @@ the same commit. The commit message records why it changed.
   - Observed work cannot revive a retired learning; a maintainer proposal can.
   - Re-evaluating a task first removes that task's earlier evidence, and reverts its
     earlier retirement or rewrite, so the new evaluation replaces it. A retirement
-    another task also made, or a later rewrite, stays.
+    another task also made stays. The text becomes the newest rewrite that no
+    re-evaluation withdrew, rebuilt from each rewrite's stored `to` text, or the
+    original text when none is left.
 - **Learnings are generic.** `knowledge.Sanitize` rejects text with issue, PR, or
   commit references (including Linear or Jira keys such as `ABC-12`, but not names
   such as `UTF-8` or `SHA-256`), URLs, emails, absolute paths, tokens or keys, or more than 300 characters,

@@ -108,7 +108,9 @@ type Change struct {
 	Task   string    `yaml:"task"`
 	Action string    `yaml:"action"`
 	From   string    `yaml:"from,omitempty"`
-	Reason string    `yaml:"reason,omitempty"`
+	// To is a rewrite's new text, so the text can be rebuilt when one is withdrawn.
+	To     string `yaml:"to,omitempty"`
+	Reason string `yaml:"reason,omitempty"`
 }
 
 type Learning struct {

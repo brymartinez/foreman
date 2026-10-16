@@ -93,7 +93,7 @@ func (s Store) apply(f *learningsFile, ev Evaluation) Evaluation {
 		if r.Action == Retire {
 			l.Status = Retired
 		} else {
-			change.From = l.Text
+			change.From, change.To = l.Text, r.Text
 			l.Text = r.Text
 			l.Evidence = append(l.Evidence, Evidence{Task: ev.Task, At: ev.TaskAt, Source: r.Source, Note: r.Reason})
 		}
@@ -210,16 +210,16 @@ func latest(l Learning, task string) time.Time {
 
 // revert undoes the task's own retire or rewrite of l before its re-evaluation is
 // applied. A retirement stays when another task retired l too since it was last
-// restored; a rewrite stays when a later rewrite replaced it.
+// restored. The text becomes the newest rewrite no re-evaluation withdrew, or the
+// original text when none is left.
 func revert(l *Learning, ev Evaluation) {
-	for i := len(l.History) - 1; i >= 0; i-- {
-		if c := l.History[i]; c.Action == Revise {
-			if c.Task == ev.Task {
-				l.History = append(l.History, Change{At: ev.At, Task: ev.Task, Action: "revert-rewrite", From: l.Text, Reason: "re-evaluation replaced this task's rewrite"})
-				l.Text = c.From
-			}
-			break
+	if live := liveRewrites(l.History); slices.ContainsFunc(live, func(c Change) bool { return c.Task == ev.Task }) {
+		l.History = append(l.History, Change{At: ev.At, Task: ev.Task, Action: "revert-rewrite", From: l.Text, Reason: "re-evaluation replaced this task's rewrite"})
+		text := originalText(*l)
+		if live = liveRewrites(l.History); len(live) > 0 {
+			text = live[len(live)-1].To
 		}
+		l.Text = text
 	}
 	if l.Status != Retired {
 		return
@@ -241,6 +241,32 @@ func revert(l *Learning, ev Evaluation) {
 		l.History = append(l.History, Change{At: ev.At, Task: ev.Task, Action: "revert", Reason: "re-evaluation replaced this task's retirement"})
 		l.Status = derive(*l)
 	}
+}
+
+// liveRewrites are the rewrites, oldest first, that no later revert-rewrite by the
+// same task withdrew.
+func liveRewrites(history []Change) []Change {
+	var live []Change
+	for i, c := range history {
+		if c.Action != Revise {
+			continue
+		}
+		withdrawn := slices.ContainsFunc(history[i+1:], func(w Change) bool { return w.Action == "revert-rewrite" && w.Task == c.Task })
+		if !withdrawn {
+			live = append(live, c)
+		}
+	}
+	return live
+}
+
+// originalText is l's text before its first rewrite.
+func originalText(l Learning) string {
+	for _, c := range l.History {
+		if c.Action == Revise {
+			return c.From
+		}
+	}
+	return l.Text
 }
 
 // derive is the status l's evidence gives it: active with maintainer evidence or
