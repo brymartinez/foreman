@@ -11,7 +11,9 @@ import (
 // redacted.
 //
 // The rules, in order:
-//   - The task's earlier evidence is withdrawn, so a re-evaluation replaces it.
+//   - The task's earlier evidence and its earlier retire or rewrite are withdrawn, so
+//     a re-evaluation replaces them. Another task's retirement or a later rewrite
+//     stays.
 //   - A maintainer source counts only when it cites the task's own decisions or
 //     comments and nothing else. Otherwise it counts as observed, so the evaluator
 //     cannot invent a correction.
@@ -19,7 +21,8 @@ import (
 //   - A reusable proposal reinforces the learning it supports or repeats, or starts a
 //     new candidate. Observed work cannot revive a retired learning.
 //   - A maintainer revision applies at once. An observed one applies only when this
-//     task started after the learning's latest evidence from other tasks.
+//     task started after the learning's latest evidence from other tasks, so a
+//     learning only this task supports cannot be retired by its own observation.
 //   - A learning is active with maintainer evidence or evidence from two tasks, a
 //     candidate with one, and retired with none.
 func (s Store) apply(f *learningsFile, ev Evaluation) Evaluation {
@@ -29,6 +32,7 @@ func (s Store) apply(f *learningsFile, ev Evaluation) Evaluation {
 	}
 	for i := range f.Learnings {
 		withdraw(&f.Learnings[i], ev.Task)
+		revert(&f.Learnings[i], ev)
 	}
 	s.demote(&ev)
 
@@ -77,9 +81,14 @@ func (s Store) apply(f *learningsFile, ev Evaluation) Evaluation {
 			r.Text = text
 		}
 		revisions = append(revisions, r)
-		if l.Status == Retired || (r.Source == Observed && !ev.TaskAt.After(latest(*l, ev.Task))) {
+		if other := latest(*l, ev.Task); r.Source == Observed && (other.IsZero() || !ev.TaskAt.After(other)) {
 			continue
 		}
+		if l.Status == Retired && r.Action == Revise {
+			continue
+		}
+		// A retirement of a retired learning is still recorded, so withdrawing another
+		// task's retirement later does not revive it.
 		change := Change{At: ev.At, Task: ev.Task, Action: r.Action, Reason: r.Reason}
 		if r.Action == Retire {
 			l.Status = Retired
@@ -199,25 +208,65 @@ func latest(l Learning, task string) time.Time {
 	return t
 }
 
+// revert undoes the task's own retire or rewrite of l before its re-evaluation is
+// applied. A retirement stays when another task retired l too since it was last
+// restored; a rewrite stays when a later rewrite replaced it.
+func revert(l *Learning, ev Evaluation) {
+	for i := len(l.History) - 1; i >= 0; i-- {
+		if c := l.History[i]; c.Action == Revise {
+			if c.Task == ev.Task {
+				l.History = append(l.History, Change{At: ev.At, Task: ev.Task, Action: "revert-rewrite", From: l.Text, Reason: "re-evaluation replaced this task's rewrite"})
+				l.Text = c.From
+			}
+			break
+		}
+	}
+	if l.Status != Retired {
+		return
+	}
+	own := false
+	for i := len(l.History) - 1; i >= 0; i-- {
+		c := l.History[i]
+		if c.Action == "restore" || c.Action == "revert" {
+			break
+		}
+		if c.Action == Retire || c.Action == "withdraw" {
+			if c.Task != ev.Task {
+				return
+			}
+			own = true
+		}
+	}
+	if own {
+		l.History = append(l.History, Change{At: ev.At, Task: ev.Task, Action: "revert", Reason: "re-evaluation replaced this task's retirement"})
+		l.Status = derive(*l)
+	}
+}
+
+// derive is the status l's evidence gives it: active with maintainer evidence or
+// two tasks, a candidate with one task, retired with none.
+func derive(l Learning) Status {
+	switch {
+	case len(l.Evidence) == 0:
+		return Retired
+	case l.Tasks() >= 2:
+		return Active
+	}
+	for _, e := range l.Evidence {
+		if e.Source == Maintainer {
+			return Active
+		}
+	}
+	return Candidate
+}
+
 // settle derives a non-retired learning's status from its evidence and records a
 // change of status in its history.
 func settle(l *Learning, ev Evaluation) {
 	if l.Status == Retired {
 		return
 	}
-	next := Candidate
-	switch {
-	case len(l.Evidence) == 0:
-		next = Retired
-	case l.Tasks() >= 2:
-		next = Active
-	default:
-		for _, e := range l.Evidence {
-			if e.Source == Maintainer {
-				next = Active
-			}
-		}
-	}
+	next := derive(*l)
 	if next == l.Status {
 		return
 	}

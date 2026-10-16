@@ -478,3 +478,65 @@ func TestMaintainerEvidenceKeepsItsCitations(t *testing.T) {
 		t.Fatalf("learnings = %+v, want an active learning citing C1", ls)
 	}
 }
+
+func TestATaskCannotRetireItsOwnLearningByObservation(t *testing.T) {
+	s, _ := newStore(t)
+	p := observed(Practice, "Pin tool versions in the Makefile.")
+	p.Source, p.Cites = Maintainer, []string{"D1"}
+	mustApply(t, s, repo, eval("5", 0, p))
+	// Task 5 re-evaluated: it still backs the learning and also observes against it.
+	again := eval("5", 0, p)
+	again.Revisions = []Revision{{ID: "L1", Action: Retire, Reason: "skipped it once", Source: Observed}}
+	mustApply(t, s, repo, again)
+	if got := learnings(t, s, repo)[0]; got.Status != Active {
+		t.Fatalf("the task's own observation retired its learning: %+v", got)
+	}
+}
+
+func TestReevaluationWithdrawsTheTasksEarlierRetirement(t *testing.T) {
+	s, _ := newStore(t)
+	l := activeLearning(t, s)
+	retire := eval("9", 10)
+	retire.Revisions = []Revision{{ID: l.ID, Action: Retire, Reason: "the script was removed", Source: Observed}}
+	mustApply(t, s, repo, retire)
+	if got := learnings(t, s, repo)[0]; got.Status != Retired {
+		t.Fatalf("setup: %+v", got)
+	}
+	mustApply(t, s, repo, eval("9", 10))
+	got := learnings(t, s, repo)[0]
+	if got.Status != Active || !strings.Contains(knowledgeMD(t, s, repo), "e2e script") {
+		t.Fatalf("the replaced retirement still holds: %+v", got)
+	}
+	if last := got.History[len(got.History)-1]; last.Action != "revert" || last.Task != "9" {
+		t.Errorf("history = %+v", got.History)
+	}
+}
+
+func TestReevaluationWithdrawsTheTasksEarlierRewrite(t *testing.T) {
+	s, _ := newStore(t)
+	l := activeLearning(t, s)
+	revise := eval("9", 10)
+	revise.Revisions = []Revision{{ID: l.ID, Action: Revise, Text: "Run the e2e script nightly.", Reason: "moved to nightly", Source: Observed}}
+	mustApply(t, s, repo, revise)
+	if got := learnings(t, s, repo)[0]; got.Text != "Run the e2e script nightly." {
+		t.Fatalf("setup: %+v", got)
+	}
+	mustApply(t, s, repo, eval("9", 10))
+	if got := learnings(t, s, repo)[0]; got.Text != l.Text || got.Status != Active {
+		t.Fatalf("the replaced rewrite still holds: %+v", got)
+	}
+}
+
+func TestReevaluationKeepsALaterTasksRetirement(t *testing.T) {
+	s, _ := newStore(t)
+	l := activeLearning(t, s)
+	for _, id := range []string{"8", "9"} {
+		ev := eval(id, 10)
+		ev.Revisions = []Revision{{ID: l.ID, Action: Retire, Reason: "removed", Source: Maintainer, Cites: []string{"C1"}}}
+		mustApply(t, s, repo, ev)
+	}
+	mustApply(t, s, repo, eval("8", 10))
+	if got := learnings(t, s, repo)[0]; got.Status != Retired {
+		t.Fatalf("withdrawing task 8 undid task 9's retirement: %+v", got)
+	}
+}

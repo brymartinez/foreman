@@ -36,6 +36,9 @@ func TestSanitizeRejectsReferencesPathsAndSecrets(t *testing.T) {
 		"slack token":         "Post with xoxb-1234-5678-abcdefgh.",
 		"private key":         "Paste -----BEGIN PRIVATE KEY----- here.",
 		"pull request number": "pull request #7 shows the way",
+		"spaced issue number": "Follow issue # 61 for the layout.",
+		"spaced PR number":    "See PR # 64 first.",
+		"spaced hash number":  "Same as # 12 before.",
 		"linear identifier":   "Follow the approach from KUB-129 for flags.",
 		"jira-style key":      "As agreed in OPS-7, pin the image.",
 	} {

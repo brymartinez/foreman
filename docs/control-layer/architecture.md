@@ -643,10 +643,12 @@ the same commit. The commit message records why it changed.
     whether the cited item says what it claims; the citations, kept in the evidence,
     make that judgment auditable.
   - A maintainer revision or retirement applies at once. An observed one applies only
-    when its task started after the learning's latest evidence from other tasks.
+    when its task started after the learning's latest evidence from other tasks; a
+    learning with no other task's evidence cannot be retired by observation.
   - Observed work cannot revive a retired learning; a maintainer proposal can.
-  - Re-evaluating a task first removes that task's earlier evidence, so it never
-    counts twice.
+  - Re-evaluating a task first removes that task's earlier evidence, and reverts its
+    earlier retirement or rewrite, so the new evaluation replaces it. A retirement
+    another task also made, or a later rewrite, stays.
 - **Learnings are generic.** `knowledge.Sanitize` rejects text with issue, PR, or
   commit references (including Linear or Jira keys such as `ABC-12`, but not names
   such as `UTF-8` or `SHA-256`), URLs, emails, absolute paths, tokens or keys, or more than 300 characters,
