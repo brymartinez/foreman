@@ -382,3 +382,38 @@ func TestAPlanCommentUnmarkedDuringThePlanningTurnIsNotEdited(t *testing.T) {
 		}
 	})
 }
+
+func TestAKeptDocumentRemovedDuringThePlanningTurnFailsWithoutPosting(t *testing.T) {
+	t.Run("GitHub unmarked", func(t *testing.T) {
+		f := newFixture()
+		key := started(t, f, startReq(t))
+		f.gh.issueComments = githubPlanComments(f, "", task.Analysis)
+		f.claude.during = func() {
+			c := f.gh.comments[501]
+			c.Body = "## Analysis\n\nThe marker was removed."
+			f.gh.comments[501] = c
+		}
+		f.claude.turns = []agent.Turn{keepingTurn(task.Analysis)}
+		if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		got := f.store.recs[key]
+		if got.State != task.Failed || got.LastOutcome.Summary != "the Analysis left on the issue was removed during planning; restart the task to plan it again" || len(f.gh.comments) != 1 || len(got.Plan) != 0 || f.claude.starts != 1 {
+			t.Fatalf("state %s outcome %+v comments %d plan %+v starts %d", got.State, got.LastOutcome, len(f.gh.comments), got.Plan, f.claude.starts)
+		}
+	})
+	t.Run("Linear deleted", func(t *testing.T) {
+		f := newFixture()
+		key, tracker := linearTask(t, &f)
+		tracker.comments = linearPlanComments("", task.Analysis)
+		f.claude.during = func() { tracker.missing = map[string]bool{"lin-analysis": true} }
+		f.claude.turns = []agent.Turn{keepingTurn(task.Analysis)}
+		if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		got := f.store.recs[key]
+		if got.State != task.Failed || !strings.Contains(got.LastOutcome.Summary, "removed during planning") || len(tracker.postIDs) != 0 || len(got.Plan) != 0 {
+			t.Fatalf("state %s outcome %+v post IDs %v plan %+v", got.State, got.LastOutcome, tracker.postIDs, got.Plan)
+		}
+	})
+}

@@ -386,7 +386,9 @@ the same commit. The commit message records why it changed.
   without posting. A partial plan goes to the planning turn with the documents' text,
   in the prompt or, for a resumed session, in the resume message; the turn returns an
   empty document to keep a comment, and the runner edits revised ones and posts only
-  missing ones. A document whose fingerprint differs from the current description
+  missing ones. After the turn the runner reads each target comment again: an edit
+  whose comment is gone or unmarked becomes a new post, and a kept comment that is
+  gone or unmarked fails the task before anything is posted. A document whose fingerprint differs from the current description
   blocks the task with a keep-or-revise decision before any turn. The answer covers
   only the description it was asked about, so a later edit asks again. Comments
   without a fingerprint predate it and count as consistent. A failed read of the issue

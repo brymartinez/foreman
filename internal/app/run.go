@@ -759,17 +759,39 @@ func applyStop(ctx context.Context, rec *task.Record, during string, log io.Writ
 }
 
 // postPlan puts each planning document on the issue as its own comment, editing the
-// marked comment found on the issue when there is one. A
-// document the turn left empty keeps the comment found on the issue as it is. Each
-// comment is recorded as soon as it is posted. A failed post fails the task;
-// restarting it plans again.
+// marked comment found on the issue when there is one. A document the turn left empty
+// keeps the comment found on the issue as it is. Each comment is recorded as soon as
+// it is posted. A failed post fails the task; restarting it plans again.
 func (a App) postPlan(ctx, final context.Context, rec *task.Record, docs map[task.PlanDoc]string, onIssue issuePlan, log io.Writer) (*task.Record, error) {
+	// Every kept document is checked before anything is posted, so a plan that can't
+	// be completed leaves the issue as it was.
 	for _, doc := range task.PlanDocs {
-		if _, ok := onIssue.found[doc]; !ok && strings.TrimSpace(docs[doc]) == "" {
-			return a.update(final, rec.Key, existing(func(cur *task.Record) {
-				failTask(cur, fmt.Sprintf("the planning turn wrote no %s", doc.Title()), a.Now())
-			}))
+		if strings.TrimSpace(docs[doc]) != "" {
+			continue
 		}
+		found, ok := onIssue.found[doc]
+		reason := fmt.Sprintf("the planning turn wrote no %s", doc.Title())
+		if ok {
+			// The comment may have been deleted or unmarked while the turn ran, and
+			// the turn left no text to post in its place.
+			id := found.comment.ExternalCommentID
+			if rec.IssueSource() != task.Linear {
+				id = strconv.FormatInt(found.comment.CommentID, 10)
+			}
+			kept, err := a.stillPlanComment(ctx, rec.Key, doc, id)
+			switch {
+			case err != nil:
+				reason = fmt.Sprintf("reading the %s on the issue failed: %v", doc.Title(), err)
+			case kept == "":
+				reason = fmt.Sprintf("the %s left on the issue was removed during planning; restart the task to plan it again", doc.Title())
+			default:
+				continue
+			}
+		}
+		return a.update(final, rec.Key, existing(func(cur *task.Record) {
+			failTask(cur, reason, a.Now())
+			applyStop(ctx, cur, "planning", log, a.Now())
+		}))
 	}
 	for _, doc := range task.PlanDocs {
 		found, isFound := onIssue.found[doc]
