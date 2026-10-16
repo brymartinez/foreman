@@ -181,10 +181,14 @@ func (e Evaluators) Evaluate(ctx context.Context, in EvaluateInput) (Evaluation,
 	if err != nil {
 		return Evaluation{Usage: usage}, err
 	}
-	// Codex has no switch that turns every tool off, so a turn that used one anyway
-	// may have read beyond the evidence, and its answer is not trusted.
-	if len(usage.ToolCalls) > 0 {
-		return Evaluation{Usage: usage}, fmt.Errorf("the evaluator called tools %v; its answer is discarded", usage.ToolCalls)
+	// Claude reports its schema response as a StructuredOutput tool call. It does
+	// not read beyond the prompt; any other tool call still invalidates the turn.
+	tools := maps.Clone(usage.ToolCalls)
+	if in.Agent == task.Claude {
+		delete(tools, "StructuredOutput")
+	}
+	if len(tools) > 0 {
+		return Evaluation{Usage: usage}, fmt.Errorf("the evaluator called tools %v; its answer is discarded", tools)
 	}
 	out, err := ParseEvaluation(raw)
 	out.Usage = usage

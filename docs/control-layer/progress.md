@@ -16,6 +16,9 @@ Linear's suggestion or the existing conventional default applies. Restarts keep
 their stored branch. Vet, Go tests, build, and the end-to-end scenarios pass.
 
 Stage 61 (per-repository evaluation and learning, for issue #61) is complete.
+Claude's schema response is now accepted as evaluator output rather than rejected as
+a tool call; other tool calls still discard the turn. Vet, Go tests, build, and the
+learning end-to-end scenario pass. Existing failed evaluations need another run.
 Task usage records tool-call counts by name. A detached `foreman __learn` evaluates a
 task when its run ends on a clean review, and a refresh starts it again when the
 task's evidence changes. One evaluator turn proposes learnings; `internal/knowledge`

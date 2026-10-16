@@ -261,3 +261,23 @@ func TestEvaluatorDiscardsAnAnswerFromATurnThatUsedTools(t *testing.T) {
 		}
 	})
 }
+
+func TestEvaluatorClaudeAcceptsSchemaOutputButRejectsOtherTools(t *testing.T) {
+	for name, extra := range map[string]string{
+		"schema only": "",
+		"schema and read": `,{"type":"tool_use","name":"Read","input":{}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			exec := func(_ context.Context, c Command) error {
+			fmt.Fprintf(c.Stdout, `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"StructuredOutput","input":%s}%s]}}`+"\n", compactEvaluation(t), extra)
+			fmt.Fprintf(c.Stdout, `{"type":"result","subtype":"success","structured_output":%s}`+"\n", compactEvaluation(t))
+			return nil
+			}
+			e := Evaluators{Claude: Claude{Bin: "claude", Exec: exec}}
+			_, err := e.Evaluate(context.Background(), EvaluateInput{Agent: task.Claude, Prompt: "judge"})
+			if (err != nil) != (extra != "") {
+				t.Fatalf("err = %v", err)
+			}
+		})
+	}
+}

@@ -671,11 +671,13 @@ the same commit. The commit message records why it changed.
   stay, because "keep functions under 80 lines" or "internal/app depends only on its
   ports" is the kind of guidance a repository needs. Evidence notes in the YAML are
   redacted the same way.
-- **The evaluator has no tools.** Claude runs with `--tools ""`. Codex has no switch
-  that removes every tool, so its turn runs read-only with `--ignore-user-config`
+- **The evaluator has no tools.** Claude runs with `--tools ""`; its
+  `StructuredOutput` schema response is allowed because it only returns the answer.
+  Codex has no switch that removes every tool, so its turn runs read-only with
+  `--ignore-user-config`
   (no user MCP servers or plugins), `--ignore-rules`, web search off, and the shell,
   code mode, subagent, app, browser, and image features off. Either way, a turn that
-  records a tool call is discarded as a failed evaluation. Codex counts every
+  records any other tool call is discarded as a failed evaluation. Codex counts every
   completed item other than a message, reasoning, a todo list, or an error as a tool
   call, so a new tool type cannot slip through.
 - **The evaluator reads every human comment on the PR**, not only those the task
