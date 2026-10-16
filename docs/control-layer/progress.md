@@ -2,6 +2,11 @@
 
 ## Current stage
 
+Duplicate runner prevention (#76) is complete. Every launch stores a launch claim in
+the write that makes the task WORKING, and a start during that launch gets "already
+starting". The runner takes the task only with the claim's token. Vet, Go tests,
+build, and the end-to-end scenarios pass.
+
 Reset of failed delegated runs (#72) is complete. `x` on a FAILED task confirms, then
 `App.Reset` resolves the run's PR, saves a record with only that link, and deletes the
 worktree, local branch, and runner log. Auto mode skips the reset issue. A manual start

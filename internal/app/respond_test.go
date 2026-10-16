@@ -28,7 +28,7 @@ func blockedTask(t *testing.T) (fixture, task.Key) {
 	}
 	q := retryQuestion
 	f.claude.turn = agent.Turn{Session: task.Session{Agent: task.Claude, ID: "sid-1"}, Outcome: agent.Outcome{Status: agent.Blocked, Summary: "need input", Questions: []task.Question{q}}}
-	if err := f.app.RunTask(context.Background(), rec.Key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), rec.Key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if f.store.recs[rec.Key].State != task.NeedsDecision {
@@ -57,7 +57,7 @@ func TestRespondRecordsAnswerAndResumesSession(t *testing.T) {
 
 	f.claude.turn = agent.Turn{Session: task.Session{Agent: task.Claude, ID: "sid-1"}, Outcome: agent.Outcome{Status: agent.PROpened, Summary: "done", PRNumber: 912}}
 	starts := f.claude.starts
-	if err := f.app.RunTask(context.Background(), key, 4243, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.claude.resumed) != 1 || !strings.HasPrefix(f.claude.resumed[0], "sid-1: ") || !strings.Contains(f.claude.resumed[0], "Decision: A. 5xx only") {
@@ -80,7 +80,7 @@ func TestRunTaskFallsBackToFreshTurnWhenSessionIsGone(t *testing.T) {
 	f.claude.resumeErr = fmt.Errorf("claude printed no result: %w", agent.ErrNoSession)
 	f.claude.turn = agent.Turn{Session: task.Session{Agent: task.Claude, ID: "sid-2"}, Outcome: agent.Outcome{Status: agent.FailedRun, Summary: "x"}}
 	starts := f.claude.starts
-	if err := f.app.RunTask(context.Background(), key, 4243, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if f.claude.starts != starts+1 || !strings.Contains(f.claude.prompt, "## Decisions already made") ||
@@ -97,7 +97,7 @@ func TestRunTaskDoesNotFallBackOnOtherResumeErrors(t *testing.T) {
 	f.app.Respond(context.Background(), key, "A")
 	f.claude.resumeErr = fmt.Errorf("claude exited: usage limit")
 	starts := f.claude.starts
-	f.app.RunTask(context.Background(), key, 4243, io.Discard)
+	f.run(context.Background(), key, 4243, io.Discard)
 	got := f.store.recs[key]
 	if f.claude.starts != starts || got.State != task.Failed || !got.Decisions[0].DeliveredAt.IsZero() {
 		t.Errorf("starts %d state %s decision %+v", f.claude.starts-starts, got.State, got.Decisions[0])
@@ -155,7 +155,7 @@ func TestRespondWaitsForEveryQuestionThenResumesOnce(t *testing.T) {
 	capQuestion := retryQuestion
 	capQuestion.Issue = "Cap the retry count?"
 	f.claude.turn = agent.Turn{Session: task.Session{Agent: task.Claude, ID: "sid-1"}, Outcome: agent.Outcome{Status: agent.Blocked, Summary: "need input", Questions: []task.Question{retryQuestion, capQuestion}}}
-	if err := f.app.RunTask(context.Background(), rec.Key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), rec.Key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	f.runners.spawned = nil
@@ -176,7 +176,7 @@ func TestRespondWaitsForEveryQuestionThenResumesOnce(t *testing.T) {
 	}
 
 	f.claude.turn = prTurn("sid-1")
-	if err := f.app.RunTask(context.Background(), rec.Key, 4243, io.Discard); err != nil {
+	if err := f.run(context.Background(), rec.Key, 4243, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.claude.resumed) != 1 {

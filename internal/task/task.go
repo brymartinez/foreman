@@ -152,10 +152,13 @@ type Delegation struct {
 	// WorktreeRemovedAt is set once cleanup removed the worktree; the branch may remain.
 	WorktreeRemovedAt time.Time
 	ContextFile       string
-	RunnerPID         int
-	RunnerLog         string
-	PR                int
-	PRURL             string
+	// Launch is the claim of the launch that spawns the next runner, until that
+	// runner takes the task over.
+	Launch    *Launch
+	RunnerPID int
+	RunnerLog string
+	PR        int
+	PRURL     string
 	// PriorPR is the PR of a run the developer reset. Each fresh session reads it
 	// again as context. It equals PR when this run continues that PR.
 	PriorPR int
@@ -171,6 +174,17 @@ type Delegation struct {
 	// until the runner has run the last one.
 	ConflictAttempts []ConflictAttempt
 	ConflictPending  bool
+}
+
+// Launch is taken under the task lock before a runner is spawned, by the foreman
+// process PID. Only the runner given Token may work the task, so two launches never
+// run two runners. A claim holds other launches off while PID runs. PID is cleared
+// once the launch has recorded its runner, and a later launch replaces a claim its
+// launcher or runner left behind.
+type Launch struct {
+	Token string    `yaml:"token"`
+	PID   int       `yaml:"pid,omitempty"`
+	Since time.Time `yaml:"since,omitempty"`
 }
 
 // ResetMark is all a reset keeps of the discarded run: the PR it opened, if any, so

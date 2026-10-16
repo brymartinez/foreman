@@ -43,10 +43,11 @@ Every agent interaction is one headless turn that runs to completion and returns
 app.Start, from the dashboard (enter on an inbox issue, or auto mode)
   ├─ gh: repo + default branch of the managed clone, fetch issue
   ├─ git: ensure worktree <root>/<owner>-<repo>/<branch> with branch slashes as directories
-  ├─ store: task file, state WORKING, session id
+  ├─ store: task file, state WORKING, session id, launch claim (one locked write)
   ├─ pin: the active gh account (kept on restarts), worktree commit identity, SSH
   │       push account check; a mismatch is FAILED and nothing launches
-  └─ spawn detached `foreman __run owner/repo#825` (pid + log recorded), exit
+  └─ spawn detached `foreman __run owner/repo#825` with the claim's token in
+     FOREMAN_LAUNCH (pid + log recorded), exit
 
 runner (one process per task, exits when the task leaves WORKING/REVIEWING):
   if the gate flagged a merge conflict:
@@ -241,6 +242,15 @@ the same commit. The commit message records why it changed.
   without process-list access. Older runners without a lock still use `ps`. A dead
   runner is reaped only after the gate has read its PR, so a
   GitHub outage delays a FAILED verdict instead of risking a wrong one.
+- **A launch claims the task before it spawns.** The write that makes a task WORKING
+  also stores `launch: {token, pid, since}`, with this foreman's pid, under the task
+  lock. Any start while that pid runs gets "already starting" and changes nothing. The
+  launch clears the pid when it records the runner, so a dashboard that outlives the
+  launch holds nothing; from then on the live runner holds starts off. A failed spawn
+  removes the claim. A claim whose launcher died is replaced by the next start. The
+  runner gets the token in `FOREMAN_LAUNCH`, and `RunTask` works the task only if the
+  token matches. It then drops the claim and records its pid. Without the claim, two
+  overlapping starts could each spawn a runner in one worktree.
 - **The runner owns its log.** `Spawn` passes the log file itself as stdout and stderr,
   and the runner timestamps its own lines. A writer in the launcher needs a pipe, which
   dies when the dashboard exits and kills the runner on its next write.
@@ -254,7 +264,7 @@ the same commit. The commit message records why it changed.
 
 ### Runner
 
-- **The runner is a step loop.** `RunTask` claims the task, runs any pending conflict
+- **The runner is a step loop.** `RunTask` takes the task over from its launch claim, runs any pending conflict
   repair, reads waiting comments, and hands a `taskRun` to its loop.
   `firstStep` picks the first step from the record alone. Each step is one method that
   returns the next:

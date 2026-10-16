@@ -13,7 +13,7 @@ import (
 
 func run(t *testing.T, f fixture, key task.Key) *task.Record {
 	t.Helper()
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	return f.store.recs[key]

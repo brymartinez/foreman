@@ -14,6 +14,7 @@ import (
 // with all the answers.
 func (a App) Respond(ctx context.Context, key task.Key, raw string) (*task.Record, error) {
 	now := a.Now()
+	var token string
 	rec, err := a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
 		if cur == nil || cur.State != task.NeedsDecision || cur.Pending() == nil {
 			return nil, fmt.Errorf("%s#%d is not waiting for a decision", key.Repo, key.Number)
@@ -27,6 +28,9 @@ func (a App) Respond(ctx context.Context, key task.Key, raw string) (*task.Recor
 		cur.Body = appendDecisionNote(cur.Body, *d)
 		if cur.Pending() == nil {
 			cur.State = task.Working
+			if token, err = a.claimLaunch(cur); err != nil {
+				return nil, err
+			}
 		}
 		cur.LastOutcome = &task.Outcome{Status: "answered", Summary: answer, At: now}
 		return cur, nil
@@ -34,7 +38,7 @@ func (a App) Respond(ctx context.Context, key task.Key, raw string) (*task.Recor
 	if err != nil || rec.State == task.NeedsDecision {
 		return rec, err
 	}
-	return a.launch(ctx, key)
+	return a.launch(ctx, key, token)
 }
 
 // ResolveAnswer turns what the developer typed into the recorded answer: empty means

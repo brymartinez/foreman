@@ -172,6 +172,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 	}
 
 	now := a.Now()
+	var token string
 	_, err = a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
 		if cur == nil {
 			cur = &task.Record{Key: key, State: task.Discovered, Body: fmt.Sprintf("# %s %s\n\n## Notes\n\n", issueLabel(key, issue.Identifier), issue.Title)}
@@ -273,6 +274,11 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			summary = fmt.Sprintf("dispatched to %s with profile %s", req.Agent, p.Name)
 		}
 		cur.LastOutcome = &task.Outcome{Status: "started", Summary: summary, At: now}
+		// Claimed in the same write that makes the task WORKING, so no other start
+		// sees it WORKING without a launch.
+		if token, err = a.claimLaunch(cur); err != nil {
+			return nil, err
+		}
 		return cur, nil
 	})
 	if err != nil {
@@ -280,7 +286,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 	}
 	saved = true
 
-	return a.launch(ctx, key)
+	return a.launch(ctx, key, token)
 }
 
 func (a App) sourceRepo(ctx context.Context, req *StartRequest) (RepoInfo, error) {
@@ -309,8 +315,10 @@ func (a App) sourceRepo(ctx context.Context, req *StartRequest) (RepoInfo, error
 	return info, nil
 }
 
-// launch spawns the runner and records its log, or marks the task FAILED if it can't.
-func (a App) launch(ctx context.Context, key task.Key) (*task.Record, error) {
+// launch spawns the runner for the launch claim token, taken with the update that
+// made the task WORKING, and records its log. If it can't, it marks the task FAILED
+// and releases the claim.
+func (a App) launch(ctx context.Context, key task.Key, token string) (*task.Record, error) {
 	var pid int
 	var logPath string
 	spawnErr := a.restoreWorktree(ctx, key)
@@ -318,9 +326,21 @@ func (a App) launch(ctx context.Context, key task.Key) (*task.Record, error) {
 		spawnErr = a.launchAccount(ctx, key)
 	}
 	if spawnErr == nil {
-		pid, logPath, spawnErr = a.Runners.Spawn(key)
+		pid, logPath, spawnErr = a.Runners.Spawn(key, token)
 	}
 	return a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
+		// Every launch of a task writes the same log, so it is recorded even when the
+		// runner already took the task over.
+		if spawnErr == nil && cur.Delegation != nil {
+			cur.Delegation.RunnerLog = logPath
+		}
+		// The runner took the claim over, or a later launch replaced it.
+		if !ownsLaunch(cur, token) {
+			return cur, nil
+		}
+		if spawnErr != nil {
+			cur.Delegation.Launch = nil
+		}
 		if spawnErr != nil && cur.Delegation.ConflictPending {
 			failRepair(cur, "could not launch runner: "+spawnErr.Error(), a.Now())
 			return cur, nil
@@ -329,10 +349,13 @@ func (a App) launch(ctx context.Context, key task.Key) (*task.Record, error) {
 			failTask(cur, "could not launch runner: "+spawnErr.Error(), a.Now())
 			return cur, nil
 		}
-		cur.Delegation.RunnerLog = logPath
-		if cur.State == task.Working && cur.Delegation.RunnerPID == 0 {
+		if cur.State == task.Working {
 			cur.Delegation.RunnerPID = pid
 		}
+		// The launch is over, though its runner still needs the token. A dashboard
+		// launcher keeps running, and its PID would hold off a restart after the
+		// runner died.
+		cur.Delegation.Launch = &task.Launch{Token: token, Since: cur.Delegation.Launch.Since}
 		return cur, nil
 	})
 }
@@ -418,6 +441,9 @@ func (a App) startableBy(rec *task.Record, owner string) error {
 		// changes it.
 		if a.liveRunner(rec) {
 			return fmt.Errorf("%s is already running (pid %d)", ref, rec.Delegation.RunnerPID)
+		}
+		if launching(rec) {
+			return fmt.Errorf("%s is already starting", ref)
 		}
 		return nil
 	case task.NeedsDecision:

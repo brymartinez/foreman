@@ -31,7 +31,7 @@ func TestStartOpensAnAttemptAndTheRunnerStartsIt(t *testing.T) {
 		t.Fatalf("attempt after start = %+v, want a claude attempt not started yet at log offset 0", a)
 	}
 	f.claude.turn = prTurn("sid-1")
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	rec := f.store.recs[key]
@@ -150,7 +150,7 @@ func TestRestartBeforeAnyPRContinuesTheAttempt(t *testing.T) {
 	ticking(&f)
 	key := started(t, f, startReq(t))
 	f.claude.err = errors.New("agent crashed")
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	first := f.store.recs[key].CurrentAttempt().StartedAt
@@ -173,7 +173,7 @@ func TestARunThatFailsBeforeAnAgentTurnLeavesTheAttemptUnstarted(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	f.stages.err = errors.New("stages/implement.md: missing")
-	_ = f.app.RunTask(context.Background(), key, 4242, io.Discard)
+	_ = f.run(context.Background(), key, 4242, io.Discard)
 	if f.claude.starts != 0 {
 		t.Fatalf("setup: the agent ran %d turns", f.claude.starts)
 	}
@@ -190,7 +190,7 @@ func TestAFailedFirstTurnStampDoesNotStartTheAgent(t *testing.T) {
 		return a != nil && !a.StartedAt.IsZero()
 	}
 	f.claude.turn = prTurn("sid-1")
-	_ = f.app.RunTask(context.Background(), key, 4242, io.Discard)
+	_ = f.run(context.Background(), key, 4242, io.Discard)
 	if f.claude.starts != 0 {
 		t.Fatalf("the agent ran %d turns with no recorded first turn", f.claude.starts)
 	}

@@ -20,6 +20,9 @@ import (
 // RunCommand is the hidden CLI verb the runner process executes.
 const RunCommand = "__run"
 
+// LaunchEnv carries the launch claim's token from Spawn to the runner.
+const LaunchEnv = "FOREMAN_LAUNCH"
+
 // LearnCommand is the hidden CLI verb the learner process executes.
 const LearnCommand = "__learn"
 
@@ -45,7 +48,7 @@ func (p Processes) lockPath(pid int) string {
 
 // Spawn starts the runner in its own session so closing the terminal does not kill it.
 // Its stdout and stderr go to an append-only log per task; the runner timestamps its own lines.
-func (p Processes) Spawn(key task.Key) (int, string, error) {
+func (p Processes) Spawn(key task.Key, token string) (int, string, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return 0, "", err
@@ -69,6 +72,7 @@ func (p Processes) Spawn(key task.Key) (int, string, error) {
 		return 0, "", err
 	}
 	cmd := exec.Command(exe, RunCommand, keyArg(key))
+	cmd.Env = append(os.Environ(), LaunchEnv+"="+token)
 	// The log must be the file itself. Any other writer makes this process copy
 	// the output through a pipe, and the runner dies once this process exits.
 	cmd.Stdout, cmd.Stderr = log, log

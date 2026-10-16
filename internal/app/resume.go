@@ -19,17 +19,20 @@ func (a App) Resume(ctx context.Context, key task.Key) (*task.Record, error) {
 	if err := a.resumable(key, rec); err != nil {
 		return nil, err
 	}
+	var token string
 	if _, err := a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
 		if err := a.resumable(key, cur); err != nil {
 			return nil, err
 		}
 		cur.State = task.Working
 		cur.LastOutcome = &task.Outcome{Status: "resumed", Summary: feedbackNote(len(cur.UnhandledFeedback()), cur.Delegation.PR), At: a.Now()}
-		return cur, nil
+		var err error
+		token, err = a.claimLaunch(cur)
+		return cur, err
 	}); err != nil {
 		return nil, err
 	}
-	return a.launch(ctx, key)
+	return a.launch(ctx, key, token)
 }
 
 func (a App) resumable(key task.Key, rec *task.Record) error {

@@ -85,7 +85,7 @@ func TestRunStopsBeforeTheAgentTurnWhenGHSwitchesAccounts(t *testing.T) {
 	key := started(t, f, startReq(t))
 	f.accts.active = Account{Login: "octo-home", ID: 7}
 	f.claude.turn = prTurn("sid-1")
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -99,7 +99,7 @@ func TestRunStopsBeforeTheAgentTurnWhenAnySSHPushURLPushesAsAnotherAccount(t *te
 	key := started(t, f, startReq(t))
 	f.accts.ssh = []SSHAccount{{Host: "git@github-work", Login: "octo-work"}, {Host: "git@github-home", Login: "octo-home"}}
 	f.claude.turn = prTurn("sid-1")
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]

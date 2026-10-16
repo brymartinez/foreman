@@ -85,7 +85,7 @@ func TestRunTaskWritesRouteLineOnce(t *testing.T) {
 	}
 	f.codex.turn = agent.Turn{Session: task.Session{Agent: task.Codex, ID: "th-1"}, Outcome: agent.Outcome{Status: agent.FailedRun, Summary: "stuck"}}
 	var log bytes.Buffer
-	if err := f.app.RunTask(context.Background(), rec.Key, 4242, &log); err != nil {
+	if err := f.run(context.Background(), rec.Key, 4242, &log); err != nil {
 		t.Fatal(err)
 	}
 	first, _, _ := strings.Cut(log.String(), "\n")
@@ -103,7 +103,7 @@ func TestRunTaskWritesRouteLineOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	log.Reset()
-	if err := f.app.RunTask(context.Background(), rec.Key, 4242, &log); err != nil {
+	if err := f.run(context.Background(), rec.Key, 4242, &log); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(log.String(), "route:") {
@@ -121,7 +121,7 @@ func TestRouteLineKeepsTheReasonOnOneLine(t *testing.T) {
 	}
 	f.codex.turn = agent.Turn{Outcome: agent.Outcome{Status: agent.FailedRun, Summary: "stuck"}}
 	var log bytes.Buffer
-	if err := f.app.RunTask(context.Background(), rec.Key, 4242, &log); err != nil {
+	if err := f.run(context.Background(), rec.Key, 4242, &log); err != nil {
 		t.Fatal(err)
 	}
 	if first, _, _ := strings.Cut(log.String(), "\n"); first != "route:codex:codex:first second" {
@@ -135,7 +135,7 @@ func TestImplementTurnCarriesProfile(t *testing.T) {
 	f.store.recs[key].State = task.Working
 	f.store.recs[key].Decisions = []task.Decision{{Question: task.Question{Issue: "q"}, Answer: "A", AnsweredAt: now}}
 	f.codex.turn = agent.Turn{Outcome: agent.Outcome{Status: agent.FailedRun, Summary: "stuck"}}
-	if err := f.app.RunTask(context.Background(), key, 4242, &bytes.Buffer{}); err != nil {
+	if err := f.run(context.Background(), key, 4242, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.codex.resumed) != 1 || len(f.codex.profiles) != 1 || f.codex.profiles[0] == nil || *f.codex.profiles[0] != codexProfile {
