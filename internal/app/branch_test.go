@@ -348,3 +348,18 @@ func TestBranchGuideFollowsAListOfNamedGuides(t *testing.T) {
 		}
 	}
 }
+
+func TestBranchGuideSkipsAHistoricalLinkInAList(t *testing.T) {
+	root := writeRepo(t, map[string]string{
+		"AGENTS.md":         "Branch naming rules: [current](docs/branches.md) and [decision log](docs/decisions.md)\n",
+		"docs/branches.md":  "Use <owner>/<slug>.",
+		"docs/decisions.md": "2024: branch names were old/<slug>." + strings.Repeat("x", 40<<10),
+	})
+	guide, err := readBranchGuide(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(guide, "<owner>/<slug>") || strings.Contains(guide, "old/<slug>") {
+		t.Fatalf("guide = %q", guide)
+	}
+}

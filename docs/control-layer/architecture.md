@@ -329,7 +329,8 @@ the same commit. The commit message records why it changed.
   or a sentence end. A link is named when the clause text since the previous link,
   with its own label, says "branch" and "name", "convention", "rule", or "guidance",
   and not "decision log", "history", "archive", or "superseded". A link joined to a
-  named one by only commas, "and", or "or" is named too. Other links, even in the
+  named one by only commas, "and", or "or" is named too, unless its own label or
+  path is historical. Other links, even in the
   same clause ("see [architecture](...)"), are not read. A document that only mentions branches is
   not a rule. A named file that is missing, unreadable, over 32 KiB, or outside the
   repository stops the start with its path. A start with a confirmed name

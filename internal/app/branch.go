@@ -159,7 +159,8 @@ var guideClause = regexp.MustCompile(`\n|[;|]|\.\s`)
 // namedGuides returns the links a clause names as branch naming guidance. A link
 // counts when the text since the previous link, including its own label, names
 // branch guidance, or when it continues a list of guidance links ("a, b and c").
-// A trailing "see [architecture](...)" therefore stays out.
+// A trailing "see [architecture](...)" therefore stays out, and a historical link
+// stays out even inside a list.
 func namedGuides(clause string) []string {
 	var paths []string
 	prev, listed := 0, false
@@ -169,7 +170,8 @@ func namedGuides(clause string) []string {
 			start, end = m[4], m[5]
 		}
 		path := clause[start:end]
-		listed = explicitBranchGuide(clause[prev:m[1]]) || listed && listJoin(clause[prev:m[0]])
+		text := clause[prev:m[1]]
+		listed = !historical(text) && (explicitBranchGuide(text) || listed && listJoin(clause[prev:m[0]]))
 		if listed {
 			paths = append(paths, path)
 		}
@@ -188,6 +190,17 @@ func listJoin(gap string) bool {
 	return true
 }
 
+// historical reports whether text points at past decisions rather than current rules.
+func historical(text string) bool {
+	text = strings.ToLower(text)
+	for _, old := range []string{"decision log", "history", "historical", "archive", "superseded"} {
+		if strings.Contains(text, old) {
+			return true
+		}
+	}
+	return false
+}
+
 // explicitBranchGuide reports whether a clause names its links as current branch
 // naming guidance. A link that only mentions branches, or points at history, is not
 // a rule: an old decision log must not decide today's branch names.
@@ -196,10 +209,8 @@ func explicitBranchGuide(clause string) bool {
 	if !strings.Contains(clause, "branch") {
 		return false
 	}
-	for _, old := range []string{"decision log", "history", "historical", "archive", "superseded"} {
-		if strings.Contains(clause, old) {
-			return false
-		}
+	if historical(clause) {
+		return false
 	}
 	for _, rule := range []string{"name", "naming", "convention", "rule", "guidance"} {
 		if strings.Contains(clause, rule) {
