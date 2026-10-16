@@ -339,6 +339,11 @@ type Evaluator interface {
 	Evaluate(ctx context.Context, in agent.EvaluateInput) (agent.Evaluation, error)
 }
 
+// Merger groups two machines' learnings about one repository in one tool-less turn.
+type Merger interface {
+	Merge(ctx context.Context, in agent.EvaluateInput, refs []string) (agent.MergeResult, error)
+}
+
 // KnowledgeStore keeps each repository's evaluations and learnings. repo is
 // "owner/name"; the store rejects anything that could reach another repository.
 type KnowledgeStore interface {
@@ -360,6 +365,13 @@ type KnowledgeStore interface {
 	// Select returns at most limit active learnings, totalling at most maxChars of
 	// text, ranked by relevance to query.
 	Select(repo, query string, limit, maxChars int) ([]knowledge.Learning, error)
+	// Snapshot returns repo's learnings and every evaluation.
+	Snapshot(repo string) (knowledge.Snapshot, error)
+	// Digest hashes the stored learnings and evaluations.
+	Digest(repo string) (string, error)
+	// Replace stores x as repo's learnings and evaluations and rewrites knowledge.md,
+	// all or nothing.
+	Replace(repo string, x knowledge.Snapshot) error
 }
 
 type QuotaStatus int

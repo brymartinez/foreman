@@ -84,8 +84,10 @@ type App struct {
 	Selector        Selector
 	// Knowledge and Evaluator learn from finished tasks. Learning starts the
 	// evaluations; off, prompts still read the knowledge already stored.
-	Knowledge         KnowledgeStore
-	Evaluator         Evaluator
+	Knowledge KnowledgeStore
+	Evaluator Evaluator
+	// Merger groups learnings when an ingest meets a repository with knowledge.
+	Merger            Merger
 	Learning          bool
 	LearningBudgetUSD float64
 	// Quota may be nil, which makes every agent's quota unknown.

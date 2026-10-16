@@ -132,9 +132,22 @@ type Evaluators struct {
 }
 
 func (e Evaluators) Evaluate(ctx context.Context, in EvaluateInput) (Evaluation, error) {
+	raw, usage, err := toollessTurn(ctx, e.Claude, e.Codex, in, EvaluationSchema)
+	if err != nil {
+		return Evaluation{Usage: usage}, err
+	}
+	out, err := ParseEvaluation(raw)
+	out.Usage = usage
+	return out, err
+}
+
+// toollessTurn runs one disposable turn with no tools in a scratch directory and
+// returns the schema answer. It fails a turn that called a tool, so its answer
+// comes from the prompt alone.
+func toollessTurn(ctx context.Context, claude Claude, codex Codex, in EvaluateInput, schema []byte) ([]byte, task.Usage, error) {
 	dir, err := os.MkdirTemp("", "foreman-evaluate-*")
 	if err != nil {
-		return Evaluation{}, err
+		return nil, task.Usage{}, err
 	}
 	defer os.RemoveAll(dir)
 	start := StartInput{Worktree: dir, Prompt: in.Prompt, Log: in.Log}
@@ -142,14 +155,14 @@ func (e Evaluators) Evaluate(ctx context.Context, in EvaluateInput) (Evaluation,
 	var usage task.Usage
 	switch in.Agent {
 	case task.Claude:
-		c := e.Claude
+		c := claude
 		c.Model = cmp.Or(in.Model, c.PlanModel, c.Model)
 		args := []string{
 			"-p", in.Prompt,
 			"--no-session-persistence",
 			"--safe-mode", "--restricted", "--strict-mcp-config",
 			"--output-format", "stream-json", "--verbose",
-			"--json-schema", string(EvaluationSchema),
+			"--json-schema", string(schema),
 			"--permission-mode", "dontAsk",
 			"--tools", "",
 		}
@@ -158,10 +171,10 @@ func (e Evaluators) Evaluate(ctx context.Context, in EvaluateInput) (Evaluation,
 		}
 		raw, usage, err = c.exec(ctx, start, args)
 	case task.Codex:
-		c := e.Codex
+		c := codex
 		c.Model = cmp.Or(in.Model, c.PlanModel, c.Model)
 		c.ReasoningEffort = cmp.Or(in.ReasoningEffort, c.PlanReasoningEffort, c.ReasoningEffort)
-		_, raw, usage, err = c.exec(ctx, start, EvaluationSchema, func(schema, last string) []string {
+		_, raw, usage, err = c.exec(ctx, start, schema, func(schema, last string) []string {
 			args := []string{
 				"exec", "--json", "--ephemeral", "--skip-git-repo-check",
 				"--ignore-user-config", "--ignore-rules",
@@ -177,10 +190,10 @@ func (e Evaluators) Evaluate(ctx context.Context, in EvaluateInput) (Evaluation,
 			return args
 		}, "", func(task.Session) {})
 	default:
-		return Evaluation{}, fmt.Errorf("unknown evaluator agent %q", in.Agent)
+		return nil, task.Usage{}, fmt.Errorf("unknown agent %q", in.Agent)
 	}
 	if err != nil {
-		return Evaluation{Usage: usage}, err
+		return nil, usage, err
 	}
 	// Claude reports its schema response as a StructuredOutput tool call. It does
 	// not read beyond the prompt; any other tool call still invalidates the turn.
@@ -189,11 +202,9 @@ func (e Evaluators) Evaluate(ctx context.Context, in EvaluateInput) (Evaluation,
 		delete(tools, "StructuredOutput")
 	}
 	if len(tools) > 0 {
-		return Evaluation{Usage: usage}, fmt.Errorf("the evaluator called tools %v; its answer is discarded", tools)
+		return nil, usage, fmt.Errorf("the agent called tools %v; its answer is discarded", tools)
 	}
-	out, err := ParseEvaluation(raw)
-	out.Usage = usage
-	return out, err
+	return raw, usage, nil
 }
 
 // EvaluationBrief is the evidence packet. It holds what the task record says and the
