@@ -44,7 +44,7 @@ func TestPlanningAndImplementationTurnsReceiveOnlyTheTasksRepositoryKnowledge(t 
 	key := started(t, f, startReq(t))
 	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2")}
 	var log strings.Builder
-	if err := f.app.RunTask(context.Background(), key, 4242, &log); err != nil {
+	if err := f.run(context.Background(), key, 4242, &log); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.claude.prompts) != 2 {
@@ -79,7 +79,7 @@ func TestRepositoryKnowledgeInPromptsStaysWithinEightItemsAndTwoThousandCharacte
 	learn(t, ks, fixtureRepo, "gh-1", texts...)
 	key := started(t, f, startReq(t))
 	f.claude.turn = prTurn("sid-1")
-	if err := f.app.RunTask(context.Background(), key, 4242, &strings.Builder{}); err != nil {
+	if err := f.run(context.Background(), key, 4242, &strings.Builder{}); err != nil {
 		t.Fatal(err)
 	}
 	got := knowledgeSection(f.claude.prompts[0])
@@ -101,7 +101,7 @@ func TestRunsWithoutTheKnowledgeSectionWhenTheStoreIsEmptyOrUnreadable(t *testin
 		f.app.Knowledge = knowledge.Store{Dir: t.TempDir()}
 		key := started(t, f, startReq(t))
 		f.claude.turn = prTurn("sid-1")
-		if err := f.app.RunTask(context.Background(), key, 4242, &strings.Builder{}); err != nil {
+		if err := f.run(context.Background(), key, 4242, &strings.Builder{}); err != nil {
 			t.Fatal(err)
 		}
 		if strings.Contains(f.claude.prompts[0], "## Repository knowledge") {
@@ -118,7 +118,7 @@ func TestRunsWithoutTheKnowledgeSectionWhenTheStoreIsEmptyOrUnreadable(t *testin
 		key := started(t, f, startReq(t))
 		f.claude.turn = prTurn("sid-1")
 		var log strings.Builder
-		if err := f.app.RunTask(context.Background(), key, 4242, &log); err != nil {
+		if err := f.run(context.Background(), key, 4242, &log); err != nil {
 			t.Fatal(err)
 		}
 		if len(f.claude.prompts) != 1 || strings.Contains(f.claude.prompts[0], "## Repository knowledge") {

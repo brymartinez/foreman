@@ -181,6 +181,7 @@ type frontmatter struct {
 	Worktree            string                 `yaml:"worktree,omitempty"`
 	WorktreeRemovedAt   *time.Time             `yaml:"worktree_removed_at,omitempty"`
 	ContextFile         string                 `yaml:"context_file,omitempty"`
+	Launch              *task.Launch           `yaml:"launch,omitempty"`
 	RunnerPID           int                    `yaml:"runner_pid,omitempty"`
 	RunnerLog           string                 `yaml:"runner_log,omitempty"`
 	PR                  int                    `yaml:"pr,omitempty"`
@@ -366,6 +367,7 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 			RepoDir:          fm.RepoDir,
 			Worktree:         fm.Worktree,
 			ContextFile:      fm.ContextFile,
+			Launch:           fm.Launch,
 			RunnerPID:        fm.RunnerPID,
 			RunnerLog:        fm.RunnerLog,
 			PR:               fm.PR,
@@ -492,6 +494,7 @@ func fromRecord(rec *task.Record) frontmatter {
 			t := d.WorktreeRemovedAt
 			fm.WorktreeRemovedAt = &t
 		}
+		fm.Launch = d.Launch
 		fm.RunnerPID, fm.RunnerLog, fm.PR, fm.PRURL, fm.PRHead = d.RunnerPID, d.RunnerLog, d.PR, d.PRURL, d.PRHead
 		fm.PriorPR = d.PriorPR
 		fm.CheckpointHead, fm.CheckpointNext, fm.Checkpoints = d.CheckpointHead, d.CheckpointNext, d.Checkpoints

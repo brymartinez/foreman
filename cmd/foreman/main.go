@@ -165,7 +165,10 @@ func run(argv []string) int {
 		log := &logs.Writer{W: os.Stdout}
 		defer log.Flush()
 		fmt.Fprintf(log, "foreman: runner %d started\n", os.Getpid())
-		if err := a.RunTask(ctx, task.Key{Repo: cmd.Repo, Number: cmd.Issue, Source: cmd.Source, ExternalID: cmd.ExternalID}, os.Getpid(), log); err != nil {
+		// The agents and learners this runner starts hold no launch.
+		token := os.Getenv(runner.LaunchEnv)
+		os.Unsetenv(runner.LaunchEnv)
+		if err := a.RunTask(ctx, task.Key{Repo: cmd.Repo, Number: cmd.Issue, Source: cmd.Source, ExternalID: cmd.ExternalID}, os.Getpid(), token, log); err != nil {
 			fmt.Fprintf(log, "foreman: %v\n", err)
 			return 1
 		}

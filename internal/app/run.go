@@ -24,11 +24,17 @@ const DefaultReviewRounds = 3
 // RunTask is the body of the detached runner. It drives implement → verify PR →
 // review → fix until the review is clean, the task needs the developer, or it fails.
 // Every step's result is written to the task file before the next one starts.
-func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) error {
+func (a App) RunTask(ctx context.Context, key task.Key, pid int, token string, log io.Writer) error {
 	rec, err := a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
 		if cur == nil || cur.Delegation == nil || cur.State != task.Working {
 			return nil, errors.New("task is not WORKING; nothing to run")
 		}
+		// Only the runner the task's launch spawned may work it. Any other would share
+		// the worktree and the task file with that one.
+		if !ownsLaunch(cur, token) {
+			return nil, errors.New("this runner does not hold the task's launch; another launch owns the task")
+		}
+		cur.Delegation.Launch = nil
 		cur.Delegation.RunnerPID = pid
 		return cur, nil
 	})

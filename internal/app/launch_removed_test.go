@@ -12,7 +12,7 @@ import (
 func TestLaunchWithRemovedTaskStopsBeforeSpawning(t *testing.T) {
 	f := newFixture()
 	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
-	if _, err := f.app.launch(context.Background(), key); !errors.Is(err, errTaskRemoved) {
+	if _, err := f.app.launch(context.Background(), key, "test-launch"); !errors.Is(err, errTaskRemoved) {
 		t.Fatalf("launch error = %v, want task removed", err)
 	}
 	if len(f.runners.spawned) != 0 || f.store.recs[key] != nil {
@@ -27,7 +27,7 @@ func TestLaunchWithTaskRemovedDuringWorktreeRestoreStopsBeforeSpawning(t *testin
 		Branch: "fix/825", Worktree: "/wt/825", WorktreeRemovedAt: now,
 	}}
 	f.wt.onEnsure = func() { delete(f.store.recs, key) }
-	if _, err := f.app.launch(context.Background(), key); !errors.Is(err, errTaskRemoved) {
+	if _, err := f.app.launch(context.Background(), key, "test-launch"); !errors.Is(err, errTaskRemoved) {
 		t.Fatalf("launch error = %v, want task removed", err)
 	}
 	if len(f.runners.spawned) != 0 || f.store.recs[key] != nil {
@@ -43,7 +43,7 @@ func TestLaunchWithTaskRemovedDuringSpawnStopsRunner(t *testing.T) {
 		f.runners.alive[4242] = true
 		delete(f.store.recs, key)
 	}
-	if _, err := f.app.launch(context.Background(), key); !errors.Is(err, errTaskRemoved) {
+	if _, err := f.app.launch(context.Background(), key, "test-launch"); !errors.Is(err, errTaskRemoved) {
 		t.Fatalf("launch error = %v, want task removed", err)
 	}
 	if len(f.runners.stopped) != 1 || f.runners.stopped[0] != 4242 || f.runners.alive[4242] || f.store.recs[key] != nil {
@@ -69,7 +69,7 @@ func TestLaunchWithTaskRemovedDuringSpawnReportsFailedStop(t *testing.T) {
 				delete(f.store.recs, key)
 			}
 			tc.setup(f.runners)
-			_, err := f.app.launch(context.Background(), key)
+			_, err := f.app.launch(context.Background(), key, "test-launch")
 			if err == nil || !strings.Contains(err.Error(), tc.want) || errors.Is(err, errTaskRemoved) {
 				t.Fatalf("launch error = %v, want failed stop containing %q", err, tc.want)
 			}

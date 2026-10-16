@@ -207,7 +207,7 @@ func TestRepairResumesImplementer(t *testing.T) {
 	f := newFixture()
 	key := repairing(t, f)
 	f.claude.onResume = func() { pushHead(f, "merged1") }
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.claude.resumed) != 1 || f.claude.starts != 1 {
@@ -226,7 +226,7 @@ func TestRepairFallsBackToFreshTurn(t *testing.T) {
 	key := repairing(t, f)
 	f.claude.resumeErr = errors.Join(errors.New("gone"), agent.ErrNoSession)
 	f.claude.during = func() { pushHead(f, "merged1") }
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if f.claude.starts != 2 || !strings.Contains(f.claude.prompt, "## Merge conflict") || !strings.Contains(f.claude.prompt, "git merge origin/main") {
@@ -247,7 +247,7 @@ func TestRepairSuccessGoesToReviewThenReady(t *testing.T) {
 		contains = append(contains, dir+" "+ancestor+" "+descendant)
 		return true, nil
 	}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -297,7 +297,7 @@ func TestRepairBlockedNeedsDecision(t *testing.T) {
 		Status: agent.Blocked, Summary: "both sides rename Retry",
 		Questions: []task.Question{{Issue: "Keep which name?", Options: []task.Option{{Label: "A", Description: "Retry"}, {Label: "B", Description: "Backoff"}}, Recommendation: "A"}},
 	}}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	assertNeedsDecision(t, f, key, "merge conflict on PR #912 needs a decision: both sides rename Retry")
@@ -333,7 +333,7 @@ func TestRepairFailedNeedsDecision(t *testing.T) {
 			f := newFixture()
 			key := repairing(t, f)
 			setup(f)
-			if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+			if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 				t.Fatal(err)
 			}
 			assertNeedsDecision(t, f, key, want[name])
@@ -351,7 +351,7 @@ func TestRepairWithoutBaseMergeNeedsDecision(t *testing.T) {
 	reviews := len(f.codex.reviewed)
 	f.claude.onResume = func() { pushHead(f, "merged1") }
 	f.wt.contains = func(string, string, string) (bool, error) { return false, nil }
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	assertNeedsDecision(t, f, key, "does not include base commit ba5e001")
@@ -364,7 +364,7 @@ func TestRepairAnsweredResumesWithTheDecision(t *testing.T) {
 	f := newFixture()
 	key := repairing(t, f)
 	f.claude.err = errors.New("claude exited 1")
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	f.claude.err = nil
@@ -372,7 +372,7 @@ func TestRepairAnsweredResumesWithTheDecision(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.claude.onResume = func() { pushHead(f, "merged1") }
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	last := f.claude.resumed[len(f.claude.resumed)-1]
@@ -408,7 +408,7 @@ func TestRepairCancelledStaysFailed(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	f.claude.err = errors.New("claude printed no result (signal: terminated)")
 	f.claude.onResume = func() { cancel(errors.New("terminated signal received")) }
-	if err := f.app.RunTask(ctx, key, 4242, io.Discard); err != nil {
+	if err := f.run(ctx, key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]

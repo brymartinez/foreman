@@ -169,7 +169,12 @@ func (f *fakeStages) Resolve(repoRoot string, s task.Stage) (task.StageInstructi
 }
 
 type fakeRunners struct {
-	spawned  []task.Key
+	spawned []task.Key
+	tokens  []string // the launch token each spawn was given
+	// entered, when set, receives once the next spawn is about to start a runner,
+	// which then waits on release. Later spawns do not wait.
+	entered  chan struct{}
+	release  chan struct{}
 	alive    map[int]bool
 	stopped  []int
 	onSpawn  func()
@@ -186,10 +191,16 @@ func (f *fakeRunners) SpawnLearn(k task.Key) error {
 	return f.learnErr
 }
 
-func (f *fakeRunners) Spawn(k task.Key) (int, string, error) {
+func (f *fakeRunners) Spawn(k task.Key, token string) (int, string, error) {
 	f.spawned = append(f.spawned, k)
 	if f.onSpawn != nil {
 		f.onSpawn()
+	}
+	f.tokens = append(f.tokens, token)
+	if entered := f.entered; entered != nil {
+		f.entered = nil
+		entered <- struct{}{}
+		<-f.release
 	}
 	if f.spawnErr != nil {
 		return 0, "", f.spawnErr
@@ -340,6 +351,19 @@ func newFixture() fixture {
 		Now: func() time.Time { return now },
 	}
 	return f
+}
+
+// run plays the runner the task's launch spawned. A record a test wrote by hand
+// gets a launch claim first, as a launch would have taken.
+func (f fixture) run(ctx context.Context, key task.Key, pid int, log io.Writer) error {
+	token := ""
+	if rec := f.store.recs[key]; rec != nil && rec.Delegation != nil {
+		if rec.Delegation.Launch == nil {
+			rec.Delegation.Launch = &task.Launch{Token: "test-launch", PID: os.Getpid(), Since: now}
+		}
+		token = rec.Delegation.Launch.Token
+	}
+	return f.app.RunTask(ctx, key, pid, token, log)
 }
 
 func TestStartFromInboxUsesRepositoryCheckoutInsteadOfCurrentDirectory(t *testing.T) {
@@ -585,7 +609,7 @@ func TestRunTaskAppliesOutcome(t *testing.T) {
 			}
 			c.turn.Session = task.Session{Agent: task.Claude, ID: "sid-9"}
 			f.claude.turn, f.claude.err = c.turn, c.err
-			if err := f.app.RunTask(context.Background(), rec.Key, 4242, io.Discard); err != nil {
+			if err := f.run(context.Background(), rec.Key, 4242, io.Discard); err != nil {
 				t.Fatal(err)
 			}
 			got := f.store.recs[rec.Key]
@@ -606,7 +630,7 @@ func TestRunTaskRefusesNonWorkingTask(t *testing.T) {
 	f := newFixture()
 	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
 	f.store.recs[key] = &task.Record{Key: key, State: task.Discovered}
-	if err := f.app.RunTask(context.Background(), key, 1, io.Discard); err == nil {
+	if err := f.run(context.Background(), key, 1, io.Discard); err == nil {
 		t.Fatal("ran a DISCOVERED task")
 	}
 }
@@ -667,7 +691,7 @@ func TestRunTaskVerifiesReportedPR(t *testing.T) {
 			f.claude.turn = agent.Turn{Session: task.Session{Agent: task.Claude, ID: "s"}, Outcome: agent.Outcome{
 				Status: agent.PROpened, Summary: "opened", PRNumber: c.reported, Validation: []task.Check{{Command: "go test ./...", Passed: true}},
 			}}
-			if err := f.app.RunTask(context.Background(), rec.Key, 4242, io.Discard); err != nil {
+			if err := f.run(context.Background(), rec.Key, 4242, io.Discard); err != nil {
 				t.Fatal(err)
 			}
 			got := f.store.recs[rec.Key]

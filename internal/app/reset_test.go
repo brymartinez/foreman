@@ -406,7 +406,7 @@ func TestRunAfterResetPutsThePriorPRInAFreshSession(t *testing.T) {
 	req.BranchName = "fix/825-provider-retries-again"
 	key := started(t, f, req)
 	f.claude.turn = agent.Turn{Session: task.Session{Agent: task.Claude, ID: "sid-new"}, Outcome: agent.Outcome{Status: agent.FailedRun, Summary: "stop"}}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if f.claude.starts != 1 || len(f.claude.resumed) != 0 {

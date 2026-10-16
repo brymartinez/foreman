@@ -36,10 +36,10 @@ func TestMain(m *testing.M) {
 		time.Sleep(300 * time.Millisecond)
 		fmt.Println("written after the launcher exited")
 		fmt.Fprintln(os.Stderr, "stderr after the launcher exited")
-		_ = os.WriteFile(os.Getenv("FOREMAN_RUNNER_MARKER"), []byte("survived"), 0o644)
+		_ = os.WriteFile(os.Getenv("FOREMAN_RUNNER_MARKER"), []byte(os.Getenv(LaunchEnv)), 0o644)
 		os.Exit(0)
 	case os.Getenv("FOREMAN_RUNNER_TEST") == "launch":
-		if _, _, err := (Processes{LogDir: os.Getenv("FOREMAN_RUNNER_LOGS")}).Spawn(task.Key{Repo: "o/r", Number: 7}); err != nil {
+		if _, _, err := (Processes{LogDir: os.Getenv("FOREMAN_RUNNER_LOGS")}).Spawn(task.Key{Repo: "o/r", Number: 7}, "5eed"); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -63,13 +63,16 @@ func TestSpawnedRunnerOutlivesItsLauncher(t *testing.T) {
 
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		if _, err := os.Stat(marker); err == nil {
+		if got, err := os.ReadFile(marker); err == nil && len(got) > 0 {
 			break
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("the runner died after its launcher exited")
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+	if got, _ := os.ReadFile(marker); string(got) != "5eed" {
+		t.Errorf("the runner got launch token %q, want the one Spawn was given", got)
 	}
 	log, err := os.ReadFile(filepath.Join(dir, "o-r-7.log"))
 	if err != nil {
@@ -91,7 +94,7 @@ func TestStopSignalsTheRunnerWhenProcessListingIsUnavailable(t *testing.T) {
 	t.Setenv("FOREMAN_RUNNER_TEST", "wait")
 	p := Processes{LogDir: t.TempDir(), StopWait: 5 * time.Second}
 	key := task.Key{Repo: "o/r", Number: 8}
-	pid, logPath, err := p.Spawn(key)
+	pid, logPath, err := p.Spawn(key, "5eed")
 	if err != nil {
 		t.Fatal(err)
 	}

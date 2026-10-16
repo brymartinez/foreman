@@ -291,7 +291,8 @@ type StageInstructionResolver interface {
 
 // Runners launches and observes the detached per-task runner process.
 type Runners interface {
-	Spawn(key task.Key) (pid int, logPath string, err error)
+	// Spawn passes token to the runner, which must hold the task's launch claim.
+	Spawn(key task.Key, token string) (pid int, logPath string, err error)
 	Alive(pid int) bool
 	// Stop asks the runner to stop and waits for it to exit; false means it is still
 	// running when the wait ends.
