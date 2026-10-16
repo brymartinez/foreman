@@ -198,6 +198,15 @@ type frontmatter struct {
 	Feedback            []feedbackFM           `yaml:"feedback,omitempty"`
 	CI                  *ciFM                  `yaml:"ci,omitempty"`
 	Attempts            []task.Attempt         `yaml:"attempts,omitempty"`
+	Reset               *resetFM               `yaml:"reset,omitempty"`
+}
+
+type resetFM struct {
+	At      time.Time `yaml:"at"`
+	PR      int       `yaml:"pr,omitempty"`
+	PRURL   string    `yaml:"pr_url,omitempty"`
+	Branch  string    `yaml:"branch,omitempty"`
+	PRState string    `yaml:"pr_state,omitempty"`
 }
 
 var linearIssueID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -419,6 +428,9 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 		}
 	}
 	rec.Attempts = fm.Attempts
+	if r := fm.Reset; r != nil {
+		rec.Reset = &task.ResetMark{At: r.At, PR: r.PR, PRURL: r.PRURL, Branch: r.Branch, PRState: r.PRState}
+	}
 	if o := fm.LastOutcome; o != nil {
 		rec.LastOutcome = &task.Outcome{Status: o.Status, Summary: o.Summary, At: o.At}
 	}
@@ -485,6 +497,9 @@ func fromRecord(rec *task.Record) frontmatter {
 	fm.Validation = rec.Validation
 	fm.Plan = rec.Plan
 	fm.Attempts = rec.Attempts
+	if r := rec.Reset; r != nil {
+		fm.Reset = &resetFM{At: r.At, PR: r.PR, PRURL: r.PRURL, Branch: r.Branch, PRState: r.PRState}
+	}
 	for _, f := range rec.Feedback {
 		item := feedbackFM{Kind: f.Kind, ID: f.ID, Author: f.Author, URL: f.URL, At: f.At, Digest: f.Digest}
 		if !f.HandledAt.IsZero() {

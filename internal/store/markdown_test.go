@@ -553,3 +553,35 @@ func TestOldFileLoadsWithoutAPinnedAccountAndSavesNone(t *testing.T) {
 		t.Errorf("saved empty account fields:\n%s", raw)
 	}
 }
+
+func TestStoreRoundTripsResetMarkWithoutADelegation(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	at := time.Date(2026, 10, 16, 9, 0, 0, 0, time.UTC)
+	want := &task.Record{
+		Key: task.Key{Repo: "a/b", Number: 3}, Kind: task.Issue, Title: "x", State: task.Discovered,
+		Reset: &task.ResetMark{At: at, PR: 12, PRURL: "https://github.com/a/b/pull/12", Branch: "feat/3-x", PRState: "open"},
+		Body:  "# a/b#3 x\n",
+	}
+	if err := s.Save(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, want.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Delegation != nil || got.Reset == nil || !got.Reset.At.Equal(at) {
+		t.Fatalf("record = %+v", got)
+	}
+	got.Reset.At = at
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("round trip mismatch\n got: %+v\nwant: %+v", got, want)
+	}
+	got.Reset = nil
+	if err := s.Save(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(s.Dir, "a-b-3.md"))
+	if strings.Contains(string(raw), "reset") {
+		t.Errorf("cleared reset mark is still saved:\n%s", raw)
+	}
+}

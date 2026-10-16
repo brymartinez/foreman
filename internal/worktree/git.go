@@ -101,27 +101,49 @@ func (Git) Ensure(ctx context.Context, req app.WorktreeRequest) error {
 }
 
 func (Git) Remove(ctx context.Context, req app.WorktreeRemoval) error {
+	common := ""
 	if _, err := os.Stat(req.Path); errors.Is(err, fs.ErrNotExist) {
-		return nil
+		if !req.Force || !req.DeleteBranch || req.RepoDir == "" {
+			return nil
+		}
+		// The worktree is gone but its branch may not be, so git runs from the checkout.
+		out, err := git(ctx, req.RepoDir, "rev-parse", "--path-format=absolute", "--git-common-dir")
+		if err != nil {
+			return err
+		}
+		common = strings.TrimSpace(string(out))
+		if _, err := git(ctx, common, "worktree", "prune"); err != nil {
+			return err
+		}
+		if _, err := git(ctx, common, "show-ref", "--verify", "--quiet", "refs/heads/"+req.Branch); err != nil {
+			return nil
+		}
 	} else if err != nil {
 		return err
-	}
-	// The worktree can't remove itself, so git runs from the repository's shared .git.
-	out, err := git(ctx, req.Path, "rev-parse", "--path-format=absolute", "--git-common-dir")
-	if err != nil {
-		return err
-	}
-	common := strings.TrimSpace(string(out))
-	if _, err := git(ctx, common, "worktree", "remove", req.Path); err != nil {
-		if strings.Contains(err.Error(), "contains modified or untracked files") {
-			return app.ErrWorktreeDirty
+	} else {
+		// The worktree can't remove itself, so git runs from the repository's shared .git.
+		out, err := git(ctx, req.Path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+		if err != nil {
+			return err
 		}
-		return err
+		common = strings.TrimSpace(string(out))
+		args := []string{"worktree", "remove", req.Path}
+		if req.Force {
+			// Twice: one --force keeps a locked worktree.
+			args = []string{"worktree", "remove", "--force", "--force", req.Path}
+		}
+		if _, err := git(ctx, common, args...); err != nil {
+			if strings.Contains(err.Error(), "contains modified or untracked files") {
+				return app.ErrWorktreeDirty
+			}
+			return err
+		}
 	}
-	if req.DeleteBranch {
-		// -D: a squash-merged branch is not an ancestor of the base, but its PR is merged.
-		_, err = git(ctx, common, "branch", "-D", req.Branch)
+	if !req.DeleteBranch {
+		return nil
 	}
+	// -D: a squash-merged branch is not an ancestor of the base, but its PR is merged.
+	_, err := git(ctx, common, "branch", "-D", req.Branch)
 	return err
 }
 

@@ -314,3 +314,48 @@ func TestContains(t *testing.T) {
 		t.Error("a commit git does not have must be an error")
 	}
 }
+
+func TestForcedRemoveDeletesADirtyWorktreeAndItsBranch(t *testing.T) {
+	clone, _ := repoWithOrigin(t)
+	ctx := context.Background()
+	req := app.WorktreeRequest{RepoDir: clone, Path: filepath.Join(t.TempDir(), "825-a"), Branch: "agent/825-a", BaseRef: "origin/main"}
+	if err := (Git{}).Ensure(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	write(t, req.Path, "notes.txt", "wip")
+	write(t, req.Path, "README", "changed")
+	run(t, req.Path, "add", "README")
+
+	rm := app.WorktreeRemoval{RepoDir: clone, Path: req.Path, Branch: req.Branch, DeleteBranch: true, Force: true}
+	if err := (Git{}).Remove(ctx, rm); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(req.Path); !os.IsNotExist(err) {
+		t.Errorf("worktree still on disk: %v", err)
+	}
+	if run(t, clone, "branch", "--list", req.Branch) != "" {
+		t.Error("branch kept")
+	}
+	if err := (Git{}).Remove(ctx, rm); err != nil {
+		t.Errorf("removing again must be a no-op: %v", err)
+	}
+}
+
+func TestForcedRemoveDeletesTheBranchOfAWorktreeAlreadyGone(t *testing.T) {
+	clone, _ := repoWithOrigin(t)
+	ctx := context.Background()
+	req := app.WorktreeRequest{RepoDir: clone, Path: filepath.Join(t.TempDir(), "825-a"), Branch: "agent/825-a", BaseRef: "origin/main"}
+	if err := (Git{}).Ensure(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	if err := (Git{}).Remove(ctx, app.WorktreeRemoval{Path: req.Path, Branch: req.Branch}); err != nil {
+		t.Fatal(err)
+	}
+	rm := app.WorktreeRemoval{RepoDir: clone, Path: req.Path, Branch: req.Branch, DeleteBranch: true, Force: true}
+	if err := (Git{}).Remove(ctx, rm); err != nil {
+		t.Fatal(err)
+	}
+	if run(t, clone, "branch", "--list", req.Branch) != "" {
+		t.Error("branch kept")
+	}
+}

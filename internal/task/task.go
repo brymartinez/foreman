@@ -168,6 +168,17 @@ type Delegation struct {
 	ConflictPending  bool
 }
 
+// ResetMark is all a reset keeps of the discarded run: the PR it opened, if any, so
+// the next start can continue that PR or read it as context. PRState is the state
+// GitHub reported at the reset; the next start reads it again.
+type ResetMark struct {
+	At      time.Time
+	PR      int
+	PRURL   string
+	Branch  string
+	PRState string
+}
+
 // ConflictAttempt is one automatic merge conflict repair: the PR head that conflicted
 // and the base head it conflicted with.
 type ConflictAttempt struct {
@@ -343,6 +354,9 @@ type Record struct {
 	CI *CIStatus
 	// Attempts are the runs of work on the issue, one per PR, oldest first.
 	Attempts []Attempt
+	// Reset is set when the developer discarded a failed run. The record then has no
+	// delegation, and auto mode leaves the issue for a manual start.
+	Reset *ResetMark
 	// Body is the Markdown below the frontmatter, round-tripped untouched so human edits survive.
 	Body string
 }

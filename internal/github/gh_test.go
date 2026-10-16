@@ -448,3 +448,33 @@ func TestActiveAccountReportsAGHFailure(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestPullRequestsForBranchListsEveryStateFromThisRepository(t *testing.T) {
+	var asked string
+	c := Client{Run: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		asked = strings.Join(args, " ")
+		return []byte(`[
+			{"number":5,"state":"MERGED","headRefName":"feat/3-x"},
+			{"number":6,"state":"OPEN","headRefName":"feat/3-x","isCrossRepository":true},
+			{"number":7,"state":"CLOSED","headRefName":"feat/3-x"},
+			{"number":8,"state":"OPEN","headRefName":"feat/3-x-other"}
+		]`), nil
+	}}
+	prs, err := c.PullRequestsForBranch(context.Background(), "a/b", "feat/3-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(asked, "--state all") || !strings.Contains(asked, "--head feat/3-x") {
+		t.Errorf("gh call %q does not list every state of the branch", asked)
+	}
+	if len(prs) != 2 || prs[0].Key.Number != 5 || prs[0].State != "merged" || prs[1].Key.Number != 7 {
+		t.Fatalf("prs = %+v", prs)
+	}
+}
+
+func TestPullRequestsForBranchReturnsTheGhError(t *testing.T) {
+	c := Client{Run: func(context.Context, string, ...string) ([]byte, error) { return nil, errors.New("HTTP 502") }}
+	if _, err := c.PullRequestsForBranch(context.Background(), "a/b", "feat/3-x"); err == nil || !strings.Contains(err.Error(), "502") {
+		t.Fatalf("err = %v", err)
+	}
+}
