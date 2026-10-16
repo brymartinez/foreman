@@ -404,3 +404,40 @@ func TestAWithdrawnMaintainerConfirmationIsNotACorrection(t *testing.T) {
 		t.Fatalf("a withdrawn confirmation restored the learning: %+v", x)
 	}
 }
+
+func TestMaintainerSupportBeatsObservedRetirementsOnBothSides(t *testing.T) {
+	text := "Run the e2e script before pushing."
+	retire := func(s Store, task string, startDay int) {
+		ev := eval(task, startDay)
+		ev.Revisions = []Revision{{ID: "L1", Action: Retire, Reason: "The script was skipped.", Source: Observed}}
+		mustApply(t, s, repo, ev)
+	}
+	a, _ := newStore(t)
+	mustApply(t, a, repo, eval("1", 0, maintainer(Practice, text)))
+	retire(a, "9", 10)
+	b, _ := newStore(t)
+	mustApply(t, b, repo, eval("20", 1, observed(Practice, text)))
+	mustApply(t, b, repo, eval("21", 2, observed(Practice, text)))
+	retire(b, "22", 11)
+	for _, s := range []Store{a, b} {
+		if l := learnings(t, s, repo)[0]; l.Status != Retired {
+			t.Fatalf("setup: %+v", l)
+		}
+	}
+	m := prepare(t, snapshot(t, a, repo), snapshot(t, b, repo))
+	if l := merged(t, m, together(m, Practice, text)).Learnings[0]; l.Status != Active {
+		t.Fatalf("observed retirements beat the maintainer's support: %+v", l)
+	}
+}
+
+func TestMaintainerRewordingsTheAgentCallsEquivalentDoNotConflict(t *testing.T) {
+	a, _ := newStore(t)
+	b, _ := newStore(t)
+	mustApply(t, a, repo, eval("1", 0, maintainer(Convention, "Wrap errors with the operation name.")))
+	mustApply(t, b, repo, eval("2", 0, maintainer(Convention, "Errors carry the operation name.")))
+	m := prepare(t, snapshot(t, a, repo), snapshot(t, b, repo))
+	l := merged(t, m, together(m, Convention, "Wrap returned errors with the operation name.")).Learnings[0]
+	if l.Text != "Wrap returned errors with the operation name." || l.Status != Active {
+		t.Fatalf("learning = %+v", l)
+	}
+}

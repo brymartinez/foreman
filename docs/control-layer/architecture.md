@@ -807,7 +807,10 @@ the same commit. The commit message records why it changed.
 - **The agent groups; Go merges.** With learnings on both sides, one tool-less turn
   (`agent.Mergers`, `merge.schema.json`, the evaluator's restrictions) returns
   groups of `local:`/`import:` refs, each with a kind, text, and an optional
-  conflict note. `ParseMerge` rejects unknown, missing, or repeated refs, unknown
+  conflict note. The prompt asks for equivalent guidance and for contradicting
+  guidance on the same point to share a group, the latter with a conflict note,
+  because Go compares corrections only within a group and cannot tell from text
+  alone that two learnings contradict. `ParseMerge` rejects unknown, missing, or repeated refs, unknown
   kinds, and text `Sanitize` rejects. `Merge.Apply` unions each group's evidence and
   history and derives status by the promotion rules. A group keeps its first local
   member's id; others get ids from `next_id`. Evaluations' `supports` and revision
@@ -815,8 +818,12 @@ the same commit. The commit message records why it changed.
   With learnings on one side only, every learning is its own group and no agent
   runs. Rejected: letting the agent write merged records, which could invent
   evidence or status.
-- **Merge conflicts.** When a group's members disagree on retirement, or the agent
-  flags a conflict, maintainer corrections decide. A member's stance is its latest
+- **Merge conflicts.** In a group with any maintainer correction, the corrections
+  decide the status, even when every member was retired by observation; with none,
+  history and evidence replay by the promotion rules. When members disagree on
+  retirement, or the agent flags a conflict, the winning correction's text is kept
+  too; otherwise the agent's text is. Without a flag, corrections differ only by
+  retirement, since the agent judged their texts the same guidance. A member's stance is its latest
   correction: maintainer evidence, a restore, or a confirm keeps it, and a
   retirement whose evaluation has a maintainer revision retires it. An observed
   retirement is not a correction, so it never stands in for the maintainer's
@@ -826,9 +833,9 @@ the same commit. The commit message records why it changed.
   time), not by the task's start. Between corrections that disagree, the later one
   wins when it is at least a minute after the other; a closer or missing time is
   unresolved. An unresolved conflict returns `knowledge.ConflictError`
-  listing both sides, the CLI exits 1, and nothing is written. The winner's text
-  is kept, and a retire or restore entry is added under its task when the replayed
-  history would say otherwise. That entry is timed one second after the group's
+  listing both sides, the CLI exits 1, and nothing is written. A retire or restore
+  entry is added under the winner's task when the replayed history would say
+  otherwise. That entry is timed one second after the group's
   latest history entry, so a later merge, which orders history by time, replays the
   same decision. Its `ingest:` reason marks it as a decision, so it never counts as
   a correction itself.

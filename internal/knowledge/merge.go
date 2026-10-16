@@ -452,8 +452,10 @@ type stance struct {
 	explicit bool
 }
 
-func (s stance) agrees(o stance) bool {
-	return s.retired == o.retired && normalize(s.item.Learning.Text) == normalize(o.item.Learning.Text)
+// agrees reports whether two stances say the same. Their texts count only in a
+// group the agent flagged; otherwise it judged them the same guidance.
+func (s stance) agrees(o stance, byText bool) bool {
+	return s.retired == o.retired && (!byText || normalize(s.item.Learning.Text) == normalize(o.item.Learning.Text))
 }
 
 // build combines one group's members into a learning, or reports their conflict.
@@ -498,7 +500,9 @@ func (m *Merge) build(g Group, members []MergeItem) (Learning, *Conflict, error)
 			explicit = append(explicit, s)
 		}
 	}
-	if (g.Conflict == "" && !disagree) || len(explicit) == 0 {
+	// Observed work alone follows the promotion rules. Any maintainer correction
+	// decides the status, even when every member is retired by observation.
+	if len(explicit) == 0 {
 		l.Status = replay(l)
 		return l, nil, nil
 	}
@@ -506,7 +510,7 @@ func (m *Merge) build(g Group, members []MergeItem) (Learning, *Conflict, error)
 	winner := explicit[0]
 	var rivals []stance
 	for _, s := range explicit[1:] {
-		if !s.agrees(winner) {
+		if !s.agrees(winner, g.Conflict != "") {
 			rivals = append(rivals, s)
 		}
 	}
@@ -517,7 +521,9 @@ func (m *Merge) build(g Group, members []MergeItem) (Learning, *Conflict, error)
 		}
 		return Learning{}, &c, nil
 	}
-	l.Text, l.Kind = winner.item.Learning.Text, winner.item.Learning.Kind
+	if g.Conflict != "" || disagree || len(rivals) > 0 {
+		l.Text, l.Kind = winner.item.Learning.Text, winner.item.Learning.Kind
+	}
 	// The entry that records the decision sorts after every entry it overrides, so a
 	// later merge, which orders history by time, replays the same result.
 	decided := winner.latest

@@ -86,7 +86,7 @@ func TestMergePromptListsEveryRefWithItsSupportAndCorrections(t *testing.T) {
 		{Ref: "import:L1", Learning: knowledge.Learning{Kind: knowledge.Practice, Status: knowledge.Candidate, Text: "Lint first.", Evidence: []knowledge.Evidence{{Task: "2", Source: knowledge.Observed}}}},
 	}
 	p := MergePrompt("acme/api", items)
-	for _, want := range []string{"acme/api", "local:L1 (convention, active, 1 tasks, 1 maintainer and 0 observed evidence): Wrap errors.", "maintainer correction: the maintainer asked for it", "import:L1 (practice, candidate", "exactly one group", "Do not decide status"} {
+	for _, want := range []string{"acme/api", "local:L1 (convention, active, 1 tasks, 1 maintainer and 0 observed evidence): Wrap errors.", "maintainer correction: the maintainer asked for it", "import:L1 (practice, candidate", "exactly one group", "Do not decide status", "contradicting guidance on the same point", "Never split contradicting learnings"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("prompt lacks %q:\n%s", want, p)
 		}

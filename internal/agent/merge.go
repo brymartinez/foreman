@@ -105,10 +105,10 @@ func MergePrompt(repo string, items []knowledge.MergeItem) string {
 
 Answer with the JSON the schema asks for: groups, where each group is one learning of the result.
 
-- members: the refs the group combines. Put every ref below in exactly one group. Put learnings in one group only when they give the same guidance, even in different words. Keep distinct guidance in separate groups.
+- members: the refs the group combines. Put every ref below in exactly one group. Put learnings in one group when they give the same guidance, even in different words, and also when they give contradicting guidance on the same point, such as two different indentation widths. Keep guidance on different points in separate groups.
 - kind: convention (how this repository wants code written), fact (something true about this repository), or practice (how to work on it).
 - text: the group's guidance in one short generic sentence: no issue, PR, or commit numbers, no URLs, no file paths outside the repository, no names, no secrets. For a group of one, repeat its text.
-- conflict: null, or one sentence on how the members contradict each other when a group holds guidance on the same point that disagrees. Foreman resolves a flagged conflict from maintainer corrections, not from your text.
+- conflict: null when the members agree. When they contradict each other on the same point, one sentence on how. Never split contradicting learnings into separate groups to avoid a conflict. Foreman resolves a flagged conflict from maintainer corrections, not from your text.
 
 Do not decide status. Foreman sets each learning's status from its evidence.
 
