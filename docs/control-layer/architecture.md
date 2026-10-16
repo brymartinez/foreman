@@ -326,13 +326,13 @@ the same commit. The commit message records why it changed.
   reason; Foreman never resets local work. A checkout the caller supplies is read as
   it is. Guidance is `AGENTS.md` plus the Markdown files it names as branch naming
   guidance, up to two links deep. Text splits into clauses at a line end, `;`, `|`,
-  or a sentence end. A link is named when the clause text since the previous link,
-  with its own label, says "branch" and "name", "convention", "rule", or "guidance",
-  and not "decision log", "history", "archive", or "superseded". A link joined to a
-  named one by only commas, "and", or "or" is named too, unless its own label or
-  path is historical. Other links, even in the
-  same clause ("see [architecture](...)"), are not read. A document that only mentions branches is
-  not a rule. A named file that is missing, unreadable, over 32 KiB, or outside the
+  or a sentence end. A list of links starts where the clause text since the
+  previous link, with the link's own label, says "branch" and "name", "convention",
+  "rule", or "guidance". It continues through links joined by only commas, "and",
+  or "or". Each listed link is read unless its label or path says "decision log",
+  "history", "archive", or "superseded"; a list whose lead-in says so is skipped
+  whole. Other links, even in the same clause ("see [architecture](...)"), are not
+  read. A document that only mentions branches is not a rule. A named file that is missing, unreadable, over 32 KiB, or outside the
   repository stops the start with its path. A start with a confirmed name
   runs the same sync and guidance read, since either can change while a person edits
   it. A tool-free

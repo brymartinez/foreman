@@ -363,3 +363,23 @@ func TestBranchGuideSkipsAHistoricalLinkInAList(t *testing.T) {
 		t.Fatalf("guide = %q", guide)
 	}
 }
+
+func TestBranchGuideReadsACurrentGuideListedAfterAHistoricalOne(t *testing.T) {
+	root := writeRepo(t, map[string]string{
+		"AGENTS.md": "Branch naming rules: [decision log](old.md) and [current](current.md)\n",
+		"old.md":    "2024: branch names were old/<slug>.",
+	})
+	_, err := readBranchGuide(root)
+	if err == nil || !strings.Contains(err.Error(), "current.md") {
+		t.Fatalf("err = %v, want the missing current guide reported", err)
+	}
+}
+
+func TestBranchGuideSkipsAListUnderAHistoricalHeading(t *testing.T) {
+	root := writeRepo(t, map[string]string{
+		"AGENTS.md": "Branch naming history: [2023](a.md) and [2024](b.md)\n",
+	})
+	if _, err := readBranchGuide(root); err != nil {
+		t.Fatalf("err = %v, want historical links skipped", err)
+	}
+}

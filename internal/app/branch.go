@@ -156,24 +156,27 @@ var markdownLink = regexp.MustCompile("`([A-Za-z0-9_./-]+\\.md)`?|\\[[^\\]]*\\]\
 // links in its own clause, not for every link on the same line.
 var guideClause = regexp.MustCompile(`\n|[;|]|\.\s`)
 
-// namedGuides returns the links a clause names as branch naming guidance. A link
-// counts when the text since the previous link, including its own label, names
-// branch guidance, or when it continues a list of guidance links ("a, b and c").
-// A trailing "see [architecture](...)" therefore stays out, and a historical link
-// stays out even inside a list.
+// namedGuides returns the links a clause names as branch naming guidance. A list
+// starts at a link whose text since the previous link, including its own label,
+// names branch rules, and continues through links joined by only commas, "and", or
+// "or". A trailing "see [architecture](...)" therefore stays out. A historical
+// link is skipped without ending the list, and a historical heading skips it all.
 func namedGuides(clause string) []string {
 	var paths []string
-	prev, listed := 0, false
+	prev, listed, oldList := 0, false, false
 	for _, m := range markdownLink.FindAllStringSubmatchIndex(clause, -1) {
 		start, end := m[2], m[3]
 		if start < 0 {
 			start, end = m[4], m[5]
 		}
-		path := clause[start:end]
-		text := clause[prev:m[1]]
-		listed = !historical(text) && (explicitBranchGuide(text) || listed && listJoin(clause[prev:m[0]]))
-		if listed {
-			paths = append(paths, path)
+		switch {
+		case namesBranchRule(clause[prev:m[1]]):
+			listed, oldList = true, historical(clause[prev:m[0]])
+		case !listJoin(clause[prev:m[0]]):
+			listed = false
+		}
+		if listed && !oldList && !historical(clause[m[0]:m[1]]) {
+			paths = append(paths, clause[start:end])
 		}
 		prev = m[1]
 	}
@@ -201,19 +204,14 @@ func historical(text string) bool {
 	return false
 }
 
-// explicitBranchGuide reports whether a clause names its links as current branch
-// naming guidance. A link that only mentions branches, or points at history, is not
-// a rule: an old decision log must not decide today's branch names.
-func explicitBranchGuide(clause string) bool {
-	clause = strings.ToLower(clause)
-	if !strings.Contains(clause, "branch") {
-		return false
-	}
-	if historical(clause) {
+// namesBranchRule reports whether text says it is about branch naming rules.
+func namesBranchRule(text string) bool {
+	text = strings.ToLower(text)
+	if !strings.Contains(text, "branch") {
 		return false
 	}
 	for _, rule := range []string{"name", "naming", "convention", "rule", "guidance"} {
-		if strings.Contains(clause, rule) {
+		if strings.Contains(text, rule) {
 			return true
 		}
 	}
