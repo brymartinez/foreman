@@ -445,6 +445,23 @@ scenario_runner() {
 	check "and names the file" contains "$sandbox/err.txt" "stages/pr.md"
 }
 
+scenario_plan_reuse() {
+	echo "plan_reuse: a task whose record lost its plan adopts the plan on the issue"
+	setup plan_reuse
+	local comments='' i=0 doc title
+	for doc in analysis:Analysis prd:PRD design:Design "plan:Implementation plan"; do
+		i=$((i + 1)); title=${doc#*:}
+		comments="$comments${comments:+,}$(printf '{"id":%s,"html_url":"https://github.com/acme/widgets/issues/42#issuecomment-%s","body":"<!-- foreman:%s -->\\n## %s\\n\\nPosted earlier.","updated_at":"2026-09-20T10:00:00Z","user":{"login":"brymartinez"}}' "$((2000 + i))" "$((2000 + i))" "${doc%%:*}" "$title")"
+	done
+	printf '[[{"id":1999,"html_url":"https://github.com/acme/widgets/issues/42#issuecomment-1999","body":"Thanks, looking.","updated_at":"2026-09-20T09:00:00Z","user":{"login":"brymartinez"}},%s]]\n' "$comments" >"$state/conv-repos-acme-widgets-issues-42-comments.json"
+	check "the dashboard delegates #42" start 42
+	check "the runner reaches a clean review" wait_status "review ✓"
+	check "no planning turn runs" bash -c "! grep -qx 'claude plan' '$state/agents.log'"
+	check "nothing is posted on the issue" bash -c "! grep -qF 'api --method POST repos/acme/widgets/issues/42/comments' '$state/gh.log'"
+	check "the implementation follows the plan on the issue" contains "$state/plan-posted-prompt.txt" "- Implementation plan: https://github.com/acme/widgets/issues/42#issuecomment-2004"
+	check "the task records the adopted comments" grep -q 'comment_id: 2002' "$sandbox/tasks/acme-widgets-42.md"
+}
+
 scenario_notify() {
 	echo "notify: the developer hears about ready work and stopped runners on Discord"
 	setup notify
@@ -889,7 +906,7 @@ scenario_conflict() {
 	check "in its own session" test "$(turns 'claude implement')" = 1
 	check "the reviewer reviewed the merge" test "$(turns 'codex review')" = 2
 	local wt
-	wt=$(ls -d "$sandbox"/worktrees/*/*)
+	wt=$(sed -n 's/^worktree: *//p' "$sandbox/tasks/acme-widgets-42.md")
 	check "the branch now includes main" git -C "$wt" merge-base --is-ancestor "$(git --git-dir="$sandbox/origin.git" rev-parse main)" HEAD
 
 	touch "$state/conflict-fail"
@@ -1032,7 +1049,7 @@ scenario_account() {
 	unset E2E_CLONE_URL
 }
 
-scenarios=${*:-runner notify logs inbox inbox_lifecycle rereview conflicts respond cancel feedback conflict tui routing history linear account learning}
+scenarios=${*:-runner plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel feedback conflict tui routing history linear account learning}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"

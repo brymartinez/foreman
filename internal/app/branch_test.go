@@ -86,6 +86,9 @@ func TestConfirmedBranchIsUsedWithoutASecondProposal(t *testing.T) {
 	if rec.Delegation.Branch != "bryan/db-825-provider-retries" || f.wt.reqs[0].Branch != rec.Delegation.Branch {
 		t.Fatalf("branch was not kept: %+v", rec.Delegation)
 	}
+	if want := filepath.Join(f.app.WorktreesDir, "ridezoomo-armada-backend", rec.Delegation.Branch); rec.Delegation.Worktree != want {
+		t.Fatalf("worktree = %q, want %q", rec.Delegation.Worktree, want)
+	}
 }
 
 // managedCheckout points the fixture's managed repository at a temp directory whose

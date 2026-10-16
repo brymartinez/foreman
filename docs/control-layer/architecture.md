@@ -42,7 +42,7 @@ Every agent interaction is one headless turn that runs to completion and returns
 ```
 app.Start, from the dashboard (enter on an inbox issue, or auto mode)
   ├─ gh: repo + default branch of the managed clone, fetch issue
-  ├─ git: ensure worktree <root>/<owner>-<repo>/825-<slug> on branch <type>/825-<slug>
+  ├─ git: ensure worktree <root>/<owner>-<repo>/<branch> with branch slashes as directories
   ├─ store: task file, state WORKING, session id
   ├─ pin: the active gh account (kept on restarts), worktree commit identity, SSH
   │       push account check; a mismatch is FAILED and nothing launches
@@ -340,7 +340,10 @@ the same commit. The commit message records why it changed.
   proposal applies the repository convention to the issue and tracker suggestion;
   repository guidance takes precedence. A manual start shows an editable proposal.
   Auto mode waits when the workstream or guidance is unclear. The chosen name is
-  validated before making a worktree and stored at the first start. Restarts keep it.
+  validated before making a worktree and stored at the first start. A new worktree is
+  `<worktrees_dir>/<owner>-<repo>/<branch>`, with each branch slash as a directory
+  separator. Restarts keep the stored branch and worktree path, including paths from
+  the older flat convention.
 
 ### Agents
 
@@ -368,9 +371,28 @@ the same commit. The commit message records why it changed.
   turn whose prompt carries the durable state; any other resume error fails the task.
 - **Planning is its own session.** Until the four planning documents are posted, and
   while there is no PR, the turn plans. The runner, not the agent, posts them as issue
-  comments with a `<!-- foreman:<doc> -->` marker and edits them on a re-plan. There is
-  no approval gate. Implementation then starts a fresh session, so it doesn't carry the
-  planning context (about 200k tokens on one task).
+  comments with a `<!-- foreman:<doc> desc=<fingerprint> -->` marker and edits them on a
+  re-plan. The fingerprint is the first 12 hex digits of the SHA-256 of the trimmed
+  issue description. There is no approval gate. Implementation then starts a fresh
+  session, so it doesn't carry the planning context (about 200k tokens on one task).
+- **The issue, not the record, says whether a plan exists.** A task record can lose its
+  plan comments (a recreated task, another machine), so before a planning turn the
+  runner reads the description and every comment from the task's source. Only a
+  comment whose first line is one of the four document markers counts; unmarked
+  comments, other `foreman:` markers, and description text never do, and none of them
+  is changed. A recorded comment that is still marked wins; otherwise the newest marked
+  comment per document wins. A recorded comment that lost its marker is left alone and
+  its document is posted anew. A complete plan is recorded and the task implements it
+  without posting. A partial plan goes to the planning turn with the documents' text,
+  in the prompt or, for a resumed session, in the resume message; the turn returns an
+  empty document to keep a comment, and the runner edits revised ones and posts only
+  missing ones. After the turn the runner reads each target comment again: an edit
+  whose comment is gone or unmarked becomes a new post, and a kept comment that is
+  gone or unmarked fails the task before anything is posted. A document whose fingerprint differs from the current description
+  blocks the task with a keep-or-revise decision before any turn. The answer covers
+  only the description it was asked about, so a later edit asks again. Comments
+  without a fingerprint predate it and count as consistent. A failed read of the issue
+  or its comments fails the task before any turn or post.
 - **Implementation checkpoints reset context within the implement phase.** Before a
   PR exists, an implementer may finish one tested part with `checkpoint`, one short
   next objective, and reported passing validation. Foreman accepts it only when the

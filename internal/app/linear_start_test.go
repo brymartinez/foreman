@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 
@@ -19,6 +20,7 @@ type lifecycleTracker struct {
 	posted       []TrackerComment
 	postIDs      []string
 	missing      map[string]bool
+	commentsErr  error
 }
 
 func (f *lifecycleTracker) AssignedIssues(context.Context, map[task.Repo]string) ([]InboxItem, error) {
@@ -30,10 +32,25 @@ func (f *lifecycleTracker) GetIssue(_ context.Context, key task.Key) (Issue, err
 }
 func (f *lifecycleTracker) IssueComments(_ context.Context, key task.Key) ([]TrackerComment, error) {
 	f.commentReads = append(f.commentReads, key)
-	return f.comments, nil
+	if f.commentsErr != nil {
+		return nil, f.commentsErr
+	}
+	out := slices.Clone(f.comments)
+	for _, c := range f.posted {
+		if i := slices.IndexFunc(out, func(o TrackerComment) bool { return o.ID == c.ID }); i >= 0 {
+			out[i] = c
+		} else {
+			out = append(out, c)
+		}
+	}
+	return out, nil
 }
-func (f *lifecycleTracker) GetIssueComment(context.Context, string) (TrackerComment, error) {
-	return TrackerComment{}, nil
+func (f *lifecycleTracker) GetIssueComment(ctx context.Context, id string) (TrackerComment, error) {
+	comments, _ := f.IssueComments(ctx, task.Key{})
+	if i := slices.IndexFunc(comments, func(c TrackerComment) bool { return c.ID == id }); i >= 0 && !f.missing[id] {
+		return comments[i], nil
+	}
+	return TrackerComment{}, ErrGone
 }
 func (f *lifecycleTracker) PostIssueComment(_ context.Context, _ task.Key, id, body string) (TrackerComment, error) {
 	f.postIDs = append(f.postIDs, id)
@@ -77,6 +94,22 @@ func TestLinearManualStartDoesNotRequireTriagedLabel(t *testing.T) {
 	rec, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude})
 	if err != nil || rec == nil || rec.Key != key || rec.Delegation.Branch != "feat/linear-web-42-fix-cache" {
 		t.Fatalf("start = %+v, %v", rec, err)
+	}
+	if rec.Delegation.Worktree != "/wt/ridezoomo-armada-backend/feat/linear-web-42-fix-cache" {
+		t.Fatalf("worktree = %q", rec.Delegation.Worktree)
+	}
+}
+
+func TestLinearSuggestionUsesFullBranchWorktreePath(t *testing.T) {
+	f := newFixture()
+	key := task.Key{Repo: f.gh.repo.Repo, Source: task.Linear, ExternalID: "uuid-42"}
+	f.app.Linear = &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", State: "open", BranchName: "bryan/web-42-fix-cache"}}
+	rec, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Delegation.Branch != "bryan/web-42-fix-cache" || rec.Delegation.Worktree != "/wt/ridezoomo-armada-backend/bryan/web-42-fix-cache" {
+		t.Fatalf("delegation = %+v", rec.Delegation)
 	}
 }
 
@@ -126,13 +159,18 @@ func TestLinearReplanningRepostsDeletedCommentAndEditsOtherComments(t *testing.T
 	tracker := &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", State: "open"}, missing: map[string]bool{"old-prd": true}}
 	f.app.Linear = tracker
 	started(t, f, StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude})
+	tracker.comments = []TrackerComment{
+		{ID: "old-analysis", URL: "https://linear.app/comment/old-analysis", Body: planCommentBody(task.Analysis, "", "Earlier analysis.")},
+		{ID: "old-prd", URL: "https://linear.app/comment/old-prd", Body: planCommentBody(task.PRD, "", "Earlier PRD.")},
+	}
 	f.store.recs[key].SetPlanComment(task.PlanComment{Doc: task.Analysis, ExternalCommentID: "old-analysis", URL: "https://linear.app/comment/old-analysis"})
 	f.store.recs[key].SetPlanComment(task.PlanComment{Doc: task.PRD, ExternalCommentID: "old-prd", URL: "https://linear.app/comment/old-prd"})
 	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2")}
 	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if !f.store.recs[key].PlanPosted() || len(tracker.postIDs) != 5 || tracker.postIDs[0] != "old-analysis" || tracker.postIDs[1] != "old-prd" || tracker.postIDs[2] != "" {
+	// The deleted PRD is found missing before the edit, so it is posted anew.
+	if !f.store.recs[key].PlanPosted() || !slices.Equal(tracker.postIDs, []string{"old-analysis", "", "", ""}) {
 		t.Fatalf("plan = %+v, post IDs = %v", f.store.recs[key].Plan, tracker.postIDs)
 	}
 }

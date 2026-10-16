@@ -223,7 +223,11 @@ part of the task.
    If the checkout cannot fast-forward safely, the start stops and says why.
    Manual starts show the name for editing;
    auto mode waits if the workstream or guidance is unclear. Foreman checks the chosen
-   name, then creates the branch and worktree. Existing tasks keep their stored branch.
+   name, then creates the branch and worktree. A branch named
+   `fix/825-provider-retries` uses
+   `<worktrees_dir>/<owner>-<repo>/fix/825-provider-retries`. Each slash in the branch
+   name separates directories. Existing tasks keep their stored branch and worktree
+   path, including paths from before this convention.
    Without repository guidance, the default is `fix/825-provider-retries` for a fix
    issue; its slug is capped at 5 words.
    - The prefix is a conventional-commit type. Foreman takes it from the title's own
