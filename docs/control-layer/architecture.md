@@ -338,11 +338,11 @@ the same commit. The commit message records why it changed.
   finishes, because the start would make a worktree at the same path. The mark
   records the owning process; once that process has exited, the mark no longer
   blocks, however long the owner ran. A start also refuses when a reset lands between its read and its write. A
-  failed removal names what is left and keeps only that listed; the next start removes it
-  first and records what it removed, so no path is removed twice. A worktree removed
-  while its branch was kept leaves only the branch listed. A retry removes a listed
-  worktree only while it still has the commit the reset recorded; any other worktree
-  there stops the start and stays. Nothing else is removed without the confirmation: a start that continues an
+  failed removal names what is left and keeps only that listed; a worktree removed
+  while its branch was kept leaves only the branch. A start never deletes a listed
+  worktree or branch, because nothing proves it is still the reset run's: it refuses
+  while either is still there, for the developer to remove by hand, and drops the ones
+  already gone. Only a listed runner log is removed again. Nothing else is removed without the confirmation: a start that continues an
   open PR refuses when something already exists at the worktree path it needs. Before it removes anything, a start claims the reset record under
   the task lock with a random owner token, and only that owner can save the run, so a
   second start cannot clear the path under the first one's new worktree. A start that
@@ -654,7 +654,8 @@ the same commit. The commit message records why it changed.
   the worktree's path with its uncommitted or untracked work, and the local branch's
   name, wrapping paths at any column. It shows the run copied when `x` was pressed,
   and `y` resets that run, so a refresh cannot swap in another run. When the list does not fit the terminal, it
-  says so and `y` does nothing. App.Reset checks for a live runner,
+  says so and `y` does nothing; below the dashboard's minimum size `y` does nothing
+  either. App.Reset checks for a live runner,
   because a FAILED task's pid stays recorded until a refresh sees it gone.
 - **Decisions are answered in the lower pane through `app.Respond`,** which resolves an
   option label, free text, or an empty answer (the recommendation). The

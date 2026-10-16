@@ -187,8 +187,8 @@ type ResetMark struct {
 // ResetCleanup names the local run files a reset still has to remove. Since is set
 // while Owner, the reset or one start in process PID, removes them and makes the new
 // worktree; any other start waits while that process runs, because it would work at
-// the same path. Since is zero once the owner finished or gave up, and the next start
-// removes what is left.
+// the same path. Since is zero once the owner finished or gave up. A start refuses
+// while a listed worktree or branch is still there.
 type ResetCleanup struct {
 	Worktree  string    `yaml:"worktree,omitempty"`
 	Branch    string    `yaml:"branch,omitempty"`
@@ -197,9 +197,6 @@ type ResetCleanup struct {
 	Since     time.Time `yaml:"since,omitempty"`
 	Owner     string    `yaml:"owner,omitempty"`
 	PID       int       `yaml:"pid,omitempty"`
-	// Head is the worktree's commit when the reset ran. A retry removes the path only
-	// while it still has that commit, so it never removes a newer worktree there.
-	Head string `yaml:"head,omitempty"`
 }
 
 // ConflictAttempt is one automatic merge conflict repair: the PR head that conflicted

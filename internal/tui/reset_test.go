@@ -169,3 +169,15 @@ func TestResetConfirmsTheRunShownEvenAfterARefresh(t *testing.T) {
 		t.Fatalf("action %+v; want the confirmed run", got)
 	}
 }
+
+func TestResetIsNotConfirmedWhenTheTerminalIsTooSmallToDraw(t *testing.T) {
+	m := failedOnly()
+	m.Width, m.Height = minWidth-1, 40
+	press(&m, rune_('x'))
+	if strings.Contains(frameText(m), "feat/12-retries") {
+		t.Fatal("test setup: the frame draws the targets below the minimum width")
+	}
+	if got := press(&m, rune_('y')); got.Kind != ActionNone {
+		t.Fatalf("y reset a task whose targets were never drawn: %+v", got)
+	}
+}

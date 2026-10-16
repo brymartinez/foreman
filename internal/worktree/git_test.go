@@ -400,3 +400,17 @@ func TestRemoveReportsABranchKeptAfterTheWorktreeIsGone(t *testing.T) {
 		t.Errorf("worktree still on disk: %v", err)
 	}
 }
+
+func TestBranchExists(t *testing.T) {
+	clone, _ := repoWithOrigin(t)
+	ctx := context.Background()
+	if ok, err := (Git{}).BranchExists(ctx, clone, "main"); err != nil || !ok {
+		t.Errorf("main: %v, %v", ok, err)
+	}
+	if ok, err := (Git{}).BranchExists(ctx, clone, "agent/none"); err != nil || ok {
+		t.Errorf("missing branch: %v, %v", ok, err)
+	}
+	if _, err := (Git{}).BranchExists(ctx, filepath.Join(t.TempDir(), "nowhere"), "main"); err == nil {
+		t.Error("a missing checkout must be an error, not a missing branch")
+	}
+}

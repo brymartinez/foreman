@@ -113,8 +113,14 @@ func resetList(m Model) []string {
 	return out
 }
 
-// resetFits reports whether the whole confirmation is on screen, which y requires.
-func resetFits(m Model) bool { return len(resetList(m)) <= m.Height-3 }
+// resetFits reports whether Frame draws the whole confirmation, which y requires.
+func resetFits(m Model) bool {
+	// Below the minimum size Frame draws only a size warning, so nothing was shown.
+	if _, ok := layoutFor(m.Width, m.Height, m.LogOpen, false); !ok {
+		return false
+	}
+	return len(resetList(m)) <= m.Height-3
+}
 
 // resetConfirmLines fill the body under the header with the targets, then the message
 // and the keys. A list too long for the terminal says so, and y does nothing.

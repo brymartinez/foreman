@@ -225,26 +225,6 @@ func TestStartWaitsWhileAResetIsRemovingTheRun(t *testing.T) {
 	}
 }
 
-func TestStartFinishesTheCleanupAResetCouldNotDo(t *testing.T) {
-	f := newFixture()
-	rec := failedTask(t, f, 912)
-	f.wt.removeErr = errors.New("permission denied")
-	if _, err := f.app.Reset(context.Background(), rec); err == nil {
-		t.Fatal("want the removal error")
-	}
-	f.wt.removeErr, f.wt.reqs = nil, nil
-	got, err := f.app.Start(context.Background(), startReq(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(f.wt.removed) == 0 || f.wt.removed[0].Path != rec.Delegation.Worktree || !f.wt.removed[0].Force {
-		t.Errorf("removed = %+v; want the reset's leftover worktree first", f.wt.removed)
-	}
-	if got.Reset != nil || len(f.wt.reqs) != 1 {
-		t.Errorf("reset %+v worktrees %+v", got.Reset, f.wt.reqs)
-	}
-}
-
 func TestStartRefusesATaskResetWhileItStarted(t *testing.T) {
 	f := newFixture()
 	rec := failedTask(t, f, 912)
@@ -566,20 +546,6 @@ func TestAStartRetriesOnlyTheCleanupThatFailed(t *testing.T) {
 	}
 }
 
-func TestAFailedStartKeepsOnlyTheCleanupStillLeft(t *testing.T) {
-	f := newFixture()
-	rec := failedTask(t, f, 912)
-	f.wt.removeErr = errors.New("permission denied")
-	f.app.Reset(context.Background(), rec)
-	f.wt.removeErr, f.wt.ensureErr = nil, errors.New("disk full")
-	if _, err := f.app.Start(context.Background(), startReq(t)); err == nil {
-		t.Fatal("want the Ensure error")
-	}
-	if c := f.store.recs[rec.Key].Reset.Cleanup; c != nil && (c.Worktree != "" || c.Branch != "") {
-		t.Errorf("cleanup = %+v; the retried removal succeeded, so the path must not be removed again", c)
-	}
-}
-
 func TestAResetThatKeepsOnlyTheBranchListsOnlyTheBranch(t *testing.T) {
 	f := newFixture()
 	rec := failedTask(t, f, 912)
@@ -593,7 +559,7 @@ func TestAResetThatKeepsOnlyTheBranchListsOnlyTheBranch(t *testing.T) {
 	}
 }
 
-func TestAStartKeepsAWorktreeThatIsNoLongerTheResetRuns(t *testing.T) {
+func TestAStartLeavesAWorktreeTheResetCouldNotRemove(t *testing.T) {
 	f := newFixture()
 	f.app.WorktreesDir = t.TempDir()
 	rec := failedTask(t, f, 912)
@@ -601,17 +567,45 @@ func TestAStartKeepsAWorktreeThatIsNoLongerTheResetRuns(t *testing.T) {
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	f.wt.head = "oldhead"
+	os.WriteFile(filepath.Join(path, "notes.txt"), []byte("work"), 0o644)
 	f.wt.removeErr = errors.New("permission denied")
 	f.app.Reset(context.Background(), rec)
-	if c := f.store.recs[rec.Key].Reset.Cleanup; c == nil || c.Head != "oldhead" {
-		t.Fatalf("cleanup = %+v; want the reset run's head recorded", c)
-	}
-	f.wt.removeErr, f.wt.head, f.wt.removed = nil, "newhead", nil
-	if _, err := f.app.Start(context.Background(), startReq(t)); err == nil || !strings.Contains(err.Error(), "no longer the reset run's") {
+	f.wt.removeErr, f.wt.removed = nil, nil
+	if _, err := f.app.Start(context.Background(), startReq(t)); err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "by hand") {
 		t.Fatalf("err = %v", err)
 	}
 	if len(f.wt.removed) != 0 {
-		t.Errorf("removed %+v; a worktree with another head is not the confirmed one", f.wt.removed)
+		t.Errorf("removed %+v; a start removes no worktree", f.wt.removed)
+	}
+	if _, err := os.Stat(filepath.Join(path, "notes.txt")); err != nil {
+		t.Errorf("the worktree's files are gone: %v", err)
+	}
+	os.RemoveAll(path)
+	got, err := f.app.Start(context.Background(), startReq(t))
+	if err != nil {
+		t.Fatalf("start after the developer removed the leftovers: %v", err)
+	}
+	if got.Reset != nil || len(f.wt.removed) != 0 {
+		t.Errorf("reset %+v removed %+v", got.Reset, f.wt.removed)
+	}
+}
+
+func TestAStartLeavesABranchTheResetKept(t *testing.T) {
+	f := newFixture()
+	rec := failedTask(t, f, 912)
+	branch := rec.Delegation.Branch
+	f.wt.removeErr = fmt.Errorf("%w: checked out elsewhere", ErrBranchNotDeleted)
+	f.app.Reset(context.Background(), rec)
+	f.wt.removeErr, f.wt.removed = nil, nil
+	f.wt.branches = map[string]bool{branch: true}
+	if _, err := f.app.Start(context.Background(), startReq(t)); err == nil || !strings.Contains(err.Error(), "branch "+branch) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(f.wt.removed) != 0 {
+		t.Errorf("removed %+v; a start deletes no branch", f.wt.removed)
+	}
+	f.wt.branches = nil
+	if _, err := f.app.Start(context.Background(), startReq(t)); err != nil {
+		t.Fatalf("start after the developer deleted the branch: %v", err)
 	}
 }

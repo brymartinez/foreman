@@ -52,13 +52,8 @@ func (a App) Reset(ctx context.Context, rec *task.Record) (*task.Record, error) 
 		removal.RepoDir = req.Dir
 	}
 
-	head := ""
-	if removal.RepoDir == "" {
-		// The worktree exists; its commit lets a retry tell it from a newer one.
-		head, _ = a.Worktrees.Head(ctx, d.Worktree)
-	}
 	mark.At = a.Now()
-	mark.Cleanup = &task.ResetCleanup{Head: head, Worktree: d.Worktree, Branch: removal.Branch, RepoDir: removal.RepoDir, RunnerLog: d.RunnerLog, Since: mark.At, Owner: resetOwner, PID: os.Getpid()}
+	mark.Cleanup = &task.ResetCleanup{Worktree: d.Worktree, Branch: removal.Branch, RepoDir: removal.RepoDir, RunnerLog: d.RunnerLog, Since: mark.At, Owner: resetOwner, PID: os.Getpid()}
 	stub, err := a.update(ctx, cur.Key, func(cur *task.Record) (*task.Record, error) {
 		// The task can change while GitHub is read; a run started since owns it.
 		if err := a.resettable(cur); err != nil {
@@ -79,7 +74,7 @@ func (a App) Reset(ctx context.Context, rec *task.Record) (*task.Record, error) 
 		return nil, fmt.Errorf("nothing was deleted: %w", err)
 	}
 
-	left, problems := a.cleanUp(ctx, *mark.Cleanup, false)
+	left, problems := a.cleanUp(ctx, *mark.Cleanup)
 	// Finishing the removal lets a start through. Only what could not be removed stays
 	// listed, and the next start removes it; a path removed here is never removed again.
 	done, err := a.update(ctx, cur.Key, func(cur *task.Record) (*task.Record, error) {
@@ -100,34 +95,27 @@ func (a App) Reset(ctx context.Context, rec *task.Record) (*task.Record, error) 
 		stub = done
 	}
 	if len(problems) > 0 {
-		return stub, fmt.Errorf("%s was reset, but could not remove %s; the next start tries again", taskRef(cur), strings.Join(problems, "; "))
+		return stub, fmt.Errorf("%s was reset, but could not remove %s; remove them by hand before starting it again", taskRef(cur), strings.Join(problems, "; "))
 	}
 	return stub, nil
 }
 
 // cleanUp removes a reset run's worktree with its uncommitted work, its local branch,
-// and its runner log. It returns the targets it could not remove, with no claim, and
-// why. A retry after the reset first checks the worktree is still the reset run's.
-func (a App) cleanUp(ctx context.Context, c task.ResetCleanup, retry bool) (task.ResetCleanup, []string) {
+// and its runner log, right after the developer confirmed them. It returns the
+// targets it could not remove, with no claim, and why. A worktree removed while its
+// branch was kept leaves only the branch.
+func (a App) cleanUp(ctx context.Context, c task.ResetCleanup) (task.ResetCleanup, []string) {
 	left := task.ResetCleanup{RepoDir: c.RepoDir}
 	var problems []string
 	if c.Worktree != "" || c.Branch != "" {
 		removal := WorktreeRemoval{Path: c.Worktree, Branch: c.Branch, DeleteBranch: c.Branch != "", Force: true, RepoDir: c.RepoDir}
-		var err error
-		if retry {
-			err = a.ownedWorktree(ctx, c)
-		}
-		if err == nil {
-			err = a.Worktrees.Remove(ctx, removal)
-		}
-		switch {
+		switch err := a.Worktrees.Remove(ctx, removal); {
 		case err == nil:
 		case errors.Is(err, ErrBranchNotDeleted):
-			// The worktree is gone, so a retry must not touch whatever is at its path.
 			left.Branch = c.Branch
 			problems = append(problems, fmt.Sprintf("branch %s (%v)", c.Branch, err))
 		default:
-			left.Worktree, left.Branch, left.Head = c.Worktree, c.Branch, c.Head
+			left.Worktree, left.Branch = c.Worktree, c.Branch
 			problems = append(problems, fmt.Sprintf("worktree %s and branch %s (%v)", c.Worktree, c.Branch, err))
 		}
 	}
@@ -140,21 +128,34 @@ func (a App) cleanUp(ctx context.Context, c task.ResetCleanup, retry bool) (task
 	return left, problems
 }
 
-// ownedWorktree checks that the path still holds the reset run's worktree before a
-// retry force-removes it. The reset recorded its commit; another commit there means
-// someone made a new worktree since, which the developer never confirmed deleting.
-func (a App) ownedWorktree(ctx context.Context, c task.ResetCleanup) error {
-	if c.Worktree == "" {
-		return nil
+// leftovers checks what a reset could not remove, before a start. Nothing proves a
+// worktree or branch found later is still the reset run's, so the start deletes
+// neither: it lists the ones still there for the developer to remove by hand, and
+// drops the ones already gone. Only the runner log, which nothing writes until a
+// start succeeds, is removed again.
+func (a App) leftovers(ctx context.Context, c task.ResetCleanup) (task.ResetCleanup, []string) {
+	left := task.ResetCleanup{RepoDir: c.RepoDir}
+	var problems []string
+	if c.Worktree != "" {
+		if _, err := os.Stat(c.Worktree); !errors.Is(err, fs.ErrNotExist) {
+			left.Worktree = c.Worktree
+			problems = append(problems, "worktree "+c.Worktree)
+		}
 	}
-	if _, err := os.Stat(c.Worktree); errors.Is(err, fs.ErrNotExist) {
-		return nil
+	if c.Branch != "" && c.RepoDir != "" {
+		exists, err := a.Worktrees.BranchExists(ctx, c.RepoDir, c.Branch)
+		if err != nil || exists {
+			left.Branch = c.Branch
+			problems = append(problems, "branch "+c.Branch)
+		}
 	}
-	head, err := a.Worktrees.Head(ctx, c.Worktree)
-	if err == nil && c.Head != "" && head == c.Head {
-		return nil
+	if c.RunnerLog != "" {
+		if err := os.Remove(c.RunnerLog); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			left.RunnerLog = c.RunnerLog
+			problems = append(problems, "runner log "+c.RunnerLog)
+		}
 	}
-	return fmt.Errorf("%s is no longer the reset run's worktree; move or remove it by hand", c.Worktree)
+	return left, problems
 }
 
 // sameRun reports whether the run the developer confirmed resetting is still the

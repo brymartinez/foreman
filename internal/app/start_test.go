@@ -23,7 +23,8 @@ type fakeWorktrees struct {
 	removeErr       error
 	onRemove        func() // runs inside Remove, before it records the removal
 	ensureErr       error
-	onEnsure        func() // runs inside Ensure
+	onEnsure        func()          // runs inside Ensure
+	branches        map[string]bool // local branches BranchExists reports
 	// contains answers Contains; nil reports every ancestor as merged.
 	contains  func(dir, ancestor, descendant string) (bool, error)
 	checks    []MergeCheck
@@ -132,6 +133,10 @@ func (f *fakeWorktrees) Remove(_ context.Context, r WorktreeRemoval) error {
 	}
 	f.removed = append(f.removed, r)
 	return nil
+}
+
+func (f *fakeWorktrees) BranchExists(_ context.Context, _, branch string) (bool, error) {
+	return f.branches[branch], nil
 }
 
 func (f *fakeWorktrees) Ensure(_ context.Context, r WorktreeRequest) error {

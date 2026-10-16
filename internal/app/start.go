@@ -425,9 +425,9 @@ func (a App) startableBy(rec *task.Record, owner string) error {
 	return fmt.Errorf("%s is %s", ref, rec.State)
 }
 
-// finishReset removes what a confirmed reset left of the old run before a start
-// makes its worktree, and records what is still left, so a removed path is never
-// removed again. Anything else at the continued PR's path was made after the reset,
+// finishReset checks what a confirmed reset could not remove before a start makes
+// its worktree, records what is still there, and refuses until the developer has
+// removed it. Anything else at the continued PR's path was made after the reset,
 // so the start refuses rather than delete it.
 func (a App) finishReset(ctx context.Context, rec *task.Record, wt WorktreeRequest, continuePR bool, owner string) error {
 	if rec == nil || rec.Delegation != nil || rec.Reset == nil {
@@ -440,7 +440,7 @@ func (a App) finishReset(ctx context.Context, rec *task.Record, wt WorktreeReque
 			// checkout of the repository finds the branch.
 			todo.RepoDir = wt.RepoDir
 		}
-		left, problems := a.cleanUp(ctx, todo, true)
+		left, problems := a.leftovers(ctx, todo)
 		if _, err := a.update(ctx, rec.Key, func(cur *task.Record) (*task.Record, error) {
 			if cur == nil || cur.Reset == nil || cur.Reset.Cleanup == nil || cur.Reset.Cleanup.Owner != owner {
 				return nil, nil
@@ -451,7 +451,7 @@ func (a App) finishReset(ctx context.Context, rec *task.Record, wt WorktreeReque
 			return fmt.Errorf("finish the reset: %w", err)
 		}
 		if len(problems) > 0 {
-			return fmt.Errorf("finish the reset: could not remove %s", strings.Join(problems, "; "))
+			return fmt.Errorf("the reset left %s; remove them by hand, then start again", strings.Join(problems, ", "))
 		}
 	}
 	if !continuePR {

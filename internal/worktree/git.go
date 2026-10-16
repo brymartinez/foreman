@@ -149,6 +149,20 @@ func (Git) Remove(ctx context.Context, req app.WorktreeRemoval) error {
 	return nil
 }
 
+// BranchExists asks show-ref, which exits 1 only for a missing ref; any other
+// failure, such as a missing checkout, is an error.
+func (Git) BranchExists(ctx context.Context, dir, branch string) (bool, error) {
+	err := exec.CommandContext(ctx, "git", "-C", dir, "show-ref", "--verify", "--quiet", "refs/heads/"+branch).Run()
+	var exit *exec.ExitError
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.As(err, &exit) && exit.ExitCode() == 1:
+		return false, nil
+	}
+	return false, fmt.Errorf("check branch %s in %s: %w", branch, dir, err)
+}
+
 // MergeConflicts uses git merge-tree (git 2.38+), which merges in memory: exit 0 is a
 // clean merge and exit 1 lists the conflicting files after the tree id.
 func (Git) MergeConflicts(ctx context.Context, check app.MergeCheck) ([]string, error) {
