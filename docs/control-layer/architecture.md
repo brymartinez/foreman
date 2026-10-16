@@ -671,7 +671,8 @@ the same commit. The commit message records why it changed.
   stay, because "keep functions under 80 lines" or "internal/app depends only on its
   ports" is the kind of guidance a repository needs. Evidence notes in the YAML are
   redacted the same way.
-- **The evaluator has no tools.** Claude runs with `--tools ""`; its
+- **The evaluator has no tools.** Claude runs with `--tools ""`, safe and
+  restricted modes, and strict MCP config (with no MCP servers supplied); its
   `StructuredOutput` schema response is allowed because it only returns the answer.
   Codex has no switch that removes every tool, so its turn runs read-only with
   `--ignore-user-config`

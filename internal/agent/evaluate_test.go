@@ -118,6 +118,7 @@ func TestEvaluatorClaudeRunsWithoutToolsInScratchDirUnderCap(t *testing.T) {
 	}
 	if argValue(got.Args, "-p") != "judge" || argValue(got.Args, "--model") != "opus" || argValue(got.Args, "--permission-mode") != "dontAsk" ||
 		!slices.Contains(got.Args, "--tools") || argValue(got.Args, "--tools") != "" || !slices.Contains(got.Args, "--no-session-persistence") ||
+		!slices.Contains(got.Args, "--safe-mode") || !slices.Contains(got.Args, "--restricted") || !slices.Contains(got.Args, "--strict-mcp-config") ||
 		argValue(got.Args, "--json-schema") != string(EvaluationSchema) || argValue(got.Args, "--max-budget-usd") != "0.50" {
 		t.Errorf("argv = %q", got.Args)
 	}

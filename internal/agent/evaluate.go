@@ -147,6 +147,7 @@ func (e Evaluators) Evaluate(ctx context.Context, in EvaluateInput) (Evaluation,
 		args := []string{
 			"-p", in.Prompt,
 			"--no-session-persistence",
+			"--safe-mode", "--restricted", "--strict-mcp-config",
 			"--output-format", "stream-json", "--verbose",
 			"--json-schema", string(EvaluationSchema),
 			"--permission-mode", "dontAsk",
