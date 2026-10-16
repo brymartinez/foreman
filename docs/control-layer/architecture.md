@@ -545,9 +545,10 @@ the same commit. The commit message records why it changed.
   task from them. Tracked lookups skip items outside the repository filter. Within the
   repository view, delegated tasks refresh through their stored source even when the inbox
   selects another source, and the selected source still controls which issues appear in
-  INBOX. DELEGATED WORK reads the task store, so delegated tasks remain reachable across
-  source filters. Linear completed and canceled issues map to closed; a stopped task
-  becomes DONE on refresh. A merged GitHub PR also completes a task.
+  INBOX. DELEGATED WORK lists the stored tasks from the selected source, and a record
+  with no source counts as GitHub. Refresh and runners still cover every task, and runs
+  from a hidden source count toward auto.max_concurrent. Linear completed and canceled
+  issues map to closed; a stopped task becomes DONE on refresh. A merged GitHub PR also completes a task.
 - **Lookup failures warn and retry** next refresh without blocking other items. A 404
   or 410 on an undelegated item is reported once and then no longer checked.
 - **Delegation doesn't need a checkout:** foreman keeps a clone under

@@ -339,3 +339,20 @@ func TestAutoStartsNothingInTheAllView(t *testing.T) {
 		t.Errorf("auto starts = %v; want the configured view's issue", startedKeys(got))
 	}
 }
+
+func TestAutoCountsHiddenSourcesRunsAgainstTheLimit(t *testing.T) {
+	m := autoModel(2, own(1, 0), own(2, 1))
+	m.IssueSource = task.GitHub
+	lin := record(10, task.Working)
+	lin.Source = task.Linear
+	m.SetTasks([]*task.Record{lin})
+	if len(m.Tasks) != 0 {
+		t.Fatalf("the GitHub view lists %d Linear tasks", len(m.Tasks))
+	}
+	if got := startedKeys(m.AutoStarts()); !slices.Equal(got, []task.Key{ownKey(1)}) {
+		t.Errorf("with a hidden Linear run active auto started %v; want only the oldest", got)
+	}
+	if got := header(m); !strings.Contains(got, "0 delegated") || !strings.Contains(got, "auto on 2/2") {
+		t.Errorf("header = %q; want no visible task and the hidden run plus the start counted", got)
+	}
+}

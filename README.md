@@ -538,8 +538,9 @@ the selected issue sources whenever you ask.
 `acme/widgets`. A nonempty include list limits the inbox to those repositories and the
 exclude list is then ignored. With an empty include list, the exclude list hides its
 repositories. The filter applies to fresh inbox results and tracked-task refreshes
-from GitHub and Linear alike. DELEGATED WORK lists every delegated
-task, even when `-s` selects the other source. A failed refresh of either selected
+from GitHub and Linear alike. DELEGATED WORK lists only tasks from the source `-s`
+selects. Hidden tasks keep running, count toward `auto.max_concurrent`, and show again
+in a dashboard that includes their source. A failed refresh of either selected
 source keeps results from the successful source visible with a warning and pauses all
 automatic starts until both sources refresh successfully.
 
