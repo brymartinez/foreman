@@ -154,9 +154,10 @@ func run(argv []string) int {
 			In: os.Stdin, Out: os.Stdout, Source: a,
 			IssueSource: cmd.Source,
 			GitHubEvery: time.Duration(cfg.Refresh) * time.Second, LocalEvery: localRefresh,
-			Auto:    autoMode(cfg.Auto, cmd.Auto),
-			Route:   routes != nil || routesErr != nil,
-			Version: currentVersion(),
+			Auto:     autoMode(cfg.Auto, cmd.Auto),
+			Route:    routes != nil || routesErr != nil,
+			Version:  currentVersion(),
+			TaskFile: store.Markdown{Dir: cfg.TasksDir}.Path,
 		}); err != nil {
 			return fail(err)
 		}

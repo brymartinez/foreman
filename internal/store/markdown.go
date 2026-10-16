@@ -34,6 +34,9 @@ func (m Markdown) path(key task.Key) string {
 	return filepath.Join(m.Dir, fmt.Sprintf("%s-%d.md", strings.ReplaceAll(string(key.Repo), "/", "-"), key.Number))
 }
 
+// Path is the file that holds the task's record.
+func (m Markdown) Path(key task.Key) string { return m.path(key) }
+
 func (m Markdown) Get(_ context.Context, key task.Key) (*task.Record, error) {
 	path := m.path(key)
 	raw, err := os.ReadFile(path)

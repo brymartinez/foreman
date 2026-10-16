@@ -45,19 +45,8 @@ func Frame(m Model) []string {
 	if m.HelpOpen {
 		return append(lines, helpLines(m, m.Height-1)...)
 	}
-
-	// A reset confirmation names everything it deletes, so it wraps onto rows taken
-	// from the log, then from the panes, rather than being cut at the edge.
-	foot := []string{footer(m)}
 	if m.Mode == ConfirmingReset {
-		foot = wrap(footer(m), m.Width, maxResetRows)
-		extra := len(foot) - 1
-		if m.LogOpen {
-			take := min(extra, lay.logHeight-2)
-			lay.logHeight -= take
-			extra -= take
-		}
-		lay.topHeight -= extra
+		return append(lines, resetConfirmLines(m)...)
 	}
 
 	right := m.Width - lay.leftWidth - 1
@@ -72,9 +61,7 @@ func Frame(m Model) []string {
 		lines = append(lines, logPane(m, lay.logHeight)...)
 	}
 	lines = append(lines, messageLine(m))
-	for _, f := range foot {
-		lines = append(lines, dimmed(pad(truncate(f, m.Width), m.Width)))
-	}
+	lines = append(lines, dimmed(pad(truncate(footer(m), m.Width), m.Width)))
 	return lines
 }
 
@@ -97,8 +84,64 @@ func withReset(short string, width int) string {
 	return strings.Join(parts, " · ")
 }
 
-// maxResetRows bounds the reset confirmation. Its text fits in four rows at minWidth.
-const maxResetRows = 4
+// resetList lists what a reset of the task deletes, by path and name, wrapped to
+// the width. Paths wrap at any column, so none is cut.
+func resetList(m Model) []string {
+	key := m.resetTarget
+	var rec *task.Record
+	for _, r := range m.Tasks {
+		if r.Key == key {
+			rec = r
+		}
+	}
+	text := []string{fmt.Sprintf("Reset %s#%d deletes its local run:", key.Repo, key.Number)}
+	item := func(what, target string) {
+		if target != "" {
+			text = append(text, "- "+what+" "+target)
+		}
+	}
+	if m.TaskFile != nil {
+		item("task file", m.TaskFile(key)+", replaced by one that keeps only the PR link")
+	}
+	if rec != nil && rec.Delegation != nil {
+		d := rec.Delegation
+		item("runner log", d.RunnerLog)
+		if d.Worktree != "" {
+			item("worktree", d.Worktree+", with any uncommitted or untracked work")
+		}
+		item("local branch", d.Branch)
+	}
+	text = append(text, "GitHub is unchanged.")
+	var out []string
+	for _, l := range text {
+		out = append(out, wrapLine(printable(l), m.Width)...)
+	}
+	return out
+}
+
+// resetFits reports whether the whole confirmation is on screen, which y requires.
+func resetFits(m Model) bool { return len(resetList(m)) <= m.Height-3 }
+
+// resetConfirmLines fill the body under the header with the targets, then the message
+// and the keys. A list too long for the terminal says so, and y does nothing.
+func resetConfirmLines(m Model) []string {
+	rows := m.Height - 3
+	targets := resetList(m)
+	keys := "y reset · any other key keeps the task"
+	if !resetFits(m) {
+		targets = append(targets[:rows-1], "Enlarge the terminal to see everything reset deletes.")
+		keys = "any key keeps the task"
+	}
+	var out []string
+	for _, l := range targets {
+		out = append(out, pad(truncate(l, m.Width), m.Width))
+	}
+	for len(out) < rows {
+		out = append(out, strings.Repeat(" ", m.Width))
+	}
+	out = append(out, messageLine(m))
+	return append(out, dimmed(pad(truncate(keys, m.Width), m.Width)))
+}
 
 // messageLine is the last result or error, under the panes.
 func messageLine(m Model) string {
@@ -596,7 +639,7 @@ func footer(m Model) string {
 		}
 		return fmt.Sprintf("Cancel %s#%d and stop its agent? [y/n]", m.cancelTarget.Repo, m.cancelTarget.Number)
 	case ConfirmingReset:
-		return fmt.Sprintf("Reset %s#%d? Deletes its runner log, worktree, local branch, and uncommitted or untracked work, and its task file, which then keeps only the PR link. GitHub is unchanged. [y/n]", m.resetTarget.Repo, m.resetTarget.Number)
+		return "y reset · any other key keeps the task"
 	case AnsweringDecision:
 		return answerHints(m)
 	}

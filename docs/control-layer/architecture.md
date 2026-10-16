@@ -334,12 +334,12 @@ the same commit. The commit message records why it changed.
   its URL, head branch, and state), and only then removes the worktree with its
   uncommitted work, the local branch, and the runner log. The record lists those
   files with the removal marked running, and a start refuses the issue until it
-  finishes, because the start would make a worktree at the same path. A removal
-  marked running for 10 minutes belongs to a dashboard that died, and no longer
-  blocks. A start also refuses when a reset lands between its read and its write. A
+  finishes, because the start would make a worktree at the same path. The mark
+  records the owning process; once that process has exited, the mark no longer
+  blocks, however long the owner ran. A start also refuses when a reset lands between its read and its write. A
   failed removal names what is left and keeps it listed; the next start removes it
-  first. A start that continues an open PR also clears the worktree path and branch it
-  is about to use. Before it removes anything, a start claims the reset record under
+  first. Nothing else is removed without the confirmation: a start that continues an
+  open PR refuses when something already exists at the worktree path it needs. Before it removes anything, a start claims the reset record under
   the task lock with a random owner token, and only that owner can save the run, so a
   second start cannot clear the path under the first one's new worktree. A start that
   gives up releases its claim. The PR link is saved before any of this. Nothing on GitHub changes. Deleting the file
@@ -646,9 +646,10 @@ the same commit. The commit message records why it changed.
   goroutine; quitting waits for a `Start`, `Cancel`, `Reset`, or `Respond` in flight.
 - **Reset is offered only where it can act.** `x` and its footer hint appear for a
   FAILED selection; on a narrow footer the hint stays and later hints drop. The
-  confirmation names the task file, runner log, worktree, local branch, and
-  uncommitted or untracked work, and wraps onto up to four rows taken from the log or
-  panes, so no effect is cut off at the edge. App.Reset checks for a live runner,
+  confirmation replaces the panes with the task file's path, the runner log's path,
+  the worktree's path with its uncommitted or untracked work, and the local branch's
+  name, wrapping paths at any column. When the list does not fit the terminal, it
+  says so and `y` does nothing. App.Reset checks for a live runner,
   because a FAILED task's pid stays recorded until a refresh sees it gone.
 - **Decisions are answered in the lower pane through `app.Respond`,** which resolves an
   option label, free text, or an empty answer (the recommendation). The

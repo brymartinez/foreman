@@ -39,6 +39,8 @@ type Options struct {
 	Route bool
 	// Version is the foreman version the help shows.
 	Version string
+	// TaskFile is the path of a task's file, for the reset confirmation.
+	TaskFile func(task.Key) string
 }
 
 // result is one finished background call. The event loop owns the model, so a
@@ -107,7 +109,7 @@ func Run(ctx context.Context, o Options) (err error) {
 	var m Model
 	m.Width, m.Height = size(o.Out)
 	m.SetAuto(o.Auto)
-	m.RouteOn, m.Version = o.Route, o.Version
+	m.RouteOn, m.Version, m.TaskFile = o.Route, o.Version, o.TaskFile
 	m.IssueSource = o.IssueSource
 
 	keys := make(chan Key, 64)

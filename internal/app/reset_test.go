@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -260,16 +261,58 @@ func TestStartRefusesATaskResetWhileItStarted(t *testing.T) {
 	}
 }
 
-func TestStartAfterResetOfAnOpenPRRemovesAWorktreeLeftAtItsPath(t *testing.T) {
+func TestStartAfterResetRefusesAndKeepsAWorktreeAtTheOpenPRPath(t *testing.T) {
 	f := newFixture()
+	f.app.WorktreesDir = t.TempDir()
 	resetTask(t, f, "open")
 	f.wt.removed = nil
-	if _, err := f.app.Start(context.Background(), startReq(t)); err != nil {
+	path := filepath.Join(f.app.WorktreesDir, "ridezoomo-armada-backend", "feat", "825-provider-retries")
+	if err := os.MkdirAll(path, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	want := WorktreeRemoval{Path: "/wt/ridezoomo-armada-backend/feat/825-provider-retries", Branch: "feat/825-provider-retries", DeleteBranch: true, Force: true, RepoDir: "/src/armada-backend"}
-	if !reflect.DeepEqual(f.wt.removed, []WorktreeRemoval{want}) {
-		t.Errorf("removed = %+v, want %+v", f.wt.removed, want)
+	os.WriteFile(filepath.Join(path, "notes.txt"), []byte("someone's work"), 0o644)
+	if _, err := f.app.Start(context.Background(), startReq(t)); err == nil || !strings.Contains(err.Error(), path) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(f.wt.removed) != 0 || len(f.wt.reqs) != 0 {
+		t.Errorf("removed %+v, made %+v", f.wt.removed, f.wt.reqs)
+	}
+	if _, err := os.Stat(filepath.Join(path, "notes.txt")); err != nil {
+		t.Errorf("the worktree's work is gone: %v", err)
+	}
+	if _, err := f.app.Start(context.Background(), startReq(t)); err == nil || strings.Contains(err.Error(), "being started") {
+		t.Errorf("a refused start must release its claim: %v", err)
+	}
+}
+
+// claimed puts a reset issue under another command's claim from process pid.
+func claimed(t *testing.T, f fixture, pid int, since time.Time) {
+	t.Helper()
+	rec := resetTask(t, f, "open")
+	f.store.recs[rec.Key].Reset.Cleanup = &task.ResetCleanup{Since: since, Owner: "other", PID: pid}
+	f.wt.removed, f.wt.reqs = nil, nil
+}
+
+func TestAClaimHeldLongByARunningProcessStillBlocksAStart(t *testing.T) {
+	f := newFixture()
+	claimed(t, f, os.Getpid(), now.Add(-time.Hour))
+	if _, err := f.app.Start(context.Background(), startReq(t)); err == nil || !strings.Contains(err.Error(), "being started") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(f.wt.removed) != 0 || len(f.wt.reqs) != 0 {
+		t.Errorf("removed %+v, made %+v", f.wt.removed, f.wt.reqs)
+	}
+}
+
+func TestAClaimOfAnExitedProcessLetsAStartThrough(t *testing.T) {
+	cmd := exec.Command("true")
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+	f := newFixture()
+	claimed(t, f, cmd.Process.Pid, now)
+	if _, err := f.app.Start(context.Background(), startReq(t)); err != nil {
+		t.Fatalf("a dead owner's claim still blocks: %v", err)
 	}
 }
 
@@ -456,8 +499,8 @@ func TestASecondStartAfterResetCannotRemoveTheFirstStartsWorktree(t *testing.T) 
 	if err != nil || first.Delegation == nil || first.Reset != nil {
 		t.Fatalf("first start: %+v, %v", first, err)
 	}
-	if len(f.wt.removed) != 1 {
-		t.Errorf("removed = %+v; only the first start may clear the path", f.wt.removed)
+	if len(f.wt.removed) != 0 {
+		t.Errorf("removed = %+v; a start after a finished reset removes nothing", f.wt.removed)
 	}
 }
 

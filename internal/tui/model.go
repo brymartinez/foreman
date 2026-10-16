@@ -114,6 +114,8 @@ type Model struct {
 	// HelpOpen shows the keys and Version in place of the panes.
 	HelpOpen bool
 	Version  string
+	// TaskFile is the path of a task's file, which the reset confirmation names.
+	TaskFile func(task.Key) string
 
 	Focus       Pane
 	InboxCursor int
@@ -870,6 +872,11 @@ func (m *Model) startReset() Action {
 
 func (m *Model) confirmReset(k Key) Action {
 	key := m.resetTarget
+	if k.Kind == KeyRune && k.Rune == 'y' && !resetFits(*m) {
+		m.Mode, m.resetTarget = Browsing, task.Key{}
+		m.Message = "! Enlarge the terminal to see everything reset deletes, then press x again"
+		return Action{}
+	}
 	m.Mode, m.resetTarget = Browsing, task.Key{}
 	if k.Kind != KeyRune || k.Rune != 'y' {
 		return Action{}

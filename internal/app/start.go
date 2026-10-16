@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"slices"
 	"strings"
@@ -424,15 +425,14 @@ func (a App) startableBy(rec *task.Record, owner string) error {
 	return fmt.Errorf("%s is %s", ref, rec.State)
 }
 
-// finishReset removes what a reset left of the old run before a start makes its
-// worktree. A continued PR's worktree goes at the old run's path, where a start that
-// raced the reset can also have left one, so that path is cleared too. Nothing else
-// owns either: the record has no delegation, and a running removal holds starts off.
+// finishReset removes what a confirmed reset left of the old run before a start
+// makes its worktree. Anything else at the continued PR's path was made after the
+// reset, so the start refuses rather than delete it.
 func (a App) finishReset(ctx context.Context, rec *task.Record, wt WorktreeRequest, continuePR bool) error {
 	if rec == nil || rec.Delegation != nil || rec.Reset == nil {
 		return nil
 	}
-	if c := rec.Reset.Cleanup; c != nil {
+	if c := rec.Reset.Cleanup; c != nil && (c.Worktree != "" || c.Branch != "" || c.RunnerLog != "") {
 		left := *c
 		if left.RepoDir == "" {
 			// The worktree had the branch when the reset ran; without it, only a
@@ -446,8 +446,10 @@ func (a App) finishReset(ctx context.Context, rec *task.Record, wt WorktreeReque
 	if !continuePR {
 		return nil
 	}
-	if err := a.Worktrees.Remove(ctx, WorktreeRemoval{Path: wt.Path, Branch: wt.Branch, DeleteBranch: true, Force: true, RepoDir: wt.RepoDir}); err != nil {
-		return fmt.Errorf("clear %s for PR #%d: %w", wt.Path, rec.Reset.PR, err)
+	if _, err := os.Stat(wt.Path); err == nil {
+		return fmt.Errorf("%s already exists; move or remove it, then start PR #%d again", wt.Path, rec.Reset.PR)
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
 	}
 	return nil
 }

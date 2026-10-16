@@ -12,22 +12,27 @@ import (
 
 // failedOnly selects a FAILED task in DELEGATED WORK.
 func failedOnly() Model {
-	m := Model{Width: 160, Height: 30}
+	m := Model{Width: 160, Height: 30, TaskFile: func(k task.Key) string { return "/tasks/a-b-12.md" }}
 	m.SetInbox([]app.InboxEntry{entry("a/b", 1, "First")})
-	m.SetTasks([]*task.Record{record(12, task.Failed)})
+	rec := record(12, task.Failed)
+	rec.Delegation.Worktree, rec.Delegation.Branch = "/wt/a-b/feat/12-retries", "feat/12-retries"
+	m.SetTasks([]*task.Record{rec})
 	m.Focus = TaskPane
 	return m
 }
+
+// resetTargets are what the confirmation for failedOnly's task must name.
+var resetTargets = []string{"/tasks/a-b-12.md", "/logs/b.log", "/wt/a-b/feat/12-retries", "feat/12-retries", "uncommitted or untracked work", "keeps only the PR link", "y reset"}
 
 func TestResetConfirmsWhatItDeletesBeforeActing(t *testing.T) {
 	m := failedOnly()
 	if got := press(&m, rune_('x')); got.Kind != ActionNone || m.Mode != ConfirmingReset {
 		t.Fatalf("action %+v mode %v", got, m.Mode)
 	}
-	footer := footer(m)
-	for _, want := range []string{"task file", "runner log", "worktree", "local branch", "uncommitted or untracked work", "[y/n]"} {
-		if !strings.Contains(footer, want) {
-			t.Errorf("confirmation %q does not name %q", footer, want)
+	text := frameText(m)
+	for _, want := range resetTargets {
+		if !strings.Contains(text, want) {
+			t.Errorf("confirmation does not name %q:\n%s", want, strings.Join(plain(Frame(m)), "\n"))
 		}
 	}
 	got := press(&m, rune_('y'))
@@ -108,7 +113,8 @@ func frameText(m Model) string {
 	return strings.Join(rows, " ")
 }
 
-func TestResetConfirmationShowsEveryEffectAtTheSmallestSize(t *testing.T) {
+// Paths wrap at any column, so the rows are compared with spaces removed.
+func TestResetConfirmationShowsEveryTargetAtTheSmallestSize(t *testing.T) {
 	for _, logOpen := range []bool{false, true} {
 		m := failedOnly()
 		m.Width, m.Height, m.LogOpen = minWidth, minHeight, logOpen
@@ -116,12 +122,26 @@ func TestResetConfirmationShowsEveryEffectAtTheSmallestSize(t *testing.T) {
 		if got := len(Frame(m)); got != m.Height {
 			t.Fatalf("log %v: frame has %d rows, want %d", logOpen, got, m.Height)
 		}
-		text := frameText(m)
-		for _, want := range []string{"task file", "runner log", "worktree", "local branch", "uncommitted or untracked work", "keeps only the PR link", "[y/n]"} {
-			if !strings.Contains(text, want) {
-				t.Errorf("log %v: confirmation does not show %q:\n%s", logOpen, want, strings.Join(Frame(m), "\n"))
+		text := strings.Join(plain(Frame(m)), "")
+		text = strings.Join(strings.Fields(text), " ")
+		for _, want := range resetTargets {
+			if !strings.Contains(strings.ReplaceAll(text, " ", ""), strings.ReplaceAll(want, " ", "")) {
+				t.Errorf("log %v: confirmation does not show %q:\n%s", logOpen, want, strings.Join(plain(Frame(m)), "\n"))
 			}
 		}
+	}
+}
+
+func TestResetIsNotConfirmedWhileTheTargetsDoNotFit(t *testing.T) {
+	m := failedOnly()
+	m.Tasks[0].Delegation.Worktree = "/" + strings.Repeat("deep/", 120) + "wt"
+	m.Width, m.Height = minWidth, minHeight
+	press(&m, rune_('x'))
+	if !strings.Contains(frameText(m), "Enlarge the terminal") {
+		t.Errorf("frame does not say the list is cut:\n%s", strings.Join(plain(Frame(m)), "\n"))
+	}
+	if got := press(&m, rune_('y')); got.Kind != ActionNone || !strings.Contains(m.Message, "Enlarge the terminal") {
+		t.Fatalf("y reset a task whose targets were not all shown: %+v %q", got, m.Message)
 	}
 }
 

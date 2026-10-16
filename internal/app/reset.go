@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/brymartinez/foreman/internal/agent"
@@ -49,7 +50,7 @@ func (a App) Reset(ctx context.Context, rec *task.Record) (*task.Record, error) 
 	}
 
 	mark.At = a.Now()
-	mark.Cleanup = &task.ResetCleanup{Worktree: d.Worktree, Branch: removal.Branch, RepoDir: removal.RepoDir, RunnerLog: d.RunnerLog, Since: mark.At, Owner: resetOwner}
+	mark.Cleanup = &task.ResetCleanup{Worktree: d.Worktree, Branch: removal.Branch, RepoDir: removal.RepoDir, RunnerLog: d.RunnerLog, Since: mark.At, Owner: resetOwner, PID: os.Getpid()}
 	stub, err := a.update(ctx, cur.Key, func(cur *task.Record) (*task.Record, error) {
 		// The task can change while GitHub is read; a run started since owns it.
 		if err := a.resettable(cur); err != nil {
@@ -80,7 +81,7 @@ func (a App) Reset(ctx context.Context, rec *task.Record) (*task.Record, error) 
 		if len(left) == 0 {
 			cur.Reset.Cleanup = nil
 		} else {
-			cur.Reset.Cleanup.Since, cur.Reset.Cleanup.Owner = time.Time{}, ""
+			cur.Reset.Cleanup.Since, cur.Reset.Cleanup.Owner, cur.Reset.Cleanup.PID = time.Time{}, "", 0
 		}
 		return cur, nil
 	})
@@ -114,10 +115,6 @@ func (a App) cleanUp(ctx context.Context, c task.ResetCleanup) []string {
 	return left
 }
 
-// resetCleanupLimit is how long a start waits on a reset's removal, or on another
-// start of the reset issue. One that runs longer belongs to a process that died.
-const resetCleanupLimit = 10 * time.Minute
-
 // resetOwner owns the removal App.Reset runs. A start owns it under a random token.
 const resetOwner = "reset"
 
@@ -127,7 +124,17 @@ func (a App) resetting(rec *task.Record) bool {
 	if rec == nil || rec.Reset == nil || rec.Reset.Cleanup == nil || rec.Reset.Cleanup.Since.IsZero() {
 		return false
 	}
-	return a.Now().Sub(rec.Reset.Cleanup.Since) < resetCleanupLimit
+	return processAlive(rec.Reset.Cleanup.PID)
+}
+
+// processAlive reports whether the process that holds a reset claim still runs. A
+// claim from a process that died, such as a closed dashboard, holds nothing.
+func processAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 // resettable allows a reset only for a FAILED run whose runner has exited, because a
@@ -257,7 +264,7 @@ func (a App) claimReset(ctx context.Context, read *task.Record) (*task.Record, s
 		if cur.Reset.Cleanup != nil {
 			c = *cur.Reset.Cleanup
 		}
-		c.Since, c.Owner = a.Now(), owner
+		c.Since, c.Owner, c.PID = a.Now(), owner, os.Getpid()
 		cur.Reset.Cleanup = &c
 		return cur, nil
 	})
@@ -271,7 +278,7 @@ func (a App) releaseReset(ctx context.Context, key task.Key, owner string) {
 		if cur == nil || cur.Reset == nil || cur.Reset.Cleanup == nil || cur.Reset.Cleanup.Owner != owner {
 			return nil, nil
 		}
-		cur.Reset.Cleanup.Since, cur.Reset.Cleanup.Owner = time.Time{}, ""
+		cur.Reset.Cleanup.Since, cur.Reset.Cleanup.Owner, cur.Reset.Cleanup.PID = time.Time{}, "", 0
 		return cur, nil
 	})
 }
