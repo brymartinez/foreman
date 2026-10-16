@@ -414,3 +414,19 @@ func TestBranchExists(t *testing.T) {
 		t.Error("a missing checkout must be an error, not a missing branch")
 	}
 }
+
+func TestCommonDirFindsTheCheckoutThatHoldsTheBranch(t *testing.T) {
+	clone, _ := repoWithOrigin(t)
+	ctx := context.Background()
+	req := app.WorktreeRequest{RepoDir: clone, Path: filepath.Join(t.TempDir(), "825-a"), Branch: "agent/825-a", BaseRef: "origin/main"}
+	if err := (Git{}).Ensure(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := (Git{}).CommonDir(ctx, req.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := (Git{}).BranchExists(ctx, dir, req.Branch); err != nil || !ok {
+		t.Errorf("branch in %s: %v, %v", dir, ok, err)
+	}
+}

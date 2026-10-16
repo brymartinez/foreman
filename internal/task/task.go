@@ -146,7 +146,9 @@ type Delegation struct {
 	AccountEmail string
 	Branch       string
 	BaseRef      string
-	Worktree     string
+	// RepoDir is the checkout the worktree was made from, which holds the branch.
+	RepoDir  string
+	Worktree string
 	// WorktreeRemovedAt is set once cleanup removed the worktree; the branch may remain.
 	WorktreeRemovedAt time.Time
 	ContextFile       string

@@ -338,6 +338,10 @@ the same commit. The commit message records why it changed.
   finishes, because the start would make a worktree at the same path. The mark
   records the owning process; once that process has exited, the mark no longer
   blocks, however long the owner ran. A start also refuses when a reset lands between its read and its write. A
+  The branch is deleted in the checkout the task's worktree was made from, which the
+  delegation stores as `repo_dir`; for an older task without it, the worktree names its
+  repository, and with no worktree the managed checkout is checked, and a branch not
+  found there is reported as possibly left in the task's own checkout. A
   failed removal names what is left and keeps only that listed; a worktree removed
   while its branch was kept leaves only the branch. A start never deletes a listed
   worktree or branch, because nothing proves it is still the reset run's: it refuses

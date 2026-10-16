@@ -244,6 +244,9 @@ type WorktreeManager interface {
 	// ConfigureIdentity sets the commit author and committer for the worktree at dir
 	// only, leaving the shared repository config and the global config alone.
 	ConfigureIdentity(ctx context.Context, dir, name, email string) error
+	// CommonDir is the repository directory a worktree at dir belongs to, which holds
+	// its branch.
+	CommonDir(ctx context.Context, dir string) (string, error)
 	// BranchExists reports whether the repository at dir has a local branch of that name.
 	BranchExists(ctx context.Context, dir, branch string) (bool, error)
 	// SyncDefaultBranch fetches origin's branch and fast-forwards the checkout at dir,

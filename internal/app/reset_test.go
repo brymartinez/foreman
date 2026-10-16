@@ -68,7 +68,7 @@ func TestResetDeletesTheRunAndKeepsTheStoredPR(t *testing.T) {
 	if f.store.recs[rec.Key] != got {
 		t.Error("reset record not saved")
 	}
-	wantRm := WorktreeRemoval{Path: d.Worktree, Branch: d.Branch, DeleteBranch: true, Force: true, RepoDir: "/repos/ridezoomo-armada-backend"}
+	wantRm := WorktreeRemoval{Path: d.Worktree, Branch: d.Branch, DeleteBranch: true, Force: true, RepoDir: "/src/armada-backend"}
 	if !reflect.DeepEqual(f.wt.removed, []WorktreeRemoval{wantRm}) {
 		t.Errorf("removed %+v, want %+v", f.wt.removed, wantRm)
 	}
@@ -607,5 +607,51 @@ func TestAStartLeavesABranchTheResetKept(t *testing.T) {
 	f.wt.branches = nil
 	if _, err := f.app.Start(context.Background(), startReq(t)); err != nil {
 		t.Fatalf("start after the developer deleted the branch: %v", err)
+	}
+}
+
+func TestStartRecordsTheCheckoutThatHoldsTheBranch(t *testing.T) {
+	f := newFixture()
+	rec := failedTask(t, f, 912)
+	if rec.Delegation.RepoDir != "/src/armada-backend" {
+		t.Fatalf("repo dir = %q", rec.Delegation.RepoDir)
+	}
+}
+
+func TestResetFindsTheCheckoutOfAnOlderTaskThroughItsWorktree(t *testing.T) {
+	f := newFixture()
+	f.app.WorktreesDir = t.TempDir()
+	rec := failedTask(t, f, 912)
+	rec.Delegation.RepoDir = ""
+	if err := os.MkdirAll(rec.Delegation.Worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f.wt.common = "/elsewhere/.git"
+	if _, err := f.app.Reset(context.Background(), rec); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.wt.removed) != 1 || f.wt.removed[0].RepoDir != "/elsewhere/.git" {
+		t.Errorf("removed = %+v", f.wt.removed)
+	}
+}
+
+func TestResetOfAnOlderTaskWithNoWorktreeWarnsWhenTheBranchIsNotInTheManagedCheckout(t *testing.T) {
+	f := newFixture()
+	rec := failedTask(t, f, 912)
+	rec.Delegation.RepoDir = ""
+	got, err := f.app.Reset(context.Background(), rec)
+	if err == nil || !strings.Contains(err.Error(), "branch "+rec.Delegation.Branch) || !strings.Contains(err.Error(), "checkout the task started from") {
+		t.Fatalf("err = %v; the branch may remain elsewhere, so the reset must not report success", err)
+	}
+	if got == nil || got.Reset == nil || got.Reset.PR != 912 {
+		t.Fatalf("record = %+v", got)
+	}
+
+	f2 := newFixture()
+	rec2 := failedTask(t, f2, 912)
+	rec2.Delegation.RepoDir = ""
+	f2.wt.branches = map[string]bool{rec2.Delegation.Branch: true}
+	if _, err := f2.app.Reset(context.Background(), rec2); err != nil {
+		t.Fatalf("the branch is in the managed checkout: %v", err)
 	}
 }

@@ -149,6 +149,11 @@ func (Git) Remove(ctx context.Context, req app.WorktreeRemoval) error {
 	return nil
 }
 
+func (Git) CommonDir(ctx context.Context, dir string) (string, error) {
+	out, err := git(ctx, dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	return strings.TrimSpace(string(out)), err
+}
+
 // BranchExists asks show-ref, which exits 1 only for a missing ref; any other
 // failure, such as a missing checkout, is an error.
 func (Git) BranchExists(ctx context.Context, dir, branch string) (bool, error) {

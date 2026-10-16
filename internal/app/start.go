@@ -203,6 +203,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			Reviewer:       req.Agent.Reviewer(),
 			Branch:         wt.Branch,
 			BaseRef:        base,
+			RepoDir:        wt.RepoDir,
 			Worktree:       wt.Path,
 			ContextFile:    req.ContextFile,
 			Profile:        req.Profile,
@@ -213,6 +214,10 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		if prev != nil {
 			cur.Delegation.Account, cur.Delegation.AccountEmail = prev.Account, prev.AccountEmail
 			cur.Delegation.PriorPR = prev.PriorPR
+			// A restart reuses the branch, which stays in the checkout it was made in.
+			if prev.Branch == wt.Branch && prev.RepoDir != "" {
+				cur.Delegation.RepoDir = prev.RepoDir
+			}
 		}
 		reset := cur.Reset != nil
 		if reset {

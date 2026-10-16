@@ -599,3 +599,16 @@ func TestStoreRoundTripsThePriorPR(t *testing.T) {
 		t.Fatalf("prior PR = %+v, %v", got.Delegation, err)
 	}
 }
+
+func TestStoreRoundTripsTheCheckoutOfTheBranch(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	want := delegated()
+	want.Delegation.RepoDir = "/src/a-b"
+	if err := s.Save(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, want.Key)
+	if err != nil || got.Delegation.RepoDir != "/src/a-b" {
+		t.Fatalf("repo dir = %+v, %v", got.Delegation, err)
+	}
+}

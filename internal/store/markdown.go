@@ -177,6 +177,7 @@ type frontmatter struct {
 	AccountEmail        string                 `yaml:"account_email,omitempty"`
 	Branch              string                 `yaml:"branch,omitempty"`
 	BaseRef             string                 `yaml:"base_ref,omitempty"`
+	RepoDir             string                 `yaml:"repo_dir,omitempty"`
 	Worktree            string                 `yaml:"worktree,omitempty"`
 	WorktreeRemovedAt   *time.Time             `yaml:"worktree_removed_at,omitempty"`
 	ContextFile         string                 `yaml:"context_file,omitempty"`
@@ -362,6 +363,7 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 			AccountEmail:     fm.AccountEmail,
 			Branch:           fm.Branch,
 			BaseRef:          fm.BaseRef,
+			RepoDir:          fm.RepoDir,
 			Worktree:         fm.Worktree,
 			ContextFile:      fm.ContextFile,
 			RunnerPID:        fm.RunnerPID,
@@ -485,6 +487,7 @@ func fromRecord(rec *task.Record) frontmatter {
 		fm.ReviewAgent = d.Reviewer
 		fm.Account, fm.AccountEmail = d.Account, d.AccountEmail
 		fm.Branch, fm.BaseRef, fm.Worktree, fm.ContextFile = d.Branch, d.BaseRef, d.Worktree, d.ContextFile
+		fm.RepoDir = d.RepoDir
 		if !d.WorktreeRemovedAt.IsZero() {
 			t := d.WorktreeRemovedAt
 			fm.WorktreeRemovedAt = &t

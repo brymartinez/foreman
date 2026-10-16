@@ -41,15 +41,14 @@ func (a App) Reset(ctx context.Context, rec *task.Record) (*task.Record, error) 
 	if err != nil {
 		return nil, fmt.Errorf("nothing was deleted: %w", err)
 	}
-	removal := WorktreeRemoval{Path: d.Worktree, Branch: d.Branch, DeleteBranch: d.Branch != "", Force: true}
-	if _, err := os.Stat(d.Worktree); d.Worktree == "" || errors.Is(err, fs.ErrNotExist) {
-		// Cleanup can remove the worktree and keep the branch, which only a checkout
-		// of the repository can then find.
-		req := StartRequest{Repo: cur.Repo}
-		if _, err := a.sourceRepo(ctx, &req); err != nil {
+	removal := WorktreeRemoval{Path: d.Worktree, Branch: d.Branch, DeleteBranch: d.Branch != "", Force: true, RepoDir: d.RepoDir}
+	// guessed is a branch looked for in the managed checkout, which may not be where
+	// an older task made it; a miss there is reported, never taken as deleted.
+	guessed := ""
+	if removal.RepoDir == "" {
+		if removal.RepoDir, guessed, err = a.branchCheckout(ctx, cur.Repo, d); err != nil {
 			return nil, fmt.Errorf("nothing was deleted: %w", err)
 		}
-		removal.RepoDir = req.Dir
 	}
 
 	mark.At = a.Now()
@@ -94,10 +93,36 @@ func (a App) Reset(ctx context.Context, rec *task.Record) (*task.Record, error) 
 	if done != nil {
 		stub = done
 	}
+	if guessed != "" && len(problems) == 0 {
+		problems = append(problems, fmt.Sprintf("branch %s, which is not in %s and may remain in the checkout the task started from", guessed, removal.RepoDir))
+	}
 	if len(problems) > 0 {
 		return stub, fmt.Errorf("%s was reset, but could not remove %s; remove them by hand before starting it again", taskRef(cur), strings.Join(problems, "; "))
 	}
 	return stub, nil
+}
+
+// branchCheckout finds the checkout that holds a task's branch when the task did not
+// record it, as tasks from before RepoDir do not. A worktree on disk names its own
+// repository. Without one, the managed checkout is the only guess; guessed is the
+// branch when that checkout does not have it.
+func (a App) branchCheckout(ctx context.Context, repo task.Repo, d task.Delegation) (dir, guessed string, err error) {
+	if _, statErr := os.Stat(d.Worktree); d.Worktree != "" && statErr == nil {
+		dir, err = a.Worktrees.CommonDir(ctx, d.Worktree)
+		return dir, "", err
+	}
+	req := StartRequest{Repo: repo}
+	if _, err := a.sourceRepo(ctx, &req); err != nil {
+		return "", "", err
+	}
+	if d.Branch == "" {
+		return req.Dir, "", nil
+	}
+	exists, err := a.Worktrees.BranchExists(ctx, req.Dir, d.Branch)
+	if err != nil || exists {
+		return req.Dir, "", err
+	}
+	return req.Dir, d.Branch, nil
 }
 
 // cleanUp removes a reset run's worktree with its uncommitted work, its local branch,

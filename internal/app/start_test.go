@@ -25,6 +25,7 @@ type fakeWorktrees struct {
 	ensureErr       error
 	onEnsure        func()          // runs inside Ensure
 	branches        map[string]bool // local branches BranchExists reports
+	common          string          // CommonDir's answer
 	// contains answers Contains; nil reports every ancestor as merged.
 	contains  func(dir, ancestor, descendant string) (bool, error)
 	checks    []MergeCheck
@@ -133,6 +134,10 @@ func (f *fakeWorktrees) Remove(_ context.Context, r WorktreeRemoval) error {
 	}
 	f.removed = append(f.removed, r)
 	return nil
+}
+
+func (f *fakeWorktrees) CommonDir(context.Context, string) (string, error) {
+	return f.common, nil
 }
 
 func (f *fakeWorktrees) BranchExists(_ context.Context, _, branch string) (bool, error) {
