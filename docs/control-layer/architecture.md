@@ -326,10 +326,10 @@ the same commit. The commit message records why it changed.
   reason; Foreman never resets local work. A checkout the caller supplies is read as
   it is. Guidance is `AGENTS.md` plus the Markdown files that a line in it names as
   branch naming guidance (the line says "branch" and "name", "convention", "rule",
-  or "guidance", and not "decision log", "history", "archive", or "superseded"), up to
-  two links deep. A document that only mentions branches is not a rule. A named file
-  that is missing, unreadable, over 32 KiB, or outside the repository stops the
-  start with its path. A tool-free
+XX  two links deep. A document that only mentions branches is not a rule. A named file
+  that is missing, unreadable, over 32 KiB, outside the repository, or past the
+  eighth named file stops the start with its path. A start with a confirmed name
+  runs the same sync, since the checkout can change while a person edits it. A tool-free
   proposal applies the repository convention to the issue and tracker suggestion;
   repository guidance takes precedence. A manual start shows an editable proposal.
   Auto mode waits when the workstream or guidance is unclear. The chosen name is

@@ -92,6 +92,13 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		branch = existing.Delegation.Branch
 	} else {
 		branch = req.BranchName
+		// A confirmed name skips the proposal, but the checkout can change while a
+		// person edits it, so the same sync still has to pass.
+		if branch != "" {
+			if err := a.refreshGuidance(ctx, req, info.DefaultBranch); err != nil {
+				return nil, err
+			}
+		}
 		if branch == "" {
 			proposal, err := a.proposeBranch(ctx, req, info.DefaultBranch, issue)
 			if err != nil {

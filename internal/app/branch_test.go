@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -249,6 +250,50 @@ func TestBranchGuideReportsAnOversizeExplicitDocument(t *testing.T) {
 	})
 	_, err := readBranchGuide(root)
 	if err == nil || !strings.Contains(err.Error(), "too large") || !strings.Contains(err.Error(), "docs/branches.md") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestConfirmedBranchStillStopsWhenTheManagedCheckoutCannotSync(t *testing.T) {
+	f := newFixture()
+	managedCheckout(t, &f)
+	f.wt.syncErr = errors.New("managed checkout has uncommitted changes on main")
+	_, err := f.app.Start(context.Background(), StartRequest{Repo: f.repos.info.Repo, Issue: 825, Agent: task.Claude, BranchName: "feat/825-provider-retries"})
+	if err == nil || !strings.Contains(err.Error(), "uncommitted changes") {
+		t.Fatalf("start error = %v", err)
+	}
+	if len(f.wt.reqs) != 0 {
+		t.Fatal("a failed refresh created a worktree")
+	}
+}
+
+func TestBranchGuideReportsNamedGuidesPastTheFileLimit(t *testing.T) {
+	files := map[string]string{}
+	var agents strings.Builder
+	for i := 1; i <= 8; i++ {
+		name := fmt.Sprintf("docs/branches%d.md", i)
+		files[name] = "rule"
+		fmt.Fprintf(&agents, "Branch naming rules: `%s`.\n", name)
+	}
+	agents.WriteString("Branch naming rules: `docs/missing.md`.\n")
+	files["AGENTS.md"] = agents.String()
+	_, err := readBranchGuide(writeRepo(t, files))
+	if err == nil || !strings.Contains(err.Error(), "docs/missing.md") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestBranchGuideStopsWhenMoreThanEightGuidesAreNamed(t *testing.T) {
+	files := map[string]string{}
+	var agents strings.Builder
+	for i := 1; i <= 9; i++ {
+		name := fmt.Sprintf("docs/branches%d.md", i)
+		files[name] = "rule"
+		fmt.Fprintf(&agents, "Branch naming rules: `%s`.\n", name)
+	}
+	files["AGENTS.md"] = agents.String()
+	_, err := readBranchGuide(writeRepo(t, files))
+	if err == nil || !strings.Contains(err.Error(), "docs/branches9.md") || !strings.Contains(err.Error(), "more than 8") {
 		t.Fatalf("err = %v", err)
 	}
 }

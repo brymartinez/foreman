@@ -189,7 +189,7 @@ func readBranchGuide(root string) (string, error) {
 	queue := []visit{{path: filepath.Join(root, "AGENTS.md")}}
 	seen := map[string]bool{}
 	var sections []string
-	for len(queue) > 0 && len(seen) < 8 {
+	for len(queue) > 0 {
 		v := queue[0]
 		queue = queue[1:]
 		name, _ := filepath.Rel(root, v.path)
@@ -209,6 +209,10 @@ func readBranchGuide(root string) (string, error) {
 		}
 		if seen[path] {
 			continue
+		}
+		// AGENTS.md plus at most 8 named files.
+		if len(seen) > 8 {
+			return "", fmt.Errorf("branch guidance names more than 8 files; %s is past the limit", name)
 		}
 		seen[path] = true
 		stat, err := os.Stat(path)

@@ -113,3 +113,15 @@ func TestSyncDefaultBranchStopsWhenAnotherBranchIsCheckedOut(t *testing.T) {
 		t.Errorf("main = %s, want it advanced to %s", got, want)
 	}
 }
+
+func TestSyncDefaultBranchStopsOnUntrackedFiles(t *testing.T) {
+	_, _, clone := staleClone(t, 1)
+	writeFile(t, filepath.Join(clone, "notes.txt"), "mine")
+	err := (Git{}).SyncDefaultBranch(context.Background(), clone, "main")
+	if err == nil || !strings.Contains(err.Error(), "uncommitted changes") {
+		t.Fatalf("err = %v", err)
+	}
+	if got := read(t, filepath.Join(clone, "AGENTS.md")); got != "old guidance" {
+		t.Errorf("AGENTS.md = %q, want the checkout left alone", got)
+	}
+}

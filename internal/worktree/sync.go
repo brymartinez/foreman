@@ -30,7 +30,7 @@ func (Git) SyncDefaultBranch(ctx context.Context, dir, branch string) error {
 		}
 		return fmt.Errorf("managed checkout %s is on %s, not %s", dir, current, branch)
 	}
-	status, err := git(ctx, dir, "status", "--porcelain=v1", "--untracked-files=no")
+	status, err := git(ctx, dir, "status", "--porcelain=v1", "--untracked-files=all")
 	if err != nil {
 		return err
 	}
