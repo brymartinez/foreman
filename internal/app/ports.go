@@ -218,7 +218,7 @@ type WorktreeRemoval struct {
 	// sets it, because the developer confirmed discarding that work.
 	Force bool
 	// RepoDir is a checkout of the repository. It finds the branch when the worktree
-	// is already gone, so a forced removal can still delete it.
+	// is already gone, so removal can still delete it.
 	RepoDir string
 }
 

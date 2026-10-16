@@ -448,6 +448,40 @@ func TestForcedRemoveDeletesTheBranchOfAWorktreeAlreadyGone(t *testing.T) {
 	}
 }
 
+func TestRemoveRetriesBranchDeletionAfterWorktreeRemoval(t *testing.T) {
+	clone, _ := repoWithOrigin(t)
+	ctx := context.Background()
+	req := app.WorktreeRequest{RepoDir: clone, Path: filepath.Join(t.TempDir(), "task"), Branch: "agent/retry", BaseRef: "origin/main"}
+	if err := (Git{}).Ensure(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	holder := filepath.Join(t.TempDir(), "holder")
+	run(t, clone, "worktree", "add", "-q", "--force", holder, req.Branch)
+	removal := app.WorktreeRemoval{RepoDir: clone, Path: req.Path, Branch: req.Branch, DeleteBranch: true}
+	if err := (Git{}).Remove(ctx, removal); !errors.Is(err, app.ErrBranchNotDeleted) {
+		t.Fatalf("first removal = %v", err)
+	}
+	if _, err := os.Stat(req.Path); !os.IsNotExist(err) {
+		t.Fatalf("task worktree still exists: %v", err)
+	}
+	if got := run(t, holder, "branch", "--show-current"); got != req.Branch {
+		t.Fatalf("holder branch = %q", got)
+	}
+	if err := (Git{}).Remove(ctx, removal); !errors.Is(err, app.ErrBranchNotDeleted) {
+		t.Fatalf("retry while branch is held = %v", err)
+	}
+	run(t, clone, "worktree", "remove", holder)
+	if err := (Git{}).Remove(ctx, removal); err != nil {
+		t.Fatalf("retry after branch is released: %v", err)
+	}
+	if got := run(t, clone, "branch", "--list", req.Branch); got != "" {
+		t.Fatalf("branch remains: %q", got)
+	}
+	if err := (Git{}).Remove(ctx, removal); err != nil {
+		t.Fatalf("already absent branch: %v", err)
+	}
+}
+
 func TestRemoveReportsABranchKeptAfterTheWorktreeIsGone(t *testing.T) {
 	clone, _ := repoWithOrigin(t)
 	ctx := context.Background()

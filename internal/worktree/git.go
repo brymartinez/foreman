@@ -127,8 +127,11 @@ func fastForward(ctx context.Context, req app.WorktreeRequest, remote, branch st
 func (Git) Remove(ctx context.Context, req app.WorktreeRemoval) error {
 	common := ""
 	if _, err := os.Stat(req.Path); errors.Is(err, fs.ErrNotExist) {
-		if !req.Force || !req.DeleteBranch || req.RepoDir == "" {
+		if !req.DeleteBranch {
 			return nil
+		}
+		if req.RepoDir == "" {
+			return fmt.Errorf("cannot delete branch %s after worktree removal: repository checkout is unknown", req.Branch)
 		}
 		// The worktree is gone but its branch may not be, so git runs from the checkout.
 		out, err := git(ctx, req.RepoDir, "rev-parse", "--path-format=absolute", "--git-common-dir")
@@ -139,7 +142,11 @@ func (Git) Remove(ctx context.Context, req app.WorktreeRemoval) error {
 		if _, err := git(ctx, common, "worktree", "prune"); err != nil {
 			return err
 		}
-		if _, err := git(ctx, common, "show-ref", "--verify", "--quiet", "refs/heads/"+req.Branch); err != nil {
+		exists, err := (Git{}).BranchExists(ctx, common, req.Branch)
+		if err != nil {
+			return err
+		}
+		if !exists {
 			return nil
 		}
 	} else if err != nil {

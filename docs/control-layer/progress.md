@@ -2,6 +2,10 @@
 
 ## Current stage
 
+Issue #78 Git removal retry is implemented and tested. Removing an already absent
+worktree now retries requested branch deletion from the recorded repository checkout.
+App cleanup still needs to pass that checkout and report pending deletion accurately.
+
 Reset of failed delegated runs (#72) is complete. `x` on a FAILED task confirms, then
 `App.Reset` resolves the run's PR, saves a record with only that link, and deletes the
 worktree, local branch, and runner log. Auto mode skips the reset issue. A manual start
@@ -196,6 +200,8 @@ Findings 1 to 4 were fixed in stage 28.
   repair can start one refresh late.
 
 ## Next stage
+
+Finish issue #78 app cleanup and reporting, then run the full validation gates.
 
 Compare completed task usage, outcomes, and the PR history's phase times before
 changing the models or budgets. For code quality, take refactor candidate 5
