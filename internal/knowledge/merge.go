@@ -442,7 +442,8 @@ func (m *Merge) firstLocal(g Group) int {
 	return pos
 }
 
-// stance is what one member says, and the latest maintainer correction behind it.
+// stance is what one member's latest maintainer correction says: retire it, or
+// keep its text. Without a correction, retired is the member's status.
 type stance struct {
 	item     MergeItem
 	retired  bool
@@ -488,7 +489,9 @@ func (m *Merge) build(g Group, members []MergeItem) (Learning, *Conflict, error)
 	}
 	slices.SortStableFunc(l.History, func(a, b Change) int { return a.At.Compare(b.At) })
 
-	disagree := slices.ContainsFunc(stances, func(s stance) bool { return s.retired != stances[0].retired })
+	disagree := slices.ContainsFunc(members, func(it MergeItem) bool {
+		return (it.Learning.Status == Retired) != (members[0].Learning.Status == Retired)
+	})
 	var explicit []stance
 	for _, s := range stances {
 		if s.explicit {
@@ -525,37 +528,48 @@ func (m *Merge) build(g Group, members []MergeItem) (Learning, *Conflict, error)
 	return l, nil, nil
 }
 
-// stanceOf finds the member's latest maintainer correction: maintainer evidence, a
-// maintainer restore or confirm, or a retirement its task's evaluation attributes to
-// a maintainer.
+// stanceOf finds the member's latest maintainer correction: maintainer evidence or
+// a restore or confirm keeps it, and a retirement its task's evaluation attributes
+// to a maintainer retires it. A correction is timed by the evaluation that recorded
+// it, not by when its task started; one without an evaluation has no time.
 func (m *Merge) stanceOf(it MergeItem) stance {
 	s := stance{item: it, retired: it.Learning.Status == Retired}
 	side := m.local
 	if strings.HasPrefix(it.Ref, ImportRef) {
 		side = m.incoming
 	}
-	mark := func(at time.Time, task string) {
+	mark := func(at time.Time, task string, retire bool) {
 		if !s.explicit || at.After(s.latest) {
-			s.latest, s.task = at, task
+			s.latest, s.task, s.retired = at, task, retire
 		}
 		s.explicit = true
 	}
 	for _, e := range it.Learning.Evidence {
 		if e.Source == Maintainer {
-			mark(e.At, e.Task)
+			mark(evaluatedAt(side, e.Task), e.Task, false)
 		}
 	}
 	for _, c := range it.Learning.History {
 		switch c.Action {
 		case "restore", "confirm":
-			mark(c.At, c.Task)
+			mark(c.At, c.Task, false)
 		case Retire:
 			if maintainerRetire(side, c.Task, it.Learning.ID) {
-				mark(c.At, c.Task)
+				mark(c.At, c.Task, true)
 			}
 		}
 	}
 	return s
+}
+
+// evaluatedAt is when task's evaluation in x was recorded, or zero.
+func evaluatedAt(x Snapshot, task string) time.Time {
+	for _, ev := range x.Evaluations {
+		if ev.Task == task {
+			return ev.At
+		}
+	}
+	return time.Time{}
 }
 
 func maintainerRetire(x Snapshot, task, id string) bool {

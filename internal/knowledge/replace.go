@@ -9,39 +9,72 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 )
 
-// replaced are the files Replace swaps as one unit. attempts/ and learning.lock
-// belong to this machine and stay.
-var replaced = []string{"evaluations", "learnings.yaml", "knowledge.md"}
+// A save stages the new state in stageDir, then writes journalFile listing the
+// staged evaluations. Writing the journal commits the save: from then on finish
+// moves the staged files in, under the lock, until it completes, even after a
+// crash. attempts/ and learning.lock belong to this machine and stay.
+const (
+	stageDir    = ".ingest"
+	journalFile = "ingest.journal"
+)
 
-// rename is os.Rename, swapped in tests to fail one step of Replace.
+type journal struct {
+	Evaluations []string `yaml:"evaluations"`
+}
+
+// ErrUnfinished means a committed save could not move every file in yet. The next
+// Lock of the repository finishes it.
+var ErrUnfinished = errors.New("knowledge: the save is committed but not finished; the next access to the repository finishes it")
+
+// rename is os.Rename, swapped in tests to interrupt a save.
 var rename = os.Rename
 
 // Replace stores x as repo's whole learning state: learnings.yaml, one file per
-// evaluation, and knowledge.md rendered from the learnings. It stages the new files
-// beside the old ones, moves the old ones aside, and moves the staged ones in. A
-// failed step moves the old files back, so the repository keeps either its old
-// state or the new one.
+// evaluation, and knowledge.md rendered from the learnings. The caller holds the
+// repository's lock. A failure before the journal is written leaves the old state;
+// after it, the new state is completed now or by the next Lock. Every file is
+// replaced by a rename, so a reader sees a whole old or new file, never a gap.
 func (s Store) Replace(repo string, x Snapshot) error {
 	dir, err := s.repoDir(repo)
 	if err != nil {
 		return err
 	}
+	j := journal{Evaluations: []string{}}
 	for _, ev := range x.Evaluations {
 		if !validName(ev.Task, taskID) {
 			return errTask(ev.Task)
 		}
+		j.Evaluations = append(j.Evaluations, ev.Task+".yaml")
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	stage, err := os.MkdirTemp(dir, ".ingest-*")
-	if err != nil {
+	if err := finish(dir); err != nil {
 		return err
 	}
-	defer os.RemoveAll(stage)
-	if err := os.Mkdir(filepath.Join(stage, "evaluations"), 0o700); err != nil {
+	stage := filepath.Join(dir, stageDir)
+	if err := s.stage(stage, x); err != nil {
+		os.RemoveAll(stage)
+		return err
+	}
+	if err := writeYAML(filepath.Join(dir, journalFile), j); err != nil {
+		os.RemoveAll(stage)
+		return err
+	}
+	if err := finish(dir); err != nil {
+		return fmt.Errorf("%w: %v", ErrUnfinished, err)
+	}
+	return nil
+}
+
+func (s Store) stage(stage string, x Snapshot) error {
+	if err := os.RemoveAll(stage); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(stage, "evaluations"), 0o700); err != nil {
 		return err
 	}
 	if err := writeYAML(filepath.Join(stage, "learnings.yaml"), learningsFile{NextID: x.NextID, Learnings: x.Learnings}); err != nil {
@@ -55,45 +88,63 @@ func (s Store) Replace(repo string, x Snapshot) error {
 			return err
 		}
 	}
-	backup, err := os.MkdirTemp(dir, ".previous-*")
+	return nil
+}
+
+// finish completes a committed save in dir, or drops a stage no journal commits.
+// Each step can run again after an interruption: a staged file already moved in
+// is gone from the stage, and only evaluations the journal does not list are
+// removed. learnings.yaml moves last, because prompts and the learner read it.
+func finish(dir string) error {
+	stage := filepath.Join(dir, stageDir)
+	var j journal
+	err := readYAML(filepath.Join(dir, journalFile), &j)
+	if errors.Is(err, fs.ErrNotExist) {
+		return os.RemoveAll(stage)
+	}
 	if err != nil {
 		return err
 	}
-	var aside, in []string
-	undo := func(cause error) error {
-		for _, name := range slices.Backward(in) {
-			_ = os.RemoveAll(filepath.Join(dir, name))
+	if err := os.MkdirAll(filepath.Join(dir, "evaluations"), 0o700); err != nil {
+		return err
+	}
+	for _, name := range j.Evaluations {
+		if !validName(strings.TrimSuffix(name, ".yaml"), taskID) {
+			return fmt.Errorf("knowledge: invalid evaluation %q in %s", name, journalFile)
 		}
-		failed := false
-		for _, name := range slices.Backward(aside) {
-			if err := rename(filepath.Join(backup, name), filepath.Join(dir, name)); err != nil {
-				failed = true
+		if err := moveIn(filepath.Join(stage, "evaluations", name), filepath.Join(dir, "evaluations", name)); err != nil {
+			return err
+		}
+	}
+	entries, err := os.ReadDir(filepath.Join(dir, "evaluations"))
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if !e.IsDir() && filepath.Ext(e.Name()) == ".yaml" && !slices.Contains(j.Evaluations, e.Name()) {
+			if err := os.Remove(filepath.Join(dir, "evaluations", e.Name())); err != nil {
+				return err
 			}
 		}
-		if failed {
-			// The old files stay in backup rather than being deleted with it.
-			return fmt.Errorf("%w; the previous knowledge is kept in %s", cause, backup)
-		}
-		_ = os.RemoveAll(backup)
-		return cause
 	}
-	for _, name := range replaced {
-		err := rename(filepath.Join(dir, name), filepath.Join(backup, name))
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
+	for _, name := range []string{"knowledge.md", "learnings.yaml"} {
+		if err := moveIn(filepath.Join(stage, name), filepath.Join(dir, name)); err != nil {
+			return err
 		}
-		if err != nil {
-			return undo(err)
-		}
-		aside = append(aside, name)
 	}
-	for _, name := range replaced {
-		if err := rename(filepath.Join(stage, name), filepath.Join(dir, name)); err != nil {
-			return undo(err)
-		}
-		in = append(in, name)
+	if err := os.Remove(filepath.Join(dir, journalFile)); err != nil {
+		return err
 	}
-	return os.RemoveAll(backup)
+	return os.RemoveAll(stage)
+}
+
+// moveIn renames a staged file over the live one, or does nothing when an earlier
+// finish already moved it.
+func moveIn(from, to string) error {
+	if _, err := os.Lstat(from); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return rename(from, to)
 }
 
 // Digest hashes learnings.yaml and every evaluation file, so an ingest can tell

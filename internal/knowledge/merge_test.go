@@ -264,7 +264,7 @@ func TestTheLaterMaintainerCorrectionWinsWhenTheOrderIsReliable(t *testing.T) {
 			a := retiredBy(t, tc.retiredAt)
 			b, _ := newStore(t)
 			ev := eval("20", 0, maintainer(Practice, text))
-			ev.TaskAt = tc.supportedAt
+			ev.At = tc.supportedAt
 			mustApply(t, b, repo, ev)
 			m := prepare(t, snapshot(t, a, repo), snapshot(t, b, repo))
 			x := merged(t, m, together(m, Practice, text))
@@ -279,8 +279,10 @@ func TestMaintainerCorrectionsWithoutAReliableOrderConflict(t *testing.T) {
 	text := "Run the e2e script before pushing."
 	a := retiredBy(t, day(9))
 	b, _ := newStore(t)
+	// The support's task started long before, but its evaluation recorded the
+	// correction 30 seconds after the retirement.
 	ev := eval("20", 0, maintainer(Practice, text))
-	ev.TaskAt = day(9).Add(30 * time.Second)
+	ev.At = day(9).Add(30 * time.Second)
 	mustApply(t, b, repo, ev)
 
 	m := prepare(t, snapshot(t, a, repo), snapshot(t, b, repo))
@@ -307,10 +309,11 @@ func TestAFlaggedConflictTakesTheLaterMaintainerText(t *testing.T) {
 		t.Fatalf("learning = %+v", l)
 	}
 
-	// The same pair started within a minute of each other cannot be ordered.
+	// Corrections recorded ten seconds apart cannot be ordered, even when their
+	// tasks started days apart.
 	c, _ := newStore(t)
-	ev := eval("2", 0, maintainer(Convention, "Indent YAML with four spaces."))
-	ev.TaskAt = day(0).Add(10 * time.Second)
+	ev := eval("2", 6, maintainer(Convention, "Indent YAML with four spaces."))
+	ev.At = day(1).Add(10 * time.Second)
 	mustApply(t, c, repo, ev)
 	m = prepare(t, snapshot(t, a, repo), snapshot(t, c, repo))
 	groups = together(m, Convention, "Indent YAML consistently.")
@@ -318,5 +321,41 @@ func TestAFlaggedConflictTakesTheLaterMaintainerText(t *testing.T) {
 	var conflict *ConflictError
 	if _, err := m.Apply(groups); !errors.As(err, &conflict) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestMaintainerCorrectionsAreOrderedByWhenTheyWereRecorded(t *testing.T) {
+	// The tasks started together, but the second correction came a day later.
+	a, _ := newStore(t)
+	b, _ := newStore(t)
+	mustApply(t, a, repo, eval("1", 0, maintainer(Convention, "Indent YAML with two spaces.")))
+	ev := eval("2", 0, maintainer(Convention, "Indent YAML with four spaces."))
+	ev.TaskAt, ev.At = day(0).Add(10*time.Second), day(2)
+	mustApply(t, b, repo, ev)
+	m := prepare(t, snapshot(t, a, repo), snapshot(t, b, repo))
+	groups := together(m, Convention, "Indent YAML consistently.")
+	groups[0].Conflict = "the two corrections ask for different indentation"
+	if l := merged(t, m, groups).Learnings[0]; l.Text != "Indent YAML with four spaces." {
+		t.Fatalf("learning = %+v", l)
+	}
+}
+
+func TestAnObservedRetirementDoesNotCountAsTheMaintainersCorrection(t *testing.T) {
+	// A maintainer backed the learning; a newer task's observation then retired it.
+	text := "Run the e2e script before pushing."
+	a, _ := newStore(t)
+	mustApply(t, a, repo, eval("1", 0, maintainer(Practice, text)))
+	ev := eval("9", 10)
+	ev.Revisions = []Revision{{ID: "L1", Action: Retire, Reason: "The script was skipped.", Source: Observed}}
+	mustApply(t, a, repo, ev)
+	if l := learnings(t, a, repo)[0]; l.Status != Retired {
+		t.Fatalf("setup: %+v", l)
+	}
+	b, _ := newStore(t)
+	mustApply(t, b, repo, eval("20", 12, observed(Practice, text)))
+
+	m := prepare(t, snapshot(t, a, repo), snapshot(t, b, repo))
+	if l := merged(t, m, together(m, Practice, text)).Learnings[0]; l.Status != Active {
+		t.Fatalf("the observed retirement beat the maintainer's support: %+v", l)
 	}
 }

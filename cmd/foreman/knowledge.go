@@ -61,6 +61,9 @@ func runKnowledge(ctx context.Context, cfg config.Config, cmd cli.Command, stdou
 			fmt.Fprintf(stderr, "foreman: %v\nNothing was saved. Settle the competing guidance on one machine, then export and ingest again.\n", err)
 			return 1
 		}
+		if errors.Is(err, knowledge.ErrUnfinished) {
+			return failed(err)
+		}
 		if err != nil {
 			return failed(fmt.Errorf("%w; nothing was saved", err))
 		}

@@ -171,32 +171,92 @@ func TestReplaceStoresTheSnapshotAndKeepsAttemptsAndTheLock(t *testing.T) {
 		t.Fatalf("knowledge.md not regenerated:\n%s", files["knowledge.md"])
 	}
 	for name := range files {
-		if strings.HasPrefix(name, ".") {
+		if strings.HasPrefix(name, ".") || name == journalFile {
 			t.Fatalf("Replace left %s behind", name)
 		}
 	}
 }
 
-func TestReplaceKeepsTheOldFilesWhenAMoveFails(t *testing.T) {
-	for _, failAt := range []int{1, 3, 4, 6} {
+// replacement is the snapshot the Replace tests store over mixedStore.
+var replacement = Snapshot{Repo: repo, NextID: 1, Learnings: []Learning{{ID: "L1", Kind: Fact, Text: "New.", Status: Active}},
+	Evaluations: []Evaluation{{Task: "8", Fingerprint: "fp-8", Assessment: "fine"}}}
+
+// movingIn reports whether a rename moves a staged file into the live store.
+func movingIn(from, to string) bool {
+	in := func(p string) bool {
+		return strings.Contains(p, string(filepath.Separator)+stageDir+string(filepath.Separator))
+	}
+	return in(from) && !in(to)
+}
+
+func TestReplaceFailingBeforeItsJournalKeepsTheOldState(t *testing.T) {
+	s := mixedStore(t)
+	before := tree(t, filepath.Join(s.Dir, repo))
+	rename = func(from, to string) error {
+		if filepath.Base(to) == journalFile {
+			return errors.New("disk full")
+		}
+		return os.Rename(from, to)
+	}
+	defer func() { rename = os.Rename }()
+	if err := s.Replace(repo, replacement); err == nil || errors.Is(err, ErrUnfinished) {
+		t.Fatalf("err = %v", err)
+	}
+	if after := tree(t, filepath.Join(s.Dir, repo)); !reflect.DeepEqual(after, before) {
+		t.Fatalf("the store changed:\n%v\n%v", before, after)
+	}
+}
+
+func TestAnInterruptedReplaceFinishesOnTheNextLock(t *testing.T) {
+	done := mixedStore(t)
+	if err := done.Replace(repo, replacement); err != nil {
+		t.Fatal(err)
+	}
+	want := tree(t, filepath.Join(done.Dir, repo))
+	for failAt := 1; failAt <= 3; failAt++ {
 		s := mixedStore(t)
-		before := tree(t, filepath.Join(s.Dir, repo))
-		calls := 0
+		moves := 0
 		rename = func(from, to string) error {
-			calls++
-			if calls == failAt {
-				return errors.New("disk full")
+			if movingIn(from, to) {
+				moves++
+				if moves == failAt {
+					return errors.New("killed")
+				}
 			}
 			return os.Rename(from, to)
 		}
-		err := s.Replace(repo, Snapshot{Repo: repo, Learnings: []Learning{{ID: "L1", Kind: Fact, Text: "New.", Status: Active}}})
+		err := s.Replace(repo, replacement)
 		rename = os.Rename
-		if err == nil {
-			t.Fatalf("move %d: no error", failAt)
+		if !errors.Is(err, ErrUnfinished) {
+			t.Fatalf("move %d: err = %v", failAt, err)
 		}
-		if after := tree(t, filepath.Join(s.Dir, repo)); !reflect.DeepEqual(after, before) {
-			t.Fatalf("move %d changed the store:\n%v\n%v", failAt, before, after)
+		unlock, err := s.Lock(repo)
+		if err != nil {
+			t.Fatalf("move %d: recovery: %v", failAt, err)
 		}
+		unlock()
+		got := tree(t, filepath.Join(s.Dir, repo))
+		delete(got, "learning.lock")
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("move %d: recovered store differs:\n%v\nwant\n%v", failAt, got, want)
+		}
+	}
+}
+
+func TestReplaceNeverLeavesALiveFileMissing(t *testing.T) {
+	s := mixedStore(t)
+	live := filepath.Join(s.Dir, repo)
+	rename = func(from, to string) error {
+		for _, name := range []string{"learnings.yaml", "knowledge.md", "evaluations"} {
+			if _, err := os.Stat(filepath.Join(live, name)); err != nil {
+				t.Errorf("%s missing during the save", name)
+			}
+		}
+		return os.Rename(from, to)
+	}
+	defer func() { rename = os.Rename }()
+	if err := s.Replace(repo, replacement); err != nil {
+		t.Fatal(err)
 	}
 }
 

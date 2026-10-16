@@ -816,11 +816,15 @@ the same commit. The commit message records why it changed.
   runs. Rejected: letting the agent write merged records, which could invent
   evidence or status.
 - **Merge conflicts.** When a group's members disagree on retirement, or the agent
-  flags a conflict, maintainer corrections decide: maintainer evidence, a restore or
-  confirm, or a retirement whose evaluation has a maintainer revision. One side with
-  a correction wins over observed work. Between corrections that disagree, the
-  later one wins when it is at least a minute after the other; a closer or missing
-  time is unresolved. An unresolved conflict returns `knowledge.ConflictError`
+  flags a conflict, maintainer corrections decide. A member's stance is its latest
+  correction: maintainer evidence, a restore, or a confirm keeps it, and a
+  retirement whose evaluation has a maintainer revision retires it. An observed
+  retirement is not a correction, so it never stands in for the maintainer's
+  stance. One side with a correction wins over observed work. Corrections are timed
+  by the evaluation that recorded them (`Evaluation.At`, or the history entry's
+  time), not by the task's start. Between corrections that disagree, the later one
+  wins when it is at least a minute after the other; a closer or missing time is
+  unresolved. An unresolved conflict returns `knowledge.ConflictError`
   listing both sides, the CLI exits 1, and nothing is written. The winner's text
   is kept, and a retire or restore entry is added under its task when the replayed
   history would say otherwise.
@@ -828,10 +832,15 @@ the same commit. The commit message records why it changed.
   without waiting, hashes `learnings.yaml` and `evaluations/`, merges, and hashes
   again before it saves; a change means another writer ran, and it fails with
   `ErrKnowledgeChanged`. `Store.Replace` stages `learnings.yaml`, `evaluations/`,
-  and a regenerated `knowledge.md` in the repository directory, moves the old ones
-  aside, moves the new ones in, and moves the old ones back if a step fails. A
-  failed agent turn, invalid output, a conflict, the lock held, or `--dry-run`
-  writes nothing.
+  and a regenerated `knowledge.md` in `.ingest/`, then writes `ingest.journal`
+  listing the staged evaluations. Writing the journal commits the save. It then
+  renames each staged file over the live one, removes evaluations the journal does
+  not list, moves `learnings.yaml` last, and deletes the journal. Each step can run
+  again, and `Store.Lock` finishes a committed save before anything else holds the
+  lock, so a crash after the commit completes on the next learner, refresh, or
+  ingest; a crash before it drops the stage. No live file is ever missing, and a
+  reader without the lock sees whole old or new files. A failed agent turn, invalid
+  output, a conflict, the lock held, or `--dry-run` writes nothing.
 - **Learning is a side job.** `learning.enabled: false` stops new evaluations, even
   from a learner spawned before the change, because `App.Learn` checks it too;
   prompts still read the knowledge already stored. `learning.budget_usd` (default

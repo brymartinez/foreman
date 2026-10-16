@@ -464,12 +464,12 @@ A file that is not a valid export changes nothing.
   on both machines counts once; a different task under the same issue number keeps
   its own evidence under a renamed id.
 - A maintainer's correction beats observed work. When two maintainer corrections
-  disagree, the later wins if they are at least a minute apart. Otherwise the ingest
+  disagree, the later wins if they were recorded at least a minute apart. Otherwise the ingest
   stops, prints both, and saves nothing.
 - `--dry-run` prints the resulting `knowledge.md` without saving.
 
-The ingest replaces `learnings.yaml`, `evaluations/`, and `knowledge.md` together, or
-not at all. It does not touch tasks, worktrees, config, `attempts/`, or the lock, and
+The ingest replaces `learnings.yaml`, `evaluations/`, and `knowledge.md` together. If
+it is interrupted after it commits, the next learner, refresh, or ingest finishes it. It does not touch tasks, worktrees, config, `attempts/`, or the lock, and
 it fails without saving when an evaluation runs at the same time.
 
 `knowledge.md` is the contract for other tools, such as the `foreman-triage` skill.
