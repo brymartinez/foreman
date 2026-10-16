@@ -30,6 +30,21 @@ type fakeWorktrees struct {
 	// identities records each ConfigureIdentity call as "dir name <email>".
 	identities  []string
 	identityErr error
+	// syncs records each SyncDefaultBranch call as "dir branch"; onSync runs inside it.
+	syncs   []string
+	syncErr error
+	onSync  func(dir string)
+}
+
+func (f *fakeWorktrees) SyncDefaultBranch(_ context.Context, dir, branch string) error {
+	f.syncs = append(f.syncs, dir+" "+branch)
+	if f.syncErr != nil {
+		return f.syncErr
+	}
+	if f.onSync != nil {
+		f.onSync(dir)
+	}
+	return nil
 }
 
 func (f *fakeWorktrees) ConfigureIdentity(_ context.Context, dir, name, email string) error {

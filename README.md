@@ -216,8 +216,12 @@ part of the task.
 
 ### What a start does
 
-1. For a new task, it proposes a branch from the issue and repository guidance in
-   `AGENTS.md` and linked Markdown files. Manual starts show the name for editing;
+1. For a new task, it fast-forwards the managed checkout's default branch from
+   origin, then proposes a branch from the issue and repository guidance in
+   `AGENTS.md` and the files it names as branch naming guidance (for example
+   "Branch naming: see `docs/branches.md`"). Other linked documents are not read.
+   If the checkout cannot fast-forward safely, the start stops and says why.
+   Manual starts show the name for editing;
    auto mode waits if the workstream or guidance is unclear. Foreman checks the chosen
    name, then creates the branch and worktree. Existing tasks keep their stored branch.
    Without repository guidance, the default is `fix/825-provider-retries` for a fix

@@ -31,8 +31,8 @@ type Client struct {
 func New() Client { return Client{Run: execGH} }
 
 // EnsureCheckout clones a repository into path when needed, then reads its
-// repository metadata. Existing checkouts are reused and refreshed by worktree
-// creation when a new task needs them.
+// repository metadata. Existing checkouts are reused as they are; a new task's
+// branch proposal syncs the default branch before it reads guidance.
 func (c Client) Ensure(ctx context.Context, repo task.Repo, path string) (app.RepoInfo, error) {
 	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
 		if _, err := c.Run(ctx, "", "repo", "clone", string(repo), path); err != nil {

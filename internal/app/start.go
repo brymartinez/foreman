@@ -93,7 +93,10 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 	} else {
 		branch = req.BranchName
 		if branch == "" {
-			proposal := a.proposeBranch(ctx, req, issue)
+			proposal, err := a.proposeBranch(ctx, req, info.DefaultBranch, issue)
+			if err != nil {
+				return nil, err
+			}
 			if proposal.Uncertain {
 				return nil, fmt.Errorf("branch needs a choice: %s", proposal.Reason)
 			}

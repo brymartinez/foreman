@@ -319,8 +319,17 @@ the same commit. The commit message records why it changed.
 - **Names are chosen once, before worktree creation.** The default branch is
   `<type>/<workName>`, with the type from the title prefix, the labels, then `feat`;
   `task.WorkName` is `<issue>-<slug>` (at most 5 words and 40 characters). A Linear
-  suggestion is the fallback when present. For new tasks, Foreman reads `AGENTS.md`
-  and linked Markdown branch guidance from the repository checkout. A tool-free
+  suggestion is the fallback when present. For a new task in the managed checkout,
+  Foreman first fetches the default branch and fast-forwards the local one, so the
+  proposal reads current guidance. A failed fetch, a diverged branch, uncommitted
+  changes, or another checked-out branch stops manual and auto starts with the
+  reason; Foreman never resets local work. A checkout the caller supplies is read as
+  it is. Guidance is `AGENTS.md` plus the Markdown files that a line in it names as
+  branch naming guidance (the line says "branch" and "name", "convention", "rule",
+  or "guidance", and not "decision log", "history", "archive", or "superseded"), up to
+  two links deep. A document that only mentions branches is not a rule. A named file
+  that is missing, unreadable, over 32 KiB, or outside the repository stops the
+  start with its path. A tool-free
   proposal applies the repository convention to the issue and tracker suggestion;
   repository guidance takes precedence. A manual start shows an editable proposal.
   Auto mode waits when the workstream or guidance is unclear. The chosen name is

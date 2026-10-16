@@ -44,7 +44,7 @@ func (a App) ProposeBranch(ctx context.Context, req StartRequest) (BranchProposa
 	if err != nil {
 		return BranchProposal{}, err
 	}
-	return a.proposeBranch(ctx, req, issue), nil
+	return a.proposeBranch(ctx, req, info.DefaultBranch, issue)
 }
 
 func defaultBranch(req StartRequest, key task.Key, issue Issue) string {
@@ -63,7 +63,12 @@ func defaultBranch(req StartRequest, key task.Key, issue Issue) string {
 	return name
 }
 
-func (a App) proposeBranch(ctx context.Context, req StartRequest, issue Issue) BranchProposal {
+// proposeBranch reads guidance for a new task. Errors mean the guidance could not be
+// trusted, so the caller stops instead of falling back to a default name.
+func (a App) proposeBranch(ctx context.Context, req StartRequest, base string, issue Issue) (BranchProposal, error) {
+	if err := a.refreshGuidance(ctx, req, base); err != nil {
+		return BranchProposal{}, err
+	}
 	key := req.Key
 	if key == (task.Key{}) {
 		key = task.Key{Repo: req.Repo, Number: req.Issue}
@@ -75,15 +80,14 @@ func (a App) proposeBranch(ctx context.Context, req StartRequest, issue Issue) B
 	}
 	guide, err := readBranchGuide(req.Dir)
 	if err != nil {
-		proposal.Uncertain, proposal.Reason = true, err.Error()
-		return proposal
+		return BranchProposal{}, err
 	}
 	if guide == "" {
-		return proposal
+		return proposal, nil
 	}
 	if a.BranchProposer == nil {
 		proposal.Uncertain, proposal.Reason = true, "repository branch guidance needs a proposer"
-		return proposal
+		return proposal, nil
 	}
 	want := req.Agent
 	if want == "" && req.Profile != nil {
@@ -92,13 +96,26 @@ func (a App) proposeBranch(ctx context.Context, req StartRequest, issue Issue) B
 	out, err := a.BranchProposer.Propose(ctx, agent.BranchInput{Agent: want, Profile: req.Profile, Prompt: branchPrompt(issue, fallback, guide)})
 	if err != nil {
 		proposal.Uncertain, proposal.Reason = true, "could not apply repository branch guidance: "+err.Error()
-		return proposal
+		return proposal, nil
 	}
 	if !task.ValidBranchName(out.BranchName) {
 		proposal.Uncertain, proposal.Reason = true, "proposed branch name is invalid: "+out.BranchName
-		return proposal
+		return proposal, nil
 	}
-	return BranchProposal{Name: out.BranchName, Reason: out.Summary, Uncertain: out.Uncertain}
+	return BranchProposal{Name: out.BranchName, Reason: out.Summary, Uncertain: out.Uncertain}, nil
+}
+
+// refreshGuidance fast-forwards the managed checkout's default branch so the
+// proposal reads current AGENTS.md. A checkout the caller supplied is the user's,
+// so foreman leaves its branch alone.
+func (a App) refreshGuidance(ctx context.Context, req StartRequest, base string) error {
+	if a.RepositoriesDir == "" || filepath.Clean(req.Dir) != task.RepositoryPath(a.RepositoriesDir, req.Repo) {
+		return nil
+	}
+	if err := a.Worktrees.SyncDefaultBranch(ctx, req.Dir, base); err != nil {
+		return fmt.Errorf("refresh %s default branch: %w", req.Repo, err)
+	}
+	return nil
 }
 
 func branchPrompt(issue Issue, fallback, guide string) string {
@@ -133,8 +150,30 @@ func truncateBranchText(s string, n int) string {
 
 var markdownPath = regexp.MustCompile("(?:`|\\]\\()([A-Za-z0-9_./-]+\\.md)")
 
-// readBranchGuide follows checked-in Markdown references from AGENTS.md, up to
-// two links deep. It reads only files that discuss branches and stays inside root.
+// explicitBranchGuide reports whether a line names its links as current branch
+// naming guidance. A link that only mentions branches, or points at history, is not
+// a rule: an old decision log must not decide today's branch names.
+func explicitBranchGuide(line string) bool {
+	line = strings.ToLower(line)
+	if !strings.Contains(line, "branch") {
+		return false
+	}
+	for _, old := range []string{"decision log", "history", "historical", "archive", "superseded"} {
+		if strings.Contains(line, old) {
+			return false
+		}
+	}
+	for _, rule := range []string{"name", "naming", "convention", "rule", "guidance"} {
+		if strings.Contains(line, rule) {
+			return true
+		}
+	}
+	return false
+}
+
+// readBranchGuide reads AGENTS.md when it mentions branches, and every Markdown file
+// it names as branch naming guidance, up to two links deep. A named file that is
+// missing, unreadable, too large, or outside root is an error, not silent guidance.
 func readBranchGuide(root string) (string, error) {
 	if _, err := os.Stat(filepath.Join(root, "AGENTS.md")); os.IsNotExist(err) {
 		return "", nil
@@ -144,25 +183,29 @@ func readBranchGuide(root string) (string, error) {
 		return "", fmt.Errorf("read repository instructions: %w", err)
 	}
 	type visit struct {
-		path  string
-		depth int
+		path, from string
+		depth      int
 	}
-	queue := []visit{{filepath.Join(root, "AGENTS.md"), 0}}
+	queue := []visit{{path: filepath.Join(root, "AGENTS.md")}}
 	seen := map[string]bool{}
 	var sections []string
 	for len(queue) > 0 && len(seen) < 8 {
 		v := queue[0]
 		queue = queue[1:]
+		name, _ := filepath.Rel(root, v.path)
+		if v.from != "" {
+			name += " (named in " + v.from + ")"
+		}
 		path, err := filepath.EvalSymlinks(v.path)
 		if os.IsNotExist(err) && v.depth == 0 {
 			return "", nil
 		}
 		if err != nil {
-			return "", fmt.Errorf("read branch guidance %s: %w", v.path, err)
+			return "", fmt.Errorf("read branch guidance %s: %w", name, err)
 		}
 		rel, err := filepath.Rel(root, path)
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return "", fmt.Errorf("branch guidance escapes repository: %s", v.path)
+			return "", fmt.Errorf("branch guidance escapes repository: %s", name)
 		}
 		if seen[path] {
 			continue
@@ -170,19 +213,25 @@ func readBranchGuide(root string) (string, error) {
 		seen[path] = true
 		stat, err := os.Stat(path)
 		if err != nil || !stat.Mode().IsRegular() || stat.Size() > 32<<10 {
-			return "", fmt.Errorf("branch guidance is unreadable or too large: %s", v.path)
+			return "", fmt.Errorf("branch guidance is unreadable or too large: %s", name)
 		}
 		b, err := os.ReadFile(path)
 		if err != nil {
-			return "", fmt.Errorf("read branch guidance %s: %w", v.path, err)
+			return "", fmt.Errorf("read branch guidance %s: %w", name, err)
 		}
 		content := string(b)
-		if strings.Contains(strings.ToLower(content), "branch") {
+		if v.depth > 0 || strings.Contains(strings.ToLower(content), "branch") {
 			sections = append(sections, "## "+rel+"\n"+content)
 		}
-		if v.depth < 2 {
-			for _, match := range markdownPath.FindAllStringSubmatch(content, -1) {
-				queue = append(queue, visit{filepath.Join(filepath.Dir(path), match[1]), v.depth + 1})
+		if v.depth == 2 {
+			continue
+		}
+		for _, line := range strings.Split(content, "\n") {
+			if !explicitBranchGuide(line) {
+				continue
+			}
+			for _, match := range markdownPath.FindAllStringSubmatch(line, -1) {
+				queue = append(queue, visit{filepath.Join(filepath.Dir(path), match[1]), rel, v.depth + 1})
 			}
 		}
 	}

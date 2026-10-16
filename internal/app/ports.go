@@ -230,6 +230,10 @@ type WorktreeManager interface {
 	// ConfigureIdentity sets the commit author and committer for the worktree at dir
 	// only, leaving the shared repository config and the global config alone.
 	ConfigureIdentity(ctx context.Context, dir, name, email string) error
+	// SyncDefaultBranch fetches origin's branch and fast-forwards the checkout at dir,
+	// which must have branch checked out with no uncommitted changes. It never
+	// overwrites local work; anything it cannot fast-forward safely is an error.
+	SyncDefaultBranch(ctx context.Context, dir, branch string) error
 }
 
 // MergeCheck names the worktree to fetch in, the PR's head branch, and its base branch.
