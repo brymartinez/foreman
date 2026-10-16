@@ -152,10 +152,17 @@ func (s Store) Lock(repo string) (func(), error) {
 		}
 		return nil, err
 	}
-	return func() {
+	unlock := func() {
 		_ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
 		lock.Close()
-	}, nil
+	}
+	// An ingest interrupted after it committed finishes before anything else reads
+	// or writes the repository under the lock.
+	if err := finish(dir); err != nil {
+		unlock()
+		return nil, err
+	}
+	return unlock, nil
 }
 
 // Busy reports whether an evaluation of repo holds the lock now.
@@ -201,7 +208,7 @@ func writeFile(path string, raw []byte) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	return rename(tmp.Name(), path)
 }
 
 var kindTitles = []struct {

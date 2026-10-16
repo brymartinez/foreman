@@ -82,6 +82,11 @@ func run(argv []string) int {
 			fmt.Fprintf(os.Stderr, "foreman: %s\n", problem)
 		}
 	}
+	if cmd.Name == cli.KnowledgeExport || cmd.Name == cli.KnowledgeIngest {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+		defer stop()
+		return runKnowledge(ctx, cfg, cmd, os.Stdout, os.Stderr)
+	}
 	if err := (stages.Files{GlobalDir: cfg.StagesDir}).RequireGlobal(); err != nil {
 		return fail(err)
 	}

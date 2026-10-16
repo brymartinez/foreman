@@ -2,7 +2,8 @@
 
 ```
 cmd/foreman           wiring: build adapters, open the dashboard or run a task
-internal/cli          argv -> Command (launch flags, __run, and __learn); no I/O beyond parsing
+internal/cli          argv -> Command (launch flags, knowledge export and ingest, __run,
+                      and __learn); no I/O beyond parsing
 internal/config       config.yaml: directories, budgets, learning, and their validation
 internal/routing      routing.yaml: profiles, rules, default, and their validation
 internal/render       terminal formatting of app results
@@ -13,8 +14,9 @@ internal/app          orchestration + ports.go (the interfaces below)
   ├── store           TaskStore over Markdown + YAML frontmatter
   ├── worktree        WorktreeManager over `git worktree`; RemoteAuth over `ssh -T`
   ├── agent           outcome contract, prompt, claude.go / codex.go adapters, selector,
-  │                   evaluator
-  ├── knowledge       KnowledgeStore: per-repository learnings, evaluations, knowledge.md
+  │                   evaluator, knowledge merger
+  ├── knowledge       KnowledgeStore: per-repository learnings, evaluations, knowledge.md,
+  │                   and their export, merge, and atomic replace
   ├── quota           QuotaChecker over the optional `quota-axi`
   ├── runner          spawns and checks the detached `foreman __run` process, and
   │                   spawns the detached `foreman __learn` process
@@ -230,11 +232,13 @@ the same commit. The commit message records why it changed.
   and a learner it started. The gate, liveness checks, cleanup, and the learning due
   check run on each dashboard refresh. Rejected: a
   daemon, a watcher, or a runner that waits for CI.
-- **The dashboard is the only interface.** Bare `foreman` opens it; `-a`/`--auto` and
-  `--no-auto` set auto mode for the session, `-s github|linear` selects an inbox source,
-  and `-c` edits the config. The only other
-  verbs are the hidden `__run` and `__learn`. Task subcommands were dropped because they duplicated the
-  dashboard, and a piped `foreman` still prints usage.
+- **The dashboard is the only interface for tasks.** Bare `foreman` opens it;
+  `-a`/`--auto` and `--no-auto` set auto mode for the session, `-s github|linear`
+  selects an inbox source, and `-c` edits the config. The other verbs are
+  `knowledge export` and `knowledge ingest`, which move a repository's knowledge and
+  need no stage files, and the hidden `__run` and `__learn`. Task subcommands were
+  dropped because they duplicated the dashboard, and a piped `foreman` still prints
+  usage.
 - **One detached runner per task.** `App.Start`, `App.Respond`, `App.Resume`, and the gate spawn
   `foreman __run owner/repo#N` with `Setsid`, so closing the terminal doesn't stop it.
   The runner inherits a locked file named for its PID in `log_dir`. A runner is alive
@@ -798,6 +802,84 @@ the same commit. The commit message records why it changed.
   instructions, the issue, decisions, context, and verified facts. Review, selector,
   conflict, and merge prompts never carry it, so review stays independent. A read
   error drops the section and logs a line.
+- **Knowledge moves between machines as one Markdown file.** `foreman knowledge
+  export owner/repo` writes the rendered active guidance, then a fenced YAML payload
+  after a `<!-- foreman-knowledge-payload -->` line: `format: foreman-knowledge/1`,
+  the source `repo`, `next_id`, every learning with evidence and history, and every
+  evaluation. `knowledge.Parse` rejects another format, unknown fields, an invalid
+  repository or task id, unknown kinds, statuses, sources, or actions, duplicate ids,
+  and learning text `Sanitize` would change, so an ingest stores only records the
+  learner could have written. Attempts and the lock stay on their machine.
+- **Ingest identity.** `foreman knowledge ingest FILE` stores the export under its
+  own repository. `--repo` naming another one fails unless `--rebind` is given, which
+  changes only where the records are stored.
+- **Tasks match by identity, not id** (`knowledge.Prepare`). A task is its id, less
+  any `.i<8 hex>` suffix an ingest added, plus its start time. The same task on both
+  sides keeps one evaluation: the export's when it judged different evidence later,
+  else the local one. The other side's evidence and history from that task are
+  dropped, so no task backs a learning twice. A different task under a taken id is
+  renamed `<id>.i<first 8 hex of sha256(id, start)>`, so a repeat ingest picks the
+  same id and the suffix is recognized on the way back. Evidence and history are
+  deduplicated by content. An export whose evaluations and learning entries the
+  store already holds is a no-op with no agent call.
+- **The agent groups; Go merges.** With learnings on both sides, one tool-less turn
+  (`agent.Mergers`, `merge.schema.json`, the evaluator's restrictions) returns
+  groups of `local:`/`import:` refs, each with a kind, text, and an optional
+  conflict note. The prompt asks for equivalent guidance and for contradicting
+  guidance on the same point to share a group, the latter with a conflict note,
+  because Go compares corrections only within a group and cannot tell from text
+  alone that two learnings contradict. `ParseMerge` rejects unknown, missing, or repeated refs, unknown
+  kinds, and text `Sanitize` rejects. `Merge.Apply` unions each group's evidence and
+  history and derives status by the promotion rules. A group keeps its first local
+  member's id; others get ids from `next_id`. Evaluations' `supports` and revision
+  ids are remapped, and a revision of a learning the merge dropped loses its id.
+  With learnings on one side only, every learning is its own group and no agent
+  runs. Rejected: letting the agent write merged records, which could invent
+  evidence or status.
+- **Merge conflicts.** In a group with any maintainer correction, the corrections
+  decide the status, even when every member was retired by observation; with none,
+  history and evidence replay by the promotion rules. When members disagree on
+  retirement, or the agent flags a conflict, the winning correction's text is kept
+  too; otherwise the agent's text is. That text is the learning's text when the
+  correction was recorded, rebuilt from the rewrites in force by then, so a later
+  observed rewrite never replaces what the maintainer backed. When the merge keeps
+  that text, it adds a rewrite entry under the winning correction's task with an
+  `ingest:` reason, and later merges read that correction's text from it rather
+  than from other members' rewrites. That entry is a decision, not the task's own
+  rewrite, so re-evaluating the task does not withdraw it; a newer rewrite or a
+  later merge replaces it. A correction the same task records after the entry
+  supersedes it, and its own text applies. Without a flag, corrections differ only by
+  retirement, since the agent judged their texts the same guidance. A member's stance is its latest
+  correction: maintainer evidence, a restore, or a confirm keeps it, and a
+  retirement whose evaluation has a maintainer revision retires it. An observed
+  retirement is not a correction, so it never stands in for the maintainer's
+  stance, and an entry a re-evaluation withdrew (`revert-restore`, `revert-retire`)
+  no longer counts. One side with a correction wins over observed work. Corrections are timed
+  by the evaluation that recorded them (`Evaluation.At`, or the history entry's
+  time), not by the task's start. Between corrections that disagree, the later one
+  wins when it is at least a minute after the other; a closer or missing time is
+  unresolved. An unresolved conflict returns `knowledge.ConflictError`
+  listing both sides, the CLI exits 1, and nothing is written. A retire or restore
+  entry is added under the winner's task when the replayed history would say
+  otherwise. That entry is timed one second after the group's
+  latest history entry, so a later merge, which orders history by time, replays the
+  same decision. Its `ingest:` reason marks it as a decision, so it never counts as
+  a correction itself.
+- **Ingest saves all or nothing.** `App.IngestKnowledge` takes the repository lock
+  without waiting, hashes `learnings.yaml` and `evaluations/`, merges, and hashes
+  again before it saves; a change means another writer ran, and it fails with
+  `ErrKnowledgeChanged`. `Store.Replace` stages `learnings.yaml`, `evaluations/`,
+  and a regenerated `knowledge.md` in `.ingest/`, then writes `ingest.journal`
+  listing the staged evaluations. Writing the journal commits the save. It then
+  renames each staged file over the live one, removes evaluations the journal does
+  not list, moves `learnings.yaml` last, and deletes the journal. Each step can run
+  again, and `Store.Lock` finishes a committed save before anything else holds the
+  lock, so a crash after the commit completes on the next learner, refresh, export,
+  or ingest; a crash before it drops the stage. `Snapshot` refuses while a journal
+  is pending, and `App.ExportKnowledge` takes the lock, so an export never mixes
+  the old state and the new. No live file is ever missing, and a
+  reader without the lock sees whole old or new files. A failed agent turn, invalid
+  output, a conflict, the lock held, or `--dry-run` writes nothing.
 - **Learning is a side job.** `learning.enabled: false` stops new evaluations, even
   from a learner spawned before the change, because `App.Learn` checks it too;
   prompts still read the knowledge already stored. `learning.budget_usd` (default
