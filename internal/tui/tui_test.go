@@ -603,3 +603,52 @@ func TestFinishWaitsForAnAnswerInFlight(t *testing.T) {
 		t.Fatal("finish never returned after the answer came back")
 	}
 }
+
+func TestReadLocalShowsOnlyTheSelectedSourcesDelegatedWork(t *testing.T) {
+	gh := record(10, task.Working)
+	gh.Source = task.GitHub
+	legacy := record(11, task.Working) // no source: a GitHub issue
+	lin := record(12, task.Working)
+	lin.Source = task.Linear
+	s := stubSource{recs: []*task.Record{gh, legacy, lin}}
+	for _, tc := range []struct {
+		name   string
+		source task.Source
+		want   []int
+	}{
+		{"linear shows only Linear tasks", task.Linear, []int{12}},
+		{"github shows GitHub and source-less tasks", task.GitHub, []int{10, 11}},
+		{"no source shows every task", "", []int{10, 11, 12}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := Model{Width: 100, Height: 30, IssueSource: tc.source}
+			readLocal(context.Background(), s, &m)
+			var got []int
+			for _, rec := range m.Tasks {
+				got = append(got, rec.Number)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("tasks = %v, want %v", got, tc.want)
+			}
+			if sel := m.Selected(); sel == nil || !slices.Contains(tc.want, sel.Number) {
+				t.Errorf("selected = %v, want one of %v", sel, tc.want)
+			}
+		})
+	}
+}
+
+func TestAHiddenTaskReturnsWhenTheSourceIncludesIt(t *testing.T) {
+	lin := record(12, task.Working)
+	lin.Source = task.Linear
+	s := stubSource{recs: []*task.Record{record(10, task.Working), lin}}
+	m := Model{Width: 100, Height: 30, IssueSource: task.GitHub}
+	readLocal(context.Background(), s, &m)
+	if len(m.Tasks) != 1 || len(s.recs) != 2 {
+		t.Fatalf("github view tasks = %d, stored = %d", len(m.Tasks), len(s.recs))
+	}
+	m.IssueSource = ""
+	readLocal(context.Background(), s, &m)
+	if len(m.Tasks) != 2 {
+		t.Errorf("both-source view tasks = %d, want 2", len(m.Tasks))
+	}
+}

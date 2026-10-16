@@ -171,6 +171,7 @@ type Model struct {
 	logFloor     int64             // the first byte of the log the pane may show
 	historySeq   int               // the history load whose result the view waits for
 	logCeil      int64             // the byte the log the pane may show ends at; 0 is the file end
+	hidden       []*task.Record    // delegated tasks from the source IssueSource leaves out
 }
 
 // Selected is the highlighted delegated task, or nil when nothing is delegated.
@@ -179,6 +180,22 @@ func (m *Model) Selected() *task.Record {
 		return nil
 	}
 	return m.Tasks[m.TaskCursor]
+}
+
+// splitBySource keeps the tasks whose issue comes from source, or every task when
+// source is empty, and returns the others apart.
+func splitBySource(recs []*task.Record, source task.Source) (kept, others []*task.Record) {
+	if source == "" {
+		return recs, nil
+	}
+	for _, rec := range recs {
+		if rec.IssueSource() == source {
+			kept = append(kept, rec)
+		} else {
+			others = append(others, rec)
+		}
+	}
+	return kept, others
 }
 
 func (m *Model) selectedEntry() *app.InboxEntry {
@@ -190,11 +207,14 @@ func (m *Model) selectedEntry() *app.InboxEntry {
 
 // SetTasks follows the latest start by default and preserves a manually picked task
 // across refreshes. The list is sorted by attention, so state changes can reorder it.
+// Tasks lists only IssueSource's tasks. The rest stay in hidden, because their runs
+// still count toward auto.max_concurrent.
 func (m *Model) SetTasks(recs []*task.Record) {
 	var selected task.Key
 	if cur := m.Selected(); cur != nil {
 		selected = cur.Key
 	}
+	recs, m.hidden = splitBySource(recs, m.IssueSource)
 	m.Tasks, m.tasksStale = recs, false
 	if !m.manualTask {
 		m.TaskCursor = newestTask(recs)

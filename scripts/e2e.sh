@@ -630,7 +630,11 @@ EOF
 	check "the Linear PR stays in its GitHub repository and links its issue" bash -c "grep -qF 'github.com/acme/linear/pull/947' '$state/pr-947.json' && grep -qF 'LIN-7/add-search' '$state/pr-947.json' && ! grep -qF 'Closes #' '$state/pr-947.json'"
 	check "the Linear PR prompt names its issue link rule" contains "$state/plan-posted-prompt.txt" "Put LIN-7 in the pull request title"
 	dash --no-auto -s github -- refreshed print >"$sandbox/github-delegated.txt" 2>/dev/null
-	check "the GitHub-only view keeps delegated Linear work" contains "$sandbox/github-delegated.txt" "LIN-7"
+	check "the GitHub-only view hides delegated Linear work" bash -c "! grep -qF 'LIN-7' '$sandbox/github-delegated.txt'"
+	dash --no-auto -s linear -- refreshed print >"$sandbox/linear-delegated.txt" 2>/dev/null
+	check "the Linear-only view shows delegated Linear work" contains "$sandbox/linear-delegated.txt" "LIN-7"
+	dash --no-auto -- refreshed print >"$sandbox/both-delegated.txt" 2>/dev/null
+	check "the view of both sources shows delegated Linear work" contains "$sandbox/both-delegated.txt" "LIN-7"
 	unset LINEAR_API_KEY
 	check "GitHub-only use needs no Linear key" dash --no-auto -s github -- refreshed
 	check "mixed use without a Linear key gives a setup error" bash -c "! dash -- 2>'$sandbox/missing-key.txt' && grep -qF LINEAR_API_KEY '$sandbox/missing-key.txt'"
