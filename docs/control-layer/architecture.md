@@ -647,7 +647,8 @@ the same commit. The commit message records why it changed.
     learning with no other task's evidence cannot be retired by observation.
   - Observed work cannot revive a retired learning; a maintainer proposal can.
   - Re-evaluating a task first removes that task's earlier evidence, and reverts its
-    earlier retirement or rewrite, so the new evaluation replaces it. The learning
+    earlier retirement, restoration, or rewrite, so the new evaluation replaces it.
+    Withdrawing a restoration puts back the retirements it ended. The learning
     stays retired while another task's retirement is still in force; once every
     retirement is withdrawn, its evidence sets its status again. The text becomes the newest rewrite that no
     re-evaluation withdrew, rebuilt from each rewrite's stored `to` text, or the

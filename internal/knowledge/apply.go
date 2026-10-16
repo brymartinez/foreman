@@ -208,8 +208,8 @@ func latest(l Learning, task string) time.Time {
 	return t
 }
 
-// revert undoes the task's own retire or rewrite of l before its re-evaluation is
-// applied. l stays retired while a retirement by another task is still in force.
+// revert undoes the task's own retire, restore, or rewrite of l before its
+// re-evaluation is applied. Withdrawing a restore puts back the retirements it ended. l stays retired while a retirement by another task is still in force.
 // The text becomes the newest rewrite still in force, or the original text when
 // none is left.
 func revert(l *Learning, ev Evaluation) {
@@ -222,6 +222,12 @@ func revert(l *Learning, ev Evaluation) {
 		}
 		l.Text = text
 	}
+	if slices.ContainsFunc(live(l.History, "restore", "revert-restore"), own) {
+		l.History = append(l.History, Change{At: ev.At, Task: ev.Task, Action: "revert-restore", Reason: "re-evaluation replaced this task's restoration"})
+		if len(live(l.History, Retire, "revert-retire")) > 0 {
+			l.Status = Retired
+		}
+	}
 	if l.Status == Retired && slices.ContainsFunc(live(l.History, Retire, "revert-retire"), own) {
 		l.History = append(l.History, Change{At: ev.At, Task: ev.Task, Action: "revert-retire", Reason: "re-evaluation replaced this task's retirement"})
 		if len(live(l.History, Retire, "revert-retire")) == 0 {
@@ -231,23 +237,24 @@ func revert(l *Learning, ev Evaluation) {
 }
 
 // live returns the history's action entries, oldest first, that are still in force:
-// no later undo entry by the same task withdrew them. A restore ends every earlier
-// retirement.
+// no later undo entry by the same task withdrew them. A restore in force ends every
+// earlier retirement.
 func live(history []Change, action, undo string) []Change {
 	var out []Change
 	for i, c := range history {
-		if action == Retire && c.Action == "restore" {
+		if action == Retire && c.Action == "restore" && !withdrawn(history[i+1:], "revert-restore", c.Task) {
 			out = nil
 		}
-		if c.Action != action {
-			continue
-		}
-		withdrawn := slices.ContainsFunc(history[i+1:], func(w Change) bool { return w.Action == undo && w.Task == c.Task })
-		if !withdrawn {
+		if c.Action == action && !withdrawn(history[i+1:], undo, c.Task) {
 			out = append(out, c)
 		}
 	}
 	return out
+}
+
+// withdrawn reports whether later holds an undo entry by task.
+func withdrawn(later []Change, undo, task string) bool {
+	return slices.ContainsFunc(later, func(w Change) bool { return w.Action == undo && w.Task == task })
 }
 
 // originalText is l's text before its first rewrite.

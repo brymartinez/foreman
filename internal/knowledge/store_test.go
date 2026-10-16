@@ -593,3 +593,25 @@ func TestReevaluatingTwoRetiringTasksRestoresTheLearning(t *testing.T) {
 		t.Fatalf("both retirements withdrawn, but the learning is %+v", got)
 	}
 }
+
+func TestWithdrawingARestorationReinstatesTheRetirement(t *testing.T) {
+	s, _ := newStore(t)
+	l := activeLearning(t, s)
+	retire := eval("8", 10)
+	retire.Revisions = []Revision{{ID: l.ID, Action: Retire, Reason: "removed", Source: Maintainer, Cites: []string{"C1"}}}
+	mustApply(t, s, repo, retire)
+	p := observed(Practice, l.Text)
+	p.Source, p.Cites = Maintainer, []string{"D1"}
+	mustApply(t, s, repo, eval("9", 11, p))
+	if got := learnings(t, s, repo)[0]; got.Status != Active {
+		t.Fatalf("setup: the maintainer proposal did not restore it: %+v", got)
+	}
+	mustApply(t, s, repo, eval("9", 11))
+	got := learnings(t, s, repo)[0]
+	if got.Status != Retired || strings.Contains(knowledgeMD(t, s, repo), "e2e script") {
+		t.Fatalf("task 8's retirement is in force again, but the learning is %+v", got)
+	}
+	if last := got.History[len(got.History)-1]; last.Action != "revert-restore" || last.Task != "9" {
+		t.Errorf("history = %+v", got.History)
+	}
+}
