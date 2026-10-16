@@ -792,7 +792,15 @@ func (a App) postPlan(ctx, final context.Context, rec *task.Record, docs map[tas
 			}
 		}
 		body := planCommentBody(doc, onIssue.fingerprint, docs[doc])
-		posted, err := a.postIssueComment(ctx, rec.Key, id, body)
+		var posted TrackerComment
+		var err error
+		if id != "" {
+			// The marker may have been removed while the planning turn ran.
+			id, err = a.stillPlanComment(ctx, rec.Key, doc, id)
+		}
+		if err == nil {
+			posted, err = a.postIssueComment(ctx, rec.Key, id, body)
+		}
 		if errors.Is(err, ErrGone) && id != "" {
 			posted, err = a.postIssueComment(ctx, rec.Key, "", body)
 		}
@@ -810,6 +818,22 @@ func (a App) postPlan(ctx, final context.Context, rec *task.Record, docs map[tas
 		fmt.Fprintf(log, "foreman: posted the %s: %s\n", doc.Title(), posted.URL)
 	}
 	return rec, nil
+}
+
+// stillPlanComment returns id when the comment still starts with doc's marker, and
+// an empty id, which posts a new comment, when it was deleted or lost the marker.
+func (a App) stillPlanComment(ctx context.Context, key task.Key, doc task.PlanDoc, id string) (string, error) {
+	c, err := a.issueComment(ctx, key, id)
+	if errors.Is(err, ErrGone) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if got, _, ok := task.ParsePlanMarker(c.Body); !ok || got != doc {
+		return "", nil
+	}
+	return id, nil
 }
 
 // maxCommentChars is GitHub's limit on an issue comment's length.

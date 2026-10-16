@@ -347,3 +347,38 @@ func TestAResumedPlanningTurnReceivesDocumentsFoundOnTheIssue(t *testing.T) {
 		t.Errorf("plan %+v edits %d", got.Plan, f.gh.edits)
 	}
 }
+
+func TestAPlanCommentUnmarkedDuringThePlanningTurnIsNotEdited(t *testing.T) {
+	t.Run("GitHub", func(t *testing.T) {
+		f := newFixture()
+		key := started(t, f, startReq(t))
+		f.gh.issueComments = githubPlanComments(f, "", task.Analysis, task.PRD)
+		unmarked := "## PRD\n\nThe marker was removed."
+		f.claude.during = func() {
+			c := f.gh.comments[502]
+			c.Body = unmarked
+			f.gh.comments[502] = c
+		}
+		f.claude.turns = []agent.Turn{keepingTurn(task.Analysis), prTurn("sid-2")}
+		if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		got := f.store.recs[key]
+		if c := got.PlanComment(task.PRD); !got.PlanPosted() || c.CommentID == 502 || f.gh.edits != 0 || f.gh.comments[502].Body != unmarked {
+			t.Fatalf("plan %+v edits %d comment 502 %q", got.Plan, f.gh.edits, f.gh.comments[502].Body)
+		}
+	})
+	t.Run("Linear", func(t *testing.T) {
+		f := newFixture()
+		key, tracker := linearTask(t, &f)
+		tracker.comments = linearPlanComments("", task.Analysis, task.PRD)
+		f.claude.during = func() { tracker.comments[1].Body = "## PRD\n\nThe marker was removed." }
+		f.claude.turns = []agent.Turn{keepingTurn(task.Analysis), prTurn("sid-2")}
+		if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		if got := f.store.recs[key]; !got.PlanPosted() || slices.Contains(tracker.postIDs, "lin-prd") || got.PlanComment(task.PRD).ExternalCommentID == "lin-prd" {
+			t.Fatalf("plan %+v post IDs %v", got.Plan, tracker.postIDs)
+		}
+	})
+}

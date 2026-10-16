@@ -45,8 +45,12 @@ func (f *lifecycleTracker) IssueComments(_ context.Context, key task.Key) ([]Tra
 	}
 	return out, nil
 }
-func (f *lifecycleTracker) GetIssueComment(context.Context, string) (TrackerComment, error) {
-	return TrackerComment{}, nil
+func (f *lifecycleTracker) GetIssueComment(ctx context.Context, id string) (TrackerComment, error) {
+	comments, _ := f.IssueComments(ctx, task.Key{})
+	if i := slices.IndexFunc(comments, func(c TrackerComment) bool { return c.ID == id }); i >= 0 && !f.missing[id] {
+		return comments[i], nil
+	}
+	return TrackerComment{}, ErrGone
 }
 func (f *lifecycleTracker) PostIssueComment(_ context.Context, _ task.Key, id, body string) (TrackerComment, error) {
 	f.postIDs = append(f.postIDs, id)
@@ -165,7 +169,8 @@ func TestLinearReplanningRepostsDeletedCommentAndEditsOtherComments(t *testing.T
 	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if !f.store.recs[key].PlanPosted() || len(tracker.postIDs) != 5 || tracker.postIDs[0] != "old-analysis" || tracker.postIDs[1] != "old-prd" || tracker.postIDs[2] != "" {
+	// The deleted PRD is found missing before the edit, so it is posted anew.
+	if !f.store.recs[key].PlanPosted() || !slices.Equal(tracker.postIDs, []string{"old-analysis", "", "", ""}) {
 		t.Fatalf("plan = %+v, post IDs = %v", f.store.recs[key].Plan, tracker.postIDs)
 	}
 }

@@ -36,6 +36,23 @@ func (a App) issueComments(ctx context.Context, key task.Key) ([]TrackerComment,
 	return out, nil
 }
 
+// issueComment reads one comment on the task's issue source. A missing comment
+// returns ErrGone.
+func (a App) issueComment(ctx context.Context, key task.Key, id string) (TrackerComment, error) {
+	if key.Source == task.Linear {
+		if a.Linear == nil {
+			return TrackerComment{}, fmt.Errorf("Linear issue source is not configured")
+		}
+		return a.Linear.GetIssueComment(ctx, id)
+	}
+	number, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return TrackerComment{}, fmt.Errorf("invalid GitHub comment ID %q: %w", id, err)
+	}
+	c, err := a.GitHub.GetIssueComment(ctx, key.Repo, number)
+	return TrackerComment{ID: strconv.FormatInt(c.ID, 10), URL: c.URL, Body: c.Body}, err
+}
+
 func issueLabel(key task.Key, identifier string) string {
 	if key.Source == task.Linear {
 		return identifier
