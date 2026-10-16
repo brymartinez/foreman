@@ -36,6 +36,8 @@ func cleanNote(res CleanResult) string {
 		return fmt.Sprintf("worktree kept: %v; commit or discard them, and a later refresh removes it", res.Err)
 	case errors.Is(res.Err, ErrBranchNotDeleted):
 		return "worktree removed; branch remains; cleanup will retry"
+	case errors.Is(res.Err, ErrBranchStatusUnknown):
+		return fmt.Sprintf("worktree removed; branch status unknown; cleanup will retry: %v", res.Err)
 	case res.Err != nil:
 		return fmt.Sprintf("worktree kept: %v", res.Err)
 	case res.BranchDeleted:

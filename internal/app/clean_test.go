@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -122,6 +123,28 @@ func TestInboxCompletesCleanupWhenBranchDeletionIsDisabledOnRetry(t *testing.T) 
 	}
 	if len(f.wt.removeAttempts) != 2 || f.wt.removeAttempts[1].DeleteBranch || f.wt.removeAttempts[1].RepoDir != "/src/armada-backend" || f.store.recs[key].Delegation.WorktreeRemovedAt.IsZero() {
 		t.Fatalf("retry requests = %+v, removed at %v", f.wt.removeAttempts, f.store.recs[key].Delegation.WorktreeRemovedAt)
+	}
+}
+
+func TestInboxReportsUnknownBranchStatusWhenAnOlderTaskHasNoCheckout(t *testing.T) {
+	f := newFixture()
+	f.app.CleanOnDone = true
+	f.app.DeleteMergedBranches = true
+	key := reviewed(t, f)
+	f.store.recs[key].Delegation.RepoDir = ""
+	setCI(f, task.CIStatus{State: task.CIPassing})
+	setPR(f, "merged")
+	f.gh.items = []InboxItem{item(825, "open", t0, task.Assigned)}
+	f.wt.removeErr = fmt.Errorf("%w: repository checkout is unknown", ErrBranchStatusUnknown)
+	report, err := f.app.Inbox(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.wt.removeAttempts) != 1 || f.wt.removeAttempts[0].RepoDir != "" || !f.wt.removeAttempts[0].DeleteBranch || !f.store.recs[key].Delegation.WorktreeRemovedAt.IsZero() {
+		t.Fatalf("removal = %+v, removed at %v", f.wt.removeAttempts, f.store.recs[key].Delegation.WorktreeRemovedAt)
+	}
+	if changes := report.Changed[0].Changes; changes[len(changes)-1] != "worktree removed; branch status unknown; cleanup will retry: branch status is unknown: repository checkout is unknown" {
+		t.Fatalf("changes = %v", changes)
 	}
 }
 

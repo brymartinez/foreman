@@ -500,6 +500,26 @@ func TestRemoveReportsABranchKeptAfterTheWorktreeIsGone(t *testing.T) {
 	}
 }
 
+func TestRemoveReportsUnknownBranchStatusWithoutARecordedCheckout(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "already-gone")
+	err := (Git{}).Remove(context.Background(), app.WorktreeRemoval{Path: path, Branch: "agent/old", DeleteBranch: true})
+	if err == nil || !strings.Contains(err.Error(), "repository checkout is unknown") {
+		t.Fatalf("remove = %v", err)
+	}
+	if !errors.Is(err, app.ErrBranchStatusUnknown) {
+		t.Fatalf("remove did not report unknown branch status: %v", err)
+	}
+}
+
+func TestRemoveReportsUnknownBranchStatusWhenTheRecordedCheckoutIsGone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "already-gone")
+	repo := filepath.Join(t.TempDir(), "checkout-gone")
+	err := (Git{}).Remove(context.Background(), app.WorktreeRemoval{Path: path, Branch: "agent/old", DeleteBranch: true, RepoDir: repo})
+	if !errors.Is(err, app.ErrBranchStatusUnknown) {
+		t.Fatalf("remove = %v", err)
+	}
+}
+
 func TestBranchExists(t *testing.T) {
 	clone, _ := repoWithOrigin(t)
 	ctx := context.Background()
