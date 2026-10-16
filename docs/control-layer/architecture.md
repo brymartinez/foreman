@@ -122,7 +122,8 @@ app.Reset             -> FAILED with no live runner only
                          store: replace the record with one holding only the PR
                          in `reset`, state DISCOVERED, no delegation, and the
                          files to remove with the removal marked running
-                         git: worktree remove --force, branch -D; delete the log
+                         git: worktree remove --force, only while the path holds
+                         the task's branch; branch -D; delete the log
                          store: clear the list, or keep what failed for the next
                          start and mark the removal finished
 foreman [-a|--auto|--no-auto]

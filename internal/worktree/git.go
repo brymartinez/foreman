@@ -4,6 +4,7 @@ package worktree
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -151,6 +152,17 @@ func (Git) Remove(ctx context.Context, req app.WorktreeRemoval) error {
 		}
 		common = strings.TrimSpace(string(out))
 		args := []string{"worktree", "remove", req.Path}
+		if req.Force && req.Branch != "" {
+			// A forced removal discards work, so it takes only the worktree it was asked
+			// for. Another worktree made at the same path is kept.
+			held, err := heldBranch(ctx, req.Path)
+			if err != nil {
+				return err
+			}
+			if held != req.Branch {
+				return fmt.Errorf("%s has %s checked out, not %s, so it was kept", req.Path, cmp.Or(held, "a detached HEAD"), req.Branch)
+			}
+		}
 		if req.Force {
 			// Twice: one --force keeps a locked worktree.
 			args = []string{"worktree", "remove", "--force", "--force", req.Path}
@@ -170,6 +182,25 @@ func (Git) Remove(ctx context.Context, req app.WorktreeRemoval) error {
 		return fmt.Errorf("%w: %v", app.ErrBranchNotDeleted, err)
 	}
 	return nil
+}
+
+// heldBranch names the branch the worktree at dir has checked out. A rebase that
+// stopped detaches HEAD, so its branch comes from the rebase state. Empty means a
+// detached HEAD on no branch.
+func heldBranch(ctx context.Context, dir string) (string, error) {
+	if out, err := git(ctx, dir, "symbolic-ref", "-q", "--short", "HEAD"); err == nil {
+		return strings.TrimSpace(string(out)), nil
+	}
+	for _, state := range []string{"rebase-merge/head-name", "rebase-apply/head-name"} {
+		out, err := git(ctx, dir, "rev-parse", "--path-format=absolute", "--git-path", state)
+		if err != nil {
+			return "", err
+		}
+		if name, err := os.ReadFile(strings.TrimSpace(string(out))); err == nil {
+			return strings.TrimPrefix(strings.TrimSpace(string(name)), "refs/heads/"), nil
+		}
+	}
+	return "", nil
 }
 
 func (Git) CommonDir(ctx context.Context, dir string) (string, error) {
