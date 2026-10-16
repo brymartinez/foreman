@@ -71,6 +71,18 @@ func press(m *Model, keys ...Key) Action {
 
 func rune_(r rune) Key { return Key{Kind: KeyRune, Rune: r} }
 
+func confirmBranch(t *testing.T, m *Model, a Action) Action {
+	t.Helper()
+	if a.Kind != ActionPropose || m.Mode != ProposingBranch {
+		t.Fatalf("action %+v mode %v; want branch proposal", a, m.Mode)
+	}
+	m.Proposed(a.ProposalSeq, app.BranchProposal{Name: "feat/proposed", Reason: "repository convention"}, nil)
+	if m.Mode != TypingBranch {
+		t.Fatalf("mode %v; want editable branch", m.Mode)
+	}
+	return press(m, Key{Kind: KeyEnter})
+}
+
 func TestArrowsMoveAndClamp(t *testing.T) {
 	m := model()
 	m.Focus = TaskPane
@@ -184,8 +196,8 @@ func TestDelegateAsksAgentThenContext(t *testing.T) {
 	if m.Input != "ctx" {
 		t.Fatalf("input = %q", m.Input)
 	}
-	got := press(&m, Key{Kind: KeyEnter})
-	want := app.StartRequest{Repo: "a/b", Issue: 2, Agent: task.Codex, ContextFile: "ctx"}
+	got := confirmBranch(t, &m, press(&m, Key{Kind: KeyEnter}))
+	want := app.StartRequest{Repo: "a/b", Issue: 2, Agent: task.Codex, ContextFile: "ctx", BranchName: "feat/proposed"}
 	if got.Kind != ActionStart || got.Start != want {
 		t.Fatalf("action = %+v; want start %+v", got, want)
 	}
@@ -196,10 +208,24 @@ func TestDelegateAsksAgentThenContext(t *testing.T) {
 
 func TestDelegateWithoutAContextFile(t *testing.T) {
 	m := model()
-	got := press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter})
-	want := app.StartRequest{Repo: "a/b", Issue: 1, Agent: task.Claude}
+	got := confirmBranch(t, &m, press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter}))
+	want := app.StartRequest{Repo: "a/b", Issue: 1, Agent: task.Claude, BranchName: "feat/proposed"}
 	if got.Kind != ActionStart || got.Start != want {
 		t.Fatalf("action = %+v; want start %+v", got, want)
+	}
+}
+
+func TestManualStartCanEditAnUncertainBranchBeforeStarting(t *testing.T) {
+	m := model()
+	a := press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter})
+	m.Proposed(a.ProposalSeq, app.BranchProposal{Name: "bryan/kub-189-x", Reason: "workstream unclear", Uncertain: true}, nil)
+	if m.Mode != TypingBranch || !strings.Contains(m.Message, "needs your choice") {
+		t.Fatalf("mode %v message %q", m.Mode, m.Message)
+	}
+	m.Input = "bryan/db-kub-189-x"
+	got := press(&m, Key{Kind: KeyEnter})
+	if got.Kind != ActionStart || got.Start.BranchName != "bryan/db-kub-189-x" {
+		t.Fatalf("start = %+v", got)
 	}
 }
 

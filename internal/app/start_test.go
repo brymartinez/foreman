@@ -287,8 +287,11 @@ func newFixture() fixture {
 		},
 	}
 	f.app = App{
-		Notifier: f.notes, Accounts: f.accts, RemoteAuth: f.accts,
-		Store: f.store, GitHub: f.gh, Worktrees: f.wt, Runners: f.runners, Stages: f.stages,
+		Notifier:          f.notes,
+		Accounts:          f.accts,
+		RemoteAuth:        f.accts,
+		ReplyToPRFeedback: true,
+		Store:             f.store, GitHub: f.gh, Worktrees: f.wt, Runners: f.runners, Stages: f.stages,
 		Agents:       map[task.Agent]AgentAdapter{task.Claude: f.claude, task.Codex: f.codex},
 		WorktreesDir: "/wt", Repositories: f.repos, RepositoriesDir: "/repos",
 		Now: func() time.Time { return now },

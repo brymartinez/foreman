@@ -30,6 +30,55 @@ func movesHead(f fixture, sha string) {
 	f.gh.prs[912] = pr
 }
 
+func TestDisabledPRFeedbackDoesNotStartReplyTurnAtHandover(t *testing.T) {
+	f := newFixture()
+	f.app.ReplyToPRFeedback = false
+	f.gh.addPRComment(912, prComment(4401, "<!-- linear-linkback --> linked issue"))
+	key := started(t, f, StartRequest{Repo: "ridezoomo/armada-backend", Issue: 825, Agent: task.Claude})
+	f.claude.turn = prTurn("sid-1")
+	if err := f.app.RunTask(context.Background(), key, 4243, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.claude.resumed) != 0 || f.gh.prCommentReads != 1 {
+		t.Fatalf("resumed turns %d, comment reads %d", len(f.claude.resumed), f.gh.prCommentReads)
+	}
+}
+
+func TestDisabledPRFeedbackRestartsFailedReplyWithoutAgentTurn(t *testing.T) {
+	f := newFixture()
+	key := waiting(t, f)
+	f.store.recs[key].State = task.Failed
+	f.app.ReplyToPRFeedback = false
+	if _, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Issue: key.Number, Agent: task.Claude}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.app.RunTask(context.Background(), key, 4243, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	rec := f.store.recs[key]
+	if rec.State != task.ReadyForHuman || len(rec.Feedback) != 0 || len(f.claude.resumed) != 0 {
+		t.Fatalf("state %s, feedback %+v, resumed turns %d", rec.State, rec.Feedback, len(f.claude.resumed))
+	}
+}
+
+func TestDisabledPRFeedbackKeepsCIUnverifiedAfterFailedReply(t *testing.T) {
+	f := newFixture()
+	key := waiting(t, f)
+	f.store.recs[key].State = task.Failed
+	f.store.recs[key].CI = nil
+	f.app.ReplyToPRFeedback = false
+	if _, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Issue: key.Number, Agent: task.Claude}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.app.RunTask(context.Background(), key, 4243, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	rec := f.store.recs[key]
+	if rec.State != task.Reviewing || len(rec.Feedback) != 0 || len(f.claude.resumed) != 0 {
+		t.Fatalf("state %s, feedback %+v, resumed turns %d", rec.State, rec.Feedback, len(f.claude.resumed))
+	}
+}
+
 func TestFeedbackTurnWithoutCommitsReturnsReady(t *testing.T) {
 	f := newFixture()
 	key := waiting(t, f)

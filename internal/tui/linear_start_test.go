@@ -13,7 +13,7 @@ func TestManualLinearDelegationKeepsSourceIdentity(t *testing.T) {
 	k := task.Key{Repo: "a/b", Source: task.Linear, ExternalID: "uuid-42"}
 	m := model()
 	m.SetInbox([]app.InboxEntry{{Item: app.InboxItem{Key: k, Identifier: "WEB-42", Kind: task.Issue, State: "open"}}})
-	got := press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter})
+	got := confirmBranch(t, &m, press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter}))
 	if got.Kind != ActionStart || got.Start.Key != k {
 		t.Fatalf("manual start = %+v", got)
 	}
@@ -30,7 +30,7 @@ func TestManualLinearStartReleasesItsSlotForTheNextAutoIssue(t *testing.T) {
 		{Item: app.InboxItem{Key: second, Identifier: "WEB-2", Kind: task.Issue, State: "open", Reasons: []task.InboxReason{task.Assigned}, Labels: []string{"triaged"}}},
 	})
 	m.githubFresh = true
-	action := press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter})
+	action := confirmBranch(t, &m, press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter}))
 	if action.Kind != ActionStart || action.Start.Key != first || !m.starting[first] {
 		t.Fatalf("manual start = %+v, starting = %+v", action, m.starting)
 	}

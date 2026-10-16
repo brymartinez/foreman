@@ -35,6 +35,8 @@ func (a App) Resume(ctx context.Context, key task.Key) (*task.Record, error) {
 func (a App) resumable(key task.Key, rec *task.Record) error {
 	ref := fmt.Sprintf("%s#%d", key.Repo, key.Number)
 	switch {
+	case !a.ReplyToPRFeedback:
+		return fmt.Errorf("%s: automatic PR feedback replies are disabled", ref)
 	case rec == nil:
 		return fmt.Errorf("%s is not tracked; refresh the dashboard first", ref)
 	case rec.State != task.Reviewed:

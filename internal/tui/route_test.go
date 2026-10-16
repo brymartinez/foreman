@@ -64,7 +64,7 @@ func TestRouteNotOfferedForDelegatedIssueOrWhenRoutingIsOff(t *testing.T) {
 func TestKeys1And2StartWithoutRouting(t *testing.T) {
 	for r, want := range map[rune]task.Agent{'1': task.Claude, '2': task.Codex} {
 		m := routingModel()
-		a := press(&m, Key{Kind: KeyEnter}, rune_(r), Key{Kind: KeyEnter})
+		a := confirmBranch(t, &m, press(&m, Key{Kind: KeyEnter}, rune_(r), Key{Kind: KeyEnter}))
 		if a.Kind != ActionStart || a.Start.Agent != want || a.Start.Profile != nil {
 			t.Errorf("%c: action = %+v; want a start with %s and no profile", r, a, want)
 		}
@@ -102,7 +102,7 @@ func TestEnterConfirmsRouteAndStarts(t *testing.T) {
 	m := routingModel()
 	a := routeTo(t, &m)
 	m.Routed(a.RouteSeq, codexRoute, nil)
-	a = press(&m, Key{Kind: KeyEnter})
+	a = confirmBranch(t, &m, press(&m, Key{Kind: KeyEnter}))
 	if a.Kind != ActionStart || a.Start.Profile != codexRoute.Profile || a.Start.RouteReason != codexRoute.Reason || a.Start.Agent != "" || a.Start.ContextFile != "ctx.md" {
 		t.Fatalf("action = %+v", a)
 	}
@@ -118,7 +118,7 @@ func TestEscFromConfirmReturnsToAgentChoice(t *testing.T) {
 	if a := press(&m, Key{Kind: KeyEscape}); a.Kind != ActionNone || m.Mode != ChoosingAgent {
 		t.Fatalf("action %+v mode %v; want the agent choice", a, m.Mode)
 	}
-	if a := press(&m, rune_('1'), Key{Kind: KeyEnter}); a.Kind != ActionStart || a.Start.Agent != task.Claude || a.Start.Profile != nil {
+	if a := confirmBranch(t, &m, press(&m, rune_('1'), Key{Kind: KeyEnter})); a.Kind != ActionStart || a.Start.Agent != task.Claude || a.Start.Profile != nil {
 		t.Errorf("override after esc = %+v", a)
 	}
 }
@@ -178,10 +178,18 @@ func TestRouteResultReachesTheModel(t *testing.T) {
 
 type routeSource struct {
 	stubSource
-	d      app.Decision
-	err    error
-	routed []app.RouteRequest
-	starts []app.StartRequest
+	d        app.Decision
+	err      error
+	proposal app.BranchProposal
+	routed   []app.RouteRequest
+	starts   []app.StartRequest
+}
+
+func (s *routeSource) ProposeBranch(_ context.Context, _ app.StartRequest) (app.BranchProposal, error) {
+	if s.proposal.Name != "" {
+		return s.proposal, nil
+	}
+	return app.BranchProposal{Name: "feat/1-x"}, nil
 }
 
 func (s *routeSource) Route(_ context.Context, req app.RouteRequest) (app.Decision, error) {
@@ -215,6 +223,17 @@ func TestAutoModeRoutesWithoutConfirmation(t *testing.T) {
 	}
 	if !strings.Contains(r.message, "auto:") || !strings.Contains(r.message, "codex") {
 		t.Errorf("message = %q", r.message)
+	}
+}
+
+func TestAutoModeWaitsWhenRepositoryBranchIsUncertain(t *testing.T) {
+	m := autoModel(3, assigned("a/b", 1, 0))
+	reqs := m.AutoStarts()
+	s := &routeSource{proposal: app.BranchProposal{Name: "bryan/db-1-x", Reason: "workstream unclear", Uncertain: true}}
+	r := autoStart(context.Background(), s, reqs[0], nil)
+	settleAuto(&m, r)
+	if len(s.starts) != 0 || m.starting[key(1)] || !strings.Contains(m.Message, "workstream unclear") {
+		t.Fatalf("result %+v starts %+v message %q", r, s.starts, m.Message)
 	}
 }
 

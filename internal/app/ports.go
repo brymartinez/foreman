@@ -250,6 +250,11 @@ type AgentAdapter interface {
 	Review(ctx context.Context, in agent.StartInput) (agent.ReviewOutcome, error)
 }
 
+// BranchProposer runs a disposable agent turn before a new task has a worktree.
+type BranchProposer interface {
+	Propose(ctx context.Context, in agent.BranchInput) (agent.Outcome, error)
+}
+
 // StageInstructionResolver loads the developer's instructions for a workflow stage:
 // the global layer, then repoRoot/.foreman. Missing files resolve to empty.
 type StageInstructionResolver interface {

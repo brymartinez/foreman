@@ -28,6 +28,8 @@ const (
 	Browsing Mode = iota
 	ChoosingAgent
 	TypingContext
+	ProposingBranch
+	TypingBranch
 	ConfirmingCancel
 	AnsweringDecision
 	// Routing waits for App.Route; ConfirmingRoute shows its choice.
@@ -48,6 +50,7 @@ const (
 	ActionRespond
 	ActionToggleView
 	ActionRoute
+	ActionPropose
 	// ActionReadLog rereads the open log from its tail; ActionLoadOlder reads the
 	// lines before the oldest loaded one.
 	ActionReadLog
@@ -68,8 +71,9 @@ type Action struct {
 	Answer  string
 	// Route asks which profile should start an issue. RouteSeq tells its result
 	// apart from one the developer has since backed out of.
-	Route    app.RouteRequest
-	RouteSeq int
+	Route       app.RouteRequest
+	RouteSeq    int
+	ProposalSeq int
 }
 
 // Model is everything the dashboard draws and everything a keystroke changes.
@@ -150,6 +154,7 @@ type Model struct {
 	routeSeq     int               // the route request the footer waits for
 	route        app.Decision      // the route on show while ConfirmingRoute
 	routeErr     string            // why the route on show failed
+	proposalSeq  int               // the branch proposal this prompt waits for
 	waiting      map[task.Key]wait // auto starts held back by routing
 	cancelTarget task.Key          // the task named when cancellation was requested
 	manualTask   bool              // cursor movement stops following the latest delegation
@@ -330,6 +335,14 @@ func (m *Model) Key(k Key) Action {
 		return m.chooseAgent(k)
 	case TypingContext:
 		return m.typeContext(k)
+	case ProposingBranch:
+		if k.Kind == KeyEscape {
+			delete(m.starting, requestKey(m.pending))
+			m.Mode, m.Input = Browsing, ""
+		}
+		return Action{}
+	case TypingBranch:
+		return m.typeBranch(k)
 	case ConfirmingCancel:
 		return m.confirmCancel(k)
 	case AnsweringDecision:
@@ -722,9 +735,57 @@ func (m *Model) typeContext(k Key) Action {
 	case k.Kind == KeyEnter:
 		req := m.pending
 		req.ContextFile = strings.TrimSpace(m.Input)
+		return m.prepareBranch(req)
+	}
+	return Action{}
+}
+
+func (m *Model) prepareBranch(req app.StartRequest) Action {
+	if !m.pendingNew {
 		m.Mode, m.Input = Browsing, ""
-		m.manualTask = false
-		m.Message = fmt.Sprintf("Starting %s#%d with %s…", req.Repo, req.Issue, req.Agent)
+		return m.startPending(req)
+	}
+	m.pending = req
+	m.Mode, m.Input = ProposingBranch, ""
+	m.starting = mark(m.starting, requestKey(req))
+	m.proposalSeq++
+	return Action{Kind: ActionPropose, Start: req, ProposalSeq: m.proposalSeq}
+}
+
+func (m *Model) Proposed(seq int, p app.BranchProposal, err error) {
+	if m.Mode != ProposingBranch || seq != m.proposalSeq {
+		return
+	}
+	m.Mode, m.Input = TypingBranch, p.Name
+	if err != nil {
+		m.Message = "! branch proposal: " + err.Error() + "; enter a branch name"
+	} else if p.Uncertain {
+		m.Message = "! branch needs your choice: " + p.Reason
+	} else {
+		m.Message = "Proposed branch: " + p.Reason
+	}
+}
+
+func (m *Model) typeBranch(k Key) Action {
+	switch k.Kind {
+	case KeyEscape:
+		delete(m.starting, requestKey(m.pending))
+		m.Mode, m.Input = Browsing, ""
+	case KeyBackspace:
+		if r := []rune(m.Input); len(r) > 0 {
+			m.Input = string(r[:len(r)-1])
+		}
+	case KeyRune:
+		m.Input += string(k.Rune)
+	case KeyEnter:
+		name := strings.TrimSpace(m.Input)
+		if !task.ValidBranchName(name) {
+			m.Message = "! enter a valid Git branch name"
+			return Action{}
+		}
+		req := m.pending
+		req.BranchName = name
+		m.Mode, m.Input, m.manualTask = Browsing, "", false
 		return m.startPending(req)
 	}
 	return Action{}
@@ -756,9 +817,7 @@ func (m *Model) confirmRoute(k Key) Action {
 	case k.Kind == KeyEnter && m.route.Profile != nil && m.routeErr == "":
 		req := m.pending
 		req.Agent, req.Profile, req.RouteReason = "", m.route.Profile, m.route.Reason
-		m.Mode, m.manualTask = Browsing, false
-		m.Message = fmt.Sprintf("Starting %s#%d with profile %s…", req.Repo, req.Issue, req.Profile.Name)
-		return m.startPending(req)
+		return m.prepareBranch(req)
 	}
 	return Action{}
 }

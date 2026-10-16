@@ -11,6 +11,7 @@ is the text after the last cursor-home sequence with the escapes removed. Steps:
   wait=TEXT     wait until the screen shows TEXT
   keys=KEYS     press each key in KEYS; backslash escapes (\\r, \\x1b) work
   pick=TEXT     move the focused pane's cursor to the row that starts with TEXT
+  confirm-branch  confirm a new task's proposal; a restart has no proposal
   sleep=SECS    wait
   print         write the screen to stdout
   quit          press q and wait for foreman to exit
@@ -155,6 +156,10 @@ def main():
                 d.press(ch.encode())
         elif name == "pick":
             d.pick(arg)
+        elif name == "confirm-branch":
+            d.until(lambda: "Branch name (edit, enter to start)" in d.screen() or "Started " in d.screen(), "a branch proposal or restart")
+            if "Branch name (edit, enter to start)" in d.screen():
+                d.press(b"\r")
         elif name == "sleep":
             end = time.time() + float(arg)
             while time.time() < end and d.pump(0.05):

@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "summary", "branchName", "uncertain"],
+  "properties": {
+    "status": {"type": "string", "enum": ["branch_proposed"]},
+    "summary": {"type": "string"},
+    "branchName": {"type": "string"},
+    "uncertain": {"type": "boolean"}
+  }
+}

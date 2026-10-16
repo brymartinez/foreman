@@ -76,7 +76,7 @@ assign() {
 # in the inbox, press enter, pick Claude, and skip the context file.
 start() {
 	assign "$1"
-	dash -- refreshed "pick=acme/widgets#$1" 'keys=\r1\r' "wait=Started acme/widgets#$1"
+	dash -- refreshed "pick=acme/widgets#$1" 'keys=\r1\r' confirm-branch "wait=Started acme/widgets#$1"
 }
 
 runner_pid() { sed -n 's/^runner_pid: *//p' "$sandbox/tasks/acme-widgets-$1.md"; }
@@ -551,7 +551,7 @@ scenario_inbox() {
 	check "the inbox shows repo-qualified items" contains "$sandbox/inbox.txt" "acme/widgets#42"
 	check "excluded repositories are hidden" bash -c "! grep -q 'acme/ignored' '$sandbox/inbox.txt'"
 	check "review requests aren't offered for delegation" bash -c "! grep -q 'acme/widgets#950' '$sandbox/inbox.txt'"
-	check "selecting an issue delegates it" dash -- refreshed "pick=acme/widgets#42" 'keys=\r1\r' "wait=Started acme/widgets#42"
+	check "selecting an issue delegates it" dash -- refreshed "pick=acme/widgets#42" 'keys=\r1\r' confirm-branch "wait=Started acme/widgets#42"
 	check "the source checkout is cloned" test -d "$sandbox/repositories/acme-widgets/.git"
 	check "the selection reaches a clean review" wait_status "review ✓"
 
@@ -616,9 +616,9 @@ EOF
 	check "a failed Linear refresh keeps GitHub results with a warning" bash -c "grep -qF 'acme/widgets#43' '$sandbox/failed.txt' && grep -qF 'warning' '$sandbox/failed.txt'"
 	check "a failed mixed refresh blocks all auto starts" grep -q '^state: DISCOVERED' "$sandbox/tasks/acme-widgets-43.md"
 	rm -f "$state/linear-fail"
-	check "a GitHub issue can be delegated" dash --no-auto -s github -- refreshed "pick=acme/widgets#43" 'keys=\r1\r' "wait=Started acme/widgets#43"
+	check "a GitHub issue can be delegated" dash --no-auto -s github -- refreshed "pick=acme/widgets#43" 'keys=\r1\r' confirm-branch "wait=Started acme/widgets#43"
 	check "the GitHub task keeps its issue number" grep -q '^number: 43' "$sandbox/tasks/acme-widgets-43.md"
-	if dash --no-auto -s linear -- refreshed "pick=acme/linear · LIN-7" 'keys=\r1\r' "wait=Started acme/linear · LIN-7" >"$sandbox/linear-start.txt" 2>&1; then
+	if dash --no-auto -s linear -- refreshed "pick=acme/linear · LIN-7" 'keys=\r1\r' confirm-branch "wait=Started acme/linear · LIN-7" >"$sandbox/linear-start.txt" 2>&1; then
 		pass "a Linear issue can be delegated"
 	else
 		fail "a Linear issue can be delegated"
@@ -843,7 +843,7 @@ EOF2
 }
 
 scenario_feedback() {
-	echo "feedback: a comment on the PR comes back to the agent"
+	echo "feedback: PR comments stay with the developer"
 	setup feedback
 	echo '[{"name":"test","bucket":"pass","link":"https://ci/1"}]' >"$state/checks.json"
 	start 42 >/dev/null
@@ -852,24 +852,11 @@ scenario_feedback() {
 	# The developer comments on the pull request.
 	conv="$state/conv-repos-acme-widgets-issues-942-comments.json"
 	printf '[[{"id":4401,"html_url":"https://github.com/acme/widgets/pull/942#issuecomment-4401","body":"Cap the retries.","updated_at":"2026-10-01T09:00:00Z","user":{"login":"brymartinez"}}]]\n' >"$conv"
-	check "a new comment makes the task REVIEWED" wait_status "REVIEWED" 5
+	check "a new comment leaves the task ready" wait_status "READY_FOR_HUMAN" 5
 	screen >"$sandbox/inbox.txt"
-	check "the inbox offers it to resume" grep -qE '^[> ] acme/widgets#42 ' "$sandbox/inbox.txt"
-	check "marked REVIEWED" grep -qE '^    REVIEWED' "$sandbox/inbox.txt"
-
-	check "selecting it resumes the agent" dash -- refreshed pick=acme/widgets#42 'keys=\r' "wait=Resumed acme/widgets#42 on PR #942"
-	check "the task comes back once the comment is answered" wait_status "READY_FOR_HUMAN" 15
-	check "the agent saw the comment" contains "$state/feedback-prompt.txt" "Cap the retries."
-	check "and was told where to reply" contains "$state/feedback-prompt.txt" "repos/acme/widgets/issues/942/comments"
-	check "the agent kept its session" test "$(turns 'claude feedback')" = 1
-	check "answering needed no new review" test "$(turns 'codex review')" = 1
-
-	# The agent's own reply carries the marker, so it is not read back as feedback.
-	screen >"$sandbox/status.txt"
-	check "the reply did not start another round" contains "$sandbox/status.txt" "READY_FOR_HUMAN"
-	check "and the agent was not asked again" test "$(turns 'claude feedback')" = 1
-	task 42 sd >"$sandbox/show.txt"
-	check "the show pane lists the answered comment" contains "$sandbox/show.txt" "answered"
+	check "the inbox does not offer a feedback resume" test "$(grep -cE '^    REVIEWED' "$sandbox/inbox.txt" || true)" = 0
+	check "the agent was not asked to answer" test "$(turns 'claude feedback')" = 0
+	check "the comment was not answered by foreman" jq -e 'length == 1 and .[0][0].id == 4401' "$conv"
 }
 
 # conflicts marks PR #942 as conflicting with its base.
@@ -979,7 +966,7 @@ scenario_learning() {
 	# A task in another repository: same origin, but foreman keys it as acme/linear.
 	echo "[$(hit acme/linear 45 'Other repo work')]" >"$state/search-issues-assignee.json"
 	issue 45 "Other repo work"
-	dash -- refreshed "pick=acme/linear#45" 'keys=\r1\r' "wait=Started acme/linear#45" >/dev/null 2>&1 || true
+	dash -- refreshed "pick=acme/linear#45" 'keys=\r1\r' confirm-branch "wait=Started acme/linear#45" >/dev/null 2>&1 || true
 	check "the other repository's task reaches a clean review" eventually 20 grep -q 'verdict: clean' "$sandbox/tasks/acme-linear-45.md"
 	check "its prompt carries no knowledge from acme/widgets" bash -c "! grep -qF 'go vet' '$state/prompt.txt'"
 	check "and has no knowledge section" bash -c "! grep -qF '## Repository knowledge' '$state/prompt.txt'"

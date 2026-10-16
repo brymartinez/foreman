@@ -60,8 +60,10 @@ type result struct {
 	// allRepos is the view a refresh fetched.
 	allRepos bool
 	// routed is a manual route's result, for the request numbered routeSeq.
-	routed   *app.Decision
-	routeSeq int
+	routed      *app.Decision
+	routeSeq    int
+	proposal    *app.BranchProposal
+	proposalSeq int
 	// wait is why routing held an auto start back; selection is what it chose.
 	wait      string
 	selection agent.Selection
@@ -186,6 +188,9 @@ func Run(ctx context.Context, o Options) (err error) {
 				req := a.Start
 				pending++
 				go func() { results <- start(ctx, o.Source, req, false) }()
+			case ActionPropose:
+				req, seq := a.Start, a.ProposalSeq
+				go func() { results <- propose(ctx, o.Source, req, seq) }()
 			case ActionRoute:
 				req, seq := a.Route, a.RouteSeq
 				go func() { results <- route(ctx, o.Source, req, seq) }()
@@ -322,6 +327,10 @@ func apply(m *Model, r result) {
 		m.Routed(r.routeSeq, *r.routed, r.err)
 		return
 	}
+	if r.proposal != nil {
+		m.Proposed(r.proposalSeq, *r.proposal, r.err)
+		return
+	}
 	if r.historyLoad {
 		// r or v while the load ran asked for a newer load, which is on its way.
 		if r.historySeq == m.historySeq {
@@ -405,21 +414,36 @@ func route(ctx context.Context, s Source, req app.RouteRequest, seq int) result 
 	return result{routed: &d, routeSeq: seq, err: err}
 }
 
+func propose(ctx context.Context, s Source, req app.StartRequest, seq int) result {
+	p, err := s.ProposeBranch(ctx, req)
+	return result{proposal: &p, proposalSeq: seq, err: err}
+}
+
 // autoStart routes an auto start that has no agent, then starts it with the chosen
 // profile. When no suitable profile can run, nothing starts and the result says why.
 func autoStart(ctx context.Context, s Source, req app.StartRequest, prior *agent.Selection) result {
-	if req.Agent != "" {
-		return start(ctx, s, req, true)
-	}
 	key := requestKey(req)
-	d, err := s.Route(ctx, app.RouteRequest{Key: req.Key, Repo: req.Repo, Issue: req.Issue, Prior: prior})
-	switch {
-	case err != nil:
-		return result{err: fmt.Errorf("auto: route %s#%d: %w", req.Repo, req.Issue, err), key: key, auto: true, finished: true}
-	case d.Profile == nil:
-		return result{message: fmt.Sprintf("! auto: %s#%d waits: %s", req.Repo, req.Issue, d.Wait), wait: d.Wait, selection: d.Selection, key: key, auto: true, finished: true}
+	var selection agent.Selection
+	if req.Agent == "" {
+		d, err := s.Route(ctx, app.RouteRequest{Key: req.Key, Repo: req.Repo, Issue: req.Issue, Prior: prior})
+		switch {
+		case err != nil:
+			return result{err: fmt.Errorf("auto: route %s#%d: %w", req.Repo, req.Issue, err), key: key, auto: true, finished: true}
+		case d.Profile == nil:
+			return result{message: fmt.Sprintf("! auto: %s#%d waits: %s", req.Repo, req.Issue, d.Wait), wait: d.Wait, selection: d.Selection, key: key, auto: true, finished: true}
+		}
+		req.Profile, req.RouteReason = d.Profile, d.Reason
+		selection = d.Selection
 	}
-	req.Profile, req.RouteReason = d.Profile, d.Reason
+	p, err := s.ProposeBranch(ctx, req)
+	if err != nil {
+		return result{err: fmt.Errorf("auto: branch proposal %s#%d: %w", req.Repo, req.Issue, err), key: key, auto: true, finished: true}
+	}
+	if p.Uncertain {
+		reason := "branch needs a choice: " + p.Reason
+		return result{message: fmt.Sprintf("! auto: %s#%d waits: %s", req.Repo, req.Issue, reason), wait: reason, selection: selection, key: key, auto: true, finished: true}
+	}
+	req.BranchName = p.Name
 	return start(ctx, s, req, true)
 }
 
