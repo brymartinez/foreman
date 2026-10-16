@@ -2,6 +2,10 @@
 
 ## Current stage
 
+Issue #77 is complete. Launch aborts when its task file disappears before spawning.
+If deletion happens after spawning, launch stops and waits for the new runner.
+Regression tests cover removal before spawn, during worktree restoration, and after
+spawn, including failed stops. Vet, Go tests, build, and end-to-end checks pass.
 Issue #78 cleanup retries merged branch deletion from the task's recorded repository
 checkout after its worktree is removed. An unsuccessful deletion leaves cleanup pending
 and reports that the branch remains; turning off branch deletion completes cleanup on

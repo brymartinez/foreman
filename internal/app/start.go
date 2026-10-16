@@ -317,10 +317,16 @@ func (a App) launch(ctx context.Context, key task.Key) (*task.Record, error) {
 	if spawnErr == nil {
 		spawnErr = a.launchAccount(ctx, key)
 	}
+	if errors.Is(spawnErr, errTaskRemoved) {
+		return nil, spawnErr
+	}
 	if spawnErr == nil {
 		pid, logPath, spawnErr = a.Runners.Spawn(key)
 	}
-	return a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
+	rec, err := a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
+		if cur == nil || cur.Delegation == nil {
+			return nil, errTaskRemoved
+		}
 		if spawnErr != nil && cur.Delegation.ConflictPending {
 			failRepair(cur, "could not launch runner: "+spawnErr.Error(), a.Now())
 			return cur, nil
@@ -335,6 +341,16 @@ func (a App) launch(ctx context.Context, key task.Key) (*task.Record, error) {
 		}
 		return cur, nil
 	})
+	if errors.Is(err, errTaskRemoved) && spawnErr == nil {
+		stopped, stopErr := a.Runners.Stop(key, pid)
+		if stopErr != nil {
+			return nil, fmt.Errorf("task was removed after runner %d started; stop runner: %w", pid, stopErr)
+		}
+		if !stopped {
+			return nil, fmt.Errorf("task was removed after runner %d started; runner is still running", pid)
+		}
+	}
+	return rec, err
 }
 
 // restoreWorktree recreates a worktree that cleanup removed. Cleanup removes a
@@ -344,8 +360,14 @@ func (a App) launch(ctx context.Context, key task.Key) (*task.Record, error) {
 // checkout has its branch there, and creating a fresh one would drop its commits.
 func (a App) restoreWorktree(ctx context.Context, key task.Key) error {
 	rec, err := a.Store.Get(ctx, key)
-	if err != nil || rec == nil || rec.Delegation == nil || rec.Delegation.WorktreeRemovedAt.IsZero() {
+	if err != nil {
 		return err
+	}
+	if rec == nil || rec.Delegation == nil {
+		return errTaskRemoved
+	}
+	if rec.Delegation.WorktreeRemovedAt.IsZero() {
+		return nil
 	}
 	d := rec.Delegation
 	req := StartRequest{Repo: key.Repo}
@@ -356,7 +378,10 @@ func (a App) restoreWorktree(ctx context.Context, key task.Key) error {
 		return fmt.Errorf("restore worktree: %w", err)
 	}
 	_, err = a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
-		if cur.Delegation != nil && cur.Delegation.Worktree == d.Worktree {
+		if cur == nil || cur.Delegation == nil {
+			return nil, errTaskRemoved
+		}
+		if cur.Delegation.Worktree == d.Worktree {
 			cur.Delegation.WorktreeRemovedAt = time.Time{}
 		}
 		return cur, nil
@@ -368,8 +393,11 @@ func (a App) restoreWorktree(ctx context.Context, key task.Key) error {
 // fails the task without spending a runner on it.
 func (a App) launchAccount(ctx context.Context, key task.Key) error {
 	rec, err := a.Store.Get(ctx, key)
-	if err != nil || rec == nil || rec.Delegation == nil {
+	if err != nil {
 		return err
+	}
+	if rec == nil || rec.Delegation == nil {
+		return errTaskRemoved
 	}
 	return a.checkAccount(ctx, rec)
 }
