@@ -371,9 +371,28 @@ the same commit. The commit message records why it changed.
   turn whose prompt carries the durable state; any other resume error fails the task.
 - **Planning is its own session.** Until the four planning documents are posted, and
   while there is no PR, the turn plans. The runner, not the agent, posts them as issue
-  comments with a `<!-- foreman:<doc> -->` marker and edits them on a re-plan. There is
-  no approval gate. Implementation then starts a fresh session, so it doesn't carry the
-  planning context (about 200k tokens on one task).
+  comments with a `<!-- foreman:<doc> desc=<fingerprint> -->` marker and edits them on a
+  re-plan. The fingerprint is the first 12 hex digits of the SHA-256 of the trimmed
+  issue description. There is no approval gate. Implementation then starts a fresh
+  session, so it doesn't carry the planning context (about 200k tokens on one task).
+- **The issue, not the record, says whether a plan exists.** A task record can lose its
+  plan comments (a recreated task, another machine), so before a planning turn the
+  runner reads the description and every comment from the task's source. Only a
+  comment whose first line is one of the four document markers counts; unmarked
+  comments, other `foreman:` markers, and description text never do, and none of them
+  is changed. A recorded comment that is still marked wins; otherwise the newest marked
+  comment per document wins. A recorded comment that lost its marker is left alone and
+  its document is posted anew. A complete plan is recorded and the task implements it
+  without posting. A partial plan goes to the planning turn with the documents' text,
+  in the prompt or, for a resumed session, in the resume message; the turn returns an
+  empty document to keep a comment, and the runner edits revised ones and posts only
+  missing ones. After the turn the runner reads each target comment again: an edit
+  whose comment is gone or unmarked becomes a new post, and a kept comment that is
+  gone or unmarked fails the task before anything is posted. A document whose fingerprint differs from the current description
+  blocks the task with a keep-or-revise decision before any turn. The answer covers
+  only the description it was asked about, so a later edit asks again. Comments
+  without a fingerprint predate it and count as consistent. A failed read of the issue
+  or its comments fails the task before any turn or post.
 - **Implementation checkpoints reset context within the implement phase.** Before a
   PR exists, an implementer may finish one tested part with `checkpoint`, one short
   next objective, and reported passing validation. Foreman accepts it only when the

@@ -38,6 +38,9 @@ type TaskBrief struct {
 	// PlanInstructions is the developer's plan stage for it.
 	Planning         bool
 	PlanInstructions string
+	// ExistingPlans are planning documents a planning turn finds already on the issue,
+	// by document, without their marker and heading.
+	ExistingPlans map[task.PlanDoc]string
 	// Plan is the planning documents already posted on the issue.
 	Plan []task.PlanComment
 	// A checkpoint starts a new implementation session from committed work.
@@ -90,6 +93,7 @@ func ImplementationPrompt(b TaskBrief) string {
 	}
 	if b.Planning {
 		planningSection(&s, b.PlanInstructions)
+		existingPlansSection(&s, b.ExistingPlans)
 	} else if len(b.Plan) > 0 {
 		s.WriteString("## The plan\n\nYour plan for this issue is posted on it:\n\n")
 		writePlanLinks(&s, b.Plan)
@@ -210,6 +214,40 @@ Do not change, commit, or push anything in this turn. If writing the documents n
 		s.WriteString("The developer's instructions for the documents:\n\n" + text + "\n\n")
 	}
 	planningTestRule(s)
+}
+
+// existingPlansSection gives a planning turn the documents foreman found on the issue.
+// An empty document keeps its comment untouched, so a valid plan is not reposted.
+func existingPlansSection(s *strings.Builder, existing map[task.PlanDoc]string) {
+	if len(existing) == 0 {
+		return
+	}
+	s.WriteString("## Documents already on the issue\n\nThese planning documents are already posted on the issue. Keep a document that is still valid by returning an empty string for it, and foreman leaves its comment as it is. Return the full revised text only for a document that needs revision; foreman edits its comment in place.")
+	var missing []string
+	for _, doc := range task.PlanDocs {
+		if _, ok := existing[doc]; !ok {
+			missing = append(missing, string(doc))
+		}
+	}
+	if len(missing) > 0 {
+		fmt.Fprintf(s, " Write every missing document: %s.", strings.Join(missing, ", "))
+	}
+	s.WriteString("\n\n")
+	for _, doc := range task.PlanDocs {
+		if text, ok := existing[doc]; ok {
+			fmt.Fprintf(s, "### %s\n\n%s\n\n", doc.Title(), strings.TrimSpace(text))
+		}
+	}
+}
+
+// ExistingPlansMessage adds the documents on the issue to a resumed planning turn.
+func ExistingPlansMessage(existing map[task.PlanDoc]string) string {
+	var s strings.Builder
+	if len(existing) > 0 {
+		s.WriteString("\n")
+	}
+	existingPlansSection(&s, existing)
+	return s.String()
 }
 
 // planningTestRule keeps the plan test-first. The plan names behavior, not tests, so it

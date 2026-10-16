@@ -2,6 +2,13 @@
 
 ## Current stage
 
+Plan reconciliation (#71) is complete. Before a planning turn, the runner reads the
+issue and its comments from GitHub or Linear and adopts Foreman's marked planning
+comments. A full plan is implemented without posting; a partial plan posts only the
+missing documents. Plan markers carry a description fingerprint, and a plan written
+for another description asks the developer to keep or revise it. A failed read fails
+the task before planning. The `plan_reuse` end-to-end scenario covers adoption.
+
 Issue #70 is complete. New worktrees use the full branch name as nested directories.
 Restarts and recreation keep the stored worktree path. Nested creation and cleanup,
 branch selection paths, and legacy path reuse have regression coverage.
