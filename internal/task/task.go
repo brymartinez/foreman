@@ -197,6 +197,9 @@ type ResetCleanup struct {
 	Since     time.Time `yaml:"since,omitempty"`
 	Owner     string    `yaml:"owner,omitempty"`
 	PID       int       `yaml:"pid,omitempty"`
+	// Head is the worktree's commit when the reset ran. A retry removes the path only
+	// while it still has that commit, so it never removes a newer worktree there.
+	Head string `yaml:"head,omitempty"`
 }
 
 // ConflictAttempt is one automatic merge conflict repair: the PR head that conflicted

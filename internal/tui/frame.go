@@ -87,13 +87,7 @@ func withReset(short string, width int) string {
 // resetList lists what a reset of the task deletes, by path and name, wrapped to
 // the width. Paths wrap at any column, so none is cut.
 func resetList(m Model) []string {
-	key := m.resetTarget
-	var rec *task.Record
-	for _, r := range m.Tasks {
-		if r.Key == key {
-			rec = r
-		}
-	}
+	key, rec := m.resetTarget, m.resetRun
 	text := []string{fmt.Sprintf("Reset %s#%d deletes its local run:", key.Repo, key.Number)}
 	item := func(what, target string) {
 		if target != "" {

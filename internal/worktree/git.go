@@ -143,8 +143,10 @@ func (Git) Remove(ctx context.Context, req app.WorktreeRemoval) error {
 		return nil
 	}
 	// -D: a squash-merged branch is not an ancestor of the base, but its PR is merged.
-	_, err := git(ctx, common, "branch", "-D", req.Branch)
-	return err
+	if _, err := git(ctx, common, "branch", "-D", req.Branch); err != nil {
+		return fmt.Errorf("%w: %v", app.ErrBranchNotDeleted, err)
+	}
+	return nil
 }
 
 // MergeConflicts uses git merge-tree (git 2.38+), which merges in memory: exit 0 is a

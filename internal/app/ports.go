@@ -205,6 +205,9 @@ type WorktreeRequest struct {
 // ErrWorktreeDirty means a worktree has uncommitted or untracked changes and was kept.
 var ErrWorktreeDirty = errors.New("it has uncommitted or untracked changes")
 
+// ErrBranchNotDeleted means Remove removed the worktree but kept the branch.
+var ErrBranchNotDeleted = errors.New("the branch was not deleted")
+
 // WorktreeRemoval names a task's worktree and, when DeleteBranch is set, its local branch.
 type WorktreeRemoval struct {
 	Path         string
@@ -228,7 +231,8 @@ type WorktreeManager interface {
 	Checkpoint(ctx context.Context, dir, branch, prior string) (string, error)
 	// Remove deletes the worktree, and the branch if asked. It refuses a worktree with
 	// uncommitted or untracked changes unless Force is set. A path that no longer
-	// exists is already removed.
+	// exists is already removed. A branch it could not delete after removing the
+	// worktree is ErrBranchNotDeleted.
 	Remove(ctx context.Context, req WorktreeRemoval) error
 	// Contains fetches origin into the worktree at dir, then reports whether ancestor
 	// is an ancestor of descendant, or the same commit.

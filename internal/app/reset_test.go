@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -576,5 +577,41 @@ func TestAFailedStartKeepsOnlyTheCleanupStillLeft(t *testing.T) {
 	}
 	if c := f.store.recs[rec.Key].Reset.Cleanup; c != nil && (c.Worktree != "" || c.Branch != "") {
 		t.Errorf("cleanup = %+v; the retried removal succeeded, so the path must not be removed again", c)
+	}
+}
+
+func TestAResetThatKeepsOnlyTheBranchListsOnlyTheBranch(t *testing.T) {
+	f := newFixture()
+	rec := failedTask(t, f, 912)
+	f.wt.removeErr = fmt.Errorf("%w: branch is checked out elsewhere", ErrBranchNotDeleted)
+	if _, err := f.app.Reset(context.Background(), rec); err == nil {
+		t.Fatal("want the branch error")
+	}
+	c := f.store.recs[rec.Key].Reset.Cleanup
+	if c == nil || c.Worktree != "" || c.Branch != rec.Delegation.Branch {
+		t.Fatalf("cleanup = %+v; the worktree is gone, so only the branch is left", c)
+	}
+}
+
+func TestAStartKeepsAWorktreeThatIsNoLongerTheResetRuns(t *testing.T) {
+	f := newFixture()
+	f.app.WorktreesDir = t.TempDir()
+	rec := failedTask(t, f, 912)
+	path := rec.Delegation.Worktree
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f.wt.head = "oldhead"
+	f.wt.removeErr = errors.New("permission denied")
+	f.app.Reset(context.Background(), rec)
+	if c := f.store.recs[rec.Key].Reset.Cleanup; c == nil || c.Head != "oldhead" {
+		t.Fatalf("cleanup = %+v; want the reset run's head recorded", c)
+	}
+	f.wt.removeErr, f.wt.head, f.wt.removed = nil, "newhead", nil
+	if _, err := f.app.Start(context.Background(), startReq(t)); err == nil || !strings.Contains(err.Error(), "no longer the reset run's") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(f.wt.removed) != 0 {
+		t.Errorf("removed %+v; a worktree with another head is not the confirmed one", f.wt.removed)
 	}
 }

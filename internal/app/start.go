@@ -440,7 +440,7 @@ func (a App) finishReset(ctx context.Context, rec *task.Record, wt WorktreeReque
 			// checkout of the repository finds the branch.
 			todo.RepoDir = wt.RepoDir
 		}
-		left, problems := a.cleanUp(ctx, todo)
+		left, problems := a.cleanUp(ctx, todo, true)
 		if _, err := a.update(ctx, rec.Key, func(cur *task.Record) (*task.Record, error) {
 			if cur == nil || cur.Reset == nil || cur.Reset.Cleanup == nil || cur.Reset.Cleanup.Owner != owner {
 				return nil, nil

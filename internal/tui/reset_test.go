@@ -154,3 +154,18 @@ func TestFooterOffersResetForAFailedTaskAtTheSmallestWidth(t *testing.T) {
 		}
 	}
 }
+
+func TestResetConfirmsTheRunShownEvenAfterARefresh(t *testing.T) {
+	m := failedOnly()
+	press(&m, rune_('x'))
+	newer := record(12, task.Failed)
+	newer.Delegation.Worktree, newer.Delegation.Branch = "/wt/a-b/feat/12-newer", "feat/12-newer"
+	m.SetTasks([]*task.Record{newer})
+	if text := frameText(m); !strings.Contains(text, "feat/12-retries") || strings.Contains(text, "feat/12-newer") {
+		t.Errorf("the confirmation must keep showing the run x was pressed on:\n%s", text)
+	}
+	got := press(&m, rune_('y'))
+	if got.Kind != ActionReset || got.Reset.Delegation.Branch != "feat/12-retries" {
+		t.Fatalf("action %+v; want the confirmed run", got)
+	}
+}

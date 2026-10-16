@@ -383,3 +383,20 @@ func TestForcedRemoveDeletesTheBranchOfAWorktreeAlreadyGone(t *testing.T) {
 		t.Error("branch kept")
 	}
 }
+
+func TestRemoveReportsABranchKeptAfterTheWorktreeIsGone(t *testing.T) {
+	clone, _ := repoWithOrigin(t)
+	ctx := context.Background()
+	req := app.WorktreeRequest{RepoDir: clone, Path: filepath.Join(t.TempDir(), "825-a"), Branch: "agent/825-a", BaseRef: "origin/main"}
+	if err := (Git{}).Ensure(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	// main is checked out in the clone, so git refuses to delete it.
+	err := (Git{}).Remove(ctx, app.WorktreeRemoval{Path: req.Path, Branch: "main", DeleteBranch: true, Force: true})
+	if !errors.Is(err, app.ErrBranchNotDeleted) {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := os.Stat(req.Path); !os.IsNotExist(err) {
+		t.Errorf("worktree still on disk: %v", err)
+	}
+}
