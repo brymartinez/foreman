@@ -328,8 +328,9 @@ the same commit. The commit message records why it changed.
   alert, keeps the branch, and returns to READY_FOR_HUMAN or REVIEWING if the PR is
   reopened. A closed issue takes precedence and makes the task DONE. The runner can't write to a `PR_CLOSED` task, so the stop that
   follows is never saved as a failure.
-- **A reset discards the run, never the PR link.** `App.Reset` resolves the run's PR
-  before anything is deleted, because a runner can die after opening a PR and before
+- **A reset discards the run, never the PR link.** `App.Reset` deletes only the run the
+  developer confirmed: its start time, worktree, branch, and runner log must still match
+  the task's run. It resolves the run's PR before anything is deleted, because a runner can die after opening a PR and before
   recording it. It then saves a record with no delegation and a `reset` block (the PR,
   its URL, head branch, and state), and only then removes the worktree with its
   uncommitted work, the local branch, and the runner log. The record lists those
@@ -337,8 +338,8 @@ the same commit. The commit message records why it changed.
   finishes, because the start would make a worktree at the same path. The mark
   records the owning process; once that process has exited, the mark no longer
   blocks, however long the owner ran. A start also refuses when a reset lands between its read and its write. A
-  failed removal names what is left and keeps it listed; the next start removes it
-  first. Nothing else is removed without the confirmation: a start that continues an
+  failed removal names what is left and keeps only that listed; the next start removes it
+  first and records what it removed, so no path is removed twice. Nothing else is removed without the confirmation: a start that continues an
   open PR refuses when something already exists at the worktree path it needs. Before it removes anything, a start claims the reset record under
   the task lock with a random owner token, and only that owner can save the run, so a
   second start cannot clear the path under the first one's new worktree. A start that

@@ -160,7 +160,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			}
 		}()
 	}
-	if err := a.finishReset(ctx, existing, wt, continuePR); err != nil {
+	if err := a.finishReset(ctx, existing, wt, continuePR, owner); err != nil {
 		return nil, err
 	}
 	if err := a.Worktrees.Ensure(ctx, wt); err != nil {
@@ -426,21 +426,32 @@ func (a App) startableBy(rec *task.Record, owner string) error {
 }
 
 // finishReset removes what a confirmed reset left of the old run before a start
-// makes its worktree. Anything else at the continued PR's path was made after the
-// reset, so the start refuses rather than delete it.
-func (a App) finishReset(ctx context.Context, rec *task.Record, wt WorktreeRequest, continuePR bool) error {
+// makes its worktree, and records what is still left, so a removed path is never
+// removed again. Anything else at the continued PR's path was made after the reset,
+// so the start refuses rather than delete it.
+func (a App) finishReset(ctx context.Context, rec *task.Record, wt WorktreeRequest, continuePR bool, owner string) error {
 	if rec == nil || rec.Delegation != nil || rec.Reset == nil {
 		return nil
 	}
 	if c := rec.Reset.Cleanup; c != nil && (c.Worktree != "" || c.Branch != "" || c.RunnerLog != "") {
-		left := *c
-		if left.RepoDir == "" {
+		todo := *c
+		if todo.RepoDir == "" {
 			// The worktree had the branch when the reset ran; without it, only a
 			// checkout of the repository finds the branch.
-			left.RepoDir = wt.RepoDir
+			todo.RepoDir = wt.RepoDir
 		}
-		if left := a.cleanUp(ctx, left); len(left) > 0 {
-			return fmt.Errorf("finish the reset: could not remove %s", strings.Join(left, "; "))
+		left, problems := a.cleanUp(ctx, todo)
+		if _, err := a.update(ctx, rec.Key, func(cur *task.Record) (*task.Record, error) {
+			if cur == nil || cur.Reset == nil || cur.Reset.Cleanup == nil || cur.Reset.Cleanup.Owner != owner {
+				return nil, nil
+			}
+			cur.Reset.Cleanup.Worktree, cur.Reset.Cleanup.Branch, cur.Reset.Cleanup.RunnerLog = left.Worktree, left.Branch, left.RunnerLog
+			return cur, nil
+		}); err != nil {
+			return fmt.Errorf("finish the reset: %w", err)
+		}
+		if len(problems) > 0 {
+			return fmt.Errorf("finish the reset: could not remove %s", strings.Join(problems, "; "))
 		}
 	}
 	if !continuePR {

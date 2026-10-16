@@ -33,6 +33,9 @@ func (a App) Reset(ctx context.Context, rec *task.Record) (*task.Record, error) 
 	if err := a.resettable(cur); err != nil {
 		return nil, err
 	}
+	if !sameRun(rec.Delegation, cur.Delegation) {
+		return nil, fmt.Errorf("%s has a new run, not the run you confirmed; nothing was deleted", taskRef(cur))
+	}
 	d := *cur.Delegation
 	mark, err := a.resetPR(ctx, cur)
 	if err != nil {
@@ -56,8 +59,8 @@ func (a App) Reset(ctx context.Context, rec *task.Record) (*task.Record, error) 
 		if err := a.resettable(cur); err != nil {
 			return nil, err
 		}
-		if cur.Delegation.Branch != d.Branch || cur.Delegation.Worktree != d.Worktree {
-			return nil, fmt.Errorf("%s changed while it was being reset; try again", taskRef(cur))
+		if !sameRun(&d, cur.Delegation) {
+			return nil, fmt.Errorf("%s has a new run, not the run you confirmed", taskRef(cur))
 		}
 		return &task.Record{
 			Key: cur.Key, Identifier: cur.Identifier, Kind: cur.Kind, Title: cur.Title, URL: cur.URL,
@@ -71,17 +74,17 @@ func (a App) Reset(ctx context.Context, rec *task.Record) (*task.Record, error) 
 		return nil, fmt.Errorf("nothing was deleted: %w", err)
 	}
 
-	left := a.cleanUp(ctx, *mark.Cleanup)
-	// Finishing the removal lets a start through. What could not be removed stays
-	// listed, and the next start removes it.
+	left, problems := a.cleanUp(ctx, *mark.Cleanup)
+	// Finishing the removal lets a start through. Only what could not be removed stays
+	// listed, and the next start removes it; a path removed here is never removed again.
 	done, err := a.update(ctx, cur.Key, func(cur *task.Record) (*task.Record, error) {
 		if cur == nil || cur.Reset == nil || cur.Reset.Cleanup == nil || !cur.Reset.At.Equal(mark.At) {
 			return nil, nil
 		}
-		if len(left) == 0 {
+		if len(problems) == 0 {
 			cur.Reset.Cleanup = nil
 		} else {
-			cur.Reset.Cleanup.Since, cur.Reset.Cleanup.Owner, cur.Reset.Cleanup.PID = time.Time{}, "", 0
+			cur.Reset.Cleanup = &left
 		}
 		return cur, nil
 	})
@@ -91,28 +94,39 @@ func (a App) Reset(ctx context.Context, rec *task.Record) (*task.Record, error) 
 	if done != nil {
 		stub = done
 	}
-	if len(left) > 0 {
-		return stub, fmt.Errorf("%s was reset, but could not remove %s; the next start tries again", taskRef(cur), strings.Join(left, "; "))
+	if len(problems) > 0 {
+		return stub, fmt.Errorf("%s was reset, but could not remove %s; the next start tries again", taskRef(cur), strings.Join(problems, "; "))
 	}
 	return stub, nil
 }
 
 // cleanUp removes a reset run's worktree with its uncommitted work, its local branch,
-// and its runner log. It returns what it could not remove, with the reason.
-func (a App) cleanUp(ctx context.Context, c task.ResetCleanup) []string {
-	var left []string
+// and its runner log. It returns the targets it could not remove, with no claim, and
+// why.
+func (a App) cleanUp(ctx context.Context, c task.ResetCleanup) (task.ResetCleanup, []string) {
+	left := task.ResetCleanup{RepoDir: c.RepoDir}
+	var problems []string
 	if c.Worktree != "" || c.Branch != "" {
 		removal := WorktreeRemoval{Path: c.Worktree, Branch: c.Branch, DeleteBranch: c.Branch != "", Force: true, RepoDir: c.RepoDir}
 		if err := a.Worktrees.Remove(ctx, removal); err != nil {
-			left = append(left, fmt.Sprintf("worktree %s and branch %s (%v)", c.Worktree, c.Branch, err))
+			left.Worktree, left.Branch = c.Worktree, c.Branch
+			problems = append(problems, fmt.Sprintf("worktree %s and branch %s (%v)", c.Worktree, c.Branch, err))
 		}
 	}
 	if c.RunnerLog != "" {
 		if err := os.Remove(c.RunnerLog); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			left = append(left, fmt.Sprintf("runner log %s (%v)", c.RunnerLog, err))
+			left.RunnerLog = c.RunnerLog
+			problems = append(problems, fmt.Sprintf("runner log %s (%v)", c.RunnerLog, err))
 		}
 	}
-	return left
+	return left, problems
+}
+
+// sameRun reports whether the run the developer confirmed resetting is still the
+// task's run. A new start writes a new start time; the paths name what is deleted.
+func sameRun(shown, cur *task.Delegation) bool {
+	return shown != nil && cur != nil && shown.StartedAt.Equal(cur.StartedAt) &&
+		shown.Worktree == cur.Worktree && shown.Branch == cur.Branch && shown.RunnerLog == cur.RunnerLog
 }
 
 // resetOwner owns the removal App.Reset runs. A start owns it under a random token.

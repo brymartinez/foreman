@@ -516,3 +516,65 @@ func TestAStartThatFailsAfterClaimingAResetLetsTheNextStartThrough(t *testing.T)
 		t.Fatalf("a failed start kept its claim: %v", err)
 	}
 }
+
+func TestResetRefusesARunOtherThanTheOneConfirmed(t *testing.T) {
+	cases := map[string]func(d *task.Delegation){
+		"another start":      func(d *task.Delegation) { d.StartedAt = d.StartedAt.Add(time.Minute) },
+		"another worktree":   func(d *task.Delegation) { d.Worktree = "/wt/other" },
+		"another branch":     func(d *task.Delegation) { d.Branch = "feat/other" },
+		"another runner log": func(d *task.Delegation) { d.RunnerLog = "/logs/other.log" },
+	}
+	for name, change := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture()
+			rec := failedTask(t, f, 912)
+			shown := *rec
+			d := *rec.Delegation
+			change(&d)
+			shown.Delegation = &d
+			if _, err := f.app.Reset(context.Background(), &shown); err == nil || !strings.Contains(err.Error(), "not the run you confirmed") {
+				t.Fatalf("err = %v", err)
+			}
+			unchanged(t, f, rec)
+		})
+	}
+}
+
+func TestAStartRetriesOnlyTheCleanupThatFailed(t *testing.T) {
+	f := newFixture()
+	rec := failedTask(t, f, 912)
+	// A directory where the log was cannot be removed with os.Remove.
+	if err := os.Remove(rec.Delegation.RunnerLog); err != nil {
+		t.Fatal(err)
+	}
+	os.MkdirAll(filepath.Join(rec.Delegation.RunnerLog, "x"), 0o755)
+	if _, err := f.app.Reset(context.Background(), rec); err == nil || !strings.Contains(err.Error(), "runner log") {
+		t.Fatalf("err = %v", err)
+	}
+	c := f.store.recs[rec.Key].Reset.Cleanup
+	if c == nil || c.Worktree != "" || c.Branch != "" || c.RunnerLog != rec.Delegation.RunnerLog {
+		t.Fatalf("cleanup = %+v; want only the runner log left", c)
+	}
+	os.RemoveAll(rec.Delegation.RunnerLog)
+	f.wt.removed = nil
+	if _, err := f.app.Start(context.Background(), startReq(t)); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.wt.removed) != 0 {
+		t.Errorf("start removed %+v; the worktree was already gone after the reset", f.wt.removed)
+	}
+}
+
+func TestAFailedStartKeepsOnlyTheCleanupStillLeft(t *testing.T) {
+	f := newFixture()
+	rec := failedTask(t, f, 912)
+	f.wt.removeErr = errors.New("permission denied")
+	f.app.Reset(context.Background(), rec)
+	f.wt.removeErr, f.wt.ensureErr = nil, errors.New("disk full")
+	if _, err := f.app.Start(context.Background(), startReq(t)); err == nil {
+		t.Fatal("want the Ensure error")
+	}
+	if c := f.store.recs[rec.Key].Reset.Cleanup; c != nil && (c.Worktree != "" || c.Branch != "") {
+		t.Errorf("cleanup = %+v; the retried removal succeeded, so the path must not be removed again", c)
+	}
+}
