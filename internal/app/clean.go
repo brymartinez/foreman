@@ -34,6 +34,10 @@ func cleanNote(res CleanResult) string {
 	switch {
 	case errors.Is(res.Err, ErrWorktreeDirty):
 		return fmt.Sprintf("worktree kept: %v; commit or discard them, and a later refresh removes it", res.Err)
+	case errors.Is(res.Err, ErrBranchNotDeleted):
+		return "worktree removed; branch remains; cleanup will retry"
+	case errors.Is(res.Err, ErrBranchStatusUnknown):
+		return fmt.Sprintf("worktree removed; branch status unknown; cleanup will retry: %v", res.Err)
 	case res.Err != nil:
 		return fmt.Sprintf("worktree kept: %v", res.Err)
 	case res.BranchDeleted:
@@ -60,7 +64,7 @@ func (a App) clean(ctx context.Context, rec *task.Record) CleanResult {
 		}
 		res.BranchDeleted = merged
 	}
-	if err := a.Worktrees.Remove(ctx, WorktreeRemoval{Path: d.Worktree, Branch: d.Branch, DeleteBranch: res.BranchDeleted}); err != nil {
+	if err := a.Worktrees.Remove(ctx, WorktreeRemoval{Path: d.Worktree, Branch: d.Branch, DeleteBranch: res.BranchDeleted, RepoDir: d.RepoDir}); err != nil {
 		res.Err, res.BranchDeleted = err, false
 		return res
 	}

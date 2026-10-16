@@ -20,6 +20,7 @@ type fakeWorktrees struct {
 	checkpointHeads []string
 	checkpointErr   error
 	removed         []WorktreeRemoval
+	removeAttempts  []WorktreeRemoval
 	removeErr       error
 	onRemove        func() // runs inside Remove, before it records the removal
 	ensureErr       error
@@ -126,6 +127,7 @@ func (f *fakeRepositories) Ensure(_ context.Context, repo task.Repo, _ string) (
 }
 
 func (f *fakeWorktrees) Remove(_ context.Context, r WorktreeRemoval) error {
+	f.removeAttempts = append(f.removeAttempts, r)
 	if f.onRemove != nil {
 		f.onRemove()
 	}
@@ -170,8 +172,10 @@ type fakeRunners struct {
 	spawned  []task.Key
 	alive    map[int]bool
 	stopped  []int
+	onSpawn  func()
 	onStop   func(pid int) // plays the runner recording its stop
 	stuck    bool
+	stopErr  error
 	spawnErr error
 	learned  []task.Key
 	learnErr error
@@ -184,6 +188,9 @@ func (f *fakeRunners) SpawnLearn(k task.Key) error {
 
 func (f *fakeRunners) Spawn(k task.Key) (int, string, error) {
 	f.spawned = append(f.spawned, k)
+	if f.onSpawn != nil {
+		f.onSpawn()
+	}
 	if f.spawnErr != nil {
 		return 0, "", f.spawnErr
 	}
@@ -192,6 +199,9 @@ func (f *fakeRunners) Spawn(k task.Key) (int, string, error) {
 func (f *fakeRunners) Alive(pid int) bool { return f.alive[pid] }
 func (f *fakeRunners) Stop(_ task.Key, pid int) (bool, error) {
 	f.stopped = append(f.stopped, pid)
+	if f.stopErr != nil {
+		return false, f.stopErr
+	}
 	if f.stuck {
 		return false, nil
 	}

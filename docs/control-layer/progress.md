@@ -11,6 +11,17 @@ decide conflicts; an unordered pair stops the ingest. Saves are all or nothing u
 the repository lock. Vet, Go tests, build, and the `knowledge_transfer` end-to-end
 scenario pass.
 
+Issue #77 is complete. Launch aborts when its task file disappears before spawning.
+If deletion happens after spawning, launch stops and waits for the new runner.
+Regression tests cover removal before spawn, during worktree restoration, and after
+spawn, including failed stops. Vet, Go tests, build, and end-to-end checks pass.
+Issue #78 cleanup retries merged branch deletion from the task's recorded repository
+checkout after its worktree is removed. An unsuccessful deletion leaves cleanup pending
+and reports that the branch remains; turning off branch deletion completes cleanup on
+the next refresh. Git and app regression tests, vet, build, and the end-to-end script
+pass. An older task without a recorded repository checkout now reports unknown branch
+status while cleanup stays pending.
+
 Reset of failed delegated runs (#72) is complete. `x` on a FAILED task confirms, then
 `App.Reset` resolves the run's PR, saves a record with only that link, and deletes the
 worktree, local branch, and runner log. Auto mode skips the reset issue. A manual start
