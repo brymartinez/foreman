@@ -20,6 +20,7 @@ type fakeWorktrees struct {
 	checkpointHeads []string
 	checkpointErr   error
 	removed         []WorktreeRemoval
+	removeAttempts  []WorktreeRemoval
 	removeErr       error
 	onRemove        func() // runs inside Remove, before it records the removal
 	ensureErr       error
@@ -126,6 +127,7 @@ func (f *fakeRepositories) Ensure(_ context.Context, repo task.Repo, _ string) (
 }
 
 func (f *fakeWorktrees) Remove(_ context.Context, r WorktreeRemoval) error {
+	f.removeAttempts = append(f.removeAttempts, r)
 	if f.onRemove != nil {
 		f.onRemove()
 	}

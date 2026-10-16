@@ -587,7 +587,13 @@ the same commit. The commit message records why it changed.
   else asks the developer.
 - **Cleanup never loses work.** `git worktree remove` without `--force`, so a dirty
   worktree stays. The local branch is deleted (`-D`, for squash merges) only when its PR
-  merged. Unless `cleanup.on_done` is off, each refresh cleans the worktrees of DONE
+  merged. If branch deletion fails after worktree removal, cleanup keeps the task pending
+  and retries deletion from its recorded repository checkout. A missing local branch
+  counts as deleted; an unknown or unusable checkout leaves cleanup pending and reports
+  that the worktree is gone but branch status is unknown. A branch checked out in
+  another worktree stays there until Git allows its deletion. The current
+  `cleanup.delete_merged_branches` setting controls each retry. Unless `cleanup.on_done`
+  is off, each refresh cleans the worktrees of DONE
   and PR_CLOSED tasks once their runner has stopped. A PR_CLOSED task whose PR reopens or
   merges gets its worktree back from the kept branch first, so a reopened PR can resume
   and a merged one has its branch deleted by the next cleanup. A runner launched for a

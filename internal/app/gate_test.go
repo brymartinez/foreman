@@ -608,7 +608,7 @@ func TestClosedIssueCompletesAPRClosedTaskAndKeepsItsBranch(t *testing.T) {
 	if got.State != task.Done || got.GitHub.State != "closed" {
 		t.Fatalf("state %s, issue %s", got.State, got.GitHub.State)
 	}
-	want := WorktreeRemoval{Path: "/wt/ridezoomo-armada-backend/feat/825-provider-retries", Branch: "feat/825-provider-retries"}
+	want := WorktreeRemoval{Path: "/wt/ridezoomo-armada-backend/feat/825-provider-retries", Branch: "feat/825-provider-retries", RepoDir: "/src/armada-backend"}
 	if !slices.Equal(f.wt.removed, []WorktreeRemoval{want}) || got.Delegation.WorktreeRemovedAt.IsZero() {
 		t.Errorf("removed %+v, rec %+v", f.wt.removed, got.Delegation)
 	}
