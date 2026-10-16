@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/brymartinez/foreman/internal/agent"
 	"github.com/brymartinez/foreman/internal/task"
@@ -18,7 +19,9 @@ import (
 //
 // The run's PR is resolved first, and any doubt about it stops the reset before
 // anything is deleted. The record is then replaced by one that holds only that PR in
-// Reset, so a failure while deleting files can never lose the PR link.
+// Reset, so a failure while deleting files can never lose the PR link. That record
+// also names the files still to remove and marks the removal as running, so a start
+// waits instead of making a worktree the removal would delete.
 func (a App) Reset(ctx context.Context, rec *task.Record) (*task.Record, error) {
 	cur, err := a.Store.Get(ctx, rec.Key)
 	if err != nil {
@@ -44,6 +47,7 @@ func (a App) Reset(ctx context.Context, rec *task.Record) (*task.Record, error) 
 	}
 
 	mark.At = a.Now()
+	mark.Cleanup = &task.ResetCleanup{Worktree: d.Worktree, Branch: removal.Branch, RepoDir: removal.RepoDir, RunnerLog: d.RunnerLog, Since: mark.At}
 	stub, err := a.update(ctx, cur.Key, func(cur *task.Record) (*task.Record, error) {
 		// The task can change while GitHub is read; a run started since owns it.
 		if err := a.resettable(cur); err != nil {
@@ -64,21 +68,60 @@ func (a App) Reset(ctx context.Context, rec *task.Record) (*task.Record, error) 
 		return nil, fmt.Errorf("nothing was deleted: %w", err)
 	}
 
-	var left []string
-	if d.Worktree != "" || removal.DeleteBranch {
-		if err := a.Worktrees.Remove(ctx, removal); err != nil {
-			left = append(left, fmt.Sprintf("worktree %s and branch %s (%v)", d.Worktree, d.Branch, err))
+	left := a.cleanUp(ctx, *mark.Cleanup)
+	// Finishing the removal lets a start through. What could not be removed stays
+	// listed, and the next start removes it.
+	done, err := a.update(ctx, cur.Key, func(cur *task.Record) (*task.Record, error) {
+		if cur == nil || cur.Reset == nil || cur.Reset.Cleanup == nil || !cur.Reset.At.Equal(mark.At) {
+			return nil, nil
 		}
+		if len(left) == 0 {
+			cur.Reset.Cleanup = nil
+		} else {
+			cur.Reset.Cleanup.Since = time.Time{}
+		}
+		return cur, nil
+	})
+	if err != nil {
+		return stub, fmt.Errorf("%s was reset, but its cleanup could not be recorded: %w", taskRef(cur), err)
 	}
-	if d.RunnerLog != "" {
-		if err := os.Remove(d.RunnerLog); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			left = append(left, fmt.Sprintf("runner log %s (%v)", d.RunnerLog, err))
-		}
+	if done != nil {
+		stub = done
 	}
 	if len(left) > 0 {
-		return stub, fmt.Errorf("%s was reset, but remove these by hand: %s", taskRef(cur), strings.Join(left, "; "))
+		return stub, fmt.Errorf("%s was reset, but could not remove %s; the next start tries again", taskRef(cur), strings.Join(left, "; "))
 	}
 	return stub, nil
+}
+
+// cleanUp removes a reset run's worktree with its uncommitted work, its local branch,
+// and its runner log. It returns what it could not remove, with the reason.
+func (a App) cleanUp(ctx context.Context, c task.ResetCleanup) []string {
+	var left []string
+	if c.Worktree != "" || c.Branch != "" {
+		removal := WorktreeRemoval{Path: c.Worktree, Branch: c.Branch, DeleteBranch: c.Branch != "", Force: true, RepoDir: c.RepoDir}
+		if err := a.Worktrees.Remove(ctx, removal); err != nil {
+			left = append(left, fmt.Sprintf("worktree %s and branch %s (%v)", c.Worktree, c.Branch, err))
+		}
+	}
+	if c.RunnerLog != "" {
+		if err := os.Remove(c.RunnerLog); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			left = append(left, fmt.Sprintf("runner log %s (%v)", c.RunnerLog, err))
+		}
+	}
+	return left
+}
+
+// resetCleanupLimit is how long a start waits on a reset's removal. A removal that
+// runs longer belongs to a dashboard that died during it.
+const resetCleanupLimit = 10 * time.Minute
+
+// resetting reports a reset whose removal of the old run is still running.
+func (a App) resetting(rec *task.Record) bool {
+	if rec == nil || rec.Reset == nil || rec.Reset.Cleanup == nil || rec.Reset.Cleanup.Since.IsZero() {
+		return false
+	}
+	return a.Now().Sub(rec.Reset.Cleanup.Since) < resetCleanupLimit
 }
 
 // resettable allows a reset only for a FAILED run whose runner has exited, because a

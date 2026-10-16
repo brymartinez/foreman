@@ -559,8 +559,9 @@ func TestStoreRoundTripsResetMarkWithoutADelegation(t *testing.T) {
 	at := time.Date(2026, 10, 16, 9, 0, 0, 0, time.UTC)
 	want := &task.Record{
 		Key: task.Key{Repo: "a/b", Number: 3}, Kind: task.Issue, Title: "x", State: task.Discovered,
-		Reset: &task.ResetMark{At: at, PR: 12, PRURL: "https://github.com/a/b/pull/12", Branch: "feat/3-x", PRState: "open"},
-		Body:  "# a/b#3 x\n",
+		Reset: &task.ResetMark{At: at, PR: 12, PRURL: "https://github.com/a/b/pull/12", Branch: "feat/3-x", PRState: "open",
+			Cleanup: &task.ResetCleanup{Worktree: "/wt/feat/3-x", Branch: "feat/3-x", RepoDir: "/repos/a-b", RunnerLog: "/logs/a-b-3.log"}},
+		Body: "# a/b#3 x\n",
 	}
 	if err := s.Save(ctx, want); err != nil {
 		t.Fatal(err)

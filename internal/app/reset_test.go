@@ -176,6 +176,101 @@ func TestResetKeepsTheMarkWhenTheWorktreeCannotBeRemoved(t *testing.T) {
 	if got == nil || got.Reset == nil || got.Reset.PR != 912 || f.store.recs[rec.Key].Reset == nil {
 		t.Fatalf("the PR link must be saved before anything is deleted: %+v", got)
 	}
+	c := f.store.recs[rec.Key].Reset.Cleanup
+	if c == nil || c.Worktree != rec.Delegation.Worktree || c.Branch != rec.Delegation.Branch || !c.Since.IsZero() {
+		t.Fatalf("the leftovers must stay recorded for the next start, with the reset finished: %+v", c)
+	}
+}
+
+func TestResetMarksItsCleanupUntilTheRunIsRemoved(t *testing.T) {
+	f := newFixture()
+	rec := failedTask(t, f, 912)
+	var during *task.ResetCleanup
+	f.wt.onRemove = func() {
+		if r := f.store.recs[rec.Key].Reset; r != nil {
+			during = r.Cleanup
+		}
+	}
+	got, err := f.app.Reset(context.Background(), rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if during == nil || !during.Since.Equal(now) {
+		t.Errorf("cleanup while removing = %+v; want it marked as running", during)
+	}
+	if got.Reset.Cleanup != nil || f.store.recs[rec.Key].Reset.Cleanup != nil {
+		t.Errorf("finished cleanup still recorded: %+v", got.Reset.Cleanup)
+	}
+}
+
+func TestStartWaitsWhileAResetIsRemovingTheRun(t *testing.T) {
+	f := newFixture()
+	rec := failedTask(t, f, 912)
+	var startErr error
+	f.wt.onRemove = func() {
+		f.wt.onRemove = nil
+		_, startErr = f.app.Start(context.Background(), startReq(t))
+	}
+	f.wt.reqs = nil
+	if _, err := f.app.Reset(context.Background(), rec); err != nil {
+		t.Fatal(err)
+	}
+	if startErr == nil || !strings.Contains(startErr.Error(), "being reset") {
+		t.Fatalf("start during the reset's cleanup: %v", startErr)
+	}
+	if len(f.wt.reqs) != 0 {
+		t.Errorf("start made a worktree the reset was removing: %+v", f.wt.reqs)
+	}
+}
+
+func TestStartFinishesTheCleanupAResetCouldNotDo(t *testing.T) {
+	f := newFixture()
+	rec := failedTask(t, f, 912)
+	f.wt.removeErr = errors.New("permission denied")
+	if _, err := f.app.Reset(context.Background(), rec); err == nil {
+		t.Fatal("want the removal error")
+	}
+	f.wt.removeErr, f.wt.reqs = nil, nil
+	got, err := f.app.Start(context.Background(), startReq(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.wt.removed) == 0 || f.wt.removed[0].Path != rec.Delegation.Worktree || !f.wt.removed[0].Force {
+		t.Errorf("removed = %+v; want the reset's leftover worktree first", f.wt.removed)
+	}
+	if got.Reset != nil || len(f.wt.reqs) != 1 {
+		t.Errorf("reset %+v worktrees %+v", got.Reset, f.wt.reqs)
+	}
+}
+
+func TestStartRefusesATaskResetWhileItStarted(t *testing.T) {
+	f := newFixture()
+	rec := failedTask(t, f, 912)
+	f.wt.onEnsure = func() {
+		f.wt.onEnsure = nil
+		if _, err := f.app.Reset(context.Background(), rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := f.app.Start(context.Background(), startReq(t)); err == nil || !strings.Contains(err.Error(), "reset while it started") {
+		t.Fatalf("err = %v", err)
+	}
+	if got := f.store.recs[rec.Key]; got.Delegation != nil || got.Reset == nil {
+		t.Errorf("start overwrote the reset: %+v", got)
+	}
+}
+
+func TestStartAfterResetOfAnOpenPRRemovesAWorktreeLeftAtItsPath(t *testing.T) {
+	f := newFixture()
+	resetTask(t, f, "open")
+	f.wt.removed = nil
+	if _, err := f.app.Start(context.Background(), startReq(t)); err != nil {
+		t.Fatal(err)
+	}
+	want := WorktreeRemoval{Path: "/wt/ridezoomo-armada-backend/feat/825-provider-retries", Branch: "feat/825-provider-retries", DeleteBranch: true, Force: true, RepoDir: "/src/armada-backend"}
+	if !reflect.DeepEqual(f.wt.removed, []WorktreeRemoval{want}) {
+		t.Errorf("removed = %+v, want %+v", f.wt.removed, want)
+	}
 }
 
 // resetTask resets a failed #825 whose run had PR #912 in state prState.

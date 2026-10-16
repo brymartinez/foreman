@@ -180,6 +180,20 @@ type ResetMark struct {
 	PRURL   string
 	Branch  string
 	PRState string
+	// Cleanup is the part of the run a reset has not removed yet, or nil.
+	Cleanup *ResetCleanup
+}
+
+// ResetCleanup names the local run files a reset still has to remove. Since is set
+// while the reset removes them, and a start waits for it, because the start would
+// make a worktree at the same path. Since is zero once the reset gave up, and the
+// next start removes what is left.
+type ResetCleanup struct {
+	Worktree  string    `yaml:"worktree,omitempty"`
+	Branch    string    `yaml:"branch,omitempty"`
+	RepoDir   string    `yaml:"repo_dir,omitempty"`
+	RunnerLog string    `yaml:"runner_log,omitempty"`
+	Since     time.Time `yaml:"since,omitempty"`
 }
 
 // ConflictAttempt is one automatic merge conflict repair: the PR head that conflicted

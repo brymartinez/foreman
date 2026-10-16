@@ -21,7 +21,9 @@ type fakeWorktrees struct {
 	checkpointErr   error
 	removed         []WorktreeRemoval
 	removeErr       error
+	onRemove        func() // runs inside Remove, before it records the removal
 	ensureErr       error
+	onEnsure        func() // runs inside Ensure
 	// contains answers Contains; nil reports every ancestor as merged.
 	contains  func(dir, ancestor, descendant string) (bool, error)
 	checks    []MergeCheck
@@ -122,6 +124,9 @@ func (f *fakeRepositories) Ensure(_ context.Context, repo task.Repo, _ string) (
 }
 
 func (f *fakeWorktrees) Remove(_ context.Context, r WorktreeRemoval) error {
+	if f.onRemove != nil {
+		f.onRemove()
+	}
 	if f.removeErr != nil {
 		return f.removeErr
 	}
@@ -131,6 +136,9 @@ func (f *fakeWorktrees) Remove(_ context.Context, r WorktreeRemoval) error {
 
 func (f *fakeWorktrees) Ensure(_ context.Context, r WorktreeRequest) error {
 	f.reqs = append(f.reqs, r)
+	if f.onEnsure != nil {
+		f.onEnsure()
+	}
 	return f.ensureErr
 }
 

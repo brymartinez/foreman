@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/brymartinez/foreman/internal/task"
@@ -143,6 +144,9 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		// The worktree starts at the PR's head; the PR keeps the base it targets.
 		wt.BaseRef, base = "origin/"+branch, "origin/"+prior.BaseRefName
 	}
+	if err := a.finishReset(ctx, existing, wt, continuePR); err != nil {
+		return nil, err
+	}
 	if err := a.Worktrees.Ensure(ctx, wt); err != nil {
 		return nil, err
 	}
@@ -158,6 +162,10 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		}
 		if err := a.startable(cur); err != nil {
 			return nil, err
+		}
+		// A reset since the record was read removes the worktree this start prepared.
+		if cur.Reset != nil && (existing == nil || existing.Reset == nil || !existing.Reset.At.Equal(cur.Reset.At)) {
+			return nil, fmt.Errorf("%s was reset while it started; start it again", taskRef(cur))
 		}
 		// Checked again under the task lock: another command may have started the
 		// issue while this one prepared the worktree.
@@ -371,6 +379,9 @@ func (a App) startable(rec *task.Record) error {
 		return nil
 	}
 	ref := fmt.Sprintf("%s#%d", rec.Repo, rec.Number)
+	if a.resetting(rec) {
+		return fmt.Errorf("%s is being reset; start it once the reset finishes", ref)
+	}
 	switch rec.State {
 	case task.Discovered, task.Failed, task.PRClosed, task.Working, task.Reviewing:
 		// A second runner would share the worktree and the task file with the first,
@@ -388,4 +399,32 @@ func (a App) startable(rec *task.Record) error {
 		return fmt.Errorf("%s has PR feedback to answer; select it in the inbox to resume it", ref)
 	}
 	return fmt.Errorf("%s is %s", ref, rec.State)
+}
+
+// finishReset removes what a reset left of the old run before a start makes its
+// worktree. A continued PR's worktree goes at the old run's path, where a start that
+// raced the reset can also have left one, so that path is cleared too. Nothing else
+// owns either: the record has no delegation, and a running removal holds starts off.
+func (a App) finishReset(ctx context.Context, rec *task.Record, wt WorktreeRequest, continuePR bool) error {
+	if rec == nil || rec.Delegation != nil || rec.Reset == nil {
+		return nil
+	}
+	if c := rec.Reset.Cleanup; c != nil {
+		left := *c
+		if left.RepoDir == "" {
+			// The worktree had the branch when the reset ran; without it, only a
+			// checkout of the repository finds the branch.
+			left.RepoDir = wt.RepoDir
+		}
+		if left := a.cleanUp(ctx, left); len(left) > 0 {
+			return fmt.Errorf("finish the reset: could not remove %s", strings.Join(left, "; "))
+		}
+	}
+	if !continuePR {
+		return nil
+	}
+	if err := a.Worktrees.Remove(ctx, WorktreeRemoval{Path: wt.Path, Branch: wt.Branch, DeleteBranch: true, Force: true, RepoDir: wt.RepoDir}); err != nil {
+		return fmt.Errorf("clear %s for PR #%d: %w", wt.Path, rec.Reset.PR, err)
+	}
+	return nil
 }

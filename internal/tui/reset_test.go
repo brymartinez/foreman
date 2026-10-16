@@ -98,3 +98,39 @@ type resetSource struct {
 }
 
 func (s resetSource) Reset(context.Context, *task.Record) (*task.Record, error) { return s.rec, s.err }
+
+// frameText joins the frame's rows, so a phrase wrapped onto the next row still reads whole.
+func frameText(m Model) string {
+	var rows []string
+	for _, l := range plain(Frame(m)) {
+		rows = append(rows, strings.Join(strings.Fields(l), " "))
+	}
+	return strings.Join(rows, " ")
+}
+
+func TestResetConfirmationShowsEveryEffectAtTheSmallestSize(t *testing.T) {
+	for _, logOpen := range []bool{false, true} {
+		m := failedOnly()
+		m.Width, m.Height, m.LogOpen = minWidth, minHeight, logOpen
+		press(&m, rune_('x'))
+		if got := len(Frame(m)); got != m.Height {
+			t.Fatalf("log %v: frame has %d rows, want %d", logOpen, got, m.Height)
+		}
+		text := frameText(m)
+		for _, want := range []string{"task file", "runner log", "worktree", "local branch", "uncommitted or untracked work", "keeps only the PR link", "[y/n]"} {
+			if !strings.Contains(text, want) {
+				t.Errorf("log %v: confirmation does not show %q:\n%s", logOpen, want, strings.Join(Frame(m), "\n"))
+			}
+		}
+	}
+}
+
+func TestFooterOffersResetForAFailedTaskAtTheSmallestWidth(t *testing.T) {
+	for _, logOpen := range []bool{false, true} {
+		m := failedOnly()
+		m.Width, m.Height, m.LogOpen = minWidth, minHeight, logOpen
+		if f := footer(m); !strings.Contains(f, "x reset") || textWidth(f) > m.Width {
+			t.Errorf("log %v: footer %q", logOpen, f)
+		}
+	}
+}

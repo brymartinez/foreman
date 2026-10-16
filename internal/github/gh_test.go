@@ -478,3 +478,22 @@ func TestPullRequestsForBranchReturnsTheGhError(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestPullRequestsForBranchRefusesAListThatHitsTheLimit(t *testing.T) {
+	c := Client{Run: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		limit := 0
+		for i, a := range args {
+			if a == "--limit" {
+				fmt.Sscan(args[i+1], &limit)
+			}
+		}
+		prs := make([]string, limit)
+		for i := range prs {
+			prs[i] = fmt.Sprintf(`{"number":%d,"state":"CLOSED","headRefName":"feat/3-x","isCrossRepository":true}`, i+1)
+		}
+		return []byte("[" + strings.Join(prs, ",") + "]"), nil
+	}}
+	if _, err := c.PullRequestsForBranch(context.Background(), "a/b", "feat/3-x"); err == nil || !strings.Contains(err.Error(), "more than") {
+		t.Fatalf("err = %v; a full page may hide another PR on the branch", err)
+	}
+}

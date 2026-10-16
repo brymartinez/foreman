@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -45,6 +46,20 @@ func Frame(m Model) []string {
 		return append(lines, helpLines(m, m.Height-1)...)
 	}
 
+	// A reset confirmation names everything it deletes, so it wraps onto rows taken
+	// from the log, then from the panes, rather than being cut at the edge.
+	foot := []string{footer(m)}
+	if m.Mode == ConfirmingReset {
+		foot = wrap(footer(m), m.Width, maxResetRows)
+		extra := len(foot) - 1
+		if m.LogOpen {
+			take := min(extra, lay.logHeight-2)
+			lay.logHeight -= take
+			extra -= take
+		}
+		lay.topHeight -= extra
+	}
+
 	right := m.Width - lay.leftWidth - 1
 	left := paneLines(inboxPane(m), lay.leftWidth, lay.topHeight, m.Focus == InboxPane, m.InboxCursor)
 	// The pane spends its first row on its heading, so a task has the rest to fill.
@@ -57,9 +72,33 @@ func Frame(m Model) []string {
 		lines = append(lines, logPane(m, lay.logHeight)...)
 	}
 	lines = append(lines, messageLine(m))
-	lines = append(lines, dimmed(pad(truncate(footer(m), m.Width), m.Width)))
+	for _, f := range foot {
+		lines = append(lines, dimmed(pad(truncate(f, m.Width), m.Width)))
+	}
 	return lines
 }
+
+// withReset fits the reset hint into the short hints by dropping the hints after it,
+// "? help" first, until the line fits.
+func withReset(short string, width int) string {
+	parts := strings.Split(short, " · ")
+	at := len(parts)
+	if i := slices.Index(parts, "? help"); i >= 0 {
+		at = i
+	}
+	parts = slices.Insert(parts, at, "x reset")
+	for textWidth(strings.Join(parts, " · ")) > width && len(parts) > 1 {
+		last := len(parts) - 1
+		if parts[last] == "x reset" {
+			last--
+		}
+		parts = slices.Delete(parts, last, last+1)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// maxResetRows bounds the reset confirmation. Its text fits in four rows at minWidth.
+const maxResetRows = 4
 
 // messageLine is the last result or error, under the panes.
 func messageLine(m Model) string {
@@ -557,7 +596,7 @@ func footer(m Model) string {
 		}
 		return fmt.Sprintf("Cancel %s#%d and stop its agent? [y/n]", m.cancelTarget.Repo, m.cancelTarget.Number)
 	case ConfirmingReset:
-		return fmt.Sprintf("Reset %s#%d? [y/n] Deletes its task file, runner log, worktree, local branch, and uncommitted or untracked work. GitHub is unchanged.", m.resetTarget.Repo, m.resetTarget.Number)
+		return fmt.Sprintf("Reset %s#%d? Deletes its runner log, worktree, local branch, and uncommitted or untracked work, and its task file, which then keeps only the PR link. GitHub is unchanged. [y/n]", m.resetTarget.Repo, m.resetTarget.Number)
 	case AnsweringDecision:
 		return answerHints(m)
 	}
@@ -570,11 +609,15 @@ func footer(m Model) string {
 	} else if m.LogOpen {
 		long, short = hintsOpenLong, hintsOpenShort
 	}
-	// Reset is offered only for a FAILED task, so its hint shows only then.
+	// Reset is offered only for a FAILED task, so its hint shows only then, and
+	// before the other keys when the full hints do not fit.
 	if rec := m.Selected(); rec != nil && rec.State == task.Failed {
-		if with := strings.Replace(long, " · ? help", " · x reset · ? help", 1); textWidth(with) <= m.Width {
-			return with
+		for _, hints := range []string{long, short} {
+			if with := strings.Replace(hints, " · ? help", " · x reset · ? help", 1); textWidth(with) <= m.Width {
+				return with
+			}
 		}
+		return withReset(short, m.Width)
 	}
 	if textWidth(long) > m.Width {
 		return short

@@ -520,16 +520,23 @@ func (c Client) OpenPullRequestForBranch(ctx context.Context, repo task.Repo, br
 	return nil, nil
 }
 
-// PullRequestsForBranch lists up to 20 PRs so a reset can see when more than one
-// shares the branch. A fork's PR with the same branch name is left out.
+// branchPRLimit caps the PRs read for one branch name. A full page may hide more, and
+// forks count toward it, so a list that reaches it is an error rather than a guess.
+const branchPRLimit = 100
+
+// PullRequestsForBranch lists every PR on the branch, so a reset can see when more
+// than one shares it. A fork's PR with the same branch name is left out.
 func (c Client) PullRequestsForBranch(ctx context.Context, repo task.Repo, branch string) ([]app.PullRequest, error) {
-	out, err := c.Run(ctx, "", "pr", "list", "--repo", string(repo), "--head", branch, "--state", "all", "--limit", "20", "--json", prFields)
+	out, err := c.Run(ctx, "", "pr", "list", "--repo", string(repo), "--head", branch, "--state", "all", "--limit", fmt.Sprint(branchPRLimit), "--json", prFields)
 	if err != nil {
 		return nil, err
 	}
 	var prs []prJSON
 	if err := json.Unmarshal(out, &prs); err != nil {
 		return nil, fmt.Errorf("parse PR list for %s: %w", branch, err)
+	}
+	if len(prs) >= branchPRLimit {
+		return nil, fmt.Errorf("branch %s has %d or more PRs, more than foreman reads", branch, branchPRLimit)
 	}
 	var found []app.PullRequest
 	for _, p := range prs {
