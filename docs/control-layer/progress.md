@@ -2,6 +2,13 @@
 
 ## Current stage
 
+Plan reconciliation (#71) is complete. Before a planning turn, the runner reads the
+issue and its comments from GitHub or Linear and adopts Foreman's marked planning
+comments. A full plan is implemented without posting; a partial plan posts only the
+missing documents. Plan markers carry a description fingerprint, and a plan written
+for another description asks the developer to keep or revise it. A failed read fails
+the task before planning. The `plan_reuse` end-to-end scenario covers adoption.
+
 Automatic PR feedback replies are disabled. PR comments stay on GitHub for the
 developer; Foreman no longer resumes an agent to answer them at handover or on a
 dashboard refresh. Legacy REVIEWED tasks return to READY_FOR_HUMAN on refresh.
