@@ -30,7 +30,7 @@ func (a App) Reset(ctx context.Context, rec *task.Record) (*task.Record, error) 
 	d := *cur.Delegation
 	mark, err := a.resetPR(ctx, cur)
 	if err != nil {
-		return nil, fmt.Errorf("%w; nothing was deleted", err)
+		return nil, fmt.Errorf("nothing was deleted: %w", err)
 	}
 	removal := WorktreeRemoval{Path: d.Worktree, Branch: d.Branch, DeleteBranch: d.Branch != "", Force: true}
 	if _, err := os.Stat(d.Worktree); d.Worktree == "" || errors.Is(err, fs.ErrNotExist) {
@@ -38,7 +38,7 @@ func (a App) Reset(ctx context.Context, rec *task.Record) (*task.Record, error) 
 		// of the repository can then find.
 		req := StartRequest{Repo: cur.Repo}
 		if _, err := a.sourceRepo(ctx, &req); err != nil {
-			return nil, fmt.Errorf("%w; nothing was deleted", err)
+			return nil, fmt.Errorf("nothing was deleted: %w", err)
 		}
 		removal.RepoDir = req.Dir
 	}
@@ -61,7 +61,7 @@ func (a App) Reset(ctx context.Context, rec *task.Record) (*task.Record, error) 
 		}, nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("%w; nothing was deleted", err)
+		return nil, fmt.Errorf("nothing was deleted: %w", err)
 	}
 
 	var left []string

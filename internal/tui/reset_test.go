@@ -85,7 +85,7 @@ func TestAResetTaskReturnsToTheInboxForAManualStartOnly(t *testing.T) {
 func TestResetShowsWhyNothingWasDeleted(t *testing.T) {
 	m := failedOnly()
 	rec := record(12, task.Failed)
-	apply(&m, resetDone(context.Background(), resetSource{err: errors.New("HTTP 502; nothing was deleted")}, rec))
+	apply(&m, resetDone(context.Background(), resetSource{err: errors.New("nothing was deleted: HTTP 502")}, rec))
 	if !strings.Contains(m.Message, "nothing was deleted") {
 		t.Errorf("message = %q", m.Message)
 	}

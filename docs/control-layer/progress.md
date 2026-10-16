@@ -2,6 +2,13 @@
 
 ## Current stage
 
+Reset of failed delegated runs (#72) is complete. `x` on a FAILED task confirms, then
+`App.Reset` resolves the run's PR, saves a record with only that link, and deletes the
+worktree, local branch, and runner log. Auto mode skips the reset issue. A manual start
+continues an open prior PR from its remote branch, or starts a new branch with a closed
+or merged PR as prompt context. Vet, Go tests, build, and the `reset` end-to-end
+scenario pass.
+
 Automatic PR feedback replies are disabled. PR comments stay on GitHub for the
 developer; Foreman no longer resumes an agent to answer them at handover or on a
 dashboard refresh. Legacy REVIEWED tasks return to READY_FOR_HUMAN on refresh.
@@ -140,6 +147,9 @@ Findings 1 to 4 were fixed in stage 28.
 
 ## Known limitations
 
+- A reset run that pushed its branch but opened no PR leaves that branch on GitHub.
+  The next start may propose the same name from the base, and the agent's push then
+  fails until the developer picks another name or deletes the remote branch.
 - PR history shows timing only for attempts recorded since stage 45. Older PRs, and a
   task in flight when foreman was upgraded, show `unavailable`.
 - A PR closed before its handoff is measured to GitHub's close time. When gh cannot

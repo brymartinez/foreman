@@ -114,6 +114,13 @@ app.Cancel            -> SIGTERM the runner, wait up to 30s for it to exit
                          runner: context cancelled -> agent process group stopped;
                          the failed step records FAILED, outcome cancelled, keeping
                          session, usage, branch, worktree, and PR
+app.Reset             -> FAILED with no live runner only
+                         gh: the stored PR (must be on the task's branch) or every
+                         PR on the branch in any state (more than one refuses);
+                         any GitHub error or doubt -> nothing changes
+                         store: replace the record with one holding only the PR
+                         in `reset`, state DISCOVERED, no delegation
+                         git: worktree remove --force, branch -D; delete the log
 foreman [-a|--auto|--no-auto]
                       -> the dashboard, until q or ctrl+c. A launch flag sets auto
                          mode for this session and saves nothing.
@@ -143,6 +150,7 @@ foreman [-a|--auto|--no-auto]
                            older chunk of the log file; g -> read back to its start
                          ? -> the keys and the version; any key closes it
                          c on a running task     -> confirm, app.Cancel
+                         x on a FAILED task      -> confirm, app.Reset
                          a -> toggle auto mode, saved in state.json (D144)
                          auto mode, after each successful refresh, finished start,
                            and 1s tick: app.Start with auto.agent for assigned,
@@ -316,6 +324,22 @@ the same commit. The commit message records why it changed.
   alert, keeps the branch, and returns to READY_FOR_HUMAN or REVIEWING if the PR is
   reopened. A closed issue takes precedence and makes the task DONE. The runner can't write to a `PR_CLOSED` task, so the stop that
   follows is never saved as a failure.
+- **A reset discards the run, never the PR link.** `App.Reset` resolves the run's PR
+  before anything is deleted, because a runner can die after opening a PR and before
+  recording it. It then saves a record with no delegation and a `reset` block (the PR,
+  its URL, head branch, and state), and only then removes the worktree with its
+  uncommitted work, the local branch, and the runner log. A failed removal names what
+  is left; the PR link is already saved. Nothing on GitHub changes. Deleting the file
+  outright was rejected: auto mode would see a new issue and start it, and the PR link
+  would be lost. Auto mode refuses a record with `reset`, and INBOX offers it for a
+  manual start even when only tracking finds it. The next start reads the PR again. If
+  it is open on the recorded branch, the worktree is made from `origin/<branch>`, the
+  branch name proposal is skipped, and the run continues that PR. If it is closed or
+  merged, the start proposes a new branch and refuses the old one, whose commits are
+  still on GitHub. Either way the delegation stores `prior_pr`, each fresh session's
+  prompt carries that PR's title, state, description, and comments, and the `reset`
+  block is cleared. A reset run has no plan, attempts, decisions, or session, so a run
+  without an open PR plans again.
 - **Names are chosen once, before worktree creation.** The default branch is
   `<type>/<workName>`, with the type from the title prefix, the labels, then `feat`;
   `task.WorkName` is `<issue>-<slug>` (at most 5 words and 40 characters). A Linear
@@ -523,7 +547,8 @@ the same commit. The commit message records why it changed.
   PRs, and review requests, each up to gh's maximum of 1000. A search that hits 1000 is
   reported as truncated, and lost reasons ("no longer assigned to you") are judged only
   when every search was complete.
-- **INBOX is work to start:** issues never delegated, plus delegated ones in FAILED.
+- **INBOX is work to start:** issues never delegated, plus delegated ones in FAILED,
+  and reset ones.
   Work an agent holds stays in DELEGATED WORK, so an issue is never delegated
   twice. `mentions: false` hides mention-only items but never a delegated task that
   needs the developer.
@@ -582,7 +607,11 @@ the same commit. The commit message records why it changed.
 - **It never blocks or misdraws:** the terminal check runs before config loads, so a
   piped `foreman` prints usage and exits 0; control characters in dynamic text become
   spaces; widths are counted in terminal columns; GitHub refreshes run off the input
-  goroutine; quitting waits for a `Start`, `Cancel`, or `Respond` in flight.
+  goroutine; quitting waits for a `Start`, `Cancel`, `Reset`, or `Respond` in flight.
+- **Reset is offered only where it can act.** `x` and its footer hint appear for a
+  FAILED selection. The confirmation names the task file, runner log, worktree, local
+  branch, and uncommitted or untracked work. App.Reset checks for a live runner,
+  because a FAILED task's pid stays recorded until a refresh sees it gone.
 - **Decisions are answered in the lower pane through `app.Respond`,** which resolves an
   option label, free text, or an empty answer (the recommendation). The
   prompt is its own mode: every rune is answer text, so an answer can start with `q`
