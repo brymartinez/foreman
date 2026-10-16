@@ -148,11 +148,45 @@ func truncateBranchText(s string, n int) string {
 	return s
 }
 
-var markdownPath = regexp.MustCompile("(?:`|\\]\\()([A-Za-z0-9_./-]+\\.md)")
+// markdownLink matches a whole `path.md` or [label](path.md) link, so the text
+// between two links can be read on its own.
+var markdownLink = regexp.MustCompile("`([A-Za-z0-9_./-]+\\.md)`?|\\[[^\\]]*\\]\\(([A-Za-z0-9_./-]+\\.md)[^)]*\\)?")
 
 // guideClause splits text into clauses, so a branch rule only vouches for the
 // links in its own clause, not for every link on the same line.
 var guideClause = regexp.MustCompile(`\n|[;|]|\.\s`)
+
+// namedGuides returns the links a clause names as branch naming guidance. A link
+// counts when the text since the previous link, including its own label, names
+// branch guidance, or when it continues a list of guidance links ("a, b and c").
+// A trailing "see [architecture](...)" therefore stays out.
+func namedGuides(clause string) []string {
+	var paths []string
+	prev, listed := 0, false
+	for _, m := range markdownLink.FindAllStringSubmatchIndex(clause, -1) {
+		start, end := m[2], m[3]
+		if start < 0 {
+			start, end = m[4], m[5]
+		}
+		path := clause[start:end]
+		listed = explicitBranchGuide(clause[prev:m[1]]) || listed && listJoin(clause[prev:m[0]])
+		if listed {
+			paths = append(paths, path)
+		}
+		prev = m[1]
+	}
+	return paths
+}
+
+// listJoin reports whether the text between two links only joins a list.
+func listJoin(gap string) bool {
+	for _, word := range strings.Fields(strings.ReplaceAll(gap, ",", " ")) {
+		if word = strings.ToLower(word); word != "and" && word != "or" {
+			return false
+		}
+	}
+	return true
+}
 
 // explicitBranchGuide reports whether a clause names its links as current branch
 // naming guidance. A link that only mentions branches, or points at history, is not
@@ -231,11 +265,8 @@ func readBranchGuide(root string) (string, error) {
 			continue
 		}
 		for _, clause := range guideClause.Split(content, -1) {
-			if !explicitBranchGuide(clause) {
-				continue
-			}
-			for _, match := range markdownPath.FindAllStringSubmatch(clause, -1) {
-				queue = append(queue, visit{filepath.Join(filepath.Dir(path), match[1]), rel, v.depth + 1})
+			for _, guide := range namedGuides(clause) {
+				queue = append(queue, visit{filepath.Join(filepath.Dir(path), guide), rel, v.depth + 1})
 			}
 		}
 	}

@@ -315,3 +315,36 @@ func TestBranchGuideSkipsOtherLinksOnABranchRuleLine(t *testing.T) {
 		t.Fatalf("guide = %q", guide)
 	}
 }
+
+func TestBranchGuideSkipsAContextLinkInTheSameClause(t *testing.T) {
+	root := writeRepo(t, map[string]string{
+		"AGENTS.md":            "Branch naming rules: [current](docs/branches.md) and see [architecture](docs/architecture.md) for context.\n",
+		"docs/branches.md":     "Use <owner>/<slug>.",
+		"docs/architecture.md": "Each task gets its own branch." + strings.Repeat("x", 40<<10),
+	})
+	guide, err := readBranchGuide(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(guide, "<owner>/<slug>") || strings.Contains(guide, "own branch") {
+		t.Fatalf("guide = %q", guide)
+	}
+}
+
+func TestBranchGuideFollowsAListOfNamedGuides(t *testing.T) {
+	root := writeRepo(t, map[string]string{
+		"AGENTS.md":      "Branch naming rules: `docs/owners.md`, `docs/slugs.md` and [workstreams](docs/work.md).\n",
+		"docs/owners.md": "owner rule",
+		"docs/slugs.md":  "slug rule",
+		"docs/work.md":   "workstream rule",
+	})
+	guide, err := readBranchGuide(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"owner rule", "slug rule", "workstream rule"} {
+		if !strings.Contains(guide, want) {
+			t.Fatalf("guide = %q, want %q", guide, want)
+		}
+	}
+}
