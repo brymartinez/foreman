@@ -607,9 +607,11 @@ func (m *Merge) stanceOf(it MergeItem) stance {
 	s.text = it.Learning.Text
 	if s.explicit {
 		s.text = textAt(it.Learning, s.latest)
-		// An earlier merge recorded the text of the correction it chose.
+		// An earlier merge recorded the text of the correction it chose. It sorts
+		// after that correction, so a correction by the same task recorded after it
+		// supersedes it, and textAt already gives that correction's text.
 		for _, c := range live(history, Revise, "revert-rewrite") {
-			if c.Reason == ingestText && c.Task == s.task {
+			if c.Reason == ingestText && c.Task == s.task && !c.At.Before(s.latest) {
 				s.text = c.To
 			}
 		}

@@ -528,3 +528,42 @@ func TestReevaluatingTheWinningTaskKeepsTheMaintainersText(t *testing.T) {
 		t.Fatalf("after re-evaluating the winning task: %+v", ls)
 	}
 }
+
+func TestANewerCorrectionFromTheWinningTaskSupersedesTheIngestDecision(t *testing.T) {
+	flagged := func(m *Merge) []Group {
+		g := together(m, Convention, "Indent YAML consistently.")
+		g[0].Conflict = "they ask for different indentation"
+		return g
+	}
+	a, _ := newStore(t)
+	mustApply(t, a, repo, eval("1", 0, maintainer(Convention, "Indent YAML with two spaces.")))
+	ev := eval("9", 10)
+	ev.Revisions = []Revision{{ID: "L1", Action: Revise, Text: "Indent YAML with four spaces.", Reason: "The files use four.", Source: Observed}}
+	mustApply(t, a, repo, ev)
+	b, _ := newStore(t)
+	tabs := eval("2", 0, maintainer(Convention, "Indent YAML with tabs."))
+	tabs.At = day(20)
+	mustApply(t, b, repo, tabs)
+	m := prepare(t, snapshot(t, a, repo), snapshot(t, b, repo))
+	if err := a.Replace(repo, merged(t, m, flagged(m))); err != nil {
+		t.Fatal(err)
+	}
+
+	// The winning task is re-evaluated, and its maintainer now asks for three spaces.
+	again := eval("2", 0)
+	again.At, again.Fingerprint = day(30), "fp-2-later"
+	again.Revisions = []Revision{{ID: "L1", Action: Revise, Text: "Indent YAML with three spaces.", Reason: "Maintainer changed it.", Source: Maintainer, Cites: []string{"D1"}}}
+	mustApply(t, a, repo, again)
+	if l := learnings(t, a, repo)[0]; l.Text != "Indent YAML with three spaces." {
+		t.Fatalf("setup: %+v", l)
+	}
+
+	c, _ := newStore(t)
+	eight := eval("3", 0, maintainer(Convention, "Indent YAML with eight spaces."))
+	eight.At = day(1)
+	mustApply(t, c, repo, eight)
+	m = prepare(t, snapshot(t, a, repo), snapshot(t, c, repo))
+	if l := merged(t, m, flagged(m)).Learnings[0]; l.Text != "Indent YAML with three spaces." {
+		t.Fatalf("text = %q, want the newer correction's", l.Text)
+	}
+}

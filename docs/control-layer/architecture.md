@@ -847,7 +847,8 @@ the same commit. The commit message records why it changed.
   `ingest:` reason, and later merges read that correction's text from it rather
   than from other members' rewrites. That entry is a decision, not the task's own
   rewrite, so re-evaluating the task does not withdraw it; a newer rewrite or a
-  later merge replaces it. Without a flag, corrections differ only by
+  later merge replaces it. A correction the same task records after the entry
+  supersedes it, and its own text applies. Without a flag, corrections differ only by
   retirement, since the agent judged their texts the same guidance. A member's stance is its latest
   correction: maintainer evidence, a restore, or a confirm keeps it, and a
   retirement whose evaluation has a maintainer revision retires it. An observed
