@@ -215,7 +215,7 @@ func TestStartAfterResetContinuesAnOpenPRFromItsRemoteBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := WorktreeRequest{RepoDir: "/src/armada-backend", Path: "/wt/ridezoomo-armada-backend/825-provider-retries", Branch: "feat/825-provider-retries", BaseRef: "origin/feat/825-provider-retries"}
+	want := WorktreeRequest{RepoDir: "/src/armada-backend", Path: "/wt/ridezoomo-armada-backend/feat/825-provider-retries", Branch: "feat/825-provider-retries", BaseRef: "origin/feat/825-provider-retries"}
 	if len(f.wt.reqs) != 1 || f.wt.reqs[0] != want {
 		t.Errorf("worktree = %+v", f.wt.reqs)
 	}

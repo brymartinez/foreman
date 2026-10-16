@@ -128,10 +128,13 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			return nil, err
 		}
 	}
-	workName := task.WorkNameOf(branch)
+	path := task.WorktreePath(a.WorktreesDir, key.Repo, branch)
+	if existing != nil && existing.Delegation != nil && existing.Delegation.Worktree != "" {
+		path = existing.Delegation.Worktree
+	}
 	wt := WorktreeRequest{
 		RepoDir: req.Dir,
-		Path:    task.WorktreePath(a.WorktreesDir, key.Repo, workName),
+		Path:    path,
 		Branch:  branch,
 		BaseRef: "origin/" + info.DefaultBranch,
 	}
