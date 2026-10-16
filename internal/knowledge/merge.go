@@ -534,8 +534,8 @@ func (m *Merge) build(g Group, members []MergeItem) (Learning, *Conflict, error)
 	if g.Conflict != "" || disagree || len(rivals) > 0 {
 		// The rewrite names the winning correction's task, so a later merge reads
 		// the text that correction backed from it, not from other members' rewrites.
-		if winner.text != l.Text || textAt(l, decided) != winner.text {
-			l.History = append(l.History, Change{At: decided, Task: winner.task, Action: Revise, From: l.Text, To: winner.text, Reason: ingestText})
+		if replayed := textAt(l, decided); winner.text != l.Text || replayed != winner.text {
+			l.History = append(l.History, Change{At: decided, Task: winner.task, Action: Revise, From: replayed, To: winner.text, Reason: ingestText})
 		}
 		l.Text, l.Kind = winner.text, winner.item.Learning.Kind
 	}

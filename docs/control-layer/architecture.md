@@ -845,7 +845,9 @@ the same commit. The commit message records why it changed.
   observed rewrite never replaces what the maintainer backed. When the merge keeps
   that text, it adds a rewrite entry under the winning correction's task with an
   `ingest:` reason, and later merges read that correction's text from it rather
-  than from other members' rewrites. Without a flag, corrections differ only by
+  than from other members' rewrites. That entry is a decision, not the task's own
+  rewrite, so re-evaluating the task does not withdraw it; a newer rewrite or a
+  later merge replaces it. Without a flag, corrections differ only by
   retirement, since the agent judged their texts the same guidance. A member's stance is its latest
   correction: maintainer evidence, a restore, or a confirm keeps it, and a
   retirement whose evaluation has a maintainer revision retires it. An observed

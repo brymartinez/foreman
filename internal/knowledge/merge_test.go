@@ -500,3 +500,31 @@ func TestALaterMergeKeepsTheTextOfACorrectionThatWon(t *testing.T) {
 		t.Fatalf("second merge text = %q, want the winning correction's", l.Text)
 	}
 }
+
+func TestReevaluatingTheWinningTaskKeepsTheMaintainersText(t *testing.T) {
+	a, _ := newStore(t)
+	mustApply(t, a, repo, eval("1", 0, maintainer(Convention, "Indent YAML with two spaces.")))
+	ev := eval("9", 10)
+	ev.Revisions = []Revision{{ID: "L1", Action: Revise, Text: "Indent YAML with four spaces.", Reason: "The files use four.", Source: Observed}}
+	mustApply(t, a, repo, ev)
+	b, _ := newStore(t)
+	tabs := eval("2", 0, maintainer(Convention, "Indent YAML with tabs."))
+	tabs.At = day(20)
+	mustApply(t, b, repo, tabs)
+	m := prepare(t, snapshot(t, a, repo), snapshot(t, b, repo))
+	groups := together(m, Convention, "Indent YAML consistently.")
+	groups[0].Conflict = "they ask for different indentation"
+	if err := a.Replace(repo, merged(t, m, groups)); err != nil {
+		t.Fatal(err)
+	}
+
+	// The winning task's evidence changes and the maintainer still backs tabs.
+	again := eval("2", 0, maintainer(Convention, "Indent YAML with tabs."))
+	again.Proposals[0].Supports = []string{"L1"}
+	again.At, again.Fingerprint = day(25), "fp-2-later"
+	mustApply(t, a, repo, again)
+	ls := learnings(t, a, repo)
+	if len(ls) != 1 || ls[0].Text != "Indent YAML with tabs." || ls[0].Status != Active {
+		t.Fatalf("after re-evaluating the winning task: %+v", ls)
+	}
+}

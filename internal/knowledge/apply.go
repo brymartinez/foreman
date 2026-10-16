@@ -218,7 +218,9 @@ func latest(l Learning, task string) time.Time {
 // rewrite still in force, or the original text, and l is retired when the last
 // retire, restore, or confirm still in force is a retire.
 func revert(l *Learning, ev Evaluation) {
-	own := func(c Change) bool { return c.Task == ev.Task }
+	// An ingest's text decision names the winning correction's task but is not that
+	// task's rewrite, so re-evaluating the task leaves it in force.
+	own := func(c Change) bool { return c.Task == ev.Task && c.Reason != ingestText }
 	if slices.ContainsFunc(live(l.History, Revise, "revert-rewrite"), own) {
 		l.History = append(l.History, Change{At: ev.At, Task: ev.Task, Action: "revert-rewrite", From: l.Text, Reason: "re-evaluation replaced this task's rewrite"})
 		text := originalText(*l)
@@ -261,11 +263,12 @@ func retiredByHistory(history []Change) bool {
 }
 
 // live returns the history's action entries, oldest first, that are still in force:
-// no later undo entry by the same task withdrew them.
+// no later undo entry by the same task withdrew them. An ingest's text decision is
+// never withdrawn by a task's undo.
 func live(history []Change, action, undo string) []Change {
 	var out []Change
 	for i, c := range history {
-		if c.Action == action && !withdrawn(history[i+1:], undo, c.Task) {
+		if c.Action == action && (c.Reason == ingestText || !withdrawn(history[i+1:], undo, c.Task)) {
 			out = append(out, c)
 		}
 	}
