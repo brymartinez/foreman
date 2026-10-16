@@ -240,6 +240,16 @@ func existingPlansSection(s *strings.Builder, existing map[task.PlanDoc]string) 
 	}
 }
 
+// ExistingPlansMessage adds the documents on the issue to a resumed planning turn.
+func ExistingPlansMessage(existing map[task.PlanDoc]string) string {
+	var s strings.Builder
+	if len(existing) > 0 {
+		s.WriteString("\n")
+	}
+	existingPlansSection(&s, existing)
+	return s.String()
+}
+
 // planningTestRule keeps the plan test-first. The plan names behavior, not tests, so it
 // stays short and the implementer picks the test names.
 func planningTestRule(s *strings.Builder) {

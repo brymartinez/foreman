@@ -42,10 +42,10 @@ func (p issuePlan) texts() map[task.PlanDoc]string {
 }
 
 // readIssuePlan finds the planning documents on the issue. Only a comment that starts
-// with a document's marker counts; the description and unmarked comments never do. A
-// document the task already records keeps its recorded comment, which postPlan edits
-// or reposts, and is never a conflict: the task wrote or accepted it. Otherwise the
-// newest marked comment wins. Both sources list comments oldest first.
+// with a document's marker counts; the description and unmarked comments never do, so
+// a recorded comment that lost its marker is left alone. A document's recorded comment
+// wins while it is still marked, and is never a conflict: the task wrote or accepted
+// it. Otherwise the newest marked comment wins. Both sources list comments oldest first.
 func (a App) readIssuePlan(ctx context.Context, rec *task.Record) (issuePlan, error) {
 	issue, err := a.issue(ctx, rec.Key)
 	if err != nil {
@@ -56,20 +56,20 @@ func (a App) readIssuePlan(ctx context.Context, rec *task.Record) (issuePlan, er
 		return issuePlan{}, err
 	}
 	p := issuePlan{fingerprint: task.DescriptionFingerprint(issue.Body), found: map[task.PlanDoc]foundPlan{}}
+	recorded := map[task.PlanDoc]bool{}
 	for _, c := range comments {
 		doc, fp, ok := task.ParsePlanMarker(c.Body)
-		if !ok {
+		if !ok || recorded[doc] {
 			continue
 		}
 		comment := planCommentFor(rec.IssueSource(), doc, c)
-		if cur := rec.PlanComment(doc); cur != nil && !samePlanComment(*cur, comment) {
-			continue
-		}
+		cur := rec.PlanComment(doc)
+		recorded[doc] = cur != nil && samePlanComment(*cur, comment)
 		p.found[doc] = foundPlan{comment: comment, text: planText(doc, c.Body), fingerprint: fp}
 	}
 	for _, doc := range task.PlanDocs {
 		f, ok := p.found[doc]
-		if ok && rec.PlanComment(doc) == nil && f.fingerprint != "" && f.fingerprint != p.fingerprint {
+		if ok && !recorded[doc] && f.fingerprint != "" && f.fingerprint != p.fingerprint {
 			p.conflicts = append(p.conflicts, doc)
 		}
 	}
@@ -108,14 +108,22 @@ var (
 	revisePlanOption = task.Option{Label: "B", Description: "Revise the plan. A planning turn updates the documents for the current description and edits their comments in place."}
 )
 
-// planConflictAnswer is the developer's answer to the plan conflict question, if any.
-func planConflictAnswer(rec *task.Record) (string, bool) {
+// planConflictAnswer is the developer's answer to the plan conflict question asked
+// about the current description, if any. An answer about an earlier description does
+// not cover a later edit.
+func planConflictAnswer(rec *task.Record, fingerprint string) (string, bool) {
 	for i := len(rec.Decisions) - 1; i >= 0; i-- {
-		if d := rec.Decisions[i]; d.Question.Issue == planConflictIssue && d.Answer != "" {
+		if d := rec.Decisions[i]; d.Question.Issue == planConflictIssue && d.Answer != "" && strings.HasSuffix(d.Question.Context, descriptionLine(fingerprint)) {
 			return d.Answer, true
 		}
 	}
 	return "", false
+}
+
+// descriptionLine ends the conflict question's context with the fingerprint of the
+// description it was asked about.
+func descriptionLine(fingerprint string) string {
+	return "\n\nCurrent description fingerprint: " + fingerprint + "."
 }
 
 // askAboutPlanConflict blocks the task on a plan written for another description.
@@ -127,6 +135,7 @@ func askAboutPlanConflict(rec *task.Record, p issuePlan, now time.Time) {
 	for _, doc := range p.conflicts {
 		fmt.Fprintf(&ctx, "\n- %s: %s", doc.Title(), p.found[doc].comment.URL)
 	}
+	ctx.WriteString(descriptionLine(p.fingerprint))
 	rec.State = task.NeedsDecision
 	rec.Delegation.Implementer.ID = ""
 	rec.LastOutcome = &task.Outcome{Status: "blocked", Summary: "the plan on the issue was written for an earlier description", At: now}
@@ -147,7 +156,7 @@ func askAboutPlanConflict(rec *task.Record, p issuePlan, now time.Time) {
 func (r *taskRun) reconcilePlan() (bool, error) {
 	a := r.a
 	p, readErr := a.readIssuePlan(r.ctx, r.rec)
-	answer, answered := planConflictAnswer(r.rec)
+	answer, answered := planConflictAnswer(r.rec, p.fingerprint)
 	adopt := readErr == nil && p.complete() && (len(p.conflicts) == 0 || answer == optionText(keepPlanOption))
 	rec, err := a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
 		switch {

@@ -296,3 +296,54 @@ func TestOnlyTheNewestMarkedCommentCountsAsAPlanningDocument(t *testing.T) {
 		t.Errorf("unrelated comments changed: %+v", f.gh.comments)
 	}
 }
+
+func TestARecordedCommentThatLostItsMarkerIsNotEdited(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	unmarked := IssueComment{ID: 77, URL: "https://github.com/x/issues/825#issuecomment-77", Body: "## Analysis\n\nThe marker was removed."}
+	f.gh.comments = map[int64]IssueComment{77: unmarked}
+	f.gh.issueComments = []IssueComment{unmarked}
+	f.store.recs[key].SetPlanComment(task.PlanComment{Doc: task.Analysis, CommentID: 77, URL: unmarked.URL})
+	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2")}
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if c := got.PlanComment(task.Analysis); !got.PlanPosted() || c.CommentID == 77 || f.gh.edits != 0 || f.gh.comments[77].Body != unmarked.Body {
+		t.Fatalf("plan %+v edits %d comment 77 %q", got.Plan, f.gh.edits, f.gh.comments[77].Body)
+	}
+}
+
+func TestAKeepAnswerForAnEarlierDescriptionAsksAgain(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	f.gh.issueComments = githubPlanComments(f, task.DescriptionFingerprint("An older description."), task.PlanDocs...)
+	answerPlanConflict(t, f, key, keepPlanOption)
+	f.gh.issue.Body = "The description changed again."
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if q := got.Pending(); got.State != task.NeedsDecision || q == nil || q.Question.Issue != planConflictIssue || len(got.Plan) != 0 || f.claude.starts != 0 {
+		t.Fatalf("state %s decisions %+v plan %+v starts %d", got.State, got.Decisions, got.Plan, f.claude.starts)
+	}
+}
+
+func TestAResumedPlanningTurnReceivesDocumentsFoundOnTheIssue(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	rec := f.store.recs[key]
+	rec.Delegation.Implementer.ID = "sid-1"
+	rec.Decisions = []task.Decision{{Question: task.Question{Issue: "Retry 4xx?"}, Answer: "A. 5xx only", AnsweredAt: f.app.Now()}}
+	f.gh.issueComments = githubPlanComments(f, "", task.Analysis)
+	f.claude.turns = []agent.Turn{keepingTurn(task.Analysis), prTurn("sid-2")}
+	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.claude.resumed) != 1 || !strings.Contains(f.claude.resumed[0], "## Documents already on the issue") || !strings.Contains(f.claude.resumed[0], "### Analysis\n\nPosted analysis.") {
+		t.Fatalf("resumed %q", f.claude.resumed)
+	}
+	if got := f.store.recs[key]; !got.PlanPosted() || got.PlanComment(task.Analysis).CommentID != 501 || f.gh.edits != 0 {
+		t.Errorf("plan %+v edits %d", got.Plan, f.gh.edits)
+	}
+}

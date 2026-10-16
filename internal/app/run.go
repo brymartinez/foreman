@@ -367,6 +367,10 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 			open = latest
 		}
 		resume = agent.ResumeMessage(decs, open, planning)
+		if planning {
+			// Documents may have appeared on the issue since the session last saw it.
+			resume += agent.ExistingPlansMessage(req.existingPlans)
+		}
 	} else if merge != nil {
 		resume = agent.MergeMessage(d.Branch, merge.Base, merge.Files)
 	} else if len(feedback) > 0 {
@@ -755,7 +759,7 @@ func applyStop(ctx context.Context, rec *task.Record, during string, log io.Writ
 }
 
 // postPlan puts each planning document on the issue as its own comment, editing the
-// comment the task records, or the one found on the issue, when there is one. A
+// marked comment found on the issue when there is one. A
 // document the turn left empty keeps the comment found on the issue as it is. Each
 // comment is recorded as soon as it is posted. A failed post fails the task;
 // restarting it plans again.
@@ -777,16 +781,14 @@ func (a App) postPlan(ctx, final context.Context, rec *task.Record, docs map[tas
 			fmt.Fprintf(log, "foreman: kept the %s: %s\n", doc.Title(), found.comment.URL)
 			continue
 		}
-		c := rec.PlanComment(doc)
-		if c == nil && isFound {
-			c = &found.comment
-		}
+		// Only a comment still marked as this document is edited. A recorded one that
+		// lost its marker belongs to someone else now, so the document is posted anew.
 		var id string
-		if c != nil {
+		if isFound {
 			if rec.IssueSource() == task.Linear {
-				id = c.ExternalCommentID
-			} else if c.CommentID > 0 {
-				id = strconv.FormatInt(c.CommentID, 10)
+				id = found.comment.ExternalCommentID
+			} else if found.comment.CommentID > 0 {
+				id = strconv.FormatInt(found.comment.CommentID, 10)
 			}
 		}
 		body := planCommentBody(doc, onIssue.fingerprint, docs[doc])

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 
@@ -31,7 +32,18 @@ func (f *lifecycleTracker) GetIssue(_ context.Context, key task.Key) (Issue, err
 }
 func (f *lifecycleTracker) IssueComments(_ context.Context, key task.Key) ([]TrackerComment, error) {
 	f.commentReads = append(f.commentReads, key)
-	return f.comments, f.commentsErr
+	if f.commentsErr != nil {
+		return nil, f.commentsErr
+	}
+	out := slices.Clone(f.comments)
+	for _, c := range f.posted {
+		if i := slices.IndexFunc(out, func(o TrackerComment) bool { return o.ID == c.ID }); i >= 0 {
+			out[i] = c
+		} else {
+			out = append(out, c)
+		}
+	}
+	return out, nil
 }
 func (f *lifecycleTracker) GetIssueComment(context.Context, string) (TrackerComment, error) {
 	return TrackerComment{}, nil
@@ -127,6 +139,10 @@ func TestLinearReplanningRepostsDeletedCommentAndEditsOtherComments(t *testing.T
 	tracker := &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", State: "open"}, missing: map[string]bool{"old-prd": true}}
 	f.app.Linear = tracker
 	started(t, f, StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude})
+	tracker.comments = []TrackerComment{
+		{ID: "old-analysis", URL: "https://linear.app/comment/old-analysis", Body: planCommentBody(task.Analysis, "", "Earlier analysis.")},
+		{ID: "old-prd", URL: "https://linear.app/comment/old-prd", Body: planCommentBody(task.PRD, "", "Earlier PRD.")},
+	}
 	f.store.recs[key].SetPlanComment(task.PlanComment{Doc: task.Analysis, ExternalCommentID: "old-analysis", URL: "https://linear.app/comment/old-analysis"})
 	f.store.recs[key].SetPlanComment(task.PlanComment{Doc: task.PRD, ExternalCommentID: "old-prd", URL: "https://linear.app/comment/old-prd"})
 	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2")}
