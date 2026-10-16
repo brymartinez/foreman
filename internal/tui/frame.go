@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -44,6 +45,9 @@ func Frame(m Model) []string {
 	if m.HelpOpen {
 		return append(lines, helpLines(m, m.Height-1)...)
 	}
+	if m.Mode == ConfirmingReset {
+		return append(lines, resetConfirmLines(m)...)
+	}
 
 	right := m.Width - lay.leftWidth - 1
 	left := paneLines(inboxPane(m), lay.leftWidth, lay.topHeight, m.Focus == InboxPane, m.InboxCursor)
@@ -59,6 +63,84 @@ func Frame(m Model) []string {
 	lines = append(lines, messageLine(m))
 	lines = append(lines, dimmed(pad(truncate(footer(m), m.Width), m.Width)))
 	return lines
+}
+
+// withReset fits the reset hint into the short hints by dropping the hints after it,
+// "? help" first, until the line fits.
+func withReset(short string, width int) string {
+	parts := strings.Split(short, " · ")
+	at := len(parts)
+	if i := slices.Index(parts, "? help"); i >= 0 {
+		at = i
+	}
+	parts = slices.Insert(parts, at, "x reset")
+	for textWidth(strings.Join(parts, " · ")) > width && len(parts) > 1 {
+		last := len(parts) - 1
+		if parts[last] == "x reset" {
+			last--
+		}
+		parts = slices.Delete(parts, last, last+1)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// resetList lists what a reset of the task deletes, by path and name, wrapped to
+// the width. Paths wrap at any column, so none is cut.
+func resetList(m Model) []string {
+	key, rec := m.resetTarget, m.resetRun
+	text := []string{fmt.Sprintf("Reset %s#%d deletes its local run:", key.Repo, key.Number)}
+	item := func(what, target string) {
+		if target != "" {
+			text = append(text, "- "+what+" "+target)
+		}
+	}
+	if m.TaskFile != nil {
+		item("task file", m.TaskFile(key)+", replaced by one that keeps only the PR link")
+	}
+	if rec != nil && rec.Delegation != nil {
+		d := rec.Delegation
+		item("runner log", d.RunnerLog)
+		if d.Worktree != "" {
+			item("worktree", d.Worktree+", with any uncommitted or untracked work")
+		}
+		item("local branch", d.Branch)
+	}
+	text = append(text, "GitHub is unchanged.")
+	var out []string
+	for _, l := range text {
+		out = append(out, wrapLine(printable(l), m.Width)...)
+	}
+	return out
+}
+
+// resetFits reports whether Frame draws the whole confirmation, which y requires.
+func resetFits(m Model) bool {
+	// Below the minimum size Frame draws only a size warning, so nothing was shown.
+	if _, ok := layoutFor(m.Width, m.Height, m.LogOpen, false); !ok {
+		return false
+	}
+	return len(resetList(m)) <= m.Height-3
+}
+
+// resetConfirmLines fill the body under the header with the targets, then the message
+// and the keys. A list too long for the terminal says so, and y does nothing.
+func resetConfirmLines(m Model) []string {
+	rows := m.Height - 3
+	targets := resetList(m)
+	keys := "y reset · any other key keeps the task"
+	if !resetFits(m) {
+		targets = append(targets[:rows-1], "Enlarge the terminal to see everything reset deletes.")
+		keys = "any key keeps the task"
+	}
+	var out []string
+	for _, l := range targets {
+		out = append(out, pad(truncate(l, m.Width), m.Width))
+	}
+	for len(out) < rows {
+		out = append(out, strings.Repeat(" ", m.Width))
+	}
+	out = append(out, messageLine(m))
+	return append(out, dimmed(pad(truncate(keys, m.Width), m.Width)))
 }
 
 // messageLine is the last result or error, under the panes.
@@ -404,6 +486,7 @@ var helpKeys = []helpKey{
 	{"ctrl-u/ctrl-d", "scroll the log, or move the PR history, half a page", "ctrl-u/d half page"},
 	{"g/G, end", "go to the log's first line or follow its tail", "g/G log start/end"},
 	{"c", "cancel the selected task's run", "c cancel"},
+	{"x", "reset the selected FAILED task: delete its local run and offer the issue again", "x reset"},
 	{"p", "open the PR history of merged and closed PRs; esc returns", "p PR history"},
 	{"ctrl-f/ctrl-b", "PR history: move a full page", "ctrl-f/b page"},
 	{"a", "turn auto mode on or off, kept for the next launch", "a auto"},
@@ -555,28 +638,34 @@ func footer(m Model) string {
 			return "Nothing to cancel. [y/n]"
 		}
 		return fmt.Sprintf("Cancel %s#%d and stop its agent? [y/n]", m.cancelTarget.Repo, m.cancelTarget.Number)
+	case ConfirmingReset:
+		return "y reset · any other key keeps the task"
 	case AnsweringDecision:
 		return answerHints(m)
 	}
 	if m.HistoryOpen {
 		return historyHints(m)
 	}
+	long, short := hintsLong, hintsShort
 	if m.LogOpen && m.Focus == TaskPane {
-		if textWidth(hintsLogLong) > m.Width {
-			return hintsLogShort
+		long, short = hintsLogLong, hintsLogShort
+	} else if m.LogOpen {
+		long, short = hintsOpenLong, hintsOpenShort
+	}
+	// Reset is offered only for a FAILED task, so its hint shows only then, and
+	// before the other keys when the full hints do not fit.
+	if rec := m.Selected(); rec != nil && rec.State == task.Failed {
+		for _, hints := range []string{long, short} {
+			if with := strings.Replace(hints, " · ? help", " · x reset · ? help", 1); textWidth(with) <= m.Width {
+				return with
+			}
 		}
-		return hintsLogLong
+		return withReset(short, m.Width)
 	}
-	if m.LogOpen {
-		if textWidth(hintsOpenLong) > m.Width {
-			return hintsOpenShort
-		}
-		return hintsOpenLong
+	if textWidth(long) > m.Width {
+		return short
 	}
-	if textWidth(hintsLong) > m.Width {
-		return hintsShort
-	}
-	return hintsLong
+	return long
 }
 
 // historyHints are the history's keys: the list's, or the detail log's when it has focus.

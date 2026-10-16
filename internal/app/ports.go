@@ -112,6 +112,9 @@ type GitHubClient interface {
 	GetPullRequest(ctx context.Context, key task.Key) (PullRequest, error)
 	// OpenPullRequestForBranch returns the open PR whose head is branch, or nil if none.
 	OpenPullRequestForBranch(ctx context.Context, repo task.Repo, branch string) (*PullRequest, error)
+	// PullRequestsForBranch returns every PR in repo, in any state, whose head is
+	// branch in repo itself.
+	PullRequestsForBranch(ctx context.Context, repo task.Repo, branch string) ([]PullRequest, error)
 	// CIStatus summarizes the checks on the PR's current head. CheckedAt is left zero.
 	CIStatus(ctx context.Context, pr task.Key) (task.CIStatus, error)
 	// PostIssueComment adds a comment to the issue, or edits comment id when id > 0.
@@ -195,18 +198,28 @@ type WorktreeRequest struct {
 	Path    string
 	Branch  string
 	// BaseRef, e.g. origin/main, is fetched before a new branch is created from it.
-	// Empty means the branch must already exist.
+	// Empty means the branch must already exist. The branch's own remote copy, e.g.
+	// origin/<Branch>, also fast-forwards an existing local branch to it.
 	BaseRef string
 }
 
 // ErrWorktreeDirty means a worktree has uncommitted or untracked changes and was kept.
 var ErrWorktreeDirty = errors.New("it has uncommitted or untracked changes")
 
+// ErrBranchNotDeleted means Remove removed the worktree but kept the branch.
+var ErrBranchNotDeleted = errors.New("the branch was not deleted")
+
 // WorktreeRemoval names a task's worktree and, when DeleteBranch is set, its local branch.
 type WorktreeRemoval struct {
 	Path         string
 	Branch       string
 	DeleteBranch bool
+	// Force removes the worktree with its uncommitted and untracked changes. A reset
+	// sets it, because the developer confirmed discarding that work.
+	Force bool
+	// RepoDir is a checkout of the repository. It finds the branch when the worktree
+	// is already gone, so a forced removal can still delete it.
+	RepoDir string
 }
 
 type WorktreeManager interface {
@@ -218,7 +231,9 @@ type WorktreeManager interface {
 	// Checkpoint accepts a clean worktree on branch whose HEAD advances from prior.
 	Checkpoint(ctx context.Context, dir, branch, prior string) (string, error)
 	// Remove deletes the worktree, and the branch if asked. It refuses a worktree with
-	// uncommitted or untracked changes. A path that no longer exists is already removed.
+	// uncommitted or untracked changes unless Force is set. A path that no longer
+	// exists is already removed. A branch it could not delete after removing the
+	// worktree is ErrBranchNotDeleted.
 	Remove(ctx context.Context, req WorktreeRemoval) error
 	// Contains fetches origin into the worktree at dir, then reports whether ancestor
 	// is an ancestor of descendant, or the same commit.
@@ -230,6 +245,11 @@ type WorktreeManager interface {
 	// ConfigureIdentity sets the commit author and committer for the worktree at dir
 	// only, leaving the shared repository config and the global config alone.
 	ConfigureIdentity(ctx context.Context, dir, name, email string) error
+	// CommonDir is the repository directory a worktree at dir belongs to, which holds
+	// its branch.
+	CommonDir(ctx context.Context, dir string) (string, error)
+	// BranchExists reports whether the repository at dir has a local branch of that name.
+	BranchExists(ctx context.Context, dir, branch string) (bool, error)
 	// SyncDefaultBranch fetches origin's branch and fast-forwards the checkout at dir,
 	// which must have branch checked out with no uncommitted changes. It never
 	// overwrites local work; anything it cannot fast-forward safely is an error.

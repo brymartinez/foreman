@@ -34,6 +34,9 @@ func (m Markdown) path(key task.Key) string {
 	return filepath.Join(m.Dir, fmt.Sprintf("%s-%d.md", strings.ReplaceAll(string(key.Repo), "/", "-"), key.Number))
 }
 
+// Path is the file that holds the task's record.
+func (m Markdown) Path(key task.Key) string { return m.path(key) }
+
 func (m Markdown) Get(_ context.Context, key task.Key) (*task.Record, error) {
 	path := m.path(key)
 	raw, err := os.ReadFile(path)
@@ -174,6 +177,7 @@ type frontmatter struct {
 	AccountEmail        string                 `yaml:"account_email,omitempty"`
 	Branch              string                 `yaml:"branch,omitempty"`
 	BaseRef             string                 `yaml:"base_ref,omitempty"`
+	RepoDir             string                 `yaml:"repo_dir,omitempty"`
 	Worktree            string                 `yaml:"worktree,omitempty"`
 	WorktreeRemovedAt   *time.Time             `yaml:"worktree_removed_at,omitempty"`
 	ContextFile         string                 `yaml:"context_file,omitempty"`
@@ -181,6 +185,7 @@ type frontmatter struct {
 	RunnerLog           string                 `yaml:"runner_log,omitempty"`
 	PR                  int                    `yaml:"pr,omitempty"`
 	PRURL               string                 `yaml:"pr_url,omitempty"`
+	PriorPR             int                    `yaml:"prior_pr,omitempty"`
 	PRHead              string                 `yaml:"pr_head,omitempty"`
 	CheckpointHead      string                 `yaml:"checkpoint_head,omitempty"`
 	CheckpointNext      string                 `yaml:"checkpoint_next,omitempty"`
@@ -198,6 +203,16 @@ type frontmatter struct {
 	Feedback            []feedbackFM           `yaml:"feedback,omitempty"`
 	CI                  *ciFM                  `yaml:"ci,omitempty"`
 	Attempts            []task.Attempt         `yaml:"attempts,omitempty"`
+	Reset               *resetFM               `yaml:"reset,omitempty"`
+}
+
+type resetFM struct {
+	At      time.Time          `yaml:"at"`
+	PR      int                `yaml:"pr,omitempty"`
+	PRURL   string             `yaml:"pr_url,omitempty"`
+	Branch  string             `yaml:"branch,omitempty"`
+	PRState string             `yaml:"pr_state,omitempty"`
+	Cleanup *task.ResetCleanup `yaml:"cleanup,omitempty"`
 }
 
 var linearIssueID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -348,12 +363,14 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 			AccountEmail:     fm.AccountEmail,
 			Branch:           fm.Branch,
 			BaseRef:          fm.BaseRef,
+			RepoDir:          fm.RepoDir,
 			Worktree:         fm.Worktree,
 			ContextFile:      fm.ContextFile,
 			RunnerPID:        fm.RunnerPID,
 			RunnerLog:        fm.RunnerLog,
 			PR:               fm.PR,
 			PRURL:            fm.PRURL,
+			PriorPR:          fm.PriorPR,
 			PRHead:           fm.PRHead,
 			CheckpointHead:   fm.CheckpointHead,
 			CheckpointNext:   fm.CheckpointNext,
@@ -419,6 +436,9 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 		}
 	}
 	rec.Attempts = fm.Attempts
+	if r := fm.Reset; r != nil {
+		rec.Reset = &task.ResetMark{At: r.At, PR: r.PR, PRURL: r.PRURL, Branch: r.Branch, PRState: r.PRState, Cleanup: r.Cleanup}
+	}
 	if o := fm.LastOutcome; o != nil {
 		rec.LastOutcome = &task.Outcome{Status: o.Status, Summary: o.Summary, At: o.At}
 	}
@@ -467,11 +487,13 @@ func fromRecord(rec *task.Record) frontmatter {
 		fm.ReviewAgent = d.Reviewer
 		fm.Account, fm.AccountEmail = d.Account, d.AccountEmail
 		fm.Branch, fm.BaseRef, fm.Worktree, fm.ContextFile = d.Branch, d.BaseRef, d.Worktree, d.ContextFile
+		fm.RepoDir = d.RepoDir
 		if !d.WorktreeRemovedAt.IsZero() {
 			t := d.WorktreeRemovedAt
 			fm.WorktreeRemovedAt = &t
 		}
 		fm.RunnerPID, fm.RunnerLog, fm.PR, fm.PRURL, fm.PRHead = d.RunnerPID, d.RunnerLog, d.PR, d.PRURL, d.PRHead
+		fm.PriorPR = d.PriorPR
 		fm.CheckpointHead, fm.CheckpointNext, fm.Checkpoints = d.CheckpointHead, d.CheckpointNext, d.Checkpoints
 		fm.ConflictAttempts, fm.ConflictPending = d.ConflictAttempts, d.ConflictPending
 	}
@@ -485,6 +507,9 @@ func fromRecord(rec *task.Record) frontmatter {
 	fm.Validation = rec.Validation
 	fm.Plan = rec.Plan
 	fm.Attempts = rec.Attempts
+	if r := rec.Reset; r != nil {
+		fm.Reset = &resetFM{At: r.At, PR: r.PR, PRURL: r.PRURL, Branch: r.Branch, PRState: r.PRState, Cleanup: r.Cleanup}
+	}
 	for _, f := range rec.Feedback {
 		item := feedbackFM{Kind: f.Kind, ID: f.ID, Author: f.Author, URL: f.URL, At: f.At, Digest: f.Digest}
 		if !f.HandledAt.IsZero() {

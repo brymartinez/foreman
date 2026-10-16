@@ -146,7 +146,9 @@ type Delegation struct {
 	AccountEmail string
 	Branch       string
 	BaseRef      string
-	Worktree     string
+	// RepoDir is the checkout the worktree was made from, which holds the branch.
+	RepoDir  string
+	Worktree string
 	// WorktreeRemovedAt is set once cleanup removed the worktree; the branch may remain.
 	WorktreeRemovedAt time.Time
 	ContextFile       string
@@ -154,6 +156,9 @@ type Delegation struct {
 	RunnerLog         string
 	PR                int
 	PRURL             string
+	// PriorPR is the PR of a run the developer reset. Each fresh session reads it
+	// again as context. It equals PR when this run continues that PR.
+	PriorPR int
 	// PRHead is the PR's head commit when foreman last read it. A review covers one head.
 	PRHead string
 	// CheckpointHead is the last accepted implementation commit, or the head when
@@ -166,6 +171,34 @@ type Delegation struct {
 	// until the runner has run the last one.
 	ConflictAttempts []ConflictAttempt
 	ConflictPending  bool
+}
+
+// ResetMark is all a reset keeps of the discarded run: the PR it opened, if any, so
+// the next start can continue that PR or read it as context. PRState is the state
+// GitHub reported at the reset; the next start reads it again.
+type ResetMark struct {
+	At      time.Time
+	PR      int
+	PRURL   string
+	Branch  string
+	PRState string
+	// Cleanup is the part of the run a reset has not removed yet, or nil.
+	Cleanup *ResetCleanup
+}
+
+// ResetCleanup names the local run files a reset still has to remove. Since is set
+// while Owner, the reset or one start in process PID, removes them and makes the new
+// worktree; any other start waits while that process runs, because it would work at
+// the same path. Since is zero once the owner finished or gave up. A start refuses
+// while a listed worktree or branch is still there.
+type ResetCleanup struct {
+	Worktree  string    `yaml:"worktree,omitempty"`
+	Branch    string    `yaml:"branch,omitempty"`
+	RepoDir   string    `yaml:"repo_dir,omitempty"`
+	RunnerLog string    `yaml:"runner_log,omitempty"`
+	Since     time.Time `yaml:"since,omitempty"`
+	Owner     string    `yaml:"owner,omitempty"`
+	PID       int       `yaml:"pid,omitempty"`
 }
 
 // ConflictAttempt is one automatic merge conflict repair: the PR head that conflicted
@@ -343,6 +376,9 @@ type Record struct {
 	CI *CIStatus
 	// Attempts are the runs of work on the issue, one per PR, oldest first.
 	Attempts []Attempt
+	// Reset is set when the developer discarded a failed run. The record then has no
+	// delegation, and auto mode leaves the issue for a manual start.
+	Reset *ResetMark
 	// Body is the Markdown below the frontmatter, round-tripped untouched so human edits survive.
 	Body string
 }

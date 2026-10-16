@@ -197,6 +197,7 @@ type fakeGitHub struct {
 	baseHeadErr      error
 	issueComments    []IssueComment // the issue's conversation, for routing
 	issueCommentsErr error
+	branchPRErr      error
 	mu               sync.Mutex
 }
 
@@ -288,6 +289,20 @@ func (f *fakeGitHub) OpenPullRequestForBranch(_ context.Context, _ task.Repo, br
 		}
 	}
 	return nil, nil
+}
+
+func (f *fakeGitHub) PullRequestsForBranch(_ context.Context, _ task.Repo, branch string) ([]PullRequest, error) {
+	if f.branchPRErr != nil {
+		return nil, f.branchPRErr
+	}
+	var out []PullRequest
+	for _, pr := range f.prs {
+		if pr.HeadRefName == branch {
+			out = append(out, pr)
+		}
+	}
+	slices.SortFunc(out, func(a, b PullRequest) int { return a.Key.Number - b.Key.Number })
+	return out, nil
 }
 
 func (f *fakeGitHub) GetIssue(_ context.Context, k task.Key) (Issue, error) {

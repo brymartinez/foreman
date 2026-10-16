@@ -31,6 +31,7 @@ const (
 	ProposingBranch
 	TypingBranch
 	ConfirmingCancel
+	ConfirmingReset
 	AnsweringDecision
 	// Routing waits for App.Route; ConfirmingRoute shows its choice.
 	Routing
@@ -45,6 +46,7 @@ const (
 	ActionRefresh
 	ActionStart
 	ActionCancel
+	ActionReset
 	ActionResume
 	ActionAuto
 	ActionRespond
@@ -64,6 +66,8 @@ type Action struct {
 	Kind   ActionKind
 	Start  app.StartRequest
 	Cancel *task.Record
+	// Reset is the FAILED task whose local run the developer confirmed discarding.
+	Reset *task.Record
 	// Resume is the REVIEWED task whose PR feedback the agent should answer.
 	Resume task.Key
 	// Respond is the NEEDS_DECISION task to record Answer for, as typed.
@@ -110,6 +114,8 @@ type Model struct {
 	// HelpOpen shows the keys and Version in place of the panes.
 	HelpOpen bool
 	Version  string
+	// TaskFile is the path of a task's file, which the reset confirmation names.
+	TaskFile func(task.Key) string
 
 	Focus       Pane
 	InboxCursor int
@@ -157,21 +163,25 @@ type Model struct {
 	proposalSeq  int               // the branch proposal this prompt waits for
 	waiting      map[task.Key]wait // auto starts held back by routing
 	cancelTarget task.Key          // the task named when cancellation was requested
-	manualTask   bool              // cursor movement stops following the latest delegation
-	tried        map[task.Key]bool // issues started this session, by hand or automatically
-	starting     map[task.Key]bool // starts and resumes in flight, manual or automatic
-	tasksStale   bool              // the last task read failed
-	githubFresh  bool              // the latest GitHub refresh succeeded and is not being replaced
-	answering    bool              // an answer is being recorded
-	question     int               // the index in Decisions of the question the prompt shows
-	logStart     int64             // the byte offset of the first loaded log line
-	logEnd       int64             // where the next read of new log lines starts
-	logPartial   int               // trailing Log lines from an unfinished last line, read again
-	logShort     int               // the part of a scroll step that waits for older lines
-	logFloor     int64             // the first byte of the log the pane may show
-	historySeq   int               // the history load whose result the view waits for
-	logCeil      int64             // the byte the log the pane may show ends at; 0 is the file end
-	hidden       []*task.Record    // delegated tasks from the source IssueSource leaves out
+	resetTarget  task.Key          // the task named when a reset was requested
+	// resetRun is the run the confirmation shows, copied when x was pressed. A refresh
+	// can replace the task's run meanwhile; y resets only this one.
+	resetRun    *task.Record
+	manualTask  bool              // cursor movement stops following the latest delegation
+	tried       map[task.Key]bool // issues started this session, by hand or automatically
+	starting    map[task.Key]bool // starts and resumes in flight, manual or automatic
+	tasksStale  bool              // the last task read failed
+	githubFresh bool              // the latest GitHub refresh succeeded and is not being replaced
+	answering   bool              // an answer is being recorded
+	question    int               // the index in Decisions of the question the prompt shows
+	logStart    int64             // the byte offset of the first loaded log line
+	logEnd      int64             // where the next read of new log lines starts
+	logPartial  int               // trailing Log lines from an unfinished last line, read again
+	logShort    int               // the part of a scroll step that waits for older lines
+	logFloor    int64             // the first byte of the log the pane may show
+	historySeq  int               // the history load whose result the view waits for
+	logCeil     int64             // the byte the log the pane may show ends at; 0 is the file end
+	hidden      []*task.Record    // delegated tasks from the source IssueSource leaves out
 }
 
 // Selected is the highlighted delegated task, or nil when nothing is delegated.
@@ -365,6 +375,8 @@ func (m *Model) Key(k Key) Action {
 		return m.typeBranch(k)
 	case ConfirmingCancel:
 		return m.confirmCancel(k)
+	case ConfirmingReset:
+		return m.confirmReset(k)
 	case AnsweringDecision:
 		return m.answerDecision(k)
 	case Routing:
@@ -432,6 +444,8 @@ func (m *Model) browse(k Key) Action {
 		m.scrollEnd()
 	case k.Kind == KeyRune && k.Rune == 'c':
 		return m.startCancel()
+	case k.Kind == KeyRune && k.Rune == 'x':
+		return m.startReset()
 	case k.Kind == KeyEnter:
 		return m.enter()
 	}
@@ -840,6 +854,53 @@ func (m *Model) confirmRoute(k Key) Action {
 		return m.prepareBranch(req)
 	}
 	return Action{}
+}
+
+// startReset asks before discarding the selected FAILED task's local run. Whether its
+// runner is still alive is App.Reset's check: the pid of a FAILED task stays recorded
+// until a refresh sees the process gone.
+func (m *Model) startReset() Action {
+	rec := m.Selected()
+	switch {
+	case rec == nil:
+		m.Message = "No delegated work to reset."
+	case rec.State != task.Failed:
+		m.Message = fmt.Sprintf("%s#%d is %s; only a FAILED task can be reset", rec.Repo, rec.Number, rec.State)
+	default:
+		run := *rec
+		if rec.Delegation != nil {
+			d := *rec.Delegation
+			run.Delegation = &d
+		}
+		m.resetTarget, m.resetRun = rec.Key, &run
+		m.Mode = ConfirmingReset
+	}
+	return Action{}
+}
+
+func (m *Model) confirmReset(k Key) Action {
+	run, fits := m.resetRun, resetFits(*m)
+	m.Mode, m.resetTarget, m.resetRun = Browsing, task.Key{}, nil
+	if k.Kind != KeyRune || k.Rune != 'y' || run == nil {
+		return Action{}
+	}
+	if !fits {
+		m.Message = "! Enlarge the terminal to see everything reset deletes, then press x again"
+		return Action{}
+	}
+	// App.Reset refuses when the task's run is no longer this one.
+	m.Message = fmt.Sprintf("Resetting %s#%d…", run.Repo, run.Number)
+	return Action{Kind: ActionReset, Reset: run}
+}
+
+// ResetDone shows a reset issue in INBOX as never started, so only a manual start
+// picks it up, until the next refresh reads it from the task file.
+func (m *Model) ResetDone(key task.Key) {
+	for i := range m.Inbox {
+		if m.Inbox[i].Item.Key == key {
+			m.Inbox[i].Delegated, m.Inbox[i].State, m.Inbox[i].Reset = false, task.Discovered, true
+		}
+	}
 }
 
 func (m *Model) confirmCancel(k Key) Action {

@@ -39,6 +39,8 @@ type Options struct {
 	Route bool
 	// Version is the foreman version the help shows.
 	Version string
+	// TaskFile is the path of a task's file, for the reset confirmation.
+	TaskFile func(task.Key) string
 }
 
 // result is one finished background call. The event loop owns the model, so a
@@ -54,6 +56,8 @@ type result struct {
 	key task.Key
 	// auto marks a start auto mode made rather than the developer.
 	auto bool
+	// reset is the issue a reset discarded the run of.
+	reset task.Key
 	// respond marks an answer coming back; answered is the record it left.
 	respond  bool
 	answered *task.Record
@@ -105,7 +109,7 @@ func Run(ctx context.Context, o Options) (err error) {
 	var m Model
 	m.Width, m.Height = size(o.Out)
 	m.SetAuto(o.Auto)
-	m.RouteOn, m.Version = o.Route, o.Version
+	m.RouteOn, m.Version, m.TaskFile = o.Route, o.Version, o.TaskFile
 	m.IssueSource = o.IssueSource
 
 	keys := make(chan Key, 64)
@@ -198,6 +202,10 @@ func Run(ctx context.Context, o Options) (err error) {
 				rec := a.Cancel
 				pending++
 				go func() { results <- stop(ctx, o.Source, rec) }()
+			case ActionReset:
+				rec := a.Reset
+				pending++
+				go func() { results <- resetDone(ctx, o.Source, rec) }()
 			case ActionResume:
 				key := a.Resume
 				pending++
@@ -361,6 +369,9 @@ func apply(m *Model, r result) {
 		} else {
 			delete(m.waiting, r.key)
 		}
+	}
+	if r.reset != (task.Key{}) {
+		m.ResetDone(r.reset)
 	}
 	if r.respond {
 		if r.err != nil {
@@ -528,6 +539,25 @@ func respondResult(ctx context.Context, s Source, key task.Key, raw string) resu
 func loadHistory(ctx context.Context, s Source, allRepos bool, seq int) result {
 	rows, warnings, err := s.History(ctx, allRepos)
 	return result{historyLoad: true, historySeq: seq, history: rows, historyWarnings: warnings, err: err, allRepos: allRepos}
+}
+
+// resetDone discards a FAILED task's local run. A reset that fails after saving the
+// PR link still returns the record, and the issue goes back to INBOX with the error.
+func resetDone(ctx context.Context, s Source, rec *task.Record) result {
+	updated, err := s.Reset(ctx, rec)
+	r := result{finished: true}
+	if updated != nil {
+		r.reset = updated.Key
+	}
+	if err != nil {
+		r.err = fmt.Errorf("reset %s#%d: %w", rec.Repo, rec.Number, err)
+		return r
+	}
+	r.message = fmt.Sprintf("Reset %s#%d; start it from INBOX", rec.Repo, rec.Number)
+	if updated.Reset != nil && updated.Reset.PR != 0 {
+		r.message += fmt.Sprintf(" with PR #%d as context", updated.Reset.PR)
+	}
+	return r
 }
 
 func stop(ctx context.Context, s Source, rec *task.Record) result {

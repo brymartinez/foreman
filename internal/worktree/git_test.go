@@ -338,3 +338,220 @@ func TestContains(t *testing.T) {
 		t.Error("a commit git does not have must be an error")
 	}
 }
+
+func TestForcedRemoveDeletesADirtyWorktreeAndItsBranch(t *testing.T) {
+	clone, _ := repoWithOrigin(t)
+	ctx := context.Background()
+	req := app.WorktreeRequest{RepoDir: clone, Path: filepath.Join(t.TempDir(), "825-a"), Branch: "agent/825-a", BaseRef: "origin/main"}
+	if err := (Git{}).Ensure(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	write(t, req.Path, "notes.txt", "wip")
+	write(t, req.Path, "README", "changed")
+	run(t, req.Path, "add", "README")
+
+	rm := app.WorktreeRemoval{RepoDir: clone, Path: req.Path, Branch: req.Branch, DeleteBranch: true, Force: true}
+	if err := (Git{}).Remove(ctx, rm); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(req.Path); !os.IsNotExist(err) {
+		t.Errorf("worktree still on disk: %v", err)
+	}
+	if run(t, clone, "branch", "--list", req.Branch) != "" {
+		t.Error("branch kept")
+	}
+	if err := (Git{}).Remove(ctx, rm); err != nil {
+		t.Errorf("removing again must be a no-op: %v", err)
+	}
+}
+
+func TestForcedRemoveKeepsAWorktreeOnAnotherBranchAtThePath(t *testing.T) {
+	clone, _ := repoWithOrigin(t)
+	ctx := context.Background()
+	req := app.WorktreeRequest{RepoDir: clone, Path: filepath.Join(t.TempDir(), "825-a"), Branch: "agent/825-b", BaseRef: "origin/main"}
+	if err := (Git{}).Ensure(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	write(t, req.Path, "notes.txt", "other work")
+
+	rm := app.WorktreeRemoval{RepoDir: clone, Path: req.Path, Branch: "agent/825-a", DeleteBranch: true, Force: true}
+	if err := (Git{}).Remove(ctx, rm); err == nil || !strings.Contains(err.Error(), "agent/825-b") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(req.Path, "notes.txt")); err != nil {
+		t.Errorf("the other worktree's work is gone: %v", err)
+	}
+}
+
+func TestForcedRemoveKeepsAWorktreeOfAnotherRepositoryAtThePath(t *testing.T) {
+	clone, _ := repoWithOrigin(t)
+	other, _ := repoWithOrigin(t)
+	ctx := context.Background()
+	req := app.WorktreeRequest{RepoDir: other, Path: filepath.Join(t.TempDir(), "825-a"), Branch: "agent/825-a", BaseRef: "origin/main"}
+	if err := (Git{}).Ensure(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	write(t, req.Path, "notes.txt", "other work")
+
+	rm := app.WorktreeRemoval{RepoDir: clone, Path: req.Path, Branch: req.Branch, DeleteBranch: true, Force: true}
+	if err := (Git{}).Remove(ctx, rm); err == nil || !strings.Contains(err.Error(), "another repository") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(req.Path, "notes.txt")); err != nil {
+		t.Errorf("the other repository's work is gone: %v", err)
+	}
+	if run(t, other, "branch", "--list", req.Branch) == "" {
+		t.Error("the other repository's branch was deleted")
+	}
+}
+
+func TestForcedRemoveDeletesAWorktreeStoppedMidRebase(t *testing.T) {
+	clone, _ := repoWithOrigin(t)
+	ctx := context.Background()
+	req := app.WorktreeRequest{RepoDir: clone, Path: filepath.Join(t.TempDir(), "825-a"), Branch: "agent/825-a", BaseRef: "origin/main"}
+	if err := (Git{}).Ensure(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	run(t, req.Path, "commit", "-q", "--allow-empty", "-m", "work")
+	// A failing --exec stops the rebase with HEAD detached from the branch.
+	cmd := exec.Command("git", "-C", req.Path, "rebase", "-q", "--exec", "false", "HEAD~1")
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("rebase did not stop: %s", out)
+	}
+
+	rm := app.WorktreeRemoval{RepoDir: clone, Path: req.Path, Branch: req.Branch, DeleteBranch: true, Force: true}
+	if err := (Git{}).Remove(ctx, rm); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(req.Path); !os.IsNotExist(err) {
+		t.Errorf("worktree still on disk: %v", err)
+	}
+}
+
+func TestForcedRemoveDeletesTheBranchOfAWorktreeAlreadyGone(t *testing.T) {
+	clone, _ := repoWithOrigin(t)
+	ctx := context.Background()
+	req := app.WorktreeRequest{RepoDir: clone, Path: filepath.Join(t.TempDir(), "825-a"), Branch: "agent/825-a", BaseRef: "origin/main"}
+	if err := (Git{}).Ensure(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	if err := (Git{}).Remove(ctx, app.WorktreeRemoval{Path: req.Path, Branch: req.Branch}); err != nil {
+		t.Fatal(err)
+	}
+	rm := app.WorktreeRemoval{RepoDir: clone, Path: req.Path, Branch: req.Branch, DeleteBranch: true, Force: true}
+	if err := (Git{}).Remove(ctx, rm); err != nil {
+		t.Fatal(err)
+	}
+	if run(t, clone, "branch", "--list", req.Branch) != "" {
+		t.Error("branch kept")
+	}
+}
+
+func TestRemoveReportsABranchKeptAfterTheWorktreeIsGone(t *testing.T) {
+	clone, _ := repoWithOrigin(t)
+	ctx := context.Background()
+	req := app.WorktreeRequest{RepoDir: clone, Path: filepath.Join(t.TempDir(), "825-a"), Branch: "agent/825-a", BaseRef: "origin/main"}
+	if err := (Git{}).Ensure(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	// A second worktree has the branch checked out, so git refuses to delete it.
+	run(t, clone, "worktree", "add", "-q", "--force", filepath.Join(t.TempDir(), "825-a-again"), req.Branch)
+	err := (Git{}).Remove(ctx, app.WorktreeRemoval{Path: req.Path, Branch: req.Branch, DeleteBranch: true, Force: true})
+	if !errors.Is(err, app.ErrBranchNotDeleted) {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := os.Stat(req.Path); !os.IsNotExist(err) {
+		t.Errorf("worktree still on disk: %v", err)
+	}
+}
+
+func TestBranchExists(t *testing.T) {
+	clone, _ := repoWithOrigin(t)
+	ctx := context.Background()
+	if ok, err := (Git{}).BranchExists(ctx, clone, "main"); err != nil || !ok {
+		t.Errorf("main: %v, %v", ok, err)
+	}
+	if ok, err := (Git{}).BranchExists(ctx, clone, "agent/none"); err != nil || ok {
+		t.Errorf("missing branch: %v, %v", ok, err)
+	}
+	if _, err := (Git{}).BranchExists(ctx, filepath.Join(t.TempDir(), "nowhere"), "main"); err == nil {
+		t.Error("a missing checkout must be an error, not a missing branch")
+	}
+}
+
+func TestCommonDirFindsTheCheckoutThatHoldsTheBranch(t *testing.T) {
+	clone, _ := repoWithOrigin(t)
+	ctx := context.Background()
+	req := app.WorktreeRequest{RepoDir: clone, Path: filepath.Join(t.TempDir(), "825-a"), Branch: "agent/825-a", BaseRef: "origin/main"}
+	if err := (Git{}).Ensure(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := (Git{}).CommonDir(ctx, req.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := (Git{}).BranchExists(ctx, dir, req.Branch); err != nil || !ok {
+		t.Errorf("branch in %s: %v, %v", dir, ok, err)
+	}
+}
+
+// staleBranch builds a clone whose local agent/825-a sits on an older commit than the
+// same branch on origin, as a branch left from an earlier run would.
+func staleBranch(t *testing.T) (clone, seed, remoteHead string) {
+	t.Helper()
+	clone, _ = repoWithOrigin(t)
+	seed = filepath.Join(filepath.Dir(clone), "seed")
+	run(t, seed, "checkout", "-q", "-b", "agent/825-a")
+	run(t, seed, "commit", "-q", "--allow-empty", "-m", "pr one")
+	run(t, seed, "push", "-q", "origin", "agent/825-a")
+	run(t, clone, "fetch", "-q", "origin")
+	run(t, clone, "branch", "agent/825-a", "origin/agent/825-a")
+	run(t, seed, "commit", "-q", "--allow-empty", "-m", "pr two")
+	run(t, seed, "push", "-q", "origin", "agent/825-a")
+	return clone, seed, run(t, seed, "rev-parse", "HEAD")
+}
+
+func TestEnsureOnARemoteBranchFastForwardsAStaleLocalBranchToTheRemoteHead(t *testing.T) {
+	clone, _, remoteHead := staleBranch(t)
+	req := app.WorktreeRequest{RepoDir: clone, Path: filepath.Join(t.TempDir(), "825-a"), Branch: "agent/825-a", BaseRef: "origin/agent/825-a"}
+	if err := (Git{}).Ensure(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if got := run(t, req.Path, "rev-parse", "HEAD"); got != remoteHead {
+		t.Errorf("worktree HEAD = %s, want the PR head %s", got, remoteHead)
+	}
+}
+
+func TestEnsureOnARemoteBranchRefusesALocalBranchWithCommitsTheRemoteLacks(t *testing.T) {
+	clone, _, _ := staleBranch(t)
+	other := filepath.Join(t.TempDir(), "other")
+	run(t, clone, "worktree", "add", "-q", other, "agent/825-a")
+	run(t, other, "commit", "-q", "--allow-empty", "-m", "local only")
+	local := run(t, other, "rev-parse", "HEAD")
+	run(t, clone, "worktree", "remove", other)
+
+	req := app.WorktreeRequest{RepoDir: clone, Path: filepath.Join(t.TempDir(), "825-a"), Branch: "agent/825-a", BaseRef: "origin/agent/825-a"}
+	err := (Git{}).Ensure(context.Background(), req)
+	if err == nil || !strings.Contains(err.Error(), "agent/825-a") {
+		t.Fatalf("err = %v", err)
+	}
+	if got := run(t, clone, "rev-parse", "refs/heads/agent/825-a"); got != local {
+		t.Errorf("local branch moved to %s; its commit %s would be lost", got, local)
+	}
+	if _, err := os.Stat(req.Path); !os.IsNotExist(err) {
+		t.Errorf("worktree made: %v", err)
+	}
+}
+
+func TestEnsureOnTheBaseKeepsAnExistingTaskBranch(t *testing.T) {
+	clone, _, _ := staleBranch(t)
+	local := run(t, clone, "rev-parse", "refs/heads/agent/825-a")
+	req := app.WorktreeRequest{RepoDir: clone, Path: filepath.Join(t.TempDir(), "825-a"), Branch: "agent/825-a", BaseRef: "origin/main"}
+	if err := (Git{}).Ensure(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if got := run(t, req.Path, "rev-parse", "HEAD"); got != local {
+		t.Errorf("worktree HEAD = %s, want the task branch %s", got, local)
+	}
+}

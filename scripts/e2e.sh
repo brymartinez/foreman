@@ -784,6 +784,53 @@ scenario_cancel() {
 	check "starting it again resumes the cancelled task" wait_status "review ✓"
 }
 
+scenario_reset() {
+	echo "reset: a FAILED run is discarded locally and started again on its open PR"
+	setup reset
+	issue 42 "Add retries" '[{"name":"triaged"}]'
+	start 42 >/dev/null
+	check "the first run reaches a clean review" wait_status "review ✓"
+	local file="$sandbox/tasks/acme-widgets-42.md" wt branch log
+	wt=$(sed -n 's/^worktree: *//p' "$file")
+	branch=$(sed -n 's/^branch: *//p' "$file")
+	log=$(ls "$sandbox"/logs/acme-widgets-42.log)
+	perl -pi -e 's/^state: .*/state: FAILED/' "$file"
+	echo wip >"$wt/notes.txt"
+	echo '[[{"id":71,"html_url":"https://github.com/acme/widgets/pull/942#issuecomment-71","body":"Only retry idempotent calls.","updated_at":"2026-10-01T10:00:00Z","user":{"login":"brymartinez"}}]]' \
+		>"$state/conv-repos-acme-widgets-issues-942-comments.json"
+	local writes
+	writes=$(grep -c 'api --method' "$state/gh.log")
+
+	mv "$state/pr-942.json" "$state/pr-942.hold"
+	check "with GitHub failing, x then y keeps the run" dash -- refreshed keys=l pick=acme/widgets#42 keys=xy "wait=nothing was deleted"
+	check "and the task file" grep -q '^state: FAILED' "$file"
+	check "and the dirty worktree" test -f "$wt/notes.txt"
+	mv "$state/pr-942.hold" "$state/pr-942.json"
+
+	check "x then y resets the task" dash -- refreshed keys=l pick=acme/widgets#42 keys=xy "wait=Reset acme/widgets#42"
+	check "the task file keeps only the PR link" bash -c "grep -q '^reset:' '$file' && ! grep -q '^implementation_agent:' '$file'"
+	check "the dirty worktree is gone" test ! -e "$wt"
+	check "the local branch is gone" test -z "$(git -C "$sandbox/repositories/acme-widgets" branch --list "$branch")"
+	check "the runner log is gone" test ! -e "$log"
+	check "the remote branch is kept" git --git-dir="$sandbox/origin.git" rev-parse --verify -q "refs/heads/$branch"
+	check "reset wrote nothing to GitHub" test "$(grep -c 'api --method' "$state/gh.log")" = "$writes"
+	check "the task leaves delegated work" bash -c "! (dash -- refreshed print 2>/dev/null | grep -qF FAILED)"
+
+	local turns
+	turns=$(grep -c . "$state/agents.log")
+	dash --auto -- refreshed sleep=2 >/dev/null 2>&1
+	check "auto mode leaves a reset issue alone" test "$(grep -c . "$state/agents.log")" = "$turns"
+	check "and the reset mark stays" grep -q '^reset:' "$file"
+
+	start 42 >/dev/null
+	check "a manual start reaches a clean review" wait_status "review ✓"
+	check "the new run continues PR #942" bash -c "grep -q '^pr: 942$' '$file' && grep -q '^prior_pr: 942$' '$file' && ! grep -q '^reset:' '$file'"
+	check "on the PR's branch" grep -q "^branch: $branch\$" "$file"
+	check "a fresh session reads the prior PR" contains "$state/plan-posted-prompt.txt" "Continue updating pull request #942"
+	check "with its comments" contains "$state/plan-posted-prompt.txt" "> Only retry idempotent calls."
+	check "the branch kept the first run's commit" test "$(git --git-dir="$sandbox/origin.git" log --oneline "$branch" | grep -c 'feat: retries')" = 2
+}
+
 scenario_tui() {
 	echo "tui: launch flags, the removed commands, and the dashboard's help"
 	setup tui
@@ -1049,7 +1096,7 @@ scenario_account() {
 	unset E2E_CLONE_URL
 }
 
-scenarios=${*:-runner plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel feedback conflict tui routing history linear account learning}
+scenarios=${*:-runner plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui routing history linear account learning}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"

@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/brymartinez/foreman/internal/task"
@@ -90,9 +92,15 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		return nil, fmt.Errorf("%s no longer has the triaged label", issueLabel(key, issue.Identifier))
 	}
 
+	prior, continuePR, err := a.priorPR(ctx, existing)
+	if err != nil {
+		return nil, err
+	}
 	branch := ""
 	if existing != nil && existing.Delegation != nil && existing.Delegation.Branch != "" {
 		branch = existing.Delegation.Branch
+	} else if continuePR {
+		branch = prior.HeadRefName
 	} else {
 		branch = req.BranchName
 		// A confirmed name skips the proposal, but the checkout and its guidance can
@@ -118,6 +126,9 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		if !task.ValidBranchName(branch) {
 			return nil, fmt.Errorf("invalid branch name %q", branch)
 		}
+		if err := priorBranch(prior, branch); err != nil {
+			return nil, err
+		}
 	}
 	path := task.WorktreePath(a.WorktreesDir, key.Repo, branch)
 	if existing != nil && existing.Delegation != nil && existing.Delegation.Worktree != "" {
@@ -128,6 +139,29 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		Path:    path,
 		Branch:  branch,
 		BaseRef: "origin/" + info.DefaultBranch,
+	}
+	base := wt.BaseRef
+	if continuePR {
+		// The worktree starts at the PR's head; the PR keeps the base it targets.
+		wt.BaseRef, base = "origin/"+branch, "origin/"+prior.BaseRefName
+	}
+	// owner is this start's claim on a reset issue; it holds other starts off until
+	// the run is saved, or is released when this start gives up first.
+	owner, saved := "", false
+	if existing != nil && existing.Delegation == nil && existing.Reset != nil {
+		claimed, token, err := a.claimReset(ctx, existing)
+		if err != nil {
+			return nil, err
+		}
+		owner, existing = token, claimed
+		defer func() {
+			if !saved {
+				a.releaseReset(ctx, key, owner)
+			}
+		}()
+	}
+	if err := a.finishReset(ctx, existing, wt, continuePR, owner); err != nil {
+		return nil, err
 	}
 	if err := a.Worktrees.Ensure(ctx, wt); err != nil {
 		return nil, err
@@ -142,8 +176,13 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		if cur == nil {
 			cur = &task.Record{Key: key, State: task.Discovered, Body: fmt.Sprintf("# %s %s\n\n## Notes\n\n", issueLabel(key, issue.Identifier), issue.Title)}
 		}
-		if err := a.startable(cur); err != nil {
+		if err := a.startableBy(cur, owner); err != nil {
 			return nil, err
+		}
+		// A reset since the record was read removes the worktree this start prepared,
+		// and only the start that claimed a reset issue may save its run.
+		if cur.Reset != nil && (owner == "" || cur.Reset.Cleanup == nil || cur.Reset.Cleanup.Owner != owner) {
+			return nil, fmt.Errorf("%s was reset while it started; start it again", taskRef(cur))
 		}
 		// Checked again under the task lock: another command may have started the
 		// issue while this one prepared the worktree.
@@ -163,7 +202,8 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			StartedAt:      now,
 			Reviewer:       req.Agent.Reviewer(),
 			Branch:         wt.Branch,
-			BaseRef:        wt.BaseRef,
+			BaseRef:        base,
+			RepoDir:        wt.RepoDir,
 			Worktree:       wt.Path,
 			ContextFile:    req.ContextFile,
 			Profile:        req.Profile,
@@ -173,6 +213,19 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		// The pin belongs to the task, not the agent, so every restart keeps it.
 		if prev != nil {
 			cur.Delegation.Account, cur.Delegation.AccountEmail = prev.Account, prev.AccountEmail
+			cur.Delegation.PriorPR = prev.PriorPR
+			// A restart reuses the branch, which stays in the checkout it was made in.
+			if prev.Branch == wt.Branch && prev.RepoDir != "" {
+				cur.Delegation.RepoDir = prev.RepoDir
+			}
+		}
+		reset := cur.Reset != nil
+		if reset {
+			cur.Delegation.PriorPR = cur.Reset.PR
+			if continuePR {
+				cur.Delegation.PR, cur.Delegation.PRURL = prior.Key.Number, prior.URL
+			}
+			cur.Reset = nil
 		}
 		// The same branch has the same PR, so a restart can pick up at its review.
 		// Another implementer starts over: its reviewer wrote the existing PR. A
@@ -204,7 +257,11 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		// A kept PR continues its attempt, or stays with the older record when it
 		// predates attempts. So does an attempt that has no PR yet: the earlier runs
 		// were work toward the PR this one opens. Anything else is a new attempt.
+		// A reset discarded the attempts and the log, so the run starts the first one,
+		// even when it continues a PR.
 		switch at := cur.CurrentAttempt(); {
+		case reset:
+			cur.Attempts = []task.Attempt{{Agent: req.Agent}}
 		case cur.Delegation.PR != 0:
 		case at != nil && at.PR == 0:
 			at.Agent = req.Agent
@@ -221,6 +278,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 	if err != nil {
 		return nil, err
 	}
+	saved = true
 
 	return a.launch(ctx, key)
 }
@@ -330,17 +388,29 @@ func logSize(prev *task.Delegation) int64 {
 }
 
 func newOnly(req StartRequest, rec *task.Record) error {
+	if req.NewOnly && rec != nil && rec.Reset != nil {
+		return fmt.Errorf("%s was reset and waits for a manual start: %w", taskRef(rec), ErrDelegated)
+	}
 	if req.NewOnly && rec != nil && rec.Delegation != nil {
 		return fmt.Errorf("%s#%d is %s: %w", rec.Repo, rec.Number, rec.State, ErrDelegated)
 	}
 	return nil
 }
 
-func (a App) startable(rec *task.Record) error {
+func (a App) startable(rec *task.Record) error { return a.startableBy(rec, "") }
+
+// startableBy is startable for the start that claimed a reset issue as owner.
+func (a App) startableBy(rec *task.Record, owner string) error {
 	if rec == nil {
 		return nil
 	}
 	ref := fmt.Sprintf("%s#%d", rec.Repo, rec.Number)
+	if a.resetting(rec) && (owner == "" || rec.Reset.Cleanup.Owner != owner) {
+		if rec.Reset.Cleanup.Owner == resetOwner {
+			return fmt.Errorf("%s is being reset; start it once the reset finishes", ref)
+		}
+		return fmt.Errorf("%s is being started by another command", ref)
+	}
 	switch rec.State {
 	case task.Discovered, task.Failed, task.PRClosed, task.Working, task.Reviewing:
 		// A second runner would share the worktree and the task file with the first,
@@ -358,4 +428,44 @@ func (a App) startable(rec *task.Record) error {
 		return fmt.Errorf("%s has PR feedback to answer; select it in the inbox to resume it", ref)
 	}
 	return fmt.Errorf("%s is %s", ref, rec.State)
+}
+
+// finishReset checks what a confirmed reset could not remove before a start makes
+// its worktree, records what is still there, and refuses until the developer has
+// removed it. Anything else at the continued PR's path was made after the reset,
+// so the start refuses rather than delete it.
+func (a App) finishReset(ctx context.Context, rec *task.Record, wt WorktreeRequest, continuePR bool, owner string) error {
+	if rec == nil || rec.Delegation != nil || rec.Reset == nil {
+		return nil
+	}
+	if c := rec.Reset.Cleanup; c != nil && (c.Worktree != "" || c.Branch != "" || c.RunnerLog != "") {
+		todo := *c
+		if todo.RepoDir == "" {
+			// The worktree had the branch when the reset ran; without it, only a
+			// checkout of the repository finds the branch.
+			todo.RepoDir = wt.RepoDir
+		}
+		left, problems := a.leftovers(ctx, todo)
+		if _, err := a.update(ctx, rec.Key, func(cur *task.Record) (*task.Record, error) {
+			if cur == nil || cur.Reset == nil || cur.Reset.Cleanup == nil || cur.Reset.Cleanup.Owner != owner {
+				return nil, nil
+			}
+			cur.Reset.Cleanup.Worktree, cur.Reset.Cleanup.Branch, cur.Reset.Cleanup.RunnerLog = left.Worktree, left.Branch, left.RunnerLog
+			return cur, nil
+		}); err != nil {
+			return fmt.Errorf("finish the reset: %w", err)
+		}
+		if len(problems) > 0 {
+			return fmt.Errorf("the reset left %s; remove them by hand, then start again", strings.Join(problems, ", "))
+		}
+	}
+	if !continuePR {
+		return nil
+	}
+	if _, err := os.Stat(wt.Path); err == nil {
+		return fmt.Errorf("%s already exists; move or remove it, then start PR #%d again", wt.Path, rec.Reset.PR)
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
 }

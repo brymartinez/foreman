@@ -43,6 +43,8 @@ type TaskBrief struct {
 	ExistingPlans map[task.PlanDoc]string
 	// Plan is the planning documents already posted on the issue.
 	Plan []task.PlanComment
+	// PriorPR is the pull request of a run the developer reset, or nil.
+	PriorPR *PriorPR
 	// A checkpoint starts a new implementation session from committed work.
 	CheckpointHead string
 	NextObjective  string
@@ -110,6 +112,10 @@ func ImplementationPrompt(b TaskBrief) string {
 	if ctx := strings.TrimSpace(b.Context); ctx != "" {
 		s.WriteString("## Implementation context\n\nThis context comes from the developer and is authoritative. Where it conflicts with the issue text, follow it.\n\n")
 		s.WriteString(ctx + "\n\n")
+	}
+
+	if b.PriorPR != nil {
+		priorPRSection(&s, *b.PriorPR)
 	}
 
 	if answered := answeredDecisions(b.Decisions); len(answered) > 0 {
@@ -423,4 +429,40 @@ func prSection(text string) string {
 		return ""
 	}
 	return "\n## Pull request description\n\nRead the repository's AGENTS.md and pull request template before opening or updating the pull request. Follow their title and body rules where they differ from the developer's instructions below. These instructions apply only to the pull request, not to the code.\n\n" + text + "\n"
+}
+
+// PriorPR is the pull request a reset run left on GitHub, read again when the next
+// run starts. Continue means it is open and the new run pushes to its branch.
+type PriorPR struct {
+	Number   int
+	URL      string
+	Title    string
+	State    string
+	Body     string
+	Comments []FeedbackItem
+	Continue bool
+}
+
+// priorPRSection gives a fresh run the pull request of the run the developer reset:
+// what it tried and what reviewers said about it.
+func priorPRSection(s *strings.Builder, pr PriorPR) {
+	fmt.Fprintf(s, "## Prior pull request\n\nThe developer discarded an earlier run on this issue and started over. This is a new session. Pull request #%d (%s) came from that run and is %s.\n\n", pr.Number, pr.URL, pr.State)
+	if pr.Continue {
+		fmt.Fprintf(s, "Your branch starts at that pull request's head. Continue updating pull request #%d; do not open another. Use its description and comments to decide what to keep and what to change.\n\n", pr.Number)
+	} else {
+		s.WriteString("Use it as context only. Do not reopen it or push to its branch; your work goes on your own branch and pull request.\n\n")
+	}
+	fmt.Fprintf(s, "### Title\n\n%s\n\n### Description\n\n", pr.Title)
+	body := strings.TrimSpace(pr.Body)
+	if body == "" {
+		body = "(no description)"
+	}
+	s.WriteString(quote(body) + "\n\n")
+	if len(pr.Comments) == 0 {
+		return
+	}
+	s.WriteString("### Comments\n\n")
+	for i, c := range pr.Comments {
+		fmt.Fprintf(s, "%d. %s, %s:\n\n%s\n\n", i+1, author(c), where(c), quote(c.Body))
+	}
 }

@@ -10,7 +10,8 @@ import (
 // Pull requests are left out, because only an issue can be delegated, and so are closed
 // items. An item foreman has never delegated is offered unless only a tracked re-fetch
 // found it. One it has delegated is offered only when the run has stopped and is the
-// developer's to move: FAILED, which starts again, and REVIEWED, which resumes. Work an
+// developer's to move: FAILED, which starts again, and REVIEWED, which resumes. A reset
+// item is offered for its manual start. Work an
 // agent still holds stays in DELEGATED WORK.
 func Delegable(report InboxReport) []InboxEntry {
 	var choices []InboxEntry
@@ -30,6 +31,10 @@ func CanDelegate(entry InboxEntry) bool {
 	}
 	if entry.Delegated {
 		return entry.State == task.Failed || entry.State == task.Reviewed
+	}
+	// A reset run was offered before, often found only by tracking, and stays offered.
+	if entry.Reset {
+		return true
 	}
 	return !slices.Contains(entry.Item.Reasons, task.Tracked)
 }

@@ -46,3 +46,10 @@ func TestDelegableHidesDelegatedWorkInProgress(t *testing.T) {
 		t.Fatalf("Delegable = %v; want the undelegated issue, the FAILED one, and the REVIEWED one", got)
 	}
 }
+
+func TestDelegableOffersAResetIssueFoundOnlyByTracking(t *testing.T) {
+	e := InboxEntry{Item: InboxItem{Key: task.Key{Repo: "a/one", Number: 1}, Kind: task.Issue, Reasons: []task.InboxReason{task.Tracked}}, Reset: true}
+	if got := Delegable(InboxReport{Current: []InboxEntry{e}}); len(got) != 1 {
+		t.Fatalf("Delegable = %+v; want the reset issue", got)
+	}
+}

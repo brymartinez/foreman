@@ -40,6 +40,9 @@ func (s stubSource) Route(context.Context, app.RouteRequest) (app.Decision, erro
 func (s stubSource) Cancel(context.Context, *task.Record) (*task.Record, error) {
 	return s.rec, s.err
 }
+func (s stubSource) Reset(context.Context, *task.Record) (*task.Record, error) {
+	return s.rec, s.err
+}
 func (s stubSource) Resume(context.Context, task.Key) (*task.Record, error) {
 	return s.rec, s.err
 }
