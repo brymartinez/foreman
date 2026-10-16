@@ -198,7 +198,8 @@ type WorktreeRequest struct {
 	Path    string
 	Branch  string
 	// BaseRef, e.g. origin/main, is fetched before a new branch is created from it.
-	// Empty means the branch must already exist.
+	// Empty means the branch must already exist. The branch's own remote copy, e.g.
+	// origin/<Branch>, also fast-forwards an existing local branch to it.
 	BaseRef string
 }
 

@@ -337,11 +337,12 @@ the same commit. The commit message records why it changed.
   files with the removal marked running, and a start refuses the issue until it
   finishes, because the start would make a worktree at the same path. The mark
   records the owning process; once that process has exited, the mark no longer
-  blocks, however long the owner ran. A start also refuses when a reset lands between its read and its write. A
+  blocks, however long the owner ran. A start also refuses when a reset lands between its read and its write.
   The branch is deleted in the checkout the task's worktree was made from, which the
   delegation stores as `repo_dir`; for an older task without it, the worktree names its
-  repository, and with no worktree the managed checkout is checked, and a branch not
-  found there is reported as possibly left in the task's own checkout. A
+  repository, and with no worktree the managed checkout is checked. When the branch is
+  not there, the reset deletes nothing, because the branch may be in a checkout no
+  record names; that task can still restart. A
   failed removal names what is left and keeps only that listed; a worktree removed
   while its branch was kept leaves only the branch. A start never deletes a listed
   worktree or branch, because nothing proves it is still the reset run's: it refuses
@@ -354,8 +355,10 @@ the same commit. The commit message records why it changed.
   outright was rejected: auto mode would see a new issue and start it, and the PR link
   would be lost. Auto mode refuses a record with `reset`, and INBOX offers it for a
   manual start even when only tracking finds it. The next start reads the PR again. If
-  it is open on the recorded branch, the worktree is made from `origin/<branch>`, the
-  branch name proposal is skipped, and the run continues that PR. If it is closed or
+  it is open on the recorded branch, the worktree is made from `origin/<branch>`; a
+  local branch of that name is fast-forwarded to it, or refused if it has commits the
+  PR lacks. The branch name
+  proposal is skipped, and the run continues that PR. If it is closed or
   merged, the start proposes a new branch and refuses the old one, whose commits are
   still on GitHub. Either way the delegation stores `prior_pr`, each fresh session's
   prompt carries that PR's title, state, description, and comments, and the `reset`

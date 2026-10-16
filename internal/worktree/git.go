@@ -84,19 +84,42 @@ func (Git) Ensure(ctx context.Context, req app.WorktreeRequest) error {
 	if err := os.MkdirAll(filepath.Dir(req.Path), 0o755); err != nil {
 		return err
 	}
+	remote, base, fetch := strings.Cut(req.BaseRef, "/")
+	// A base of the branch's own remote copy continues a PR, which starts at its head.
+	onRemote := fetch && base == req.Branch
 	if _, err := git(ctx, req.RepoDir, "show-ref", "--verify", "--quiet", ref); err == nil {
+		if onRemote {
+			if err := fastForward(ctx, req, remote, base); err != nil {
+				return err
+			}
+		}
 		_, err := git(ctx, req.RepoDir, "worktree", "add", req.Path, req.Branch)
 		return err
 	}
 	if req.BaseRef == "" {
 		return fmt.Errorf("branch %s does not exist in %s", req.Branch, req.RepoDir)
 	}
-	if remote, branch, ok := strings.Cut(req.BaseRef, "/"); ok {
-		if _, err := git(ctx, req.RepoDir, "fetch", remote, branch); err != nil {
+	if fetch {
+		if _, err := git(ctx, req.RepoDir, "fetch", remote, base); err != nil {
 			return err
 		}
 	}
 	_, err = git(ctx, req.RepoDir, "worktree", "add", "--no-track", "-b", req.Branch, req.Path, req.BaseRef)
+	return err
+}
+
+// fastForward moves a local branch left from an earlier run up to the fetched remote
+// head. A local branch with commits the remote lacks is refused, not overwritten.
+// Ensure already refused a branch checked out elsewhere, so moving it is safe.
+func fastForward(ctx context.Context, req app.WorktreeRequest, remote, branch string) error {
+	if _, err := git(ctx, req.RepoDir, "fetch", remote, branch); err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", req.RepoDir, "merge-base", "--is-ancestor", "refs/heads/"+req.Branch, req.BaseRef)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("local branch %s in %s has commits that %s lacks; remove or rename it, then start again: %w", req.Branch, req.RepoDir, req.BaseRef, err)
+	}
+	_, err := git(ctx, req.RepoDir, "branch", "--force", "--no-track", req.Branch, req.BaseRef)
 	return err
 }
 

@@ -430,3 +430,63 @@ func TestCommonDirFindsTheCheckoutThatHoldsTheBranch(t *testing.T) {
 		t.Errorf("branch in %s: %v, %v", dir, ok, err)
 	}
 }
+
+// staleBranch builds a clone whose local agent/825-a sits on an older commit than the
+// same branch on origin, as a branch left from an earlier run would.
+func staleBranch(t *testing.T) (clone, seed, remoteHead string) {
+	t.Helper()
+	clone, _ = repoWithOrigin(t)
+	seed = filepath.Join(filepath.Dir(clone), "seed")
+	run(t, seed, "checkout", "-q", "-b", "agent/825-a")
+	run(t, seed, "commit", "-q", "--allow-empty", "-m", "pr one")
+	run(t, seed, "push", "-q", "origin", "agent/825-a")
+	run(t, clone, "fetch", "-q", "origin")
+	run(t, clone, "branch", "agent/825-a", "origin/agent/825-a")
+	run(t, seed, "commit", "-q", "--allow-empty", "-m", "pr two")
+	run(t, seed, "push", "-q", "origin", "agent/825-a")
+	return clone, seed, run(t, seed, "rev-parse", "HEAD")
+}
+
+func TestEnsureOnARemoteBranchFastForwardsAStaleLocalBranchToTheRemoteHead(t *testing.T) {
+	clone, _, remoteHead := staleBranch(t)
+	req := app.WorktreeRequest{RepoDir: clone, Path: filepath.Join(t.TempDir(), "825-a"), Branch: "agent/825-a", BaseRef: "origin/agent/825-a"}
+	if err := (Git{}).Ensure(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if got := run(t, req.Path, "rev-parse", "HEAD"); got != remoteHead {
+		t.Errorf("worktree HEAD = %s, want the PR head %s", got, remoteHead)
+	}
+}
+
+func TestEnsureOnARemoteBranchRefusesALocalBranchWithCommitsTheRemoteLacks(t *testing.T) {
+	clone, _, _ := staleBranch(t)
+	other := filepath.Join(t.TempDir(), "other")
+	run(t, clone, "worktree", "add", "-q", other, "agent/825-a")
+	run(t, other, "commit", "-q", "--allow-empty", "-m", "local only")
+	local := run(t, other, "rev-parse", "HEAD")
+	run(t, clone, "worktree", "remove", other)
+
+	req := app.WorktreeRequest{RepoDir: clone, Path: filepath.Join(t.TempDir(), "825-a"), Branch: "agent/825-a", BaseRef: "origin/agent/825-a"}
+	err := (Git{}).Ensure(context.Background(), req)
+	if err == nil || !strings.Contains(err.Error(), "agent/825-a") {
+		t.Fatalf("err = %v", err)
+	}
+	if got := run(t, clone, "rev-parse", "refs/heads/agent/825-a"); got != local {
+		t.Errorf("local branch moved to %s; its commit %s would be lost", got, local)
+	}
+	if _, err := os.Stat(req.Path); !os.IsNotExist(err) {
+		t.Errorf("worktree made: %v", err)
+	}
+}
+
+func TestEnsureOnTheBaseKeepsAnExistingTaskBranch(t *testing.T) {
+	clone, _, _ := staleBranch(t)
+	local := run(t, clone, "rev-parse", "refs/heads/agent/825-a")
+	req := app.WorktreeRequest{RepoDir: clone, Path: filepath.Join(t.TempDir(), "825-a"), Branch: "agent/825-a", BaseRef: "origin/main"}
+	if err := (Git{}).Ensure(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if got := run(t, req.Path, "rev-parse", "HEAD"); got != local {
+		t.Errorf("worktree HEAD = %s, want the task branch %s", got, local)
+	}
+}
