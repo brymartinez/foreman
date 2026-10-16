@@ -209,6 +209,9 @@ var ErrWorktreeDirty = errors.New("it has uncommitted or untracked changes")
 // ErrBranchNotDeleted means Remove removed the worktree but kept the branch.
 var ErrBranchNotDeleted = errors.New("the branch was not deleted")
 
+// ErrBranchStatusUnknown means the worktree is gone but its branch could not be checked.
+var ErrBranchStatusUnknown = errors.New("branch status is unknown")
+
 // WorktreeRemoval names a task's worktree and, when DeleteBranch is set, its local branch.
 type WorktreeRemoval struct {
 	Path         string
@@ -218,7 +221,7 @@ type WorktreeRemoval struct {
 	// sets it, because the developer confirmed discarding that work.
 	Force bool
 	// RepoDir is a checkout of the repository. It finds the branch when the worktree
-	// is already gone, so a forced removal can still delete it.
+	// is already gone, so removal can still delete it.
 	RepoDir string
 }
 
@@ -233,7 +236,8 @@ type WorktreeManager interface {
 	// Remove deletes the worktree, and the branch if asked. It refuses a worktree with
 	// uncommitted or untracked changes unless Force is set. A path that no longer
 	// exists is already removed. A branch it could not delete after removing the
-	// worktree is ErrBranchNotDeleted.
+	// worktree is ErrBranchNotDeleted. If it cannot check the branch after the
+	// worktree is gone, it returns ErrBranchStatusUnknown.
 	Remove(ctx context.Context, req WorktreeRemoval) error
 	// Contains fetches origin into the worktree at dir, then reports whether ancestor
 	// is an ancestor of descendant, or the same commit.
