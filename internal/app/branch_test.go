@@ -297,3 +297,31 @@ func TestBranchGuideStopsWhenMoreThanEightGuidesAreNamed(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestConfirmedBranchStillStopsOnAMissingNamedGuide(t *testing.T) {
+	f := newFixture()
+	dir := managedCheckout(t, &f)
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("Branch naming rules: `docs/branches.md`.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := f.app.Start(context.Background(), StartRequest{Repo: f.repos.info.Repo, Issue: 825, Agent: task.Claude, BranchName: "feat/825-provider-retries"})
+	if err == nil || !strings.Contains(err.Error(), "docs/branches.md") {
+		t.Fatalf("start error = %v", err)
+	}
+	if len(f.wt.reqs) != 0 {
+		t.Fatal("a missing guide created a worktree")
+	}
+}
+
+func TestCallerSuppliedManagedPathIsNotSynced(t *testing.T) {
+	f := newFixture()
+	dir := managedCheckout(t, &f)
+	f.wt.syncErr = errors.New("managed checkout has uncommitted changes on main")
+	f.app.BranchProposer = &fakeBranchProposer{out: agent.Outcome{Status: agent.BranchProposed, BranchName: "feat/825-provider-retries"}}
+	if _, err := f.app.ProposeBranch(context.Background(), StartRequest{Dir: dir, Issue: 825, Agent: task.Claude}); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.wt.syncs) != 0 {
+		t.Fatalf("syncs = %v", f.wt.syncs)
+	}
+}

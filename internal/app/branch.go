@@ -109,7 +109,7 @@ func (a App) proposeBranch(ctx context.Context, req StartRequest, base string, i
 // proposal reads current AGENTS.md. A checkout the caller supplied is the user's,
 // so foreman leaves its branch alone.
 func (a App) refreshGuidance(ctx context.Context, req StartRequest, base string) error {
-	if a.RepositoriesDir == "" || filepath.Clean(req.Dir) != task.RepositoryPath(a.RepositoriesDir, req.Repo) {
+	if !req.managed {
 		return nil
 	}
 	if err := a.Worktrees.SyncDefaultBranch(ctx, req.Dir, base); err != nil {

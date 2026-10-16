@@ -30,6 +30,9 @@ type StartRequest struct {
 	// keeps the task's stored profile when the agent is the same.
 	Profile     *task.Profile
 	RouteReason string
+	// managed is set when Dir is foreman's managed checkout rather than one the
+	// caller supplied. Only a managed checkout is synced before a proposal.
+	managed bool
 }
 
 // ErrDelegated is a NewOnly start for an issue that already has a delegation.
@@ -92,10 +95,13 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		branch = existing.Delegation.Branch
 	} else {
 		branch = req.BranchName
-		// A confirmed name skips the proposal, but the checkout can change while a
-		// person edits it, so the same sync still has to pass.
+		// A confirmed name skips the proposal, but the checkout and its guidance can
+		// change while a person edits it, so the same checks still have to pass.
 		if branch != "" {
 			if err := a.refreshGuidance(ctx, req, info.DefaultBranch); err != nil {
+				return nil, err
+			}
+			if _, err := readBranchGuide(req.Dir); err != nil {
 				return nil, err
 			}
 		}
@@ -238,7 +244,7 @@ func (a App) sourceRepo(ctx context.Context, req *StartRequest) (RepoInfo, error
 	if err != nil {
 		return RepoInfo{}, fmt.Errorf("prepare checkout for %s: %w", req.Repo, err)
 	}
-	req.Dir = path
+	req.Dir, req.managed = path, true
 	return info, nil
 }
 
