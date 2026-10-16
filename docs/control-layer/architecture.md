@@ -319,8 +319,24 @@ the same commit. The commit message records why it changed.
 - **Names are chosen once, before worktree creation.** The default branch is
   `<type>/<workName>`, with the type from the title prefix, the labels, then `feat`;
   `task.WorkName` is `<issue>-<slug>` (at most 5 words and 40 characters). A Linear
-  suggestion is the fallback when present. For new tasks, Foreman reads `AGENTS.md`
-  and linked Markdown branch guidance from the repository checkout. A tool-free
+  suggestion is the fallback when present. For a new task in the managed checkout,
+  Foreman first fetches the default branch and fast-forwards the local one, so the
+  proposal reads current guidance. A failed fetch, a diverged branch, uncommitted
+  changes, or another checked-out branch stops manual and auto starts with the
+  reason; Foreman never resets local work. A checkout the caller supplies is read as
+  it is. Guidance is `AGENTS.md` plus the Markdown files it names as branch naming
+  guidance, up to two links deep. Text splits into clauses at a line end, `;`, `|`,
+  or a sentence end. A list of links starts where the clause text since the
+  previous link, with the link's own label, says "branch" and "name", "convention",
+  "rule", or "guidance". It continues through links joined by only commas, "and",
+  or "or". Each listed link is read unless its label or path says "decision log",
+  "history", "archive", or "superseded" (with `-`, `_`, `/`, or `.` read as spaces,
+  so `decision-log.md` counts); a list whose lead-in says so is skipped
+  whole. Other links, even in the same clause ("see [architecture](...)"), are not
+  read. A document that only mentions branches is not a rule. A named file that is missing, unreadable, over 32 KiB, or outside the
+  repository stops the start with its path. A start with a confirmed name
+  runs the same sync and guidance read, since either can change while a person edits
+  it. A tool-free
   proposal applies the repository convention to the issue and tracker suggestion;
   repository guidance takes precedence. A manual start shows an editable proposal.
   Auto mode waits when the workstream or guidance is unclear. The chosen name is

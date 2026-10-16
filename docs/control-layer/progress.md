@@ -7,8 +7,10 @@ developer; Foreman no longer resumes an agent to answer them at handover or on a
 dashboard refresh. Legacy REVIEWED tasks return to READY_FOR_HUMAN on refresh.
 Vet, Go tests, build, and the feedback end-to-end scenario pass.
 
-Branch naming for new tasks now reads repository `AGENTS.md` and linked Markdown
-guidance before making a worktree. Manual starts show an editable proposal; auto
+Branch naming for new tasks fast-forwards the managed checkout's default branch,
+then reads repository `AGENTS.md` and the files it names as branch naming guidance
+before making a worktree. A checkout that cannot fast-forward safely, or a named
+guidance file that is missing or too large, stops the start with the reason (#67). Manual starts show an editable proposal; auto
 starts wait when the convention or workstream is unclear. With no repository rule,
 Linear's suggestion or the existing conventional default applies. Restarts keep
 their stored branch. Vet, Go tests, build, and the end-to-end scenarios pass.
