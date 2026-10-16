@@ -33,7 +33,7 @@ func TestInboxCleansDoneTasksWhenEnabled(t *testing.T) {
 	if len(report.Changed) != 1 || !slices.Equal(report.Changed[0].Changes[len(report.Changed[0].Changes)-2:], []string{"PR #912 merged", "worktree and merged branch removed"}) {
 		t.Fatalf("changed %+v", report.Changed)
 	}
-	want := WorktreeRemoval{Path: "/wt/ridezoomo-armada-backend/feat/825-provider-retries", Branch: "feat/825-provider-retries", DeleteBranch: true}
+	want := WorktreeRemoval{Path: "/wt/ridezoomo-armada-backend/feat/825-provider-retries", Branch: "feat/825-provider-retries", DeleteBranch: true, RepoDir: "/src/armada-backend"}
 	if !slices.Equal(f.wt.removed, []WorktreeRemoval{want}) || !f.store.recs[key].Delegation.WorktreeRemovedAt.Equal(now) {
 		t.Fatalf("removed %+v, rec %+v", f.wt.removed, f.store.recs[key].Delegation)
 	}
@@ -55,7 +55,7 @@ func TestInboxCleansAPRClosedWorktreeAndKeepsItsBranchWhileTheIssueIsOpen(t *tes
 	f.app.DeleteMergedBranches = true
 	key, report := refreshDone(t, f, "closed")
 	got := f.store.recs[key]
-	want := WorktreeRemoval{Path: "/wt/ridezoomo-armada-backend/feat/825-provider-retries", Branch: "feat/825-provider-retries"}
+	want := WorktreeRemoval{Path: "/wt/ridezoomo-armada-backend/feat/825-provider-retries", Branch: "feat/825-provider-retries", RepoDir: "/src/armada-backend"}
 	if got.State != task.PRClosed || !slices.Equal(f.wt.removed, []WorktreeRemoval{want}) || !got.Delegation.WorktreeRemovedAt.Equal(now) {
 		t.Fatalf("state %s, removed %+v", got.State, f.wt.removed)
 	}
@@ -77,6 +77,51 @@ func TestInboxRetriesADirtyPRClosedWorktreeOnTheNextRefresh(t *testing.T) {
 	}
 	if len(f.wt.removed) != 1 || f.store.recs[key].Delegation.WorktreeRemovedAt.IsZero() {
 		t.Errorf("removed %+v", f.wt.removed)
+	}
+}
+
+func TestInboxRetriesMergedBranchDeletionAfterWorktreeRemoval(t *testing.T) {
+	f := newFixture()
+	f.app.DeleteMergedBranches = true
+	f.wt.removeErr = ErrBranchNotDeleted
+	key, report := refreshDone(t, f, "merged")
+	if !f.store.recs[key].Delegation.WorktreeRemovedAt.IsZero() {
+		t.Fatal("cleanup completed while the branch remains")
+	}
+	if changes := report.Changed[0].Changes; changes[len(changes)-1] != "worktree removed; branch remains; cleanup will retry" {
+		t.Fatalf("changes = %v", changes)
+	}
+	want := WorktreeRemoval{Path: f.store.recs[key].Delegation.Worktree, Branch: f.store.recs[key].Delegation.Branch, DeleteBranch: true, RepoDir: "/src/armada-backend"}
+	if !slices.Equal(f.wt.removeAttempts, []WorktreeRemoval{want}) {
+		t.Fatalf("first removal = %+v", f.wt.removeAttempts)
+	}
+	f.wt.removeErr = nil
+	f.app.CleanOnDone = true
+	report, err := f.app.Inbox(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(f.wt.removeAttempts, []WorktreeRemoval{want, want}) || f.store.recs[key].Delegation.WorktreeRemovedAt.IsZero() {
+		t.Fatalf("retry requests = %+v, removed at %v", f.wt.removeAttempts, f.store.recs[key].Delegation.WorktreeRemovedAt)
+	}
+	if changes := report.Changed[0].Changes; changes[len(changes)-1] != "worktree and merged branch removed" {
+		t.Fatalf("retry changes = %v", changes)
+	}
+}
+
+func TestInboxCompletesCleanupWhenBranchDeletionIsDisabledOnRetry(t *testing.T) {
+	f := newFixture()
+	f.app.DeleteMergedBranches = true
+	f.wt.removeErr = ErrBranchNotDeleted
+	key, _ := refreshDone(t, f, "merged")
+	f.wt.removeErr = nil
+	f.app.CleanOnDone = true
+	f.app.DeleteMergedBranches = false
+	if _, err := f.app.Inbox(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.wt.removeAttempts) != 2 || f.wt.removeAttempts[1].DeleteBranch || f.wt.removeAttempts[1].RepoDir != "/src/armada-backend" || f.store.recs[key].Delegation.WorktreeRemovedAt.IsZero() {
+		t.Fatalf("retry requests = %+v, removed at %v", f.wt.removeAttempts, f.store.recs[key].Delegation.WorktreeRemovedAt)
 	}
 }
 
