@@ -128,3 +128,67 @@ func TestUsageListsOnlyTheLaunchFlags(t *testing.T) {
 		}
 	}
 }
+
+func TestParseKnowledgeExport(t *testing.T) {
+	for name, tc := range map[string]struct {
+		argv []string
+		want Command
+	}{
+		"to stdout": {[]string{"knowledge", "export", "a/b"}, Command{Name: KnowledgeExport, Repo: "a/b"}},
+		"to a file": {[]string{"knowledge", "export", "a/b", "-o", "k.md"}, Command{Name: KnowledgeExport, Repo: "a/b", File: "k.md"}},
+		"long flag": {[]string{"knowledge", "export", "--output", "k.md", "a/b"}, Command{Name: KnowledgeExport, Repo: "a/b", File: "k.md"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got, err := Parse(tc.argv); err != nil || got != tc.want {
+				t.Fatalf("Parse(%q) = %+v, %v; want %+v", tc.argv, got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseKnowledgeIngest(t *testing.T) {
+	for name, tc := range map[string]struct {
+		argv []string
+		want Command
+	}{
+		"export's repository": {[]string{"knowledge", "ingest", "k.md"}, Command{Name: KnowledgeIngest, File: "k.md"}},
+		"every flag": {[]string{"knowledge", "ingest", "--repo", "c/d", "--rebind", "--agent", "codex", "--dry-run", "k.md"},
+			Command{Name: KnowledgeIngest, File: "k.md", Repo: "c/d", Rebind: true, Agent: task.Codex, DryRun: true}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got, err := Parse(tc.argv); err != nil || got != tc.want {
+				t.Fatalf("Parse(%q) = %+v, %v; want %+v", tc.argv, got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseRejectsInvalidKnowledgeCommands(t *testing.T) {
+	for _, argv := range [][]string{
+		{"knowledge"},
+		{"knowledge", "sync"},
+		{"knowledge", "export"},
+		{"knowledge", "export", "not-a-repo"},
+		{"knowledge", "export", "a/b", "c/d"},
+		{"knowledge", "export", "a/b", "-o"},
+		{"knowledge", "export", "a/b", "--dry-run"},
+		{"knowledge", "ingest"},
+		{"knowledge", "ingest", "a.md", "b.md"},
+		{"knowledge", "ingest", "k.md", "--agent", "gpt"},
+		{"knowledge", "ingest", "k.md", "--repo", "bad"},
+		{"knowledge", "ingest", "k.md", "--rebind"},
+		{"knowledge", "ingest", "k.md", "-o", "x.md"},
+	} {
+		if _, err := Parse(argv); err == nil {
+			t.Errorf("Parse(%q) succeeded; want usage error", argv)
+		}
+	}
+}
+
+func TestUsageListsTheKnowledgeCommands(t *testing.T) {
+	for _, want := range []string{"foreman knowledge export owner/repo [-o FILE]", "foreman knowledge ingest FILE", "--rebind", "--agent claude|codex", "--dry-run"} {
+		if !strings.Contains(Usage, want) {
+			t.Errorf("usage lacks %q:\n%s", want, Usage)
+		}
+	}
+}
