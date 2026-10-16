@@ -615,3 +615,26 @@ func TestWithdrawingARestorationReinstatesTheRetirement(t *testing.T) {
 		t.Errorf("history = %+v", got.History)
 	}
 }
+
+func TestWithdrawingARestorationKeepsALaterMaintainerSupport(t *testing.T) {
+	s, _ := newStore(t)
+	l := activeLearning(t, s)
+	retire := eval("8", 10)
+	retire.Revisions = []Revision{{ID: l.ID, Action: Retire, Reason: "removed", Source: Maintainer, Cites: []string{"C1"}}}
+	mustApply(t, s, repo, retire)
+	support := func(task string, day int) Evaluation {
+		p := observed(Practice, l.Text)
+		p.Source, p.Cites = Maintainer, []string{"D1"}
+		return eval(task, day, p)
+	}
+	mustApply(t, s, repo, support("9", 11))
+	mustApply(t, s, repo, support("10", 12))
+	mustApply(t, s, repo, eval("9", 11))
+	if got := learnings(t, s, repo)[0]; got.Status != Active || !strings.Contains(knowledgeMD(t, s, repo), "e2e script") {
+		t.Fatalf("task 10's maintainer support no longer restores it: %+v", got)
+	}
+	mustApply(t, s, repo, eval("10", 12))
+	if got := learnings(t, s, repo)[0]; got.Status != Retired {
+		t.Fatalf("with both supports withdrawn, task 8's retirement holds, but the learning is %+v", got)
+	}
+}

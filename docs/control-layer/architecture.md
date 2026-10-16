@@ -646,12 +646,12 @@ the same commit. The commit message records why it changed.
     when its task started after the learning's latest evidence from other tasks; a
     learning with no other task's evidence cannot be retired by observation.
   - Observed work cannot revive a retired learning; a maintainer proposal can.
-  - Re-evaluating a task first removes that task's earlier evidence, and reverts its
-    earlier retirement, restoration, or rewrite, so the new evaluation replaces it.
-    Withdrawing a restoration puts back the retirements it ended. The learning
-    stays retired while another task's retirement is still in force; once every
-    retirement is withdrawn, its evidence sets its status again. The text becomes the newest rewrite that no
-    re-evaluation withdrew, rebuilt from each rewrite's stored `to` text, or the
+  - Re-evaluating a task first removes that task's earlier evidence and withdraws
+    its earlier retire, restore, confirm (maintainer support of a live learning), or
+    rewrite entries, so the new evaluation replaces them. Go then replays the entries
+    still in force. The learning is retired when the last retire, restore, or
+    confirm is a retire; otherwise its evidence sets its status. The text becomes
+    the newest rewrite still in force, from each rewrite's stored `to` text, or the
     original text when none is left.
 - **Learnings are generic.** `knowledge.Sanitize` rejects text with issue, PR, or
   commit references (including Linear or Jira keys such as `ABC-12`, but not names

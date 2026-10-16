@@ -55,9 +55,14 @@ func (s Store) apply(f *learningsFile, ev Evaluation) Evaluation {
 			f.Learnings = append(f.Learnings, Learning{ID: nextID(f), Kind: p.Kind, Text: text, Evidence: []Evidence{evidence}})
 		case l.Status == Retired && p.Source != Maintainer:
 		default:
-			if l.Status == Retired {
+			switch {
+			case l.Status == Retired:
 				l.Status = Candidate
 				l.History = append(l.History, Change{At: ev.At, Task: ev.Task, Action: "restore", Reason: p.Why})
+			case p.Source == Maintainer:
+				// Maintainer support of a live learning would have restored it, so it
+				// still does if an earlier restoration is withdrawn.
+				l.History = append(l.History, Change{At: ev.At, Task: ev.Task, Action: "confirm", Reason: p.Why})
 			}
 			l.Evidence = append(l.Evidence, evidence)
 		}
@@ -208,10 +213,10 @@ func latest(l Learning, task string) time.Time {
 	return t
 }
 
-// revert undoes the task's own retire, restore, or rewrite of l before its
-// re-evaluation is applied. Withdrawing a restore puts back the retirements it ended. l stays retired while a retirement by another task is still in force.
-// The text becomes the newest rewrite still in force, or the original text when
-// none is left.
+// revert undoes the task's own retire, restore, confirm, or rewrite of l before its
+// re-evaluation is applied, then replays what is left: the text becomes the newest
+// rewrite still in force, or the original text, and l is retired when the last
+// retire, restore, or confirm still in force is a retire.
 func revert(l *Learning, ev Evaluation) {
 	own := func(c Change) bool { return c.Task == ev.Task }
 	if slices.ContainsFunc(live(l.History, Revise, "revert-rewrite"), own) {
@@ -222,29 +227,44 @@ func revert(l *Learning, ev Evaluation) {
 		}
 		l.Text = text
 	}
-	if slices.ContainsFunc(live(l.History, "restore", "revert-restore"), own) {
-		l.History = append(l.History, Change{At: ev.At, Task: ev.Task, Action: "revert-restore", Reason: "re-evaluation replaced this task's restoration"})
-		if len(live(l.History, Retire, "revert-retire")) > 0 {
-			l.Status = Retired
-		}
-	}
-	if l.Status == Retired && slices.ContainsFunc(live(l.History, Retire, "revert-retire"), own) {
+	undid := false
+	if slices.ContainsFunc(live(l.History, Retire, "revert-retire"), own) {
 		l.History = append(l.History, Change{At: ev.At, Task: ev.Task, Action: "revert-retire", Reason: "re-evaluation replaced this task's retirement"})
-		if len(live(l.History, Retire, "revert-retire")) == 0 {
-			l.Status = derive(*l)
-		}
+		undid = true
+	}
+	if slices.ContainsFunc(append(live(l.History, "restore", "revert-restore"), live(l.History, "confirm", "revert-restore")...), own) {
+		l.History = append(l.History, Change{At: ev.At, Task: ev.Task, Action: "revert-restore", Reason: "re-evaluation replaced this task's maintainer support"})
+		undid = true
+	}
+	switch {
+	case !undid:
+	case retiredByHistory(l.History):
+		l.Status = Retired
+	case l.Status == Retired:
+		l.Status = derive(*l)
 	}
 }
 
+// retiredByHistory replays the retire, restore, and confirm entries still in force
+// and reports whether a retire came last.
+func retiredByHistory(history []Change) bool {
+	retired := false
+	for i, c := range history {
+		switch c.Action {
+		case Retire:
+			retired = retired || !withdrawn(history[i+1:], "revert-retire", c.Task)
+		case "restore", "confirm":
+			retired = retired && withdrawn(history[i+1:], "revert-restore", c.Task)
+		}
+	}
+	return retired
+}
+
 // live returns the history's action entries, oldest first, that are still in force:
-// no later undo entry by the same task withdrew them. A restore in force ends every
-// earlier retirement.
+// no later undo entry by the same task withdrew them.
 func live(history []Change, action, undo string) []Change {
 	var out []Change
 	for i, c := range history {
-		if action == Retire && c.Action == "restore" && !withdrawn(history[i+1:], "revert-restore", c.Task) {
-			out = nil
-		}
 		if c.Action == action && !withdrawn(history[i+1:], undo, c.Task) {
 			out = append(out, c)
 		}
