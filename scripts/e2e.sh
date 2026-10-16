@@ -906,7 +906,7 @@ scenario_conflict() {
 	check "in its own session" test "$(turns 'claude implement')" = 1
 	check "the reviewer reviewed the merge" test "$(turns 'codex review')" = 2
 	local wt
-	wt=$(ls -d "$sandbox"/worktrees/*/*)
+	wt=$(sed -n 's/^worktree: *//p' "$sandbox/tasks/acme-widgets-42.md")
 	check "the branch now includes main" git -C "$wt" merge-base --is-ancestor "$(git --git-dir="$sandbox/origin.git" rev-parse main)" HEAD
 
 	touch "$state/conflict-fail"

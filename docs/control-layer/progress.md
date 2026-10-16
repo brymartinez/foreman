@@ -9,6 +9,10 @@ missing documents. Plan markers carry a description fingerprint, and a plan writ
 for another description asks the developer to keep or revise it. A failed read fails
 the task before planning. The `plan_reuse` end-to-end scenario covers adoption.
 
+Issue #70 is complete. New worktrees use the full branch name as nested directories.
+Restarts and recreation keep the stored worktree path. Nested creation and cleanup,
+branch selection paths, and legacy path reuse have regression coverage.
+
 Automatic PR feedback replies are disabled. PR comments stay on GitHub for the
 developer; Foreman no longer resumes an agent to answer them at handover or on a
 dashboard refresh. Legacy REVIEWED tasks return to READY_FOR_HUMAN on refresh.

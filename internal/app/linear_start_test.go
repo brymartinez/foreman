@@ -91,6 +91,22 @@ func TestLinearManualStartDoesNotRequireTriagedLabel(t *testing.T) {
 	if err != nil || rec == nil || rec.Key != key || rec.Delegation.Branch != "feat/linear-web-42-fix-cache" {
 		t.Fatalf("start = %+v, %v", rec, err)
 	}
+	if rec.Delegation.Worktree != "/wt/ridezoomo-armada-backend/feat/linear-web-42-fix-cache" {
+		t.Fatalf("worktree = %q", rec.Delegation.Worktree)
+	}
+}
+
+func TestLinearSuggestionUsesFullBranchWorktreePath(t *testing.T) {
+	f := newFixture()
+	key := task.Key{Repo: f.gh.repo.Repo, Source: task.Linear, ExternalID: "uuid-42"}
+	f.app.Linear = &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", State: "open", BranchName: "bryan/web-42-fix-cache"}}
+	rec, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Delegation.Branch != "bryan/web-42-fix-cache" || rec.Delegation.Worktree != "/wt/ridezoomo-armada-backend/bryan/web-42-fix-cache" {
+		t.Fatalf("delegation = %+v", rec.Delegation)
+	}
 }
 
 func TestLinearRouteReadsIssueAndCommentsFromLinear(t *testing.T) {

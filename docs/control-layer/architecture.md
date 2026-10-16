@@ -42,7 +42,7 @@ Every agent interaction is one headless turn that runs to completion and returns
 ```
 app.Start, from the dashboard (enter on an inbox issue, or auto mode)
   ├─ gh: repo + default branch of the managed clone, fetch issue
-  ├─ git: ensure worktree <root>/<owner>-<repo>/825-<slug> on branch <type>/825-<slug>
+  ├─ git: ensure worktree <root>/<owner>-<repo>/<branch> with branch slashes as directories
   ├─ store: task file, state WORKING, session id
   ├─ pin: the active gh account (kept on restarts), worktree commit identity, SSH
   │       push account check; a mismatch is FAILED and nothing launches
@@ -340,7 +340,10 @@ the same commit. The commit message records why it changed.
   proposal applies the repository convention to the issue and tracker suggestion;
   repository guidance takes precedence. A manual start shows an editable proposal.
   Auto mode waits when the workstream or guidance is unclear. The chosen name is
-  validated before making a worktree and stored at the first start. Restarts keep it.
+  validated before making a worktree and stored at the first start. A new worktree is
+  `<worktrees_dir>/<owner>-<repo>/<branch>`, with each branch slash as a directory
+  separator. Restarts keep the stored branch and worktree path, including paths from
+  the older flat convention.
 
 ### Agents
 

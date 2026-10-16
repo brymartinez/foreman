@@ -186,6 +186,30 @@ func TestRemove(t *testing.T) {
 	}
 }
 
+func TestNestedWorktreeCanBeCreatedRemovedAndRecreated(t *testing.T) {
+	clone, _ := repoWithOrigin(t)
+	ctx := context.Background()
+	req := app.WorktreeRequest{RepoDir: clone, Path: filepath.Join(t.TempDir(), "owner-repo", "fix", "825-provider-retries"), Branch: "fix/825-provider-retries", BaseRef: "origin/main"}
+	if err := (Git{}).Ensure(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	if got := run(t, req.Path, "branch", "--show-current"); got != req.Branch {
+		t.Fatalf("branch = %q", got)
+	}
+	if err := (Git{}).Remove(ctx, app.WorktreeRemoval{Path: req.Path, Branch: req.Branch}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(req.Path); !os.IsNotExist(err) {
+		t.Fatalf("removed worktree still exists: %v", err)
+	}
+	if err := (Git{}).Ensure(ctx, app.WorktreeRequest{RepoDir: clone, Path: req.Path, Branch: req.Branch}); err != nil {
+		t.Fatal(err)
+	}
+	if got := run(t, req.Path, "branch", "--show-current"); got != req.Branch {
+		t.Fatalf("recreated branch = %q", got)
+	}
+}
+
 // prWorktree builds a bare origin with main and a pushed task branch, and a worktree on
 // the branch. seed is a clone that can push new commits to either.
 func prWorktree(t *testing.T) (wt, seed string) {
