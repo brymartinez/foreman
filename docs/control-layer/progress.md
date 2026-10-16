@@ -2,6 +2,20 @@
 
 ## Current stage
 
+Stage 61 (per-repository evaluation and learning, for issue #61) is complete.
+Task usage records tool-call counts by name. A detached `foreman __learn` evaluates a
+task when its run ends on a clean review, and a refresh starts it again when the
+task's evidence changes. One evaluator turn proposes learnings; `internal/knowledge`
+sanitizes them, promotes a learning after two tasks or a maintainer source, and
+retires it on a maintainer correction or a newer task's observation. Each repository
+keeps its own `learnings.yaml`, evaluations, and rendered `knowledge.md` under
+`knowledge_dir`. Planning and implementation prompts carry up to 8 learnings and 2000
+characters from the task's repository; review and selector prompts carry none.
+`learning.enabled` and `learning.budget_usd` control it. The `learning` end-to-end
+scenario covers promotion over two tasks, a maintainer retirement, and a second
+repository that learns nothing. Vet, Go tests, build, and the end-to-end script
+pass.
+
 Stage 62 (pin each task to one GitHub account) is complete. The first launch stores
 the active `gh` login and noreply email on the task. Every launch and implementer turn
 sets the worktree's commit identity, and fails the task before the agent runs when
@@ -145,6 +159,8 @@ Findings 1 to 4 were fixed in stage 28.
 - An agent that leaves the reply marker off reads its own reply as new feedback. That
   costs one extra round, bounded by the per-run cap.
 - PR feedback has been checked against the stand-in `gh` and fixtures, not a live PR.
+- A PR comment posted after a merged or closed task's last evaluation is not learned,
+  because nothing watches finished PRs. Codex evaluations have no spend cap.
 - The release workflow has not run: the repo has no GitHub remote yet.
 - Conflict repair is checked against the stand-in `gh` and fixtures, not a live
   conflicting PR. GitHub reports UNKNOWN until it has computed mergeability, so a

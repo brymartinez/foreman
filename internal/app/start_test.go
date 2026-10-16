@@ -140,6 +140,13 @@ type fakeRunners struct {
 	onStop   func(pid int) // plays the runner recording its stop
 	stuck    bool
 	spawnErr error
+	learned  []task.Key
+	learnErr error
+}
+
+func (f *fakeRunners) SpawnLearn(k task.Key) error {
+	f.learned = append(f.learned, k)
+	return f.learnErr
 }
 
 func (f *fakeRunners) Spawn(k task.Key) (int, string, error) {

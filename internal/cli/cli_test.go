@@ -80,6 +80,9 @@ func TestParseRejectsRemovedCommandsAndConflictingFlags(t *testing.T) {
 		{"__run"},
 		{"__run", "a/b#1", "a/b#2"},
 		{"__run", "not a repo#1"},
+		{"__learn", "825"},
+		{"__learn"},
+		{"__learn", "not a repo#1"},
 	} {
 		if _, err := Parse(argv); err == nil {
 			t.Errorf("Parse(%q) succeeded; want usage error", argv)
@@ -102,13 +105,24 @@ func TestParseRunKeepsLinearIssueIdentity(t *testing.T) {
 	}
 }
 
+func TestParseLearnTakesTheSameTaskKeyAsRun(t *testing.T) {
+	got, err := Parse([]string{"__learn", "a/b#3"})
+	if want := (Command{Name: Learn, Repo: "a/b", Issue: 3}); err != nil || got != want {
+		t.Fatalf("Parse(__learn a/b#3) = %+v, %v; want %+v", got, err, want)
+	}
+	got, err = Parse([]string{"__learn", "a/b#linear:ENG-1"})
+	if want := (Command{Name: Learn, Repo: "a/b", Source: task.Linear, ExternalID: "ENG-1"}); err != nil || got != want {
+		t.Fatalf("Parse Linear learn key = %+v, %v; want %+v", got, err, want)
+	}
+}
+
 func TestUsageListsOnlyTheLaunchFlags(t *testing.T) {
 	for _, flag := range []string{"-a, --auto", "--no-auto", "-c", "-h, --help", "--version"} {
 		if !strings.Contains(Usage, flag) {
 			t.Errorf("usage is missing %s:\n%s", flag, Usage)
 		}
 	}
-	for _, removed := range []string{"inbox", "status", "show", "start", "respond", "resume", "cancel", "clean", "config --", "logs", "__run"} {
+	for _, removed := range []string{"inbox", "status", "show", "start", "respond", "resume", "cancel", "clean", "config --", "logs", "__run", "__learn"} {
 		if strings.Contains(Usage, "foreman "+removed) {
 			t.Errorf("usage still lists foreman %s:\n%s", removed, Usage)
 		}

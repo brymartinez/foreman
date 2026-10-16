@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/brymartinez/foreman/internal/agent"
+	"github.com/brymartinez/foreman/internal/knowledge"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -262,6 +263,8 @@ type Runners interface {
 	// Stop asks the runner to stop and waits for it to exit; false means it is still
 	// running when the wait ends.
 	Stop(key task.Key, pid int) (bool, error)
+	// SpawnLearn starts a detached evaluation of the task. It does not wait for it.
+	SpawnLearn(key task.Key) error
 }
 
 // Alert is one announcement to the developer: a task moved into a state that needs
@@ -300,6 +303,34 @@ type Notifier interface {
 // Selector reads an issue against the routing rules and picks one.
 type Selector interface {
 	Select(ctx context.Context, in agent.SelectInput) (agent.Selection, error)
+}
+
+// Evaluator judges one finished task from its evidence packet.
+type Evaluator interface {
+	Evaluate(ctx context.Context, in agent.EvaluateInput) (agent.Evaluation, error)
+}
+
+// KnowledgeStore keeps each repository's evaluations and learnings. repo is
+// "owner/name"; the store rejects anything that could reach another repository.
+type KnowledgeStore interface {
+	// Lock takes the repository's evaluation lock without waiting, or returns
+	// knowledge.ErrLocked.
+	Lock(repo string) (func(), error)
+	// Busy reports whether an evaluation of repo holds the lock now.
+	Busy(repo string) bool
+	Learnings(repo string) ([]knowledge.Learning, error)
+	// Evaluation returns one task's stored evaluation, or nil.
+	Evaluation(repo, task string) (*knowledge.Evaluation, error)
+	// Evaluations returns up to limit evaluations, newest task first.
+	Evaluations(repo string, limit int) ([]knowledge.Evaluation, error)
+	// Attempt returns the task's last evaluation attempt, or nil.
+	Attempt(repo, task string) (*knowledge.Attempt, error)
+	RecordAttempt(repo, task string, at knowledge.Attempt) error
+	// Apply stores ev, replacing the task's earlier evaluation and evidence.
+	Apply(repo string, ev knowledge.Evaluation) error
+	// Select returns at most limit active learnings, totalling at most maxChars of
+	// text, ranked by relevance to query.
+	Select(repo, query string, limit, maxChars int) ([]knowledge.Learning, error)
 }
 
 type QuotaStatus int

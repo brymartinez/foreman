@@ -2,8 +2,8 @@
 
 ```
 cmd/foreman           wiring: build adapters, open the dashboard or run a task
-internal/cli          argv -> Command (launch flags and __run); no I/O beyond parsing
-internal/config       tasks directory resolution
+internal/cli          argv -> Command (launch flags, __run, and __learn); no I/O beyond parsing
+internal/config       config.yaml: directories, budgets, learning, and their validation
 internal/routing      routing.yaml: profiles, rules, default, and their validation
 internal/render       terminal formatting of app results
 internal/tui          the dashboard: pure Model and Frame, one terminal loop
@@ -12,9 +12,12 @@ internal/app          orchestration + ports.go (the interfaces below)
   ├── linear          IssueTracker over Linear GraphQL using a personal API key
   ├── store           TaskStore over Markdown + YAML frontmatter
   ├── worktree        WorktreeManager over `git worktree`; RemoteAuth over `ssh -T`
-  ├── agent           outcome contract, prompt, claude.go / codex.go adapters, selector
+  ├── agent           outcome contract, prompt, claude.go / codex.go adapters, selector,
+  │                   evaluator
+  ├── knowledge       KnowledgeStore: per-repository learnings, evaluations, knowledge.md
   ├── quota           QuotaChecker over the optional `quota-axi`
-  ├── runner          spawns and checks the detached `foreman __run` process
+  ├── runner          spawns and checks the detached `foreman __run` process, and
+  │                   spawns the detached `foreman __learn` process
   └── stages          resolves ~/.config/foreman/stages/<stage>.md + <repo>/.foreman/<stage>.md
 internal/task         the durable model: Record, State, Delegation, Decision, Attempt
 ```
@@ -88,6 +91,23 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
                                 fixes and reports pr_opened again; re-verify; re-review
                     findings after fix_rounds reviewed fixes since the last answer ->
                                 NEEDS_DECISION (A: another round, B: accept remaining), exit
+  when the loop ends on a clean review and the evidence changed since the stored
+  evaluation: spawn detached `foreman __learn owner/repo#825`, then exit
+
+foreman __learn       -> one evaluation of one task; output goes to <log_dir>/learning.log
+  ├─ knowledge: take the repository's lock without waiting; held -> exit 0, a later
+  │             refresh retries
+  ├─ build the evidence packet from the task file (decisions, review findings,
+  │  phase times, cost or tokens, tool-call counts, PR outcome) and every human
+  │  comment on the PR from gh; no logs, transcripts, CI, or tool arguments. The
+  │  prompt adds the repository's current learnings, which revisions cite by id, and
+  │  its 12 newest other evaluations, so recurrence is visible
+  ├─ evaluator turn: the task's implementer agent, no tools, a scratch directory,
+  │  learning.budget_usd for Claude; a turn that called a tool is discarded;
+  │  agent.ParseEvaluation reads its output
+  └─ knowledge.Apply: store the evaluation, fold its proposals and revisions into
+     learnings.yaml, rewrite knowledge.md. A failed turn writes nothing, and never
+     changes the task, its alerts, or the runner's exit code
 
 app.Resume            -> a REVIEWED task goes back to WORKING with its branch,
                          worktree, PR, and session kept; the runner answers the
@@ -174,13 +194,20 @@ app.InboxView         -> runner pid dead while WORKING/REVIEWING -> FAILED
                            check keeps the worktree for the next refresh
                          Reconcile, per item: issue closed, no runner -> DONE, including
                            FAILED and PR_CLOSED; a DONE task stays DONE if it reopens
+                         learning on, per cleanly reviewed task no runner drives
+                         (not WORKING or REVIEWING), at most one per repository:
+                           evidence fingerprint differs from the stored evaluation, the
+                           repository is not locked, no failed attempt on the same
+                           evidence in the last hour -> spawn `foreman __learn`
+                           (a merged or closed task never evaluated is skipped)
 
 foreman -c            -> open the config in $VISUAL, $EDITOR, or vi, before the config
                          loads, so an invalid file can be fixed; check it after
 ```
 
-Nothing runs in the background except the runner working on a task. The readiness and
-liveness checks happen on each dashboard refresh. Every task write goes through
+Nothing runs in the background except the runner working on a task and a learner
+evaluating a finished one. The readiness and liveness checks happen on each dashboard
+refresh. Every task write goes through
 `App.update`, which posts an alert to the Discord webhook when a task enters
 NEEDS_DECISION, FAILED, READY_FOR_HUMAN, or REVIEWED, and marks a phase change on the
 task's attempt.
@@ -193,13 +220,14 @@ the same commit. The commit message records why it changed.
 
 ### Processes
 
-- **No daemon.** Nothing runs while the dashboard is closed except a task's own runner.
-  The gate, liveness checks, and cleanup run on each dashboard refresh. Rejected: a
+- **No daemon.** Nothing runs while the dashboard is closed except a task's own runner
+  and a learner it started. The gate, liveness checks, cleanup, and the learning due
+  check run on each dashboard refresh. Rejected: a
   daemon, a watcher, or a runner that waits for CI.
 - **The dashboard is the only interface.** Bare `foreman` opens it; `-a`/`--auto` and
   `--no-auto` set auto mode for the session, `-s github|linear` selects an inbox source,
   and `-c` edits the config. The only other
-  verb is the hidden `__run`. Task subcommands were dropped because they duplicated the
+  verbs are the hidden `__run` and `__learn`. Task subcommands were dropped because they duplicated the
   dashboard, and a piped `foreman` still prints usage.
 - **One detached runner per task.** `App.Start`, `App.Respond`, `App.Resume`, and the gate spawn
   `foreman __run owner/repo#N` with `Setsid`, so closing the terminal doesn't stop it.
@@ -314,8 +342,8 @@ the same commit. The commit message records why it changed.
   matches `internal/agent/outcome.schema.json`: `planned`, `checkpoint`, `pr_opened`, `blocked` with
   questions, or `failed`. `agent.ParseOutcome` is the only way an implementer's output
   enters the program, and it rejects questions with fewer than two options or duplicate
-  labels. The reviewer and the routing selector have their own schemas and parsers,
-  `agent.ParseReview` and `agent.ParseSelection`.
+  labels. The reviewer, the routing selector, and the evaluator have their own schemas and
+  parsers, `agent.ParseReview`, `agent.ParseSelection`, and `agent.ParseEvaluation`.
   Rejected: interactive sessions with terminal scraping.
 - **Permissions.** The dangerous bypass flags are never used. Claude runs with
   `acceptEdits` and the fixed `Bash,WebFetch,WebSearch` tool list; the list is not
@@ -578,6 +606,89 @@ the same commit. The commit message records why it changed.
   show the whole issue log, labeled. The
   history log reuses the log pane's paging inside the attempt's byte range, and
   rereads it when a reload changes the range.
+
+### Learning
+
+- **Foreman evaluates each finished task and keeps what it learns per repository.**
+  The store is `<knowledge_dir>/<owner>/<repo>/` (default `<data>/knowledge`):
+  `learnings.yaml` is the source of truth (id, kind, text, status, evidence entries,
+  and history), `evaluations/<task>.yaml` holds each task's evaluation and evidence
+  fingerprint, `attempts/<task>.yaml` the last attempt, `learning.lock` the
+  repository lock, and `knowledge.md` the active learnings rendered for people.
+  `Apply` writes the evaluation last, so a failed write leaves the task due for a
+  retry. Paths
+  come from a validated `owner/repo`, so one repository cannot reach another's
+  directory. Writes use a temp file and rename.
+- **Two triggers, no daemon.** The runner spawns `foreman __learn` when its loop ends
+  on a clean review. The refresh spawns it for a task with a clean review whose
+  evidence fingerprint changed: review count, answered decisions, PR comments, PR
+  number, head, and outcome, and the attempt's end. CI is not in the fingerprint, so a
+  CI change never re-evaluates. A failed evaluation of the same evidence waits an hour.
+  Merged or closed tasks that were never evaluated are not started, so turning
+  learning on does not pay for old work. Rejected: evaluating inside the runner, which
+  delays the handover and misses later feedback; a scheduled job, which is a daemon.
+- **The agent judges; Go keeps the books.** One evaluator turn reads the evidence and
+  the repository's current learnings and returns proposals and revisions. Go decides
+  what is stored, so the rules below are tested and a model cannot argue past them.
+  Rejected: letting the agent edit `knowledge.md`, which nobody could audit.
+- **Promotion rules** (`knowledge.Store.apply`):
+  - A `one_off` proposal stays in the task's evaluation only.
+  - A `reusable` proposal backed by a maintainer (a recorded decision or a developer's
+    PR comment) is active at once. An `observed` one is a candidate until evidence
+    from two tasks backs it.
+  - The prompt numbers the task's answered decisions (D1...) and human PR comments
+    (C1...). A `source: maintainer` item must cite some of them in `cites`, and
+    nothing else (`Evaluation.MaintainerRefs`). Otherwise Go treats it as observed
+    and logs it, so a model cannot invent a correction. The evaluator still judges
+    whether the cited item says what it claims; the citations, kept in the evidence,
+    make that judgment auditable.
+  - A maintainer revision or retirement applies at once. An observed one applies only
+    when its task started after the learning's latest evidence from other tasks; a
+    learning with no other task's evidence cannot be retired by observation.
+  - Observed work cannot revive a retired learning; a maintainer proposal can.
+  - Re-evaluating a task first removes that task's earlier evidence and withdraws
+    its earlier retire, restore, confirm (maintainer support of a live learning), or
+    rewrite entries, so the new evaluation replaces them. Go then replays the entries
+    still in force. The learning is retired when the last retire, restore, or
+    confirm is a retire; otherwise its evidence sets its status. The text becomes
+    the newest rewrite still in force, from each rewrite's stored `to` text, or the
+    original text when none is left.
+- **Learnings are generic.** `knowledge.Sanitize` rejects text with issue, PR, or
+  commit references (including Linear or Jira keys such as `ABC-12`, but not names
+  such as `UTF-8` or `SHA-256`), URLs, emails, absolute paths, tokens or keys, or more than 300 characters,
+  and logs the item number and reason, never the text. `knowledge.md` carries no ids,
+  issue or PR numbers, or evidence. Repository-relative paths and plain numbers
+  stay, because "keep functions under 80 lines" or "internal/app depends only on its
+  ports" is the kind of guidance a repository needs. Evidence notes in the YAML are
+  redacted the same way.
+- **The evaluator has no tools.** Claude runs with `--tools ""`. Codex has no switch
+  that removes every tool, so its turn runs read-only with `--ignore-user-config`
+  (no user MCP servers or plugins), `--ignore-rules`, web search off, and the shell,
+  code mode, subagent, app, browser, and image features off. Either way, a turn that
+  records a tool call is discarded as a failed evaluation. Codex counts every
+  completed item other than a message, reasoning, a todo list, or an error as a tool
+  call, so a new tool type cannot slip through.
+- **The evaluator reads every human comment on the PR**, not only those the task
+  file recorded, and leaves out logins ending in `[bot]`, because the gate stops recording when the PR merges or closes. The
+  merge changes the fingerprint, so the evaluation after it sees comments posted just
+  before it. A comment posted after that evaluation starts nothing.
+- **Time and cost are context, not a score.** The evaluator prompt says so, and says
+  CI is not evidence. A long or expensive task is not a failure by itself.
+- **Prompts get a bounded selection.** Planning and implementation turns, including
+  fresh-session fallbacks and checkpoints, carry a `## Repository knowledge` section:
+  at most 8 active learnings and 2000 characters, heading and notice included, from
+  the task's repository, ranked
+  by word overlap with the issue title, body, and labels, then by task count, then by
+  recency. The section says the learnings may be wrong and lose to repository
+  instructions, the issue, decisions, context, and verified facts. Review, selector,
+  conflict, and merge prompts never carry it, so review stays independent. A read
+  error drops the section and logs a line.
+- **Learning is a side job.** `learning.enabled: false` stops new evaluations, even
+  from a learner spawned before the change, because `App.Learn` checks it too;
+  prompts still read the knowledge already stored. `learning.budget_usd` (default
+  0.50) caps one Claude evaluation. Codex reports no cost, so its evaluations have no
+  cap, like its other turns. Evaluation errors go to `learning.log` and never
+  change a task, an alert, or an exit code.
 
 ### Notifications
 

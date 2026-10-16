@@ -349,3 +349,45 @@ func TestCorruptAutoStateIsAnError(t *testing.T) {
 		t.Fatal("a corrupt state file loaded without an error")
 	}
 }
+
+func TestLearningDefaultsToOnWithAKnowledgeDirUnderTheDataDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("FOREMAN_CONFIG", "")
+	t.Setenv("FOREMAN_TASKS_DIR", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.KnowledgeDir != filepath.Join(home, ".local/share/foreman/knowledge") || !cfg.Learning.Enabled || cfg.Learning.BudgetUSD != 0.5 {
+		t.Fatalf("knowledge_dir %q learning %+v", cfg.KnowledgeDir, cfg.Learning)
+	}
+}
+
+func TestLearningSettingsOverlayDefaults(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("FOREMAN_CONFIG", "")
+	t.Setenv("FOREMAN_TASKS_DIR", "")
+	os.MkdirAll(filepath.Join(home, ".config/foreman"), 0o755)
+	os.WriteFile(filepath.Join(home, ".config/foreman/config.yaml"), []byte("knowledge_dir: ~/kb\nlearning:\n  enabled: false\n  budget_usd: 0.2\n"), 0o644)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.KnowledgeDir != filepath.Join(home, "kb") || cfg.Learning.Enabled || cfg.Learning.BudgetUSD != 0.2 {
+		t.Fatalf("knowledge_dir %q learning %+v", cfg.KnowledgeDir, cfg.Learning)
+	}
+}
+
+func TestLoadRejectsANegativeLearningBudget(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("FOREMAN_CONFIG", "")
+	t.Setenv("FOREMAN_TASKS_DIR", "")
+	os.MkdirAll(filepath.Join(home, ".config/foreman"), 0o755)
+	os.WriteFile(filepath.Join(home, ".config/foreman/config.yaml"), []byte("learning:\n  budget_usd: -1\n"), 0o644)
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "learning.budget_usd") {
+		t.Fatalf("err = %v", err)
+	}
+}

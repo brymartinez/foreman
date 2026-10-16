@@ -74,12 +74,12 @@ func (c Claude) run(ctx context.Context, in StartInput, session task.Session, se
 	if in.MaxBudgetUSD > 0 {
 		args = append(args, "--max-budget-usd", fmt.Sprintf("%.2f", in.MaxBudgetUSD))
 	}
-	raw, cost, err := c.exec(ctx, in, args)
+	raw, usage, err := c.exec(ctx, in, args)
 	if err != nil {
 		return Turn{Session: session}, err
 	}
 	outcome, err := ParseOutcome(raw)
-	return Turn{Session: session, Outcome: outcome, Usage: task.Usage{ClaudeCostUSD: cost, ClaudeTurns: 1}}, err
+	return Turn{Session: session, Outcome: outcome, Usage: usage}, err
 }
 
 // ReviewTools lets the reviewer read code and git history and nothing else; dontAsk
@@ -103,48 +103,52 @@ func (c Claude) Review(ctx context.Context, in StartInput) (ReviewOutcome, error
 	if in.MaxBudgetUSD > 0 {
 		args = append(args, "--max-budget-usd", fmt.Sprintf("%.2f", in.MaxBudgetUSD))
 	}
-	raw, cost, err := c.exec(ctx, in, args)
+	raw, usage, err := c.exec(ctx, in, args)
 	if err != nil {
 		return ReviewOutcome{}, err
 	}
 	out, err := ParseReview(raw)
-	out.Usage = task.Usage{ClaudeCostUSD: cost, ClaudeTurns: 1}
+	out.Usage = usage
 	return out, err
 }
 
 // exec runs claude -p, copies its stream-json events to the log, and returns the
-// result event's structured_output.
-func (c Claude) exec(ctx context.Context, in StartInput, args []string) (json.RawMessage, float64, error) {
+// result event's structured_output with the turn's cost and tool calls.
+func (c Claude) exec(ctx context.Context, in StartInput, args []string) (json.RawMessage, task.Usage, error) {
 	if c.Model != "" {
 		args = append(args, "--model", c.Model)
 	}
 	pr, pw := io.Pipe()
 	var result []byte
+	var tools map[string]int
 	done := make(chan struct{})
-	go func() { result = consumeClaudeStream(pr, logOrDiscard(in.Log)); close(done) }()
+	go func() { result, tools = consumeClaudeStream(pr, logOrDiscard(in.Log)); close(done) }()
 	runErr := c.Exec(ctx, Command{Name: c.Bin, Args: args, Dir: in.Worktree, Stdout: pw, Stderr: logOrDiscard(in.Log)})
 	pw.Close()
 	<-done
 	if result == nil {
-		return nil, 0, fmt.Errorf("claude printed no result (%v): %w", runErr, ErrNoSession)
+		return nil, task.Usage{}, fmt.Errorf("claude printed no result (%v): %w", runErr, ErrNoSession)
 	}
 	var r claudeResult
 	_ = json.Unmarshal(result, &r)
 	// A resume of a missing session reports error_during_execution without a turn.
 	if r.IsError && r.NumTurns == 0 && r.Subtype == "error_during_execution" {
-		return nil, 0, fmt.Errorf("claude ran no turn (%v): %w", runErr, ErrNoSession)
+		return nil, task.Usage{}, fmt.Errorf("claude ran no turn (%v): %w", runErr, ErrNoSession)
 	}
+	usage := task.Usage{ClaudeCostUSD: r.TotalCostUSD, ClaudeTurns: 1, ToolCalls: tools}
 	raw, err := parseClaudeResult(result, in.Log)
 	if err != nil && runErr != nil {
-		return nil, 0, fmt.Errorf("claude exited: %w (%w)", runErr, err)
+		return nil, usage, fmt.Errorf("claude exited: %w (%w)", runErr, err)
 	}
-	return raw, r.TotalCostUSD, err
+	return raw, usage, err
 }
 
 // consumeClaudeStream copies each event line to the log and returns the last result
-// event. Other events can follow the result, so it reads to the end.
-func consumeClaudeStream(r io.Reader, log io.Writer) []byte {
+// event and the tool_use blocks counted by tool name. Other events can follow the
+// result, so it reads to the end.
+func consumeClaudeStream(r io.Reader, log io.Writer) ([]byte, map[string]int) {
 	var result []byte
+	var tools map[string]int
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	for sc.Scan() {
@@ -154,14 +158,33 @@ func consumeClaudeStream(r io.Reader, log io.Writer) []byte {
 		}
 		fmt.Fprintf(log, "%s\n", line)
 		var ev struct {
-			Type string `json:"type"`
+			Type    string `json:"type"`
+			Message struct {
+				Content []struct {
+					Type string `json:"type"`
+					Name string `json:"name"`
+				} `json:"content"`
+			} `json:"message"`
 		}
-		if json.Unmarshal(line, &ev) == nil && ev.Type == "result" {
+		if json.Unmarshal(line, &ev) != nil {
+			continue
+		}
+		switch ev.Type {
+		case "result":
 			result = bytes.Clone(line)
+		case "assistant":
+			for _, c := range ev.Message.Content {
+				if c.Type == "tool_use" && c.Name != "" {
+					if tools == nil {
+						tools = map[string]int{}
+					}
+					tools[c.Name]++
+				}
+			}
 		}
 	}
 	_, _ = io.Copy(io.Discard, r)
-	return result
+	return result, tools
 }
 
 var transcriptUnsafe = regexp.MustCompile(`[^a-zA-Z0-9]`)

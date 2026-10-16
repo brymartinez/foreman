@@ -76,6 +76,12 @@ type App struct {
 	RoutingErr      error
 	RoutingDefaults routing.Defaults
 	Selector        Selector
+	// Knowledge and Evaluator learn from finished tasks. Learning starts the
+	// evaluations; off, prompts still read the knowledge already stored.
+	Knowledge         KnowledgeStore
+	Evaluator         Evaluator
+	Learning          bool
+	LearningBudgetUSD float64
 	// Quota may be nil, which makes every agent's quota unknown.
 	Quota QuotaChecker
 	// Accounts and RemoteAuth pin each task to a GitHub account. A nil Accounts turns
@@ -122,6 +128,7 @@ func (a App) inboxView(ctx context.Context, allRepos bool, source task.Source) (
 	if err := a.reap(ctx, recs, reapable(recs, dead, checked)); err != nil {
 		return InboxReport{}, err
 	}
+	a.startLearners(recs)
 	items, truncated, sourceWarnings, available, err := a.discoverSources(ctx, source, allRepos)
 	if err != nil {
 		return InboxReport{}, err

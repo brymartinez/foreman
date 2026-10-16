@@ -94,6 +94,15 @@ Headless mode is `codex exec <prompt>`.
   selector runs in a scratch directory with it. On 2026-10-03, `exec --ephemeral
   --skip-git-repo-check -s read-only --output-schema` in an empty directory emitted
   `thread.started` and wrote the schema reply.
+- **No tools-off switch.** Checked on 2026-10-16 with Codex CLI 0.162.1. `-s read-only`
+  still lets the model run shell commands and call the user's MCP servers; a
+  `node_repl` MCP tool listed `/`. `--ignore-user-config` drops the user's MCP
+  servers and plugins and still uses the stored login. With it, `--ignore-rules`,
+  `-c web_search="disabled"`, and `features.<name>=false` for `shell_tool`,
+  `unified_exec`, `code_mode_host`, `multi_agent`, and the app, browser, and image
+  features, a request to read `/etc/hosts` failed: code mode fails closed and logs an
+  `error` item. Subagent tools stayed listed, so the evaluator also rejects any turn
+  that completes a tool item.
 
 ## quota-axi
 

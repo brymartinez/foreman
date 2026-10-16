@@ -29,6 +29,9 @@ func TestMain(m *testing.M) {
 		case <-time.After(10 * time.Second):
 		}
 		os.Exit(0)
+	case len(os.Args) > 2 && os.Args[1] == LearnCommand:
+		fmt.Println("learner for", os.Args[2])
+		os.Exit(0)
 	case len(os.Args) > 1 && os.Args[1] == RunCommand:
 		time.Sleep(300 * time.Millisecond)
 		fmt.Println("written after the launcher exited")
@@ -115,5 +118,26 @@ func TestStopSignalsTheRunnerWhenProcessListingIsUnavailable(t *testing.T) {
 	}
 	if stopped, err := p.Stop(key, pid); err != nil || !stopped {
 		t.Errorf("stopping an exited runner = %v, %v", stopped, err)
+	}
+}
+
+func TestSpawnLearnRunsTheLearnerWithItsOutputInLearningLog(t *testing.T) {
+	dir := t.TempDir()
+	p := Processes{LogDir: dir}
+	if err := p.SpawnLearn(task.Key{Repo: "o/r", Number: 7}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.SpawnLearn(task.Key{Repo: "o/r", Source: task.Linear, ExternalID: "ENG-3"}); err != nil {
+		t.Fatal(err)
+	}
+	var out string
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		raw, _ := os.ReadFile(filepath.Join(dir, "learning.log"))
+		if out = string(raw); strings.Count(out, "learner for") == 2 {
+			break
+		}
+	}
+	if !strings.Contains(out, "learner for o/r#7\n") || !strings.Contains(out, "learner for o/r#linear:ENG-3\n") {
+		t.Fatalf("learning.log = %q", out)
 	}
 }

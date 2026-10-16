@@ -477,6 +477,44 @@ func TestStoreRejectsAnUnknownPhase(t *testing.T) {
 	}
 }
 
+func TestStoreRoundTripsToolCallCounts(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	want := delegated()
+	want.Usage = task.Usage{CodexTurns: 2, ToolCalls: map[string]int{"command_execution": 4, "file_change": 2}}
+	if err := s.Save(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, want.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Usage, want.Usage) {
+		t.Fatalf("usage\n got: %+v\nwant: %+v", got.Usage, want.Usage)
+	}
+}
+
+func TestOldFileLoadsWithoutToolCallsAndSavesNone(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	old := "---\nrepo: a/b\nnumber: 3\nkind: issue\nstate: READY_FOR_HUMAN\nimplementation_agent: claude\nbranch: feat/3-x\nusage:\n  claude_cost_usd: 1.5\n  claude_turns: 2\n---\n"
+	if err := os.WriteFile(filepath.Join(s.Dir, "a-b-3.md"), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, task.Key{Repo: "a/b", Number: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Usage.ToolCalls != nil || got.Usage.ClaudeCostUSD != 1.5 {
+		t.Fatalf("usage = %+v", got.Usage)
+	}
+	if err := s.Save(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(s.Dir, "a-b-3.md"))
+	if strings.Contains(string(raw), "tool_calls") {
+		t.Errorf("saved an empty tool_calls key:\n%s", raw)
+	}
+}
+
 func TestStoreRoundTripsPinnedAccount(t *testing.T) {
 	s := Markdown{Dir: t.TempDir()}
 	want := delegated()

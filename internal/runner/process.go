@@ -1,5 +1,6 @@
 // Package runner launches the detached per-task process (`foreman __run owner/repo#N`)
-// and checks whether one is still alive. There is no daemon.
+// and checks whether one is still alive, and launches the detached learner
+// (`foreman __learn owner/repo#N`). There is no daemon.
 package runner
 
 import (
@@ -18,6 +19,12 @@ import (
 
 // RunCommand is the hidden CLI verb the runner process executes.
 const RunCommand = "__run"
+
+// LearnCommand is the hidden CLI verb the learner process executes.
+const LearnCommand = "__learn"
+
+// LearningLog is the file in LogDir every learner appends to.
+const LearningLog = "learning.log"
 
 type Processes struct {
 	LogDir string
@@ -61,11 +68,7 @@ func (p Processes) Spawn(key task.Key) (int, string, error) {
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
 		return 0, "", err
 	}
-	issueArg := fmt.Sprintf("%s#%d", key.Repo, key.Number)
-	if key.Source == task.Linear {
-		issueArg = fmt.Sprintf("%s#linear:%s", key.Repo, key.ExternalID)
-	}
-	cmd := exec.Command(exe, RunCommand, issueArg)
+	cmd := exec.Command(exe, RunCommand, keyArg(key))
 	// The log must be the file itself. Any other writer makes this process copy
 	// the output through a pipe, and the runner dies once this process exits.
 	cmd.Stdout, cmd.Stderr = log, log
@@ -82,6 +85,40 @@ func (p Processes) Spawn(key task.Key) (int, string, error) {
 		return 0, "", err
 	}
 	return pid, logPath, cmd.Process.Release()
+}
+
+// SpawnLearn starts the learner for key in its own session and returns without
+// waiting. Learners need no lock file: the knowledge store's repository lock keeps
+// them from overlapping, and nothing stops one. All of them append to LearningLog.
+func (p Processes) SpawnLearn(key task.Key) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(p.LogDir, 0o755); err != nil {
+		return err
+	}
+	log, err := os.OpenFile(filepath.Join(p.LogDir, LearningLog), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer log.Close()
+	cmd := exec.Command(exe, LearnCommand, keyArg(key))
+	cmd.Stdout, cmd.Stderr = log, log
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	// Wait in the background so a dashboard that lives on does not collect zombies.
+	go cmd.Wait()
+	return nil
+}
+
+func keyArg(key task.Key) string {
+	if key.Source == task.Linear {
+		return fmt.Sprintf("%s#linear:%s", key.Repo, key.ExternalID)
+	}
+	return fmt.Sprintf("%s#%d", key.Repo, key.Number)
 }
 
 // Alive reports whether pid is a running foreman runner. The inherited lock

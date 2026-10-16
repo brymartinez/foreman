@@ -388,6 +388,55 @@ tasks_dir: ~/Documents/vault/foreman
 
 Each task then appears as a note, and the frontmatter shows up as properties.
 
+## Learning
+
+Foreman evaluates each task once it has a clean review, and again when new evidence
+arrives: a later review, an answered decision, a PR comment, a new PR head, or the PR
+merging or closing. CI results are not evidence. The evaluation is one turn with the
+task's implementer agent, with no tools, run by a detached `foreman __learn` process.
+It reads the task file, the PR's comments from people (not bots), and the
+repository's current learnings and recent evaluations, never the logs or the agent
+transcripts. A turn that calls a tool anyway is discarded. Its output goes to
+`<log_dir>/learning.log`. An evaluation that fails
+never changes the task or sends an alert.
+
+What it learns is kept per repository under `knowledge_dir`:
+
+```
+~/.local/share/foreman/knowledge/<owner>/<repo>/
+  knowledge.md            active learnings, for people and prompts
+  learnings.yaml          every learning with its status, evidence, and history
+  evaluations/<task>.yaml each task's assessment, signals, and proposals
+  attempts/<task>.yaml    the last evaluation attempt
+  learning.lock           one evaluation per repository at a time
+```
+
+A learning becomes active when the developer backs it, through a decision answer or a
+PR comment, or when two tasks support it. The evaluator must cite the decision or
+comment by id; a claim without a real citation from the task counts as one task's
+observation. One task's observation stays a candidate.
+The developer's correction retires or rewrites a learning at once; observed work does
+so only from a newer task. Learnings are short and generic: foreman drops any with
+issue or PR numbers, issue keys such as `ABC-12`, commit hashes, URLs, emails, absolute paths, or secret-shaped
+text. Paths inside the repository are kept.
+
+Planning and implementation prompts carry up to 8 active learnings in a section of
+at most 2000 characters, from the task's repository only, under `## Repository knowledge`. The
+prompt says they may be wrong and that the repository's instructions, the issue, and
+your decisions win. Review prompts never carry them.
+
+Set `learning.enabled: false` to stop new evaluations. Prompts still use what is
+already learned. To forget a repository's knowledge, delete its directory. To remove
+one learning, delete its entry from `learnings.yaml`. Prompts read that file, and the
+next evaluation rewrites `knowledge.md`.
+
+`knowledge.md` is the contract for other tools, such as the `foreman-triage` skill.
+It starts with a `# Repository knowledge` heading and a line saying the learnings are
+fallible, then has up to three sections, `## Conventions`, `## Repository facts`,
+and `## Working practices`, each a list of one-sentence bullets. It holds no ids,
+issue or PR numbers, or evidence. A reader should pick the file by the verified target
+repository, use the bullets that fit the issue, and not publish the file wholesale.
+
 ## Configuration
 
 Foreman reads `~/.config/foreman/config.yaml`, or the file named in `$FOREMAN_CONFIG`.
@@ -398,6 +447,7 @@ tasks_dir: ~/.local/share/foreman/tasks
 worktrees_dir: ~/.local/share/foreman/worktrees
 repositories_dir: ~/.local/share/foreman/repositories # source checkouts for delegated work
 log_dir: ~/.local/share/foreman/logs
+knowledge_dir: ~/.local/share/foreman/knowledge # what foreman learns, per repository
 review_rounds: 3                     # reviewer passes over the whole PR per review
 fix_rounds: 3                        # fix and re-review cycles before foreman asks you
 mentions: true                       # show items found only because they mention you
@@ -408,6 +458,9 @@ auto:                                # the dashboard's auto mode; press a to tur
 budgets:                             # Claude only: Codex reports no cost, so it has no cap
   implementer_usd: 3.00              # Claude maximum per implementation turn
   reviewer_usd: 1.00                 # Claude maximum per review turn
+learning:
+  enabled: true                      # evaluate finished tasks; off keeps existing knowledge in prompts
+  budget_usd: 0.50                   # Claude maximum per evaluation; 0 sets no cap; Codex has none
 notifications:
   enabled: true                      # decision, failure, readiness, and feedback alerts
   webhook_url: ""                    # Discord webhook URL; a secret, keep this file chmod 600

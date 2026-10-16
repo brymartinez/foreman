@@ -217,7 +217,14 @@ type codexEvent struct {
 	Error    *struct {
 		Message string `json:"message"`
 	} `json:"error"`
+	Item *struct {
+		Type string `json:"type"`
+	} `json:"item"`
 }
+
+// codexNonToolItems are the item types that are not tool calls. Every other
+// completed item counts as one, so a tool type a newer Codex adds is counted too.
+var codexNonToolItems = map[string]bool{"agent_message": true, "reasoning": true, "todo_list": true, "error": true}
 
 // consume copies the JSONL event stream to the log and reports thread.started immediately.
 func (e *codexEvents) consume(r io.Reader) {
@@ -238,6 +245,13 @@ func (e *codexEvents) consume(r io.Reader) {
 			}
 		case "error":
 			e.lastError = ev.Message
+		case "item.completed":
+			if ev.Item != nil && ev.Item.Type != "" && !codexNonToolItems[ev.Item.Type] {
+				if e.usage.ToolCalls == nil {
+					e.usage.ToolCalls = map[string]int{}
+				}
+				e.usage.ToolCalls[ev.Item.Type]++
+			}
 		case "turn.failed":
 			if ev.Error != nil {
 				e.lastError = ev.Error.Message
