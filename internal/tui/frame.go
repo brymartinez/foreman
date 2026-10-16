@@ -546,6 +546,10 @@ func footer(m Model) string {
 		return routeHints(m)
 	case TypingContext:
 		return "Context file (enter to skip): " + m.Input + "█"
+	case ProposingBranch:
+		return "Reading repository branch rules…   esc cancel"
+	case TypingBranch:
+		return "Branch name (edit, enter to start): " + m.Input + "█"
 	case ConfirmingCancel:
 		if m.cancelTarget == (task.Key{}) {
 			return "Nothing to cancel. [y/n]"

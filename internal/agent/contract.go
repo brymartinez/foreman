@@ -21,11 +21,12 @@ var OutcomeSchema []byte
 type Status string
 
 const (
-	Planned    Status = "planned"
-	Checkpoint Status = "checkpoint"
-	PROpened   Status = "pr_opened"
-	Blocked    Status = "blocked"
-	FailedRun  Status = "failed"
+	Planned        Status = "planned"
+	Checkpoint     Status = "checkpoint"
+	PROpened       Status = "pr_opened"
+	Blocked        Status = "blocked"
+	FailedRun      Status = "failed"
+	BranchProposed Status = "branch_proposed"
 )
 
 type Check = task.Check
@@ -41,7 +42,9 @@ type Outcome struct {
 	Validation    []Check
 	Questions     []task.Question
 	// Documents are the planning documents a planned turn wrote, by task.PlanDocs.
-	Documents map[task.PlanDoc]string
+	Documents  map[task.PlanDoc]string
+	BranchName string
+	Uncertain  bool
 }
 
 // CheckpointValidationError keeps the failed commands available for a repair turn.
@@ -69,6 +72,8 @@ type wireOutcome struct {
 	Validation    []Check         `json:"validation"`
 	Questions     []task.Question `json:"questions"`
 	Documents     *wireDocuments  `json:"documents"`
+	BranchName    *string         `json:"branchName"`
+	Uncertain     *bool           `json:"uncertain"`
 }
 
 func ParseOutcome(raw []byte) (Outcome, error) {
@@ -81,6 +86,11 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 	}
 	out := Outcome{Status: w.Status, Summary: w.Summary}
 	switch w.Status {
+	case BranchProposed:
+		if w.BranchName == nil || strings.TrimSpace(*w.BranchName) == "" || w.Uncertain == nil {
+			return Outcome{}, errors.New("branch proposal needs a name and uncertainty")
+		}
+		out.BranchName, out.Uncertain = strings.TrimSpace(*w.BranchName), *w.Uncertain
 	case Planned:
 		if w.Documents == nil {
 			return Outcome{}, errors.New("planned outcome has no documents")

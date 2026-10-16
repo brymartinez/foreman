@@ -120,7 +120,7 @@ task's state. The selected row is drawn in reverse video with no color inside it
 |---|---|
 | `tab`, `←` `→`, `h` `l` | switch between inbox and delegated work |
 | `↑` `↓`, `k` `j` | move the focused list cursor |
-| `enter` on an issue | delegate it: pick `1` for Claude, `2` for Codex, or `3` to route it, then type an optional context file. A `FAILED` issue starts again; a `REVIEWED` one resumes on its PR comments |
+| `enter` on an issue | delegate it: pick `1` for Claude, `2` for Codex, or `3` to route it, type an optional context file, then confirm or edit the proposed branch. A `FAILED` issue starts again on its stored branch |
 | `enter` on a task | open its log below, or the waiting question on a `NEEDS_DECISION` task |
 | `c` | cancel the highlighted delegated task, after a `y`/`n` confirm |
 | `a` | turn auto mode on or off; the choice is kept for the next launch |
@@ -158,7 +158,7 @@ assigned to you that foreman has never delegated, oldest first, with `auto.agent
 no context file. It looks after the first refresh, after each successful refresh, and
 when a run leaves WORKING or REVIEWING. Only issues with the exact `triaged` label
 start automatically; you can start an unlabelled issue by hand. Mentions, FAILED
-tasks, and REVIEWED tasks never start on their own. At most `auto.max_concurrent`
+tasks, and previously REVIEWED tasks never start on their own. At most `auto.max_concurrent`
 runs are active at once, and
 runs you start by hand count toward that limit. Issues in one repository start one
 at a time, because they share its checkout. You can still start an issue by hand
@@ -216,14 +216,17 @@ part of the task.
 
 ### What a start does
 
-1. It creates a worktree and branch named after the issue, for example
-   `fix/825-provider-retries`. The slug is capped at 5 words, and the worktree directory
-   is `825-provider-retries`.
+1. For a new task, it proposes a branch from the issue and repository guidance in
+   `AGENTS.md` and linked Markdown files. Manual starts show the name for editing;
+   auto mode waits if the workstream or guidance is unclear. Foreman checks the chosen
+   name, then creates the branch and worktree. Existing tasks keep their stored branch.
+   Without repository guidance, the default is `fix/825-provider-retries` for a fix
+   issue; its slug is capped at 5 words.
    - The prefix is a conventional-commit type. Foreman takes it from the title's own
      prefix (`fix: …`), otherwise from a label (`bug` → `fix`, `documentation` →
      `docs`, …), otherwise it uses `feat`.
-   - For a Linear issue, Foreman uses the branch name supplied by Linear when
-     available. Existing tasks keep their stored branch.
+   - For a Linear issue without repository guidance, Foreman uses Linear's suggested
+     branch when available. Repository conventions take precedence over that suggestion.
 2. It launches a detached runner that logs to `~/.local/share/foreman/logs/`. The
    runner keeps going after you quit the dashboard.
 3. The runner has the agent implement the issue, run validation, push, and open a PR
@@ -315,7 +318,7 @@ questions. The task becomes `NEEDS_DECISION`, and the agent process ends. Nothin
 a terminal.
 
 Foreman posts to a Discord webhook when a task needs a decision, fails or is cancelled,
-becomes ready for review, or gets PR feedback. Each post names the alert, the task
+becomes ready for review. Each post names the alert, the task
 (`owner/repo#N`) and its state, and links the PR, or the issue when there is no PR yet.
 Set the webhook URL in `notifications.webhook_url` (see Configuration). The URL is a
 secret: keep the config file `chmod 600`. Foreman warns when the URL is missing or the
@@ -462,7 +465,7 @@ learning:
   enabled: true                      # evaluate finished tasks; off keeps existing knowledge in prompts
   budget_usd: 0.50                   # Claude maximum per evaluation; 0 sets no cap; Codex has none
 notifications:
-  enabled: true                      # decision, failure, readiness, and feedback alerts
+  enabled: true                      # decision, failure, and readiness alerts
   webhook_url: ""                    # Discord webhook URL; a secret, keep this file chmod 600
 claude:
   command: claude

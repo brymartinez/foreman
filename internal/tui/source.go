@@ -17,6 +17,7 @@ type Source interface {
 	// Tasks re-reads delegated work from the task files. It makes no GitHub call.
 	Tasks(ctx context.Context) ([]*task.Record, error)
 	Start(ctx context.Context, req app.StartRequest) (*task.Record, error)
+	ProposeBranch(ctx context.Context, req app.StartRequest) (app.BranchProposal, error)
 	// Route picks the profile a never-delegated issue starts with. It returns
 	// app.ErrRoutingOff when there is no routing.yaml.
 	Route(ctx context.Context, req app.RouteRequest) (app.Decision, error)

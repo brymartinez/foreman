@@ -17,6 +17,7 @@ type StartRequest struct {
 	Issue       int
 	Agent       task.Agent
 	ContextFile string // absolute path, or ""
+	BranchName  string // confirmed name for a new task; existing tasks keep their branch
 	// BranchType overrides the type inferred from the issue title and labels. It only
 	// applies to a task's first start; a stored branch is always reused.
 	BranchType task.BranchType
@@ -48,6 +49,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 	if key.Repo != info.Repo {
 		return nil, fmt.Errorf("issue belongs to %s, not %s", key.Repo, info.Repo)
 	}
+	req.Repo, req.Key = info.Repo, key
 	existing, err := a.Store.Get(ctx, key)
 	if err != nil {
 		return nil, err
@@ -89,20 +91,16 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 	if existing != nil && existing.Delegation != nil && existing.Delegation.Branch != "" {
 		branch = existing.Delegation.Branch
 	} else {
-		branchType := req.BranchType
-		if branchType == "" {
-			branchType = task.BranchTypeFor(issue.Title, issue.Labels)
-		}
-		work := task.WorkName(key.Number, issue.Title)
-		if key.Source == task.Linear {
-			work = "linear-" + task.Slug(issue.Identifier) + "-" + task.Slug(issue.Title)
-		}
-		branch = task.BranchName(branchType, work)
-		if key.Source == task.Linear && issue.BranchName != "" {
-			if !task.ValidBranchName(issue.BranchName) {
-				return nil, fmt.Errorf("Linear issue %s returned an invalid branch name %q", issue.Identifier, issue.BranchName)
+		branch = req.BranchName
+		if branch == "" {
+			proposal := a.proposeBranch(ctx, req, issue)
+			if proposal.Uncertain {
+				return nil, fmt.Errorf("branch needs a choice: %s", proposal.Reason)
 			}
-			branch = issue.BranchName
+			branch = proposal.Name
+		}
+		if !task.ValidBranchName(branch) {
+			return nil, fmt.Errorf("invalid branch name %q", branch)
 		}
 	}
 	workName := task.WorkNameOf(branch)
@@ -160,9 +158,8 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		// The same branch has the same PR, so a restart can pick up at its review.
 		// Another implementer starts over: its reviewer wrote the existing PR. A
 		// PR_CLOSED task's PR cannot be picked up, and keeping its number would have
-		// the readiness gate end this run on its next refresh. Comments still
-		// waiting on the PR keep it for any agent, because the run reads them through
-		// that number and the new agent has to answer them first.
+		// the readiness gate end this run on its next refresh. When feedback replies
+		// are enabled, waiting comments keep the PR for any agent.
 		sameAgent := prev != nil && prev.Implementer.Agent == req.Agent
 		if sameAgent && prev.Reviewer == req.Agent {
 			cur.Delegation.Reviewer = prev.Reviewer
@@ -175,7 +172,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		if req.Profile == nil && sameAgent && prev.Profile != nil {
 			cur.Delegation.Profile, cur.Delegation.RouteReason, cur.Delegation.RouteLogged = prev.Profile, prev.RouteReason, prev.RouteLogged
 		}
-		if was != task.PRClosed && prev != nil && prev.Branch == wt.Branch && (sameAgent || len(cur.UnhandledFeedback()) > 0) {
+		if was != task.PRClosed && prev != nil && prev.Branch == wt.Branch && (sameAgent || (a.ReplyToPRFeedback && len(cur.UnhandledFeedback()) > 0)) {
 			cur.Delegation.PR, cur.Delegation.PRURL, cur.Delegation.PRHead = prev.PR, prev.PRURL, prev.PRHead
 			// The same PR keeps its conflict repair: a spent one is not repeated, and one a
 			// dead runner left pending is finished by this run.

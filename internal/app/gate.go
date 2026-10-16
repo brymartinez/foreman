@@ -116,7 +116,18 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 		// A pull request the agents are done with is the developer's to comment on, so
 		// this is where feedback arrives. It runs after advance, so a task
 		// handed over by this same refresh is checked in the same pass.
-		if pr.State == "open" && a.handsOver(updated) {
+		if pr.State == "open" && !a.ReplyToPRFeedback && updated.State == task.Reviewed {
+			updated, err = a.update(ctx, r.Key, existing(func(cur *task.Record) {
+				if cur.State == task.Reviewed {
+					cur.State = task.ReadyForHuman
+					cur.Feedback = nil
+				}
+			}))
+			if err != nil {
+				return nil, nil, nil, err
+			}
+		}
+		if pr.State == "open" && a.ReplyToPRFeedback && a.handsOver(updated) {
 			withFeedback, feedbackNote, err := a.feedback(ctx, updated)
 			if err != nil {
 				warnings = append(warnings, err)

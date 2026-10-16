@@ -39,6 +39,37 @@ func refresh(t *testing.T, f fixture) {
 	}
 }
 
+func TestDisabledPRFeedbackLeavesBotCommentsForHuman(t *testing.T) {
+	f := newFixture()
+	f.app.ReplyToPRFeedback = false
+	key := ready(t, f)
+	f.gh.addPRComment(912, PRComment{Kind: task.IssueComment, ID: 4401, Author: "linear[bot]", Body: "<!-- linear-linkback --> linked issue"})
+	f.gh.addPRComment(912, PRComment{Kind: task.ReviewSummary, ID: 5501, Author: "github-actions[bot]", Body: "No actionable findings."})
+	refresh(t, f)
+
+	rec := f.store.recs[key]
+	if rec.State != task.ReadyForHuman || len(rec.Feedback) != 0 || f.gh.prCommentReads != 0 {
+		t.Fatalf("state %s, feedback %+v, comment reads %d", rec.State, rec.Feedback, f.gh.prCommentReads)
+	}
+}
+
+func TestDisabledPRFeedbackReleasesPreviouslyReviewedTask(t *testing.T) {
+	f := newFixture()
+	key := ready(t, f)
+	f.gh.addPRComment(912, prComment(4401, "Please check this."))
+	refresh(t, f)
+	if f.store.recs[key].State != task.Reviewed {
+		t.Fatal("setup: expected REVIEWED")
+	}
+	f.app.ReplyToPRFeedback = false
+	refresh(t, f)
+
+	rec := f.store.recs[key]
+	if rec.State != task.ReadyForHuman || len(rec.Feedback) != 0 || f.gh.prCommentReads != 1 {
+		t.Fatalf("state %s, feedback %+v, comment reads %d", rec.State, rec.Feedback, f.gh.prCommentReads)
+	}
+}
+
 func TestGateRaisesReviewedOnNewComment(t *testing.T) {
 	f := newFixture()
 	key := ready(t, f)

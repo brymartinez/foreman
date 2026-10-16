@@ -2,6 +2,17 @@
 
 ## Current stage
 
+Automatic PR feedback replies are disabled. PR comments stay on GitHub for the
+developer; Foreman no longer resumes an agent to answer them at handover or on a
+dashboard refresh. Legacy REVIEWED tasks return to READY_FOR_HUMAN on refresh.
+Vet, Go tests, build, and the feedback end-to-end scenario pass.
+
+Branch naming for new tasks now reads repository `AGENTS.md` and linked Markdown
+guidance before making a worktree. Manual starts show an editable proposal; auto
+starts wait when the convention or workstream is unclear. With no repository rule,
+Linear's suggestion or the existing conventional default applies. Restarts keep
+their stored branch. Vet, Go tests, build, and the end-to-end scenarios pass.
+
 Stage 61 (per-repository evaluation and learning, for issue #61) is complete.
 Task usage records tool-call counts by name. A detached `foreman __learn` evaluates a
 task when its run ends on a clean review, and a refresh starts it again when the
@@ -21,12 +32,6 @@ the active `gh` login and noreply email on the task. Every launch and implemente
 sets the worktree's commit identity, and fails the task before the agent runs when
 `gh` or the SSH origin's key is on another account. The `account` end-to-end scenario
 covers the pin, the commit author, and both mismatches.
-
-Linear branch naming uses the name supplied by Linear for new Linear tasks when
-available. GitHub issues and Linear issues without a supplied name keep the
-conventional type prefix; restarts keep their stored branch. Repository PR
-instructions and templates take precedence over global PR defaults. Vet, Go tests,
-build, and the Linear end-to-end scenario pass.
 
 Stage 58 (per-repository Linear issue sources) is complete. Configuration maps GitHub
 repositories to Linear projects. The dashboard selects GitHub, Linear, or both issue
@@ -146,8 +151,8 @@ Findings 1 to 4 were fixed in stage 28.
 - The gate runs only while the dashboard is open, because the design rules out
   daemons. Nothing else runs while it is closed except a task's own runner.
   Notifications come from the runner and from dashboard refreshes.
-- A PR_CLOSED task cannot be restarted: the inbox offers only FAILED and REVIEWED
-  delegated work. Reopening the PR brings it back.
+- A PR_CLOSED task cannot be restarted: the inbox offers FAILED delegated work.
+  Reopening the PR brings it back.
 - The dashboard does not show which searches hit the 1000-result limit, or the
   inbox's change notes for tasks it does not offer.
 - `gh pr checks` handling is verified against gh's documented behavior and fixtures,
@@ -156,9 +161,6 @@ Findings 1 to 4 were fixed in stage 28.
   check, and foreman gates on it.
 - A search that returns 1000 results is flagged, and lost reasons aren't judged
   while one is truncated.
-- An agent that leaves the reply marker off reads its own reply as new feedback. That
-  costs one extra round, bounded by the per-run cap.
-- PR feedback has been checked against the stand-in `gh` and fixtures, not a live PR.
 - A PR comment posted after a merged or closed task's last evaluation is not learned,
   because nothing watches finished PRs. Codex evaluations have no spend cap.
 - The release workflow has not run: the repo has no GitHub remote yet.

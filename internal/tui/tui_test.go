@@ -31,6 +31,9 @@ func (s stubSource) Tasks(context.Context) ([]*task.Record, error) { return s.re
 func (s stubSource) Start(context.Context, app.StartRequest) (*task.Record, error) {
 	return s.rec, s.err
 }
+func (s stubSource) ProposeBranch(_ context.Context, req app.StartRequest) (app.BranchProposal, error) {
+	return app.BranchProposal{Name: fmt.Sprintf("feat/%d", req.Issue)}, nil
+}
 func (s stubSource) Route(context.Context, app.RouteRequest) (app.Decision, error) {
 	return app.Decision{}, app.ErrRoutingOff
 }

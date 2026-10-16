@@ -72,7 +72,7 @@ func TestAwaitingTriageIssueShowsStatusAndCanStartManually(t *testing.T) {
 	if detail := strings.Join(inboxPane(m).rows[0].lines, " "); !strings.Contains(detail, "awaiting triage") {
 		t.Fatalf("inbox detail = %q; want awaiting triage", detail)
 	}
-	if action := press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter}); action.Kind != ActionStart {
+	if action := confirmBranch(t, &m, press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter})); action.Kind != ActionStart {
 		t.Fatalf("manual start = %+v; want ActionStart", action)
 	}
 }
@@ -158,7 +158,7 @@ func TestAutoFillsOnlyFreeSlots(t *testing.T) {
 func TestAutoCountsManualAndInFlightStartsAgainstTheLimit(t *testing.T) {
 	m := autoModel(2, own(1, 0), own(2, 1), own(3, 2))
 	m.InboxCursor = 2
-	if a := press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter}); a.Kind != ActionStart {
+	if a := confirmBranch(t, &m, press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter})); a.Kind != ActionStart {
 		t.Fatalf("manual start = %+v", a)
 	}
 	if got := startedKeys(m.AutoStarts()); !slices.Equal(got, []task.Key{ownKey(1)}) {
@@ -179,7 +179,7 @@ func TestManualStartStillWorksWhenFull(t *testing.T) {
 		t.Fatalf("auto started %v with the limit full", got)
 	}
 	m.InboxCursor = 1
-	a := press(&m, Key{Kind: KeyEnter}, rune_('2'), Key{Kind: KeyEnter})
+	a := confirmBranch(t, &m, press(&m, Key{Kind: KeyEnter}, rune_('2'), Key{Kind: KeyEnter}))
 	if a.Kind != ActionStart || a.Start.Issue != 2 || a.Start.Agent != task.Codex {
 		t.Fatalf("manual start with the limit full = %+v", a)
 	}
@@ -262,7 +262,7 @@ func TestHeaderShowsAutoStateAndSlots(t *testing.T) {
 func TestAutoSkipsAnIssueStartedByHand(t *testing.T) {
 	m := autoModel(3, assigned("a/b", 1, 0))
 	m.AutoOn = false
-	press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter})
+	confirmBranch(t, &m, press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter}))
 	m.Done(key(1)) // the run finished and left the task list before the next refresh
 	m.AutoOn = true
 	if got := m.AutoStarts(); len(got) != 0 {

@@ -43,13 +43,17 @@ type InboxReport struct {
 }
 
 type App struct {
-	Store                TaskStore
-	GitHub               GitHubClient
+	Store  TaskStore
+	GitHub GitHubClient
+	// ReplyToPRFeedback is disabled in the CLI. It remains available to exercise
+	// the older feedback flow in tests while stored tasks are migrated.
+	ReplyToPRFeedback    bool
 	Linear               IssueTracker
 	LinearProjects       map[task.Repo]string
 	Repositories         RepositoryManager
 	Worktrees            WorktreeManager
 	Agents               map[task.Agent]AgentAdapter
+	BranchProposer       BranchProposer
 	Runners              Runners
 	Stages               StageInstructionResolver
 	WorktreesDir         string

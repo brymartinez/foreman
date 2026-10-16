@@ -56,10 +56,6 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
     blocked      -> NEEDS_DECISION with the agent's questions, exit
     anything else -> NEEDS_DECISION, "merge again" or "I fixed it", exit
     (a repair runner that cannot spawn or dies is also NEEDS_DECISION)
-  if the PR has comments the agent has not answered (resumed from REVIEWED):
-    turn = implementer.Resume(session, each comment, where it is, and how to reply)
-    head unchanged -> mark them answered, keep CI, READY_FOR_HUMAN
-    head moved     -> mark them answered, review the new head like any change
   if the verified PR head has no review (crash mid-review, or new commits):
     re-verify the PR, record its head, skip to the review below
   turn = implementer.Start(worktree, prompt)          # later: Resume(session, msg)
@@ -85,8 +81,7 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
                                   turns still conflicting -> NEEDS_DECISION, exit
                     review = reviewer.Review(disposable read-only session,
                                              PR description + PR comments + git diff + earlier rounds)
-                    clean    -> record review and the head it covered; read the PR's comments,
-                and answer anything new before handing over; stay REVIEWING, exit
+                    clean    -> record review and the head it covered; stay REVIEWING, exit
                     findings -> WORKING; implementer.Resume(session, findings); agent pushes
                                 fixes and reports pr_opened again; re-verify; re-review
                     findings after fix_rounds reviewed fixes since the last answer ->
@@ -109,9 +104,8 @@ foreman __learn       -> one evaluation of one task; output goes to <log_dir>/le
      learnings.yaml, rewrite knowledge.md. A failed turn writes nothing, and never
      changes the task, its alerts, or the runner's exit code
 
-app.Resume            -> a REVIEWED task goes back to WORKING with its branch,
-                         worktree, PR, and session kept; the runner answers the
-                         comments
+app.Resume            -> disabled for legacy REVIEWED tasks; the next refresh
+                         returns them to READY_FOR_HUMAN
 app.Respond           -> answer each waiting question in order; after the last,
                          state WORKING, spawn runner
                          runner: Resume(session, all answers); on ErrNoSession, a fresh
@@ -134,7 +128,7 @@ foreman [-a|--auto|--no-auto]
                            3 (routing on, never delegated) -> context file,
                              app.Route, show the profile and reason; enter ->
                              app.Start with the profile, esc -> agent choice
-                         enter on a REVIEWED issue -> app.Resume, no prompts
+                         legacy REVIEWED issues return to READY_FOR_HUMAN on refresh
                          enter on delegated work -> open that task's log below the lists
                          enter on a NEEDS_DECISION task -> the oldest unanswered
                            question below the lists; enter -> app.Respond with the
@@ -175,11 +169,8 @@ app.InboxView         -> runner pid dead while WORKING/REVIEWING -> FAILED
                              pending              -> record, wait
                              finished             -> READY_FOR_HUMAN, ✓ CI or ✗ CI: <checks>
                            READY_FOR_HUMAN: refresh the CI result; flag new commits
-                         and then, per task the agents are done with (READY_FOR_HUMAN
-                         or REVIEWED, PR open, no live runner):
-                           read the PR's comments, drop the agent's own replies
-                           any unanswered -> REVIEWED, shown in INBOX
-                           none left      -> READY_FOR_HUMAN
+                         and then, per legacy REVIEWED task with an open PR:
+                           clear stored feedback and return to READY_FOR_HUMAN
                          and then, per READY_FOR_HUMAN task with an open PR:
                            mergeable CONFLICTING, (PR head, base head) never tried ->
                              record the pair, WORKING, spawn a runner
@@ -256,11 +247,11 @@ the same commit. The commit message records why it changed.
 
   | Step | Does | Next |
   |---|---|---|
-  | `stepAnswer` | a turn on the waiting comments | stopped or blocked: done. Head unchanged: handover. Else review |
+  | `stepAnswer` | legacy PR feedback turn, disabled by the CLI | unused |
   | `stepPickUpReview` | re-verify the PR, record its head | PR not open: implement. Else review |
   | `stepImplement` | a plan, implement, or fix turn | plan posted or checkpoint verified: implement. Not REVIEWING: done. Else review |
-  | `stepReview` | conflict check, review, escalate | findings: implement. Clean: handover. Else done |
-  | `stepHandover` | read comments that arrived during the run | comments: answer. Else done |
+  | `stepReview` | conflict check, review, escalate | findings: implement. Clean: done |
+  | `stepHandover` | legacy comment handover, disabled by the CLI | unused |
 
   Every implementer turn goes through `runTurn` (turn, then the PR check) and
   `finishTurn` (one write through the uncancelled context, the cancel outcome, and
@@ -325,13 +316,15 @@ the same commit. The commit message records why it changed.
   alert, keeps the branch, and returns to READY_FOR_HUMAN or REVIEWING if the PR is
   reopened. A closed issue takes precedence and makes the task DONE. The runner can't write to a `PR_CLOSED` task, so the stop that
   follows is never saved as a failure.
-- **Names are computed once.** `task.WorkName` is `<issue>-<slug>` (at most 5 words
-  and 40 characters, conventional prefix removed). The default branch is
-  `<type>/<workName>`, with the type from the title prefix, the labels, then `feat`.
-  A new Linear task uses Linear's `branchName` when provided; an invalid name stops
-  before worktree creation. Without one, it uses the default branch name. The chosen
-  branch is stored at the first start, so renaming the issue changes nothing. Old
-  `agent/…` branches still work.
+- **Names are chosen once, before worktree creation.** The default branch is
+  `<type>/<workName>`, with the type from the title prefix, the labels, then `feat`;
+  `task.WorkName` is `<issue>-<slug>` (at most 5 words and 40 characters). A Linear
+  suggestion is the fallback when present. For new tasks, Foreman reads `AGENTS.md`
+  and linked Markdown branch guidance from the repository checkout. A tool-free
+  proposal applies the repository convention to the issue and tracker suggestion;
+  repository guidance takes precedence. A manual start shows an editable proposal.
+  Auto mode waits when the workstream or guidance is unclear. The chosen name is
+  validated before making a worktree and stored at the first start. Restarts keep it.
 
 ### Agents
 
@@ -371,13 +364,13 @@ the same commit. The commit message records why it changed.
   recorded decisions, developer context and stage instructions, commit, and objective;
   it omits the issue body and previous transcript. A retry keeps the objective only
   when the worktree still points at the accepted commit. Checkpoints are limited to
-  eight per task. Planning, PR feedback, merge repair, and review fixes do not
+  eight per task. Planning, merge repair, and review fixes do not
   checkpoint. Validation remains agent reported; Foreman verifies Git state.
   If a checkpoint reports failed validation, Foreman resumes the same session
   with the failed commands and allows two repair turns. A passing checkpoint
   then follows the usual Git checks; repeated failed validation fails the task.
 - **Models and effort are set per step:** `plan_model`, `model` (implementation, fixes,
-  feedback, merges, PR creation), and `review_model`; Codex also takes reasoning effort
+  merges, PR creation), and `review_model`; Codex also takes reasoning effort
   per step. Each turn logs an `agent:model:step` line. A routed task's stored profile
   replaces the plan and implementation settings for its turns; review settings never
   change.
@@ -489,14 +482,13 @@ the same commit. The commit message records why it changed.
   configures, or fixes CI. Every check gates, not just required ones; failing beats
   pending beats passing, and no checks passes as `✓ CI (no checks)`. A clean review
   with finished CI hands over even when CI failed, with the failing checks listed.
-- **PR feedback.** The gate reads the three comment threads of each handed-over PR on
-  every refresh. A comment is identified by kind, id, and a digest of its text, so an
-  edit counts again; the text itself is never stored. The agent prefixes its replies
-  with `<!-- foreman:reply -->` and foreman drops those, because replies post under the
-  developer's own login. A turn that leaves the head unchanged only replied and goes
-  straight back; one that moved it is reviewed. A run answers new comments at most
-  three times before handing over. Enter on a REVIEWED issue resumes with the branch,
-  PR, and session kept; a start rebuilds them.
+- **PR feedback replies are disabled.** Foreman leaves PR conversation comments and
+  review summaries for the developer to handle on GitHub. The runner does not start
+  a reply turn at handover or on restart, and the dashboard does not turn new PR
+  comments into REVIEWED tasks. A legacy REVIEWED task returns to READY_FOR_HUMAN on
+  refresh; a restarted task whose only pending work is old feedback returns to
+  REVIEWING until CI finishes, without an agent turn. Reviews still read PR comments
+  as history.
 - **A handed-over PR that conflicts is repaired once per (PR head, base head) pair.**
   Every attempted pair is kept, so none is tried twice. A repair is accepted only if
   the head moved, contains the base head, and every reported check passed; anything
@@ -515,8 +507,8 @@ the same commit. The commit message records why it changed.
   PRs, and review requests, each up to gh's maximum of 1000. A search that hits 1000 is
   reported as truncated, and lost reasons ("no longer assigned to you") are judged only
   when every search was complete.
-- **INBOX is work to start:** issues never delegated, plus delegated ones in FAILED or
-  REVIEWED. Work an agent holds stays in DELEGATED WORK, so an issue is never delegated
+- **INBOX is work to start:** issues never delegated, plus delegated ones in FAILED.
+  Work an agent holds stays in DELEGATED WORK, so an issue is never delegated
   twice. `mentions: false` hides mention-only items but never a delegated task that
   needs the developer.
 - **Auto mode requires current triage.** A never-delegated, open, assigned issue needs
@@ -531,8 +523,9 @@ the same commit. The commit message records why it changed.
   the selected inbox item, including Linear's stable issue ID. Routing reads the
   issue and recent comments from that tracker. In-flight starts and auto routing
   retries use the same key to release slots and retain routing selections.
-  A Linear branch uses the name supplied by Linear when available, otherwise its
-  display identifier and title. GitHub branches keep their numeric issue name.
+  When no repository branch guidance exists, a Linear task uses Linear's suggested
+  name when available, otherwise its display identifier and title. GitHub tasks
+  use their numeric issue name by default.
 - **Runner issue source.** A runner reads the issue through the source stored on
   the task. Planning documents are posted through that source and retain its
   comment IDs for later edits. A Linear task still opens its PR on GitHub; the

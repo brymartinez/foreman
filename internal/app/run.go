@@ -52,9 +52,24 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, log io.Writer) 
 			return err
 		}
 	}
-	// A resumed task answers the comments on its PR first.
-	feedback, rec, done, err := a.unanswered(ctx, final, rec, log)
-	if err != nil || done {
+	var feedback []PRComment
+	if a.ReplyToPRFeedback {
+		// A resumed task answers the comments on its PR first.
+		var done bool
+		feedback, rec, done, err = a.unanswered(ctx, final, rec, log)
+		if err != nil || done {
+			return err
+		}
+	} else if len(rec.UnhandledFeedback()) > 0 && rec.Delegation.PR != 0 && reviewCovers(rec, rec.Delegation.PRHead) {
+		// A task left by the old feedback flow already passed review. Hand it
+		// back without resuming the implementer on the same comments.
+		_, err = a.update(final, rec.Key, existing(func(cur *task.Record) {
+			cur.State = task.Reviewing
+			if cur.CI != nil && cur.CI.State != task.CIPending {
+				cur.State = task.ReadyForHuman
+			}
+			cur.Feedback = nil
+		}))
 		return err
 	}
 	r := &taskRun{a: a, ctx: ctx, final: final, log: log, rec: rec, feedback: feedback}
@@ -250,7 +265,7 @@ func (r *taskRun) review() (step, error) {
 	case rec.State == task.Working:
 		r.findings = rec.LatestReview()
 		return stepImplement, nil
-	case reviewErr == nil && review.Clean && rec.State == task.Reviewing:
+	case reviewErr == nil && review.Clean && rec.State == task.Reviewing && a.ReplyToPRFeedback:
 		return stepHandover, nil
 	}
 	return stepDone, nil
