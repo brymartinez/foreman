@@ -339,7 +339,10 @@ the same commit. The commit message records why it changed.
   blocks. A start also refuses when a reset lands between its read and its write. A
   failed removal names what is left and keeps it listed; the next start removes it
   first. A start that continues an open PR also clears the worktree path and branch it
-  is about to use. The PR link is saved before any of this. Nothing on GitHub changes. Deleting the file
+  is about to use. Before it removes anything, a start claims the reset record under
+  the task lock with a random owner token, and only that owner can save the run, so a
+  second start cannot clear the path under the first one's new worktree. A start that
+  gives up releases its claim. The PR link is saved before any of this. Nothing on GitHub changes. Deleting the file
   outright was rejected: auto mode would see a new issue and start it, and the PR link
   would be lost. Auto mode refuses a record with `reset`, and INBOX offers it for a
   manual start even when only tracking finds it. The next start reads the PR again. If

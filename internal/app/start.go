@@ -144,6 +144,21 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		// The worktree starts at the PR's head; the PR keeps the base it targets.
 		wt.BaseRef, base = "origin/"+branch, "origin/"+prior.BaseRefName
 	}
+	// owner is this start's claim on a reset issue; it holds other starts off until
+	// the run is saved, or is released when this start gives up first.
+	owner, saved := "", false
+	if existing != nil && existing.Delegation == nil && existing.Reset != nil {
+		claimed, token, err := a.claimReset(ctx, existing)
+		if err != nil {
+			return nil, err
+		}
+		owner, existing = token, claimed
+		defer func() {
+			if !saved {
+				a.releaseReset(ctx, key, owner)
+			}
+		}()
+	}
 	if err := a.finishReset(ctx, existing, wt, continuePR); err != nil {
 		return nil, err
 	}
@@ -160,11 +175,12 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		if cur == nil {
 			cur = &task.Record{Key: key, State: task.Discovered, Body: fmt.Sprintf("# %s %s\n\n## Notes\n\n", issueLabel(key, issue.Identifier), issue.Title)}
 		}
-		if err := a.startable(cur); err != nil {
+		if err := a.startableBy(cur, owner); err != nil {
 			return nil, err
 		}
-		// A reset since the record was read removes the worktree this start prepared.
-		if cur.Reset != nil && (existing == nil || existing.Reset == nil || !existing.Reset.At.Equal(cur.Reset.At)) {
+		// A reset since the record was read removes the worktree this start prepared,
+		// and only the start that claimed a reset issue may save its run.
+		if cur.Reset != nil && (owner == "" || cur.Reset.Cleanup == nil || cur.Reset.Cleanup.Owner != owner) {
 			return nil, fmt.Errorf("%s was reset while it started; start it again", taskRef(cur))
 		}
 		// Checked again under the task lock: another command may have started the
@@ -256,6 +272,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 	if err != nil {
 		return nil, err
 	}
+	saved = true
 
 	return a.launch(ctx, key)
 }
@@ -374,13 +391,19 @@ func newOnly(req StartRequest, rec *task.Record) error {
 	return nil
 }
 
-func (a App) startable(rec *task.Record) error {
+func (a App) startable(rec *task.Record) error { return a.startableBy(rec, "") }
+
+// startableBy is startable for the start that claimed a reset issue as owner.
+func (a App) startableBy(rec *task.Record, owner string) error {
 	if rec == nil {
 		return nil
 	}
 	ref := fmt.Sprintf("%s#%d", rec.Repo, rec.Number)
-	if a.resetting(rec) {
-		return fmt.Errorf("%s is being reset; start it once the reset finishes", ref)
+	if a.resetting(rec) && (owner == "" || rec.Reset.Cleanup.Owner != owner) {
+		if rec.Reset.Cleanup.Owner == resetOwner {
+			return fmt.Errorf("%s is being reset; start it once the reset finishes", ref)
+		}
+		return fmt.Errorf("%s is being started by another command", ref)
 	}
 	switch rec.State {
 	case task.Discovered, task.Failed, task.PRClosed, task.Working, task.Reviewing:

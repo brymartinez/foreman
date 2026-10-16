@@ -437,3 +437,39 @@ func TestInboxMarksAResetIssueAndKeepsFetchingIt(t *testing.T) {
 		t.Errorf("current = %+v; want #6 marked reset", report.Current)
 	}
 }
+
+func TestASecondStartAfterResetCannotRemoveTheFirstStartsWorktree(t *testing.T) {
+	f := newFixture()
+	resetTask(t, f, "open")
+	f.wt.removed = nil
+	var second error
+	// The second start reads the reset record, then pauses until the first start
+	// has made its worktree.
+	f.wt.onEnsure = func() {
+		f.wt.onEnsure = nil
+		_, second = f.app.Start(context.Background(), startReq(t))
+	}
+	first, err := f.app.Start(context.Background(), startReq(t))
+	if second == nil || !strings.Contains(second.Error(), "being started") {
+		t.Fatalf("second start: %v", second)
+	}
+	if err != nil || first.Delegation == nil || first.Reset != nil {
+		t.Fatalf("first start: %+v, %v", first, err)
+	}
+	if len(f.wt.removed) != 1 {
+		t.Errorf("removed = %+v; only the first start may clear the path", f.wt.removed)
+	}
+}
+
+func TestAStartThatFailsAfterClaimingAResetLetsTheNextStartThrough(t *testing.T) {
+	f := newFixture()
+	resetTask(t, f, "open")
+	f.wt.ensureErr = errors.New("disk full")
+	if _, err := f.app.Start(context.Background(), startReq(t)); err == nil {
+		t.Fatal("want the Ensure error")
+	}
+	f.wt.ensureErr = nil
+	if _, err := f.app.Start(context.Background(), startReq(t)); err != nil {
+		t.Fatalf("a failed start kept its claim: %v", err)
+	}
+}

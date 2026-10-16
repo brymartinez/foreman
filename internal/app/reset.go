@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -47,7 +49,7 @@ func (a App) Reset(ctx context.Context, rec *task.Record) (*task.Record, error) 
 	}
 
 	mark.At = a.Now()
-	mark.Cleanup = &task.ResetCleanup{Worktree: d.Worktree, Branch: removal.Branch, RepoDir: removal.RepoDir, RunnerLog: d.RunnerLog, Since: mark.At}
+	mark.Cleanup = &task.ResetCleanup{Worktree: d.Worktree, Branch: removal.Branch, RepoDir: removal.RepoDir, RunnerLog: d.RunnerLog, Since: mark.At, Owner: resetOwner}
 	stub, err := a.update(ctx, cur.Key, func(cur *task.Record) (*task.Record, error) {
 		// The task can change while GitHub is read; a run started since owns it.
 		if err := a.resettable(cur); err != nil {
@@ -78,7 +80,7 @@ func (a App) Reset(ctx context.Context, rec *task.Record) (*task.Record, error) 
 		if len(left) == 0 {
 			cur.Reset.Cleanup = nil
 		} else {
-			cur.Reset.Cleanup.Since = time.Time{}
+			cur.Reset.Cleanup.Since, cur.Reset.Cleanup.Owner = time.Time{}, ""
 		}
 		return cur, nil
 	})
@@ -112,11 +114,15 @@ func (a App) cleanUp(ctx context.Context, c task.ResetCleanup) []string {
 	return left
 }
 
-// resetCleanupLimit is how long a start waits on a reset's removal. A removal that
-// runs longer belongs to a dashboard that died during it.
+// resetCleanupLimit is how long a start waits on a reset's removal, or on another
+// start of the reset issue. One that runs longer belongs to a process that died.
 const resetCleanupLimit = 10 * time.Minute
 
-// resetting reports a reset whose removal of the old run is still running.
+// resetOwner owns the removal App.Reset runs. A start owns it under a random token.
+const resetOwner = "reset"
+
+// resetting reports a reset issue whose old run is being removed, by the reset or by
+// a start that claimed it.
 func (a App) resetting(rec *task.Record) bool {
 	if rec == nil || rec.Reset == nil || rec.Reset.Cleanup == nil || rec.Reset.Cleanup.Since.IsZero() {
 		return false
@@ -229,4 +235,43 @@ func taskRef(rec *task.Record) string {
 		return rec.Identifier
 	}
 	return fmt.Sprintf("%s#%d", rec.Repo, rec.Number)
+}
+
+// claimReset makes this start the only one working on a reset issue until it saves
+// its run or gives up, because finishReset force-removes the path the new worktree
+// takes. It returns the claimed record and its owner token.
+func (a App) claimReset(ctx context.Context, read *task.Record) (*task.Record, string, error) {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return nil, "", err
+	}
+	owner := hex.EncodeToString(b[:])
+	claimed, err := a.update(ctx, read.Key, func(cur *task.Record) (*task.Record, error) {
+		if err := a.startable(cur); err != nil {
+			return nil, err
+		}
+		if cur == nil || cur.Delegation != nil || cur.Reset == nil || !cur.Reset.At.Equal(read.Reset.At) {
+			return nil, fmt.Errorf("%s changed while it was starting; start it again", taskRef(read))
+		}
+		c := task.ResetCleanup{}
+		if cur.Reset.Cleanup != nil {
+			c = *cur.Reset.Cleanup
+		}
+		c.Since, c.Owner = a.Now(), owner
+		cur.Reset.Cleanup = &c
+		return cur, nil
+	})
+	return claimed, owner, err
+}
+
+// releaseReset lets the next start through after this one gave up. What is left of
+// the old run stays listed for it.
+func (a App) releaseReset(ctx context.Context, key task.Key, owner string) {
+	_, _ = a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
+		if cur == nil || cur.Reset == nil || cur.Reset.Cleanup == nil || cur.Reset.Cleanup.Owner != owner {
+			return nil, nil
+		}
+		cur.Reset.Cleanup.Since, cur.Reset.Cleanup.Owner = time.Time{}, ""
+		return cur, nil
+	})
 }
