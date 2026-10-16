@@ -45,13 +45,17 @@ func TestParseOutcomePlanned(t *testing.T) {
 	if err != nil || got.Status != Planned || got.Documents[task.Analysis] != "a" || got.Documents[task.ImplementationPlan] != "### Task 1" {
 		t.Fatalf("got %+v, %v", got, err)
 	}
-	for wire, want := range map[string]string{
-		`{"status":"planned","summary":"s","documents":null}`:                                               "no documents",
-		`{"status":"planned","summary":"s","documents":{"analysis":"a","prd":" ","design":"d","plan":"p"}}`: "empty PRD",
-	} {
-		if _, err := ParseOutcome([]byte(wire)); err == nil || !strings.Contains(err.Error(), want) {
-			t.Errorf("ParseOutcome(%s) err = %v, want %q", wire, err, want)
-		}
+	if _, err := ParseOutcome([]byte(`{"status":"planned","summary":"s","documents":null}`)); err == nil || !strings.Contains(err.Error(), "no documents") {
+		t.Errorf("planned without documents err = %v", err)
+	}
+}
+
+// A document already on the issue may come back empty to keep its comment. The runner
+// knows which documents exist, so it rejects an empty one that has no comment.
+func TestParseOutcomePlannedKeepsAnEmptyDocumentForTheRunner(t *testing.T) {
+	got, err := ParseOutcome([]byte(`{"status":"planned","summary":"s","documents":{"analysis":"a","prd":" ","design":"d","plan":"p"}}`))
+	if err != nil || got.Documents[task.PRD] != " " || got.Documents[task.Design] != "d" {
+		t.Fatalf("got %+v, %v", got, err)
 	}
 }
 

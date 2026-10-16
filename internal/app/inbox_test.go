@@ -311,8 +311,26 @@ func (f *fakeGitHub) GetIssue(_ context.Context, k task.Key) (Issue, error) {
 	return i, nil
 }
 
+// IssueComments is the issue's conversation followed by the comments posted on it
+// since, oldest first, each in its latest version.
 func (f *fakeGitHub) IssueComments(context.Context, task.Key) ([]IssueComment, error) {
-	return f.issueComments, f.issueCommentsErr
+	if f.issueCommentsErr != nil {
+		return nil, f.issueCommentsErr
+	}
+	out := slices.Clone(f.issueComments)
+	for i, c := range out {
+		if cur, ok := f.comments[c.ID]; ok {
+			out[i] = cur
+		}
+	}
+	var posted []IssueComment
+	for id, c := range f.comments {
+		if !slices.ContainsFunc(out, func(o IssueComment) bool { return o.ID == id }) {
+			posted = append(posted, c)
+		}
+	}
+	slices.SortFunc(posted, func(a, b IssueComment) int { return int(a.ID - b.ID) })
+	return append(out, posted...), nil
 }
 
 func (f *fakeGitHub) RepoAt(context.Context, string) (RepoInfo, error) { return f.repo, nil }

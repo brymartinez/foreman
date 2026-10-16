@@ -13,11 +13,12 @@ import (
 )
 
 // turnRequest is the work an implementer turn resumes with when no answered decision
-// or conflict repair comes first. At most one field is set.
+// or conflict repair comes first. At most one of findings, feedback, and merge is set.
 type turnRequest struct {
-	findings *task.Review      // open findings from the latest review
-	feedback []PRComment       // PR comments to answer
-	merge    *agent.MergeBrief // a base branch to merge before the next review
+	existingPlans map[task.PlanDoc]string // planning documents already on the issue
+	findings      *task.Review            // open findings from the latest review
+	feedback      []PRComment             // PR comments to answer
+	merge         *agent.MergeBrief       // a base branch to merge before the next review
 }
 
 // turnResult is a finished implementer turn. pr is the verified PR when the turn

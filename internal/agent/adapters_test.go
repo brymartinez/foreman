@@ -459,6 +459,19 @@ func TestPlanningPromptWritesDocumentsOnly(t *testing.T) {
 	}
 }
 
+func TestPlanningPromptCarriesDocumentsAlreadyOnTheIssue(t *testing.T) {
+	existing := map[task.PlanDoc]string{task.Analysis: "Retries 5xx only today.", task.PRD: "R1. Retry 5xx."}
+	p := ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}, Planning: true, ExistingPlans: existing})
+	for _, want := range []string{"## Documents already on the issue", "### Analysis\n\nRetries 5xx only today.", "### PRD\n\nR1. Retry 5xx.", "empty string", "Write every missing document: design, plan."} {
+		if !strings.Contains(p, want) {
+			t.Errorf("planning prompt missing %q:\n%s", want, p)
+		}
+	}
+	if p = ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}, Planning: true}); strings.Contains(p, "already on the issue") {
+		t.Errorf("a plan from scratch must not mention existing documents:\n%s", p)
+	}
+}
+
 func TestPromptIncludesAnsweredDecisions(t *testing.T) {
 	p := ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 1}, Decisions: []task.Decision{
 		{Question: task.Question{Issue: "Retry 4xx?"}, Answer: "A. 5xx only"},
