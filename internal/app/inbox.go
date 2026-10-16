@@ -19,6 +19,8 @@ type InboxEntry struct {
 	// Together they are what keeps work already in hand out of INBOX.
 	Delegated bool
 	State     task.State
+	// Reset says the developer discarded the item's run. It waits for a manual start.
+	Reset bool
 }
 
 // InboxReport lists each item once, in the section with the highest priority:
@@ -406,7 +408,7 @@ func (a App) fetchTrackedSources(ctx context.Context, recs []*task.Record, found
 		if r.Delegation != nil && issueSource == task.Linear && a.Linear == nil {
 			continue
 		}
-		if r.Delegation == nil && r.GitHub != nil && len(r.GitHub.Reasons) == 0 {
+		if r.Delegation == nil && r.Reset == nil && r.GitHub != nil && len(r.GitHub.Reasons) == 0 {
 			continue
 		}
 		if r.State != task.Done && !inSearch[r.Key] && a.repoVisible(r.Repo, allRepos) {
@@ -563,7 +565,7 @@ func Reconcile(items []InboxItem, recs []*task.Record, notes map[task.Key][]stri
 // entryFor is one item in the current refresh, carrying the state of the run foreman
 // has for it. INBOX reads that state to leave work already in hand alone.
 func entryFor(rec *task.Record, it InboxItem, changes []string) InboxEntry {
-	return InboxEntry{Item: it, Changes: changes, Delegated: rec.Delegation != nil, State: rec.State}
+	return InboxEntry{Item: it, Changes: changes, Delegated: rec.Delegation != nil, State: rec.State, Reset: rec.Reset != nil}
 }
 
 func needsHuman(r *task.Record) bool {

@@ -38,9 +38,9 @@ func awaitingTriage(e app.InboxEntry) bool {
 
 // autoCandidate is an open issue assigned to the developer that foreman has
 // never delegated. FAILED and REVIEWED work also sits in INBOX, but resuming it
-// is the developer's call.
+// is the developer's call, and so is starting a reset issue again.
 func autoCandidate(e app.InboxEntry) bool {
-	return e.Item.Kind == task.Issue && e.Item.State == "open" && !e.Delegated &&
+	return e.Item.Kind == task.Issue && e.Item.State == "open" && !e.Delegated && !e.Reset &&
 		slices.Contains(e.Item.Reasons, task.Assigned)
 }
 

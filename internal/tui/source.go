@@ -22,6 +22,9 @@ type Source interface {
 	// app.ErrRoutingOff when there is no routing.yaml.
 	Route(ctx context.Context, req app.RouteRequest) (app.Decision, error)
 	Cancel(ctx context.Context, rec *task.Record) (*task.Record, error)
+	// Reset discards a FAILED task's local run and returns the record left for the
+	// next manual start, as App.Reset does.
+	Reset(ctx context.Context, rec *task.Record) (*task.Record, error)
 	// Resume continues a REVIEWED task so its agent answers the comments on its PR.
 	Resume(ctx context.Context, key task.Key) (*task.Record, error)
 	// Respond records an answer to the oldest pending question, as App.Respond

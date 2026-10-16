@@ -404,6 +404,7 @@ var helpKeys = []helpKey{
 	{"ctrl-u/ctrl-d", "scroll the log, or move the PR history, half a page", "ctrl-u/d half page"},
 	{"g/G, end", "go to the log's first line or follow its tail", "g/G log start/end"},
 	{"c", "cancel the selected task's run", "c cancel"},
+	{"x", "reset the selected FAILED task: delete its local run and offer the issue again", "x reset"},
 	{"p", "open the PR history of merged and closed PRs; esc returns", "p PR history"},
 	{"ctrl-f/ctrl-b", "PR history: move a full page", "ctrl-f/b page"},
 	{"a", "turn auto mode on or off, kept for the next launch", "a auto"},
@@ -555,28 +556,30 @@ func footer(m Model) string {
 			return "Nothing to cancel. [y/n]"
 		}
 		return fmt.Sprintf("Cancel %s#%d and stop its agent? [y/n]", m.cancelTarget.Repo, m.cancelTarget.Number)
+	case ConfirmingReset:
+		return fmt.Sprintf("Reset %s#%d? [y/n] Deletes its task file, runner log, worktree, local branch, and uncommitted or untracked work. GitHub is unchanged.", m.resetTarget.Repo, m.resetTarget.Number)
 	case AnsweringDecision:
 		return answerHints(m)
 	}
 	if m.HistoryOpen {
 		return historyHints(m)
 	}
+	long, short := hintsLong, hintsShort
 	if m.LogOpen && m.Focus == TaskPane {
-		if textWidth(hintsLogLong) > m.Width {
-			return hintsLogShort
+		long, short = hintsLogLong, hintsLogShort
+	} else if m.LogOpen {
+		long, short = hintsOpenLong, hintsOpenShort
+	}
+	// Reset is offered only for a FAILED task, so its hint shows only then.
+	if rec := m.Selected(); rec != nil && rec.State == task.Failed {
+		if with := strings.Replace(long, " · ? help", " · x reset · ? help", 1); textWidth(with) <= m.Width {
+			return with
 		}
-		return hintsLogLong
 	}
-	if m.LogOpen {
-		if textWidth(hintsOpenLong) > m.Width {
-			return hintsOpenShort
-		}
-		return hintsOpenLong
+	if textWidth(long) > m.Width {
+		return short
 	}
-	if textWidth(hintsLong) > m.Width {
-		return hintsShort
-	}
-	return hintsLong
+	return long
 }
 
 // historyHints are the history's keys: the list's, or the detail log's when it has focus.

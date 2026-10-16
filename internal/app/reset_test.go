@@ -7,8 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/brymartinez/foreman/internal/agent"
 	"github.com/brymartinez/foreman/internal/task"
@@ -313,5 +315,30 @@ func TestBranchProposalAfterResetOfAClosedPRAsksForAnotherName(t *testing.T) {
 	p, err := f.app.ProposeBranch(context.Background(), startReq(t))
 	if err != nil || !p.Uncertain || !strings.Contains(p.Reason, "#912") {
 		t.Fatalf("proposal = %+v, %v", p, err)
+	}
+}
+
+func TestInboxMarksAResetIssueAndKeepsFetchingIt(t *testing.T) {
+	stub := seen(5, task.Discovered, "open", t0)
+	stub.Reset = &task.ResetMark{At: now}
+	listed := seen(6, task.Discovered, "open", t0, task.Assigned)
+	listed.Reset = &task.ResetMark{At: now}
+	store := &fakeStore{recs: map[task.Key]*task.Record{key(5): stub, key(6): listed}}
+	gh := &fakeGitHub{items: []InboxItem{item(6, "open", t0, task.Assigned)}}
+	report, err := App{Store: store, GitHub: gh, Runners: &fakeRunners{}, Now: func() time.Time { return now }}.Inbox(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(gh.fetched, key(5)) {
+		t.Errorf("fetched %v; a reset issue with no reasons left must still be read", gh.fetched)
+	}
+	var found bool
+	for _, e := range report.Current {
+		if e.Item.Key == key(6) {
+			found = e.Reset && !e.Delegated
+		}
+	}
+	if !found {
+		t.Errorf("current = %+v; want #6 marked reset", report.Current)
 	}
 }

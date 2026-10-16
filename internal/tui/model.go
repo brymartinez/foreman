@@ -31,6 +31,7 @@ const (
 	ProposingBranch
 	TypingBranch
 	ConfirmingCancel
+	ConfirmingReset
 	AnsweringDecision
 	// Routing waits for App.Route; ConfirmingRoute shows its choice.
 	Routing
@@ -45,6 +46,7 @@ const (
 	ActionRefresh
 	ActionStart
 	ActionCancel
+	ActionReset
 	ActionResume
 	ActionAuto
 	ActionRespond
@@ -64,6 +66,8 @@ type Action struct {
 	Kind   ActionKind
 	Start  app.StartRequest
 	Cancel *task.Record
+	// Reset is the FAILED task whose local run the developer confirmed discarding.
+	Reset *task.Record
 	// Resume is the REVIEWED task whose PR feedback the agent should answer.
 	Resume task.Key
 	// Respond is the NEEDS_DECISION task to record Answer for, as typed.
@@ -157,6 +161,7 @@ type Model struct {
 	proposalSeq  int               // the branch proposal this prompt waits for
 	waiting      map[task.Key]wait // auto starts held back by routing
 	cancelTarget task.Key          // the task named when cancellation was requested
+	resetTarget  task.Key          // the task named when a reset was requested
 	manualTask   bool              // cursor movement stops following the latest delegation
 	tried        map[task.Key]bool // issues started this session, by hand or automatically
 	starting     map[task.Key]bool // starts and resumes in flight, manual or automatic
@@ -365,6 +370,8 @@ func (m *Model) Key(k Key) Action {
 		return m.typeBranch(k)
 	case ConfirmingCancel:
 		return m.confirmCancel(k)
+	case ConfirmingReset:
+		return m.confirmReset(k)
 	case AnsweringDecision:
 		return m.answerDecision(k)
 	case Routing:
@@ -432,6 +439,8 @@ func (m *Model) browse(k Key) Action {
 		m.scrollEnd()
 	case k.Kind == KeyRune && k.Rune == 'c':
 		return m.startCancel()
+	case k.Kind == KeyRune && k.Rune == 'x':
+		return m.startReset()
 	case k.Kind == KeyEnter:
 		return m.enter()
 	}
@@ -840,6 +849,49 @@ func (m *Model) confirmRoute(k Key) Action {
 		return m.prepareBranch(req)
 	}
 	return Action{}
+}
+
+// startReset asks before discarding the selected FAILED task's local run. Whether its
+// runner is still alive is App.Reset's check: the pid of a FAILED task stays recorded
+// until a refresh sees the process gone.
+func (m *Model) startReset() Action {
+	rec := m.Selected()
+	switch {
+	case rec == nil:
+		m.Message = "No delegated work to reset."
+	case rec.State != task.Failed:
+		m.Message = fmt.Sprintf("%s#%d is %s; only a FAILED task can be reset", rec.Repo, rec.Number, rec.State)
+	default:
+		m.resetTarget = rec.Key
+		m.Mode = ConfirmingReset
+	}
+	return Action{}
+}
+
+func (m *Model) confirmReset(k Key) Action {
+	key := m.resetTarget
+	m.Mode, m.resetTarget = Browsing, task.Key{}
+	if k.Kind != KeyRune || k.Rune != 'y' {
+		return Action{}
+	}
+	for _, rec := range m.Tasks {
+		if rec.Key == key && rec.State == task.Failed {
+			m.Message = fmt.Sprintf("Resetting %s#%d…", rec.Repo, rec.Number)
+			return Action{Kind: ActionReset, Reset: rec}
+		}
+	}
+	m.Message = fmt.Sprintf("%s#%d is no longer FAILED; nothing was reset", key.Repo, key.Number)
+	return Action{}
+}
+
+// ResetDone shows a reset issue in INBOX as never started, so only a manual start
+// picks it up, until the next refresh reads it from the task file.
+func (m *Model) ResetDone(key task.Key) {
+	for i := range m.Inbox {
+		if m.Inbox[i].Item.Key == key {
+			m.Inbox[i].Delegated, m.Inbox[i].State, m.Inbox[i].Reset = false, task.Discovered, true
+		}
+	}
 }
 
 func (m *Model) confirmCancel(k Key) Action {
