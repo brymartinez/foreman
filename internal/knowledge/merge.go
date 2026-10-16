@@ -524,16 +524,21 @@ func (m *Merge) build(g Group, members []MergeItem) (Learning, *Conflict, error)
 		}
 		return Learning{}, &c, nil
 	}
-	if g.Conflict != "" || disagree || len(rivals) > 0 {
-		l.Text, l.Kind = winner.text, winner.item.Learning.Kind
-	}
-	// The entry that records the decision sorts after every entry it overrides, so a
-	// later merge, which orders history by time, replays the same result.
+	// The entries that record the decision sort after every entry they override, so
+	// a later merge, which orders history by time, replays the same result.
 	decided := winner.latest
 	for _, c := range l.History {
 		decided = later(decided, c.At)
 	}
 	decided = decided.Add(time.Second)
+	if g.Conflict != "" || disagree || len(rivals) > 0 {
+		// The rewrite names the winning correction's task, so a later merge reads
+		// the text that correction backed from it, not from other members' rewrites.
+		if winner.text != l.Text || textAt(l, decided) != winner.text {
+			l.History = append(l.History, Change{At: decided, Task: winner.task, Action: Revise, From: l.Text, To: winner.text, Reason: ingestText})
+		}
+		l.Text, l.Kind = winner.text, winner.item.Learning.Kind
+	}
 	switch {
 	case winner.retired && !retiredByHistory(l.History):
 		l.History = append(l.History, Change{At: decided, Task: winner.task, Action: Retire, Reason: ingestRetired})
@@ -550,6 +555,7 @@ func (m *Merge) build(g Group, members []MergeItem) (Learning, *Conflict, error)
 const (
 	ingestRetired  = "ingest: the latest maintainer correction retires it"
 	ingestRestored = "ingest: the latest maintainer correction keeps it"
+	ingestText     = "ingest: the latest maintainer correction's text"
 )
 
 func later(a, b time.Time) time.Time {
@@ -582,7 +588,7 @@ func (m *Merge) stanceOf(it MergeItem) stance {
 	}
 	history := it.Learning.History
 	for i, c := range history {
-		if c.Reason == ingestRetired || c.Reason == ingestRestored {
+		if c.Reason == ingestRetired || c.Reason == ingestRestored || c.Reason == ingestText {
 			continue
 		}
 		// A re-evaluation of the task withdrew the entry, so the maintainer no
@@ -601,6 +607,12 @@ func (m *Merge) stanceOf(it MergeItem) stance {
 	s.text = it.Learning.Text
 	if s.explicit {
 		s.text = textAt(it.Learning, s.latest)
+		// An earlier merge recorded the text of the correction it chose.
+		for _, c := range live(history, Revise, "revert-rewrite") {
+			if c.Reason == ingestText && c.Task == s.task {
+				s.text = c.To
+			}
+		}
 	}
 	return s
 }

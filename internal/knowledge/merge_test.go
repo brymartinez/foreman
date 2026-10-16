@@ -464,3 +464,39 @@ func TestTheWinningCorrectionKeepsTheTextTheMaintainerBacked(t *testing.T) {
 		t.Fatalf("text = %q, want the maintainer's", l.Text)
 	}
 }
+
+func TestALaterMergeKeepsTheTextOfACorrectionThatWon(t *testing.T) {
+	flagged := func(m *Merge) []Group {
+		g := together(m, Convention, "Indent YAML consistently.")
+		g[0].Conflict = "they ask for different indentation"
+		return g
+	}
+	a, _ := newStore(t)
+	mustApply(t, a, repo, eval("1", 0, maintainer(Convention, "Indent YAML with two spaces.")))
+	ev := eval("9", 10)
+	ev.Revisions = []Revision{{ID: "L1", Action: Revise, Text: "Indent YAML with four spaces.", Reason: "The files use four.", Source: Observed}}
+	mustApply(t, a, repo, ev)
+	b, _ := newStore(t)
+	tabs := eval("2", 0, maintainer(Convention, "Indent YAML with tabs."))
+	tabs.At = day(20)
+	mustApply(t, b, repo, tabs)
+	m := prepare(t, snapshot(t, a, repo), snapshot(t, b, repo))
+	first := merged(t, m, flagged(m))
+	if l := first.Learnings[0]; l.Text != "Indent YAML with tabs." {
+		t.Fatalf("first merge text = %q", l.Text)
+	}
+	if err := a.Replace(repo, first); err != nil {
+		t.Fatal(err)
+	}
+
+	// An older correction from a third machine conflicts again; the tabs
+	// correction is still the latest and keeps its own text.
+	c, _ := newStore(t)
+	three := eval("3", 0, maintainer(Convention, "Indent YAML with three spaces."))
+	three.At = day(-5)
+	mustApply(t, c, repo, three)
+	m = prepare(t, snapshot(t, a, repo), snapshot(t, c, repo))
+	if l := merged(t, m, flagged(m)).Learnings[0]; l.Text != "Indent YAML with tabs." {
+		t.Fatalf("second merge text = %q, want the winning correction's", l.Text)
+	}
+}
