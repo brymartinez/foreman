@@ -48,8 +48,7 @@ func Slug(title string) string {
 	return strings.Join(out, "-")
 }
 
-// WorkName is the shared identifier for a task's branch and worktree directory: "825-provider-retries".
-// It is computed once at start and stored, so later title edits don't move the branch.
+// WorkName is the issue-derived part of a default branch: "825-provider-retries".
 func WorkName(issue int, title string) string {
 	return fmt.Sprintf("%d-%s", issue, Slug(title))
 }
@@ -126,18 +125,9 @@ func ValidBranchName(name string) bool {
 	return true
 }
 
-// WorkNameOf recovers the work name from a stored branch, whatever its prefix, so tasks
-// started under the old agent/ prefix keep their branch and worktree.
-func WorkNameOf(branch string) string {
-	if _, name, ok := strings.Cut(branch, "/"); ok {
-		return name
-	}
-	return branch
-}
-
-// WorktreePath is <root>/<owner>-<repo>/<workName>, so equal repo names under different owners never collide.
-func WorktreePath(root string, repo Repo, workName string) string {
-	return filepath.Join(root, strings.ReplaceAll(string(repo), "/", "-"), workName)
+// WorktreePath is <root>/<owner>-<repo>/<branch>, with branch slashes as directories.
+func WorktreePath(root string, repo Repo, branch string) string {
+	return filepath.Join(root, strings.ReplaceAll(string(repo), "/", "-"), branch)
 }
 
 // RepositoryPath is the managed source checkout used by commands that run outside

@@ -23,12 +23,12 @@ func TestSlug(t *testing.T) {
 	}
 }
 
-func TestBranchAndWorktreeShareWorkName(t *testing.T) {
+func TestBranchAndWorktreeUseFullBranchName(t *testing.T) {
 	name := WorkName(825, "Provider retries")
-	if got := BranchName("fix", name); got != "fix/825-provider-retries" || WorkNameOf(got) != name || WorkNameOf("agent/"+name) != name {
+	if got := BranchName("fix", name); got != "fix/825-provider-retries" {
 		t.Errorf("branch = %q", got)
 	}
-	if got := WorktreePath("/wt", "ridezoomo/armada-backend", name); got != "/wt/ridezoomo-armada-backend/825-provider-retries" {
+	if got := WorktreePath("/wt", "ridezoomo/armada-backend", BranchName("fix", name)); got != "/wt/ridezoomo-armada-backend/fix/825-provider-retries" {
 		t.Errorf("worktree = %q", got)
 	}
 }

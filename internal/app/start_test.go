@@ -331,6 +331,48 @@ func TestStartFromInboxUsesRepositoryCheckoutInsteadOfCurrentDirectory(t *testin
 	}
 }
 
+func TestNewTaskWorktreeUsesFullBranchName(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		branch string
+	}{
+		{"edited branch", "fix/825-provider-retries"},
+		{"branch with several components", "bryan/db/825-provider-retries"},
+		{"default branch", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture()
+			rec, err := f.app.Start(context.Background(), StartRequest{Dir: "/src/armada-backend", Issue: 825, Agent: task.Claude, BranchName: tc.branch})
+			if err != nil {
+				t.Fatal(err)
+			}
+			branch := tc.branch
+			if branch == "" {
+				branch = "feat/825-provider-retries"
+			}
+			want := filepath.Join("/wt/ridezoomo-armada-backend", branch)
+			if f.wt.reqs[0].Path != want || rec.Delegation.Worktree != want {
+				t.Fatalf("worktree request %q, stored %q, want %q", f.wt.reqs[0].Path, rec.Delegation.Worktree, want)
+			}
+		})
+	}
+}
+
+func TestRestartKeepsStoredWorktreePath(t *testing.T) {
+	f := newFixture()
+	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+	want := "/wt/ridezoomo-armada-backend/legacy/825-provider-retries"
+	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.Failed,
+		Delegation: &task.Delegation{Branch: "fix/825-provider-retries", Worktree: want}}
+	rec, err := f.app.Start(context.Background(), startReq(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.wt.reqs[0].Path != want || rec.Delegation.Worktree != want {
+		t.Fatalf("worktree request %q, stored %q, want %q", f.wt.reqs[0].Path, rec.Delegation.Worktree, want)
+	}
+}
+
 func startReq(t *testing.T) StartRequest {
 	ctxFile := filepath.Join(t.TempDir(), "825.md")
 	os.WriteFile(ctxFile, []byte("Preserve the existing 5xx-only retry semantics."), 0o644)
@@ -346,7 +388,7 @@ func TestStartDispatches(t *testing.T) {
 	}
 	wantWT := WorktreeRequest{
 		RepoDir: "/src/armada-backend",
-		Path:    "/wt/ridezoomo-armada-backend/825-provider-retries",
+		Path:    "/wt/ridezoomo-armada-backend/feat/825-provider-retries",
 		Branch:  "feat/825-provider-retries",
 		BaseRef: "origin/main",
 	}
@@ -463,7 +505,7 @@ func TestRestartKeepsBranchWhenTitleChanged(t *testing.T) {
 	f := newFixture()
 	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
 	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.Failed,
-		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex}, Branch: "agent/825-old-title"}}
+		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex}, Branch: "agent/825-old-title", Worktree: "/wt/ridezoomo-armada-backend/825-old-title"}}
 	f.gh.issue.Title = "A completely new title"
 	rec, err := f.app.Start(context.Background(), startReq(t))
 	if err != nil {
@@ -624,7 +666,7 @@ func TestStartPicksBranchTypeFromLabelsOrOverride(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if rec.Delegation.Branch != tc.want || f.wt.reqs[0].Path != "/wt/ridezoomo-armada-backend/825-provider-retries" {
+		if rec.Delegation.Branch != tc.want || f.wt.reqs[0].Path != "/wt/ridezoomo-armada-backend/"+tc.want {
 			t.Errorf("override %q: branch %s path %s", tc.override, rec.Delegation.Branch, f.wt.reqs[0].Path)
 		}
 	}
@@ -638,7 +680,7 @@ func TestLinearStartUsesTrackerBranchName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.Delegation.Branch != "bryan/web-42-fix-cache" || f.wt.reqs[0].Branch != rec.Delegation.Branch || f.wt.reqs[0].Path != "/wt/ridezoomo-armada-backend/web-42-fix-cache" {
+	if rec.Delegation.Branch != "bryan/web-42-fix-cache" || f.wt.reqs[0].Branch != rec.Delegation.Branch || f.wt.reqs[0].Path != "/wt/ridezoomo-armada-backend/bryan/web-42-fix-cache" {
 		t.Fatalf("branch = %q, worktree = %+v", rec.Delegation.Branch, f.wt.reqs[0])
 	}
 }
