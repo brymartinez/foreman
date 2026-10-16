@@ -193,9 +193,10 @@ func listJoin(gap string) bool {
 	return true
 }
 
-// historical reports whether text points at past decisions rather than current rules.
+// historical reports whether text points at past decisions rather than current
+// rules. Path separators count as spaces, so docs/decision-log.md matches too.
 func historical(text string) bool {
-	text = strings.ToLower(text)
+	text = pathWords.Replace(strings.ToLower(text))
 	for _, old := range []string{"decision log", "history", "historical", "archive", "superseded"} {
 		if strings.Contains(text, old) {
 			return true
@@ -203,6 +204,8 @@ func historical(text string) bool {
 	}
 	return false
 }
+
+var pathWords = strings.NewReplacer("-", " ", "_", " ", "/", " ", ".", " ")
 
 // namesBranchRule reports whether text says it is about branch naming rules.
 func namesBranchRule(text string) bool {

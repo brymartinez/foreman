@@ -330,7 +330,8 @@ the same commit. The commit message records why it changed.
   previous link, with the link's own label, says "branch" and "name", "convention",
   "rule", or "guidance". It continues through links joined by only commas, "and",
   or "or". Each listed link is read unless its label or path says "decision log",
-  "history", "archive", or "superseded"; a list whose lead-in says so is skipped
+  "history", "archive", or "superseded" (with `-`, `_`, `/`, or `.` read as spaces,
+  so `decision-log.md` counts); a list whose lead-in says so is skipped
   whole. Other links, even in the same clause ("see [architecture](...)"), are not
   read. A document that only mentions branches is not a rule. A named file that is missing, unreadable, over 32 KiB, or outside the
   repository stops the start with its path. A start with a confirmed name

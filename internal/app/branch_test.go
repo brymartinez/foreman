@@ -383,3 +383,20 @@ func TestBranchGuideSkipsAListUnderAHistoricalHeading(t *testing.T) {
 		t.Fatalf("err = %v, want historical links skipped", err)
 	}
 }
+
+func TestBranchGuideSkipsADecisionLogNamedOnlyByItsPath(t *testing.T) {
+	for _, path := range []string{"docs/decision-log.md", "docs/decision_log.md", "docs/branch-history.md"} {
+		root := writeRepo(t, map[string]string{
+			"AGENTS.md":  "Branch naming rules: [current](current.md) and [details](" + path + ")\n",
+			"current.md": "Use <owner>/<slug>.",
+			path:         "old/<slug>" + strings.Repeat("x", 40<<10),
+		})
+		guide, err := readBranchGuide(root)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		if !strings.Contains(guide, "<owner>/<slug>") || strings.Contains(guide, "old/<slug>") {
+			t.Fatalf("%s: guide = %q", path, guide)
+		}
+	}
+}
