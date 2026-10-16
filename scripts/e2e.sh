@@ -228,6 +228,16 @@ if [[ "$*" == *"You evaluate one finished task"* ]]; then
 	printf '{"type":"result","session_id":"e1","subtype":"success","total_cost_usd":0.01,"structured_output":%s}\n' "$out"
 	exit 0
 fi
+# A knowledge ingest's merge turn answers with merge.json, or fails on merge-fail.
+if [[ "$*" == *"You merge two machines' learnings"* ]]; then
+	echo "claude merge-knowledge" >>"$E2E_STATE/merges.log"
+	if [ -f "$E2E_STATE/merge-fail" ]; then
+		echo '{"type":"result","session_id":"m1","subtype":"error_during_execution","is_error":true}'
+		exit 1
+	fi
+	printf '{"type":"result","session_id":"m1","subtype":"success","total_cost_usd":0.01,"structured_output":%s}\n' "$(cat "$E2E_STATE/merge.json")"
+	exit 0
+fi
 if [[ " $* " == *" --no-session-persistence "* ]]; then
 	echo "claude review" >>"$E2E_STATE/agents.log"
 	echo '{"type":"result","session_id":"r1","subtype":"success","total_cost_usd":0.05,"structured_output":{"verdict":"clean","summary":"looks right","findings":[]}}'
@@ -1054,6 +1064,113 @@ scenario_learning() {
 	check "the learner evaluated every finished task" bash -c "[ \"\$(grep -c '^claude evaluate' '$state/evaluations.log')\" -ge 4 ]"
 }
 
+# seed <store dir> <task> <task start> <source> <text> gives the store's acme/widgets
+# one learning backed by one task, as the learner would have written it.
+seed() {
+	local k="$1/acme/widgets" status=candidate
+	[ "$4" = observed ] || status=active
+	mkdir -p "$k/evaluations"
+	cat >"$k/learnings.yaml" <<EOF
+next_id: 1
+learnings:
+  - id: L1
+    kind: convention
+    text: $5
+    status: $status
+    evidence:
+      - task: "$2"
+        at: $3
+        source: $4
+    history:
+      - at: $3
+        task: "$2"
+        action: propose
+EOF
+	cat >"$k/evaluations/$2.yaml" <<EOF
+task: "$2"
+task_at: $3
+at: $3
+fingerprint: fp-$2
+assessment: fine
+EOF
+}
+
+# store_digest <store dir> hashes every file but the lock, to show nothing changed.
+store_digest() { (cd "$1" && find . -type f ! -name learning.lock | LC_ALL=C sort | xargs shasum); }
+
+# merges counts the merge agent's turns.
+merges() { if [ -f "$state/merges.log" ]; then wc -l <"$state/merges.log" | tr -d ' '; else echo 0; fi; }
+
+# machine <name> writes config-<name>.yaml with its own knowledge_dir.
+machine() { sed "s|knowledge_dir: .*|knowledge_dir: $sandbox/knowledge-$1|" "$sandbox/config.yaml" >"$sandbox/config-$1.yaml"; }
+on() { local m=$1; shift; FOREMAN_CONFIG="$sandbox/config-$m.yaml" foreman "$@"; }
+
+scenario_knowledge_transfer() {
+	echo "knowledge_transfer: export, restore, merge, repeat, identity, conflict, failure"
+	setup knowledge_transfer
+	local a=$sandbox/knowledge b=$sandbox/knowledge-b c=$sandbox/knowledge-c out=$sandbox/out.txt before turns
+	machine b
+	machine c
+	seed "$a" 1 2026-09-01T12:00:00Z observed "Wrap errors with the operation name."
+	seed "$b" 7 2026-09-05T12:00:00Z observed "Errors carry the operation name."
+
+	check "export writes the file" foreman knowledge export acme/widgets -o "$sandbox/a.md"
+	check "the export names its repository" contains "$sandbox/a.md" "Repository: acme/widgets"
+	check "and carries the versioned payload" contains "$sandbox/a.md" "format: foreman-knowledge/1"
+	on b knowledge export acme/widgets -o "$sandbox/b.md" >/dev/null
+
+	on c knowledge ingest "$sandbox/a.md" >"$out" 2>&1 || true
+	check "an empty store restores the export" contains "$out" "Restored acme/widgets"
+	check "without a merge turn" test "$(merges)" = 0
+	check "the restore keeps the evaluation" test -f "$c/acme/widgets/evaluations/1.yaml"
+	check "and regenerates knowledge.md" test -f "$c/acme/widgets/knowledge.md"
+
+	if on c knowledge ingest "$sandbox/a.md" --repo acme/gadgets >"$out" 2>&1; then fail "another repository is rejected"; else pass "another repository is rejected"; fi
+	check "and stores nothing there" test ! -e "$c/acme/gadgets/learnings.yaml"
+	on c knowledge ingest "$sandbox/a.md" --repo acme/gadgets --rebind >"$out" 2>&1 || true
+	check "rebinding stores it under the destination" test -f "$c/acme/gadgets/evaluations/1.yaml"
+
+	before=$(store_digest "$a")
+	printf '# notes\n' >"$sandbox/bad.md"
+	if foreman knowledge ingest "$sandbox/bad.md" >"$out" 2>&1; then fail "an invalid file is rejected"; else pass "an invalid file is rejected"; fi
+	touch "$state/merge-fail"
+	if foreman knowledge ingest "$sandbox/b.md" >"$out" 2>&1; then fail "a failed merge turn is reported"; else pass "a failed merge turn is reported"; fi
+	check "after one merge turn" test "$(merges)" = 1
+	mv "$state/merge-fail" "$state/merge-fail.done"
+	echo '{"groups":[{"members":["local:L1"],"kind":"convention","text":"Wrap errors.","conflict":null}]}' >"$state/merge.json"
+	if foreman knowledge ingest "$sandbox/b.md" >"$out" 2>&1; then fail "a merge that leaves out a learning is rejected"; else pass "a merge that leaves out a learning is rejected"; fi
+	check "after one more merge turn" test "$(merges)" = 2
+	check "and none of the failures changed the store" test "$(store_digest "$a")" = "$before"
+
+	echo '{"groups":[{"members":["local:L1","import:L1"],"kind":"convention","text":"Wrap returned errors with the operation name.","conflict":null}]}' >"$state/merge.json"
+	on b knowledge ingest "$sandbox/a.md" --dry-run >"$out" 2>&1 || true
+	check "a dry run shows the merged knowledge.md" contains "$out" "- Wrap returned errors with the operation name."
+	check "and saves nothing" bash -c "! grep -qF 'Wrap returned' '$b/acme/widgets/learnings.yaml'"
+
+	turns=$(merges)
+	foreman knowledge ingest "$sandbox/b.md" >"$out" 2>&1 || true
+	check "both sides' knowledge merges in one turn" test "$(merges)" = $((turns + 1))
+	check "into one active learning" contains "$a/acme/widgets/knowledge.md" "Wrap returned errors with the operation name."
+	check "with both tasks' evaluations" test -f "$a/acme/widgets/evaluations/7.yaml"
+
+	before=$(store_digest "$a")
+	foreman knowledge ingest "$sandbox/b.md" >"$out" 2>&1 || true
+	check "a repeat ingest changes nothing" contains "$out" "nothing changed"
+	check "without a merge turn" test "$(merges)" = $((turns + 1))
+	check "and leaves the store byte for byte" test "$(store_digest "$a")" = "$before"
+
+	machine d
+	machine e
+	seed "$sandbox/knowledge-d" 1 2026-09-01T12:00:00Z maintainer "Indent YAML with two spaces."
+	seed "$sandbox/knowledge-e" 2 2026-09-01T12:00:10Z maintainer "Indent YAML with four spaces."
+	on e knowledge export acme/widgets -o "$sandbox/e.md" >/dev/null
+	echo '{"groups":[{"members":["local:L1","import:L1"],"kind":"convention","text":"Indent YAML consistently.","conflict":"they ask for different indentation"}]}' >"$state/merge.json"
+	before=$(store_digest "$sandbox/knowledge-d")
+	if on d knowledge ingest "$sandbox/e.md" >"$out" 2>&1; then fail "an unresolved conflict fails"; else pass "an unresolved conflict fails"; fi
+	check "and reports both corrections" bash -c "grep -qF 'two spaces' '$out' && grep -qF 'four spaces' '$out'"
+	check "and saves nothing" test "$(store_digest "$sandbox/knowledge-d")" = "$before"
+}
+
 scenario_account() {
 	echo "account: a task keeps the gh account it started under for commits and pushes"
 	setup account
@@ -1096,7 +1213,7 @@ scenario_account() {
 	unset E2E_CLONE_URL
 }
 
-scenarios=${*:-runner plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui routing history linear account learning}
+scenarios=${*:-runner plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui routing history linear account learning knowledge_transfer}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"

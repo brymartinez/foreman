@@ -192,9 +192,11 @@ func TestIngestFailuresLeaveTheStoreUnchanged(t *testing.T) {
 		locked bool
 		want   error
 	}{
-		"invalid file":        {data: func([]byte) []byte { return []byte("# notes\n") }},
-		"unsupported version": {data: func(d []byte) []byte { return []byte(strings.Replace(string(d), "foreman-knowledge/1", "foreman-knowledge/9", 1)) }},
-		"agent failure":       {merger: &stubMerger{err: errors.New("quota exhausted")}},
+		"invalid file": {data: func([]byte) []byte { return []byte("# notes\n") }},
+		"unsupported version": {data: func(d []byte) []byte {
+			return []byte(strings.Replace(string(d), "foreman-knowledge/1", "foreman-knowledge/9", 1))
+		}},
+		"agent failure": {merger: &stubMerger{err: errors.New("quota exhausted")}},
 		"invalid grouping": {merger: &stubMerger{groups: func(refs []string) []knowledge.Group {
 			return []knowledge.Group{{Members: refs[:1], Kind: knowledge.Convention, Text: text}}
 		}}},

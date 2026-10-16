@@ -71,6 +71,8 @@ foreman --no-auto    # open it with auto mode off for this session
 foreman -s github    # show only GitHub issues in the inbox
 foreman -s linear    # show only Linear issues in the inbox
 foreman -c           # edit the config in $VISUAL, $EDITOR, or vi
+foreman knowledge export owner/repo -o knowledge.md  # move learned knowledge to another machine
+foreman knowledge ingest knowledge.md                # and store it there
 foreman --help
 foreman --version
 ```
@@ -440,6 +442,35 @@ Set `learning.enabled: false` to stop new evaluations. Prompts still use what is
 already learned. To forget a repository's knowledge, delete its directory. To remove
 one learning, delete its entry from `learnings.yaml`. Prompts read that file, and the
 next evaluation rewrites `knowledge.md`.
+
+### Moving knowledge between machines
+
+`foreman knowledge export owner/repo -o knowledge.md` writes the repository's
+knowledge to one Markdown file: the active guidance to read, then a versioned YAML
+block with every learning (active, candidate, and retired), its evidence and
+history, and every evaluation. Without `-o` it writes to stdout.
+
+`foreman knowledge ingest knowledge.md` stores it under the repository the export
+names. `--repo owner/repo` must name the same repository unless you add `--rebind`.
+A file that is not a valid export changes nothing.
+
+- If this machine has no knowledge for the repository, the export is restored as it
+  is, with no agent call.
+- If both machines have learnings, one tool-less agent turn groups equivalent
+  learnings, and foreman combines their evidence. The agent is `auto.agent` unless
+  you pass `--agent claude` or `--agent codex`; a Claude turn is capped at
+  `learning.budget_usd`.
+- Ingesting the same export again changes nothing and calls no agent. The same task
+  on both machines counts once; a different task under the same issue number keeps
+  its own evidence under a renamed id.
+- A maintainer's correction beats observed work. When two maintainer corrections
+  disagree, the later wins if they are at least a minute apart. Otherwise the ingest
+  stops, prints both, and saves nothing.
+- `--dry-run` prints the resulting `knowledge.md` without saving.
+
+The ingest replaces `learnings.yaml`, `evaluations/`, and `knowledge.md` together, or
+not at all. It does not touch tasks, worktrees, config, `attempts/`, or the lock, and
+it fails without saving when an evaluation runs at the same time.
 
 `knowledge.md` is the contract for other tools, such as the `foreman-triage` skill.
 It starts with a `# Repository knowledge` heading and a line saying the learnings are

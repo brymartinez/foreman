@@ -2,6 +2,15 @@
 
 ## Current stage
 
+Knowledge export and ingest (#79) is complete. `foreman knowledge export owner/repo`
+writes active guidance and a `foreman-knowledge/1` YAML payload. `foreman knowledge
+ingest FILE` checks the repository identity, restores into an empty store without an
+agent, skips an export it already holds, and otherwise groups learnings in one
+tool-less merge turn while Go builds evidence and status. Maintainer corrections
+decide conflicts; an unordered pair stops the ingest. Saves are all or nothing under
+the repository lock. Vet, Go tests, build, and the `knowledge_transfer` end-to-end
+scenario pass.
+
 Reset of failed delegated runs (#72) is complete. `x` on a FAILED task confirms, then
 `App.Reset` resolves the run's PR, saves a record with only that link, and deletes the
 worktree, local branch, and runner log. Auto mode skips the reset issue. A manual start
