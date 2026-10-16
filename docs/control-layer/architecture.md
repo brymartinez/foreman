@@ -324,11 +324,13 @@ the same commit. The commit message records why it changed.
   proposal reads current guidance. A failed fetch, a diverged branch, uncommitted
   changes, or another checked-out branch stops manual and auto starts with the
   reason; Foreman never resets local work. A checkout the caller supplies is read as
-  it is. Guidance is `AGENTS.md` plus the Markdown files that a line in it names as
-  branch naming guidance (the line says "branch" and "name", "convention", "rule",
-XX  two links deep. A document that only mentions branches is not a rule. A named file
-  that is missing, unreadable, over 32 KiB, outside the repository, or past the
-  eighth named file stops the start with its path. A start with a confirmed name
+  it is. Guidance is `AGENTS.md` plus the Markdown files that a clause in it names
+  as branch naming guidance, up to two links deep. The clause, split at a line end,
+  `;`, `|`, or a sentence end, says "branch" and "name", "convention", "rule", or
+  "guidance", and not "decision log", "history", "archive", or "superseded". Other
+  links on the same line are not read. A document that only mentions branches is
+  not a rule. A named file that is missing, unreadable, over 32 KiB, or outside the
+  repository stops the start with its path. A start with a confirmed name
   runs the same sync and guidance read, since either can change while a person edits
   it. A tool-free
   proposal applies the repository convention to the issue and tracker suggestion;

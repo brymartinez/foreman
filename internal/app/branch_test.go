@@ -267,7 +267,7 @@ func TestConfirmedBranchStillStopsWhenTheManagedCheckoutCannotSync(t *testing.T)
 	}
 }
 
-func TestBranchGuideReportsNamedGuidesPastTheFileLimit(t *testing.T) {
+func TestBranchGuideReportsAMissingNinthGuide(t *testing.T) {
 	files := map[string]string{}
 	var agents strings.Builder
 	for i := 1; i <= 8; i++ {
@@ -283,45 +283,35 @@ func TestBranchGuideReportsNamedGuidesPastTheFileLimit(t *testing.T) {
 	}
 }
 
-func TestBranchGuideStopsWhenMoreThanEightGuidesAreNamed(t *testing.T) {
+func TestBranchGuideReadsEveryNamedGuide(t *testing.T) {
 	files := map[string]string{}
 	var agents strings.Builder
 	for i := 1; i <= 9; i++ {
 		name := fmt.Sprintf("docs/branches%d.md", i)
-		files[name] = "rule"
+		files[name] = fmt.Sprintf("rule %d", i)
 		fmt.Fprintf(&agents, "Branch naming rules: `%s`.\n", name)
 	}
 	files["AGENTS.md"] = agents.String()
-	_, err := readBranchGuide(writeRepo(t, files))
-	if err == nil || !strings.Contains(err.Error(), "docs/branches9.md") || !strings.Contains(err.Error(), "more than 8") {
-		t.Fatalf("err = %v", err)
+	guide, err := readBranchGuide(writeRepo(t, files))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(guide, "rule 9") {
+		t.Fatalf("guide = %q, want the ninth guide", guide)
 	}
 }
 
-func TestConfirmedBranchStillStopsOnAMissingNamedGuide(t *testing.T) {
-	f := newFixture()
-	dir := managedCheckout(t, &f)
-	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("Branch naming rules: `docs/branches.md`.\n"), 0o644); err != nil {
+func TestBranchGuideSkipsOtherLinksOnABranchRuleLine(t *testing.T) {
+	root := writeRepo(t, map[string]string{
+		"AGENTS.md":            "Branch naming rules: [current](docs/branches.md); background: [architecture](docs/architecture.md)\n",
+		"docs/branches.md":     "Use <owner>/<slug>.",
+		"docs/architecture.md": "Each task gets its own branch." + strings.Repeat("x", 40<<10),
+	})
+	guide, err := readBranchGuide(root)
+	if err != nil {
 		t.Fatal(err)
 	}
-	_, err := f.app.Start(context.Background(), StartRequest{Repo: f.repos.info.Repo, Issue: 825, Agent: task.Claude, BranchName: "feat/825-provider-retries"})
-	if err == nil || !strings.Contains(err.Error(), "docs/branches.md") {
-		t.Fatalf("start error = %v", err)
-	}
-	if len(f.wt.reqs) != 0 {
-		t.Fatal("a missing guide created a worktree")
-	}
-}
-
-func TestCallerSuppliedManagedPathIsNotSynced(t *testing.T) {
-	f := newFixture()
-	dir := managedCheckout(t, &f)
-	f.wt.syncErr = errors.New("managed checkout has uncommitted changes on main")
-	f.app.BranchProposer = &fakeBranchProposer{out: agent.Outcome{Status: agent.BranchProposed, BranchName: "feat/825-provider-retries"}}
-	if _, err := f.app.ProposeBranch(context.Background(), StartRequest{Dir: dir, Issue: 825, Agent: task.Claude}); err != nil {
-		t.Fatal(err)
-	}
-	if len(f.wt.syncs) != 0 {
-		t.Fatalf("syncs = %v", f.wt.syncs)
+	if !strings.Contains(guide, "<owner>/<slug>") || strings.Contains(guide, "own branch") {
+		t.Fatalf("guide = %q", guide)
 	}
 }

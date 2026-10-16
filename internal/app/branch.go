@@ -150,21 +150,25 @@ func truncateBranchText(s string, n int) string {
 
 var markdownPath = regexp.MustCompile("(?:`|\\]\\()([A-Za-z0-9_./-]+\\.md)")
 
-// explicitBranchGuide reports whether a line names its links as current branch
+// guideClause splits text into clauses, so a branch rule only vouches for the
+// links in its own clause, not for every link on the same line.
+var guideClause = regexp.MustCompile(`\n|[;|]|\.\s`)
+
+// explicitBranchGuide reports whether a clause names its links as current branch
 // naming guidance. A link that only mentions branches, or points at history, is not
 // a rule: an old decision log must not decide today's branch names.
-func explicitBranchGuide(line string) bool {
-	line = strings.ToLower(line)
-	if !strings.Contains(line, "branch") {
+func explicitBranchGuide(clause string) bool {
+	clause = strings.ToLower(clause)
+	if !strings.Contains(clause, "branch") {
 		return false
 	}
 	for _, old := range []string{"decision log", "history", "historical", "archive", "superseded"} {
-		if strings.Contains(line, old) {
+		if strings.Contains(clause, old) {
 			return false
 		}
 	}
 	for _, rule := range []string{"name", "naming", "convention", "rule", "guidance"} {
-		if strings.Contains(line, rule) {
+		if strings.Contains(clause, rule) {
 			return true
 		}
 	}
@@ -210,10 +214,6 @@ func readBranchGuide(root string) (string, error) {
 		if seen[path] {
 			continue
 		}
-		// AGENTS.md plus at most 8 named files.
-		if len(seen) > 8 {
-			return "", fmt.Errorf("branch guidance names more than 8 files; %s is past the limit", name)
-		}
 		seen[path] = true
 		stat, err := os.Stat(path)
 		if err != nil || !stat.Mode().IsRegular() || stat.Size() > 32<<10 {
@@ -230,11 +230,11 @@ func readBranchGuide(root string) (string, error) {
 		if v.depth == 2 {
 			continue
 		}
-		for _, line := range strings.Split(content, "\n") {
-			if !explicitBranchGuide(line) {
+		for _, clause := range guideClause.Split(content, -1) {
+			if !explicitBranchGuide(clause) {
 				continue
 			}
-			for _, match := range markdownPath.FindAllStringSubmatch(line, -1) {
+			for _, match := range markdownPath.FindAllStringSubmatch(clause, -1) {
 				queue = append(queue, visit{filepath.Join(filepath.Dir(path), match[1]), rel, v.depth + 1})
 			}
 		}
