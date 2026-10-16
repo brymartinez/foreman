@@ -492,7 +492,7 @@ func TestPlanIsPostedThenAFreshSessionImplementsIt(t *testing.T) {
 	for i, doc := range task.PlanDocs {
 		c := got.Plan[i]
 		body := f.gh.comments[c.CommentID].Body
-		if c.Doc != doc || !strings.HasPrefix(body, "<!-- foreman:"+string(doc)+" -->\n## "+doc.Title()+"\n\n") {
+		if c.Doc != doc || !strings.HasPrefix(body, task.PlanMarker(doc, task.DescriptionFingerprint(f.gh.issue.Body))+"\n## "+doc.Title()+"\n\n") {
 			t.Errorf("comment %d = %+v body %q", i, c, body)
 		}
 	}
@@ -589,7 +589,7 @@ func TestATaskWithAPRSkipsPlanning(t *testing.T) {
 }
 
 func TestPlanCommentFitsGitHubsLimit(t *testing.T) {
-	body := planCommentBody(task.ImplementationPlan, strings.Repeat("é", maxCommentChars))
+	body := planCommentBody(task.ImplementationPlan, task.DescriptionFingerprint("body"), strings.Repeat("é", maxCommentChars))
 	if n := len([]rune(body)); n > maxCommentChars || !strings.HasSuffix(body, "_Truncated at GitHub's comment length limit._") {
 		t.Errorf("body is %d characters", n)
 	}

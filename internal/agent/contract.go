@@ -99,11 +99,6 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 			task.Analysis: w.Documents.Analysis, task.PRD: w.Documents.PRD,
 			task.Design: w.Documents.Design, task.ImplementationPlan: w.Documents.Plan,
 		}
-		for _, d := range task.PlanDocs {
-			if strings.TrimSpace(out.Documents[d]) == "" {
-				return Outcome{}, fmt.Errorf("planned outcome has an empty %s", d.Title())
-			}
-		}
 	case PROpened:
 		if len(w.Validation) == 0 {
 			return Outcome{}, errors.New("pr_opened outcome needs the validation that was run")

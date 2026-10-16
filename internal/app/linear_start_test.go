@@ -19,6 +19,7 @@ type lifecycleTracker struct {
 	posted       []TrackerComment
 	postIDs      []string
 	missing      map[string]bool
+	commentsErr  error
 }
 
 func (f *lifecycleTracker) AssignedIssues(context.Context, map[task.Repo]string) ([]InboxItem, error) {
@@ -30,7 +31,7 @@ func (f *lifecycleTracker) GetIssue(_ context.Context, key task.Key) (Issue, err
 }
 func (f *lifecycleTracker) IssueComments(_ context.Context, key task.Key) ([]TrackerComment, error) {
 	f.commentReads = append(f.commentReads, key)
-	return f.comments, nil
+	return f.comments, f.commentsErr
 }
 func (f *lifecycleTracker) GetIssueComment(context.Context, string) (TrackerComment, error) {
 	return TrackerComment{}, nil

@@ -125,6 +125,7 @@ type taskRun struct {
 	findings   *task.Review // the latest review's findings, for the next fix turn
 	feedback   []PRComment  // the comments the next stepAnswer answers
 	rounds     int          // how many times this run has answered comments
+	plan       issuePlan    // the plan on the issue, read before a planning turn
 }
 
 func (r *taskRun) loop(next step) error {
@@ -155,11 +156,18 @@ func (r *taskRun) loop(next step) error {
 // goes straight on to an implementation turn; a PR goes to review.
 func (r *taskRun) implement() (step, error) {
 	a := r.a
+	if a.needsPlan(r.rec) {
+		if ok, err := r.reconcilePlan(); err != nil || !ok {
+			return stepDone, err
+		}
+	}
 	during := "implementation"
+	req := turnRequest{findings: r.findings}
 	if a.needsPlan(r.rec) {
 		during = "planning"
+		req.existingPlans = r.plan.texts()
 	}
-	res := a.runTurn(r.ctx, r.rec, turnRequest{findings: r.findings}, a.verifiedPR(r.log), r.log)
+	res := a.runTurn(r.ctx, r.rec, req, a.verifiedPR(r.log), r.log)
 	rec, err := a.finishTurn(r.ctx, r.final, r.rec.Key, during, res, func(cur *task.Record) {
 		applyTurn(cur, res.turn, res.pr, res.err, a.Now())
 		if res.err == nil && res.turn.Outcome.Status == agent.Checkpoint {
@@ -175,7 +183,7 @@ func (r *taskRun) implement() (step, error) {
 	}
 	r.rec = rec
 	if res.err == nil && res.turn.Outcome.Status == agent.Planned {
-		if r.rec, err = a.postPlan(r.ctx, r.final, rec, res.turn.Outcome.Documents, r.log); err != nil || r.rec.State != task.Working {
+		if r.rec, err = a.postPlan(r.ctx, r.final, rec, res.turn.Outcome.Documents, r.plan, r.log); err != nil || r.rec.State != task.Working {
 			return stepDone, err
 		}
 		return stepImplement, nil
@@ -407,7 +415,7 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 		if err != nil {
 			return agent.Turn{}, err
 		}
-		brief.Planning, brief.PlanInstructions = true, plan.Content()
+		brief.Planning, brief.PlanInstructions, brief.ExistingPlans = true, plan.Content(), req.existingPlans
 		fmt.Fprintf(log, "foreman: starting %s in %s to write the plan\n", adapter.Name(), d.Worktree)
 	} else {
 		fmt.Fprintf(log, "foreman: starting %s in %s\n", adapter.Name(), d.Worktree)
@@ -747,19 +755,41 @@ func applyStop(ctx context.Context, rec *task.Record, during string, log io.Writ
 }
 
 // postPlan puts each planning document on the issue as its own comment, editing the
-// comment from an earlier plan when there is one. Each comment is recorded as soon as
-// it is posted. A failed post fails the task; restarting it plans again.
-func (a App) postPlan(ctx, final context.Context, rec *task.Record, docs map[task.PlanDoc]string, log io.Writer) (*task.Record, error) {
+// comment the task records, or the one found on the issue, when there is one. A
+// document the turn left empty keeps the comment found on the issue as it is. Each
+// comment is recorded as soon as it is posted. A failed post fails the task;
+// restarting it plans again.
+func (a App) postPlan(ctx, final context.Context, rec *task.Record, docs map[task.PlanDoc]string, onIssue issuePlan, log io.Writer) (*task.Record, error) {
 	for _, doc := range task.PlanDocs {
+		if _, ok := onIssue.found[doc]; !ok && strings.TrimSpace(docs[doc]) == "" {
+			return a.update(final, rec.Key, existing(func(cur *task.Record) {
+				failTask(cur, fmt.Sprintf("the planning turn wrote no %s", doc.Title()), a.Now())
+			}))
+		}
+	}
+	for _, doc := range task.PlanDocs {
+		found, isFound := onIssue.found[doc]
+		if strings.TrimSpace(docs[doc]) == "" {
+			var err error
+			if rec, err = a.update(final, rec.Key, existing(func(cur *task.Record) { cur.SetPlanComment(found.comment) })); err != nil {
+				return rec, err
+			}
+			fmt.Fprintf(log, "foreman: kept the %s: %s\n", doc.Title(), found.comment.URL)
+			continue
+		}
+		c := rec.PlanComment(doc)
+		if c == nil && isFound {
+			c = &found.comment
+		}
 		var id string
-		if c := rec.PlanComment(doc); c != nil {
+		if c != nil {
 			if rec.IssueSource() == task.Linear {
 				id = c.ExternalCommentID
 			} else if c.CommentID > 0 {
 				id = strconv.FormatInt(c.CommentID, 10)
 			}
 		}
-		body := planCommentBody(doc, docs[doc])
+		body := planCommentBody(doc, onIssue.fingerprint, docs[doc])
 		posted, err := a.postIssueComment(ctx, rec.Key, id, body)
 		if errors.Is(err, ErrGone) && id != "" {
 			posted, err = a.postIssueComment(ctx, rec.Key, "", body)
@@ -771,13 +801,7 @@ func (a App) postPlan(ctx, final context.Context, rec *task.Record, docs map[tas
 				applyStop(ctx, cur, "planning", log, a.Now())
 				return
 			}
-			comment := task.PlanComment{Doc: doc, URL: posted.URL}
-			if rec.IssueSource() == task.Linear {
-				comment.ExternalCommentID = posted.ID
-			} else {
-				comment.CommentID, _ = strconv.ParseInt(posted.ID, 10, 64)
-			}
-			cur.SetPlanComment(comment)
+			cur.SetPlanComment(planCommentFor(rec.IssueSource(), doc, posted))
 		})); updateErr != nil || err != nil {
 			return rec, updateErr
 		}
@@ -789,10 +813,11 @@ func (a App) postPlan(ctx, final context.Context, rec *task.Record, docs map[tas
 // maxCommentChars is GitHub's limit on an issue comment's length.
 const maxCommentChars = 65536
 
-// planCommentBody is one document's comment: a marker foreman can recognize, the
-// document's heading, and the agent's text, cut to fit GitHub's limit.
-func planCommentBody(doc task.PlanDoc, text string) string {
-	head := fmt.Sprintf("<!-- foreman:%s -->\n## %s\n\n", doc, doc.Title())
+// planCommentBody is one document's comment: a marker foreman can recognize, with the
+// fingerprint of the description the plan was written for, the document's heading,
+// and the agent's text, cut to fit GitHub's limit.
+func planCommentBody(doc task.PlanDoc, fingerprint, text string) string {
+	head := task.PlanMarker(doc, fingerprint) + "\n## " + doc.Title() + "\n\n"
 	const cut = "\n\n_Truncated at GitHub's comment length limit._"
 	text = strings.TrimSpace(text)
 	if r := []rune(text); len([]rune(head))+len(r) > maxCommentChars {
