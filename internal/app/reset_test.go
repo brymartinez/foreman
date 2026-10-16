@@ -635,6 +635,26 @@ func TestResetFindsTheCheckoutOfAnOlderTaskThroughItsWorktree(t *testing.T) {
 	}
 }
 
+func TestResetOfAnOlderTaskDeletesNothingWhenItsWorktreePathHoldsAnotherRepository(t *testing.T) {
+	f := newFixture()
+	f.app.WorktreesDir = t.TempDir()
+	rec := failedTask(t, f, 912)
+	rec.Delegation.RepoDir = ""
+	if err := os.MkdirAll(rec.Delegation.Worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f.wt.common = "/elsewhere/.git"
+	f.gh.repo.Repo = "someone/other"
+	got, err := f.app.Reset(context.Background(), rec)
+	if err == nil || !strings.Contains(err.Error(), "someone/other") || !strings.Contains(err.Error(), "nothing was deleted") {
+		t.Fatalf("err = %v; a worktree of another repository at the path is not the run's", err)
+	}
+	if got != nil {
+		t.Errorf("record = %+v", got)
+	}
+	unchanged(t, f, rec)
+}
+
 func TestResetOfAnOlderTaskWithNoWorktreeDeletesNothing(t *testing.T) {
 	cases := map[string]map[string]bool{
 		"branch not in the managed checkout": nil,

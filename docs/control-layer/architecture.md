@@ -342,7 +342,7 @@ the same commit. The commit message records why it changed.
   blocks, however long the owner ran. A start also refuses when a reset lands between its read and its write.
   The branch is deleted in the checkout the task's worktree was made from, which the
   delegation stores as `repo_dir`; for an older task without it, the worktree names its
-  repository. With neither, the reset deletes nothing, because a branch of that name in
+  repository once its remote shows the task's repository. With neither, the reset deletes nothing, because a branch of that name in
   any checkout may be other work; that task can still restart. A forced removal takes
   the worktree only while it belongs to that checkout's repository and holds the task's
   branch, so another worktree made at the path is kept. A

@@ -43,7 +43,7 @@ func (a App) Reset(ctx context.Context, rec *task.Record) (*task.Record, error) 
 	}
 	repoDir := d.RepoDir
 	if repoDir == "" {
-		if repoDir, err = a.branchCheckout(ctx, d); err != nil {
+		if repoDir, err = a.branchCheckout(ctx, cur.Repo, d); err != nil {
 			return nil, fmt.Errorf("nothing was deleted: %w", err)
 		}
 	}
@@ -98,11 +98,20 @@ func (a App) Reset(ctx context.Context, rec *task.Record) (*task.Record, error) 
 
 // branchCheckout finds the checkout that holds a task's branch when the task did not
 // record it, as tasks from before RepoDir do not. A worktree on disk names its own
-// repository. Without one, nothing ties the branch to a checkout: a branch of that
-// name in the managed checkout may be other work, since the task may have started
-// from another checkout. The reset refuses rather than delete the wrong branch.
-func (a App) branchCheckout(ctx context.Context, d task.Delegation) (string, error) {
+// repository, once its remote shows it is a checkout of the task's repository and not
+// another one made at the same path. Without a worktree, nothing ties the branch to a
+// checkout: a branch of that name in the managed checkout may be other work, since
+// the task may have started from another checkout. The reset refuses rather than
+// delete the wrong branch.
+func (a App) branchCheckout(ctx context.Context, repo task.Repo, d task.Delegation) (string, error) {
 	if _, statErr := os.Stat(d.Worktree); d.Worktree != "" && statErr == nil {
+		info, err := a.GitHub.RepoAt(ctx, d.Worktree)
+		if err != nil {
+			return "", fmt.Errorf("read the repository of the worktree at %s: %w", d.Worktree, err)
+		}
+		if info.Repo != repo {
+			return "", fmt.Errorf("%s is a checkout of %s, not %s, so it is not the run's worktree", d.Worktree, info.Repo, repo)
+		}
 		return a.Worktrees.CommonDir(ctx, d.Worktree)
 	}
 	if d.Branch == "" {
