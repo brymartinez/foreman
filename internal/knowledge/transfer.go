@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -41,7 +43,16 @@ func (x Snapshot) Empty() bool { return len(x.Learnings) == 0 && len(x.Evaluatio
 func (x Snapshot) Guidance() string { return render(x.Learnings) }
 
 // Snapshot reads repo's learnings and every evaluation, oldest task first.
+// It fails while an interrupted save waits for Lock to finish it, because the
+// files would mix the old state and the new.
 func (s Store) Snapshot(repo string) (Snapshot, error) {
+	dir, err := s.repoDir(repo)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if _, err := os.Stat(filepath.Join(dir, journalFile)); err == nil {
+		return Snapshot{}, ErrUnfinished
+	}
 	f, err := s.load(repo)
 	if err != nil {
 		return Snapshot{}, err

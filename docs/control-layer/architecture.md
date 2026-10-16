@@ -820,14 +820,18 @@ the same commit. The commit message records why it changed.
   correction: maintainer evidence, a restore, or a confirm keeps it, and a
   retirement whose evaluation has a maintainer revision retires it. An observed
   retirement is not a correction, so it never stands in for the maintainer's
-  stance. One side with a correction wins over observed work. Corrections are timed
+  stance, and an entry a re-evaluation withdrew (`revert-restore`, `revert-retire`)
+  no longer counts. One side with a correction wins over observed work. Corrections are timed
   by the evaluation that recorded them (`Evaluation.At`, or the history entry's
   time), not by the task's start. Between corrections that disagree, the later one
   wins when it is at least a minute after the other; a closer or missing time is
   unresolved. An unresolved conflict returns `knowledge.ConflictError`
   listing both sides, the CLI exits 1, and nothing is written. The winner's text
   is kept, and a retire or restore entry is added under its task when the replayed
-  history would say otherwise.
+  history would say otherwise. That entry is timed one second after the group's
+  latest history entry, so a later merge, which orders history by time, replays the
+  same decision. Its `ingest:` reason marks it as a decision, so it never counts as
+  a correction itself.
 - **Ingest saves all or nothing.** `App.IngestKnowledge` takes the repository lock
   without waiting, hashes `learnings.yaml` and `evaluations/`, merges, and hashes
   again before it saves; a change means another writer ran, and it fails with
@@ -837,8 +841,10 @@ the same commit. The commit message records why it changed.
   renames each staged file over the live one, removes evaluations the journal does
   not list, moves `learnings.yaml` last, and deletes the journal. Each step can run
   again, and `Store.Lock` finishes a committed save before anything else holds the
-  lock, so a crash after the commit completes on the next learner, refresh, or
-  ingest; a crash before it drops the stage. No live file is ever missing, and a
+  lock, so a crash after the commit completes on the next learner, refresh, export,
+  or ingest; a crash before it drops the stage. `Snapshot` refuses while a journal
+  is pending, and `App.ExportKnowledge` takes the lock, so an export never mixes
+  the old state and the new. No live file is ever missing, and a
   reader without the lock sees whole old or new files. A failed agent turn, invalid
   output, a conflict, the lock held, or `--dry-run` writes nothing.
 - **Learning is a side job.** `learning.enabled: false` stops new evaluations, even

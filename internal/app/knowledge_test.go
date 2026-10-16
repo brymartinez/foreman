@@ -274,3 +274,15 @@ func TestIngestStopsOnAnUnresolvedMaintainerConflict(t *testing.T) {
 		t.Fatal("a conflict changed the store")
 	}
 }
+
+func TestExportKnowledgeWaitsForTheRepositoryLock(t *testing.T) {
+	s := machine(t, kEval("1", 0, "Wrap errors with the operation name.", knowledge.Observed))
+	unlock, err := s.Lock(kRepo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	if _, err := knowledgeApp(s, nil).ExportKnowledge(kRepo); !errors.Is(err, knowledge.ErrLocked) {
+		t.Fatalf("err = %v, want the lock held", err)
+	}
+}

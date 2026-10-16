@@ -280,3 +280,29 @@ func TestDigestChangesOnlyWhenTheStoreChanges(t *testing.T) {
 		t.Fatal("a new evaluation left the digest unchanged")
 	}
 }
+
+func TestSnapshotRefusesAnInterruptedSaveUntilTheLockFinishesIt(t *testing.T) {
+	s := mixedStore(t)
+	rename = func(from, to string) error {
+		if movingIn(from, to) && filepath.Base(to) == "learnings.yaml" {
+			return errors.New("killed")
+		}
+		return os.Rename(from, to)
+	}
+	err := s.Replace(repo, replacement)
+	rename = os.Rename
+	if !errors.Is(err, ErrUnfinished) {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := s.Snapshot(repo); !errors.Is(err, ErrUnfinished) {
+		t.Fatalf("snapshot of a half-finished save: %v", err)
+	}
+	unlock, err := s.Lock(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+	if x := snapshot(t, s, repo); !reflect.DeepEqual(x.Learnings, replacement.Learnings) || len(x.Evaluations) != 1 {
+		t.Fatalf("snapshot after recovery = %+v", x)
+	}
+}

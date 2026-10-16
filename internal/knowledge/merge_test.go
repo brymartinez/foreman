@@ -359,3 +359,48 @@ func TestAnObservedRetirementDoesNotCountAsTheMaintainersCorrection(t *testing.T
 		t.Fatalf("the observed retirement beat the maintainer's support: %+v", l)
 	}
 }
+
+func TestALaterMergeKeepsAMaintainerCorrectionThatWon(t *testing.T) {
+	text := "Run the e2e script before pushing."
+	a, _ := newStore(t)
+	mustApply(t, a, repo, eval("1", 0, maintainer(Practice, text)))
+	ev := eval("9", 10)
+	ev.Revisions = []Revision{{ID: "L1", Action: Retire, Reason: "The script was skipped.", Source: Observed}}
+	mustApply(t, a, repo, ev)
+	b, _ := newStore(t)
+	mustApply(t, b, repo, eval("20", 12, observed(Practice, text)))
+	m := prepare(t, snapshot(t, a, repo), snapshot(t, b, repo))
+	if err := a.Replace(repo, merged(t, m, together(m, Practice, text))); err != nil {
+		t.Fatal(err)
+	}
+
+	// New observed support from a third machine merges into the restored learning.
+	c, _ := newStore(t)
+	mustApply(t, c, repo, eval("30", 15, observed(Practice, text)))
+	m = prepare(t, snapshot(t, a, repo), snapshot(t, c, repo))
+	if l := merged(t, m, together(m, Practice, text)).Learnings[0]; l.Status != Active {
+		t.Fatalf("a later merge undid the maintainer's correction: %+v", l)
+	}
+}
+
+func TestAWithdrawnMaintainerConfirmationIsNotACorrection(t *testing.T) {
+	a, _ := newStore(t)
+	l := activeLearning(t, a)
+	// Task 3's maintainer support of the live learning records a confirm, then its
+	// re-evaluation withdraws it.
+	mustApply(t, a, repo, eval("3", 4, maintainer(Practice, l.Text)))
+	mustApply(t, a, repo, eval("3", 4))
+	ev := eval("9", 10)
+	ev.Revisions = []Revision{{ID: l.ID, Action: Retire, Reason: "The script was removed.", Source: Observed}}
+	mustApply(t, a, repo, ev)
+	got := learnings(t, a, repo)[0]
+	if got.Status != Retired || !slices.ContainsFunc(got.History, func(c Change) bool { return c.Action == "confirm" }) {
+		t.Fatalf("setup: %+v", got)
+	}
+	b, _ := newStore(t)
+	mustApply(t, b, repo, eval("20", 12, observed(Practice, l.Text)))
+	m := prepare(t, snapshot(t, a, repo), snapshot(t, b, repo))
+	if x := merged(t, m, together(m, Practice, l.Text)).Learnings[0]; x.Status != Retired {
+		t.Fatalf("a withdrawn confirmation restored the learning: %+v", x)
+	}
+}

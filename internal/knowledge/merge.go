@@ -518,14 +518,36 @@ func (m *Merge) build(g Group, members []MergeItem) (Learning, *Conflict, error)
 		return Learning{}, &c, nil
 	}
 	l.Text, l.Kind = winner.item.Learning.Text, winner.item.Learning.Kind
+	// The entry that records the decision sorts after every entry it overrides, so a
+	// later merge, which orders history by time, replays the same result.
+	decided := winner.latest
+	for _, c := range l.History {
+		decided = later(decided, c.At)
+	}
+	decided = decided.Add(time.Second)
 	switch {
 	case winner.retired && !retiredByHistory(l.History):
-		l.History = append(l.History, Change{At: winner.latest, Task: winner.task, Action: Retire, Reason: "ingest: the latest maintainer correction retires it"})
+		l.History = append(l.History, Change{At: decided, Task: winner.task, Action: Retire, Reason: ingestRetired})
 	case !winner.retired && retiredByHistory(l.History):
-		l.History = append(l.History, Change{At: winner.latest, Task: winner.task, Action: "restore", Reason: "ingest: the latest maintainer correction keeps it"})
+		l.History = append(l.History, Change{At: decided, Task: winner.task, Action: "restore", Reason: ingestRestored})
 	}
 	l.Status = replay(l)
 	return l, nil, nil
+}
+
+// The reasons on the history entries a merge adds. They record a decision, not a
+// correction, so stanceOf skips them; the correction behind it stays in the
+// evidence or history with its own time.
+const (
+	ingestRetired  = "ingest: the latest maintainer correction retires it"
+	ingestRestored = "ingest: the latest maintainer correction keeps it"
+)
+
+func later(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
 }
 
 // stanceOf finds the member's latest maintainer correction: maintainer evidence or
@@ -549,12 +571,20 @@ func (m *Merge) stanceOf(it MergeItem) stance {
 			mark(evaluatedAt(side, e.Task), e.Task, false)
 		}
 	}
-	for _, c := range it.Learning.History {
+	history := it.Learning.History
+	for i, c := range history {
+		if c.Reason == ingestRetired || c.Reason == ingestRestored {
+			continue
+		}
+		// A re-evaluation of the task withdrew the entry, so the maintainer no
+		// longer stands behind it.
 		switch c.Action {
 		case "restore", "confirm":
-			mark(c.At, c.Task, false)
+			if !withdrawn(history[i+1:], "revert-restore", c.Task) {
+				mark(c.At, c.Task, false)
+			}
 		case Retire:
-			if maintainerRetire(side, c.Task, it.Learning.ID) {
+			if !withdrawn(history[i+1:], "revert-retire", c.Task) && maintainerRetire(side, c.Task, it.Learning.ID) {
 				mark(c.At, c.Task, true)
 			}
 		}

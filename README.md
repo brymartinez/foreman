@@ -469,7 +469,9 @@ A file that is not a valid export changes nothing.
 - `--dry-run` prints the resulting `knowledge.md` without saving.
 
 The ingest replaces `learnings.yaml`, `evaluations/`, and `knowledge.md` together. If
-it is interrupted after it commits, the next learner, refresh, or ingest finishes it. It does not touch tasks, worktrees, config, `attempts/`, or the lock, and
+it is interrupted after it commits, the next learner, refresh, export, or ingest
+finishes it. An export waits for no one: it fails while an evaluation holds the
+repository's lock, so run it again. It does not touch tasks, worktrees, config, `attempts/`, or the lock, and
 it fails without saving when an evaluation runs at the same time.
 
 `knowledge.md` is the contract for other tools, such as the `foreman-triage` skill.

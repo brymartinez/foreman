@@ -15,11 +15,19 @@ import (
 // ingest was merging, so the merge is stale and nothing was saved.
 var ErrKnowledgeChanged = errors.New("the repository's knowledge changed during the merge; nothing was saved, so run the ingest again")
 
-// ExportKnowledge writes repo's learnings and evaluations as an export file.
+// ExportKnowledge writes repo's learnings and evaluations as an export file. It
+// returns knowledge.ErrLocked while an evaluation or ingest holds the lock.
 func (a App) ExportKnowledge(repo string) ([]byte, error) {
 	if a.Knowledge == nil {
 		return nil, errors.New("knowledge is not configured")
 	}
+	// The lock keeps a learner's write out of the export and finishes an
+	// interrupted ingest first.
+	unlock, err := a.Knowledge.Lock(repo)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	x, err := a.Knowledge.Snapshot(repo)
 	if err != nil {
 		return nil, err
