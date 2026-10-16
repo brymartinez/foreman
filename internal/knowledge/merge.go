@@ -450,12 +450,15 @@ type stance struct {
 	latest   time.Time
 	task     string
 	explicit bool
+	// text is the learning's text when the latest correction was recorded, so a
+	// later observed rewrite does not stand in for what the maintainer backed.
+	text string
 }
 
 // agrees reports whether two stances say the same. Their texts count only in a
 // group the agent flagged; otherwise it judged them the same guidance.
 func (s stance) agrees(o stance, byText bool) bool {
-	return s.retired == o.retired && (!byText || normalize(s.item.Learning.Text) == normalize(o.item.Learning.Text))
+	return s.retired == o.retired && (!byText || normalize(s.text) == normalize(o.text))
 }
 
 // build combines one group's members into a learning, or reports their conflict.
@@ -517,12 +520,12 @@ func (m *Merge) build(g Group, members []MergeItem) (Learning, *Conflict, error)
 	if len(rivals) > 0 && (winner.latest.IsZero() || rivals[0].latest.IsZero() || winner.latest.Sub(rivals[0].latest) < reliableOrder) {
 		c := Conflict{Reason: cmp.Or(g.Conflict, "maintainer corrections disagree on whether to keep this learning")}
 		for _, s := range append([]stance{winner}, rivals...) {
-			c.Sides = append(c.Sides, ConflictSide{Ref: s.item.Ref, Text: s.item.Learning.Text, Status: s.item.Learning.Status, Corrected: s.latest})
+			c.Sides = append(c.Sides, ConflictSide{Ref: s.item.Ref, Text: s.text, Status: s.item.Learning.Status, Corrected: s.latest})
 		}
 		return Learning{}, &c, nil
 	}
 	if g.Conflict != "" || disagree || len(rivals) > 0 {
-		l.Text, l.Kind = winner.item.Learning.Text, winner.item.Learning.Kind
+		l.Text, l.Kind = winner.text, winner.item.Learning.Kind
 	}
 	// The entry that records the decision sorts after every entry it overrides, so a
 	// later merge, which orders history by time, replays the same result.
@@ -595,7 +598,23 @@ func (m *Merge) stanceOf(it MergeItem) stance {
 			}
 		}
 	}
+	s.text = it.Learning.Text
+	if s.explicit {
+		s.text = textAt(it.Learning, s.latest)
+	}
 	return s
+}
+
+// textAt is l's text as of at: the newest rewrite still in force recorded by
+// then, or the original text.
+func textAt(l Learning, at time.Time) string {
+	text := originalText(l)
+	for _, c := range live(l.History, Revise, "revert-rewrite") {
+		if !c.At.After(at) {
+			text = c.To
+		}
+	}
+	return text
 }
 
 // evaluatedAt is when task's evaluation in x was recorded, or zero.

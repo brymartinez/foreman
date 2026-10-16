@@ -441,3 +441,26 @@ func TestMaintainerRewordingsTheAgentCallsEquivalentDoNotConflict(t *testing.T) 
 		t.Fatalf("learning = %+v", l)
 	}
 }
+
+func TestTheWinningCorrectionKeepsTheTextTheMaintainerBacked(t *testing.T) {
+	a, _ := newStore(t)
+	mustApply(t, a, repo, eval("1", 0, maintainer(Convention, "Indent YAML with two spaces.")))
+	// A newer task's observation rewrites the text after the maintainer's support.
+	ev := eval("9", 10)
+	ev.Revisions = []Revision{{ID: "L1", Action: Revise, Text: "Indent YAML with four spaces.", Reason: "The files use four.", Source: Observed}}
+	mustApply(t, a, repo, ev)
+	if l := learnings(t, a, repo)[0]; l.Text != "Indent YAML with four spaces." {
+		t.Fatalf("setup: %+v", l)
+	}
+	b, _ := newStore(t)
+	other := eval("2", 0, maintainer(Convention, "Indent YAML with tabs."))
+	other.At = day(-5)
+	mustApply(t, b, repo, other)
+
+	m := prepare(t, snapshot(t, a, repo), snapshot(t, b, repo))
+	groups := together(m, Convention, "Indent YAML consistently.")
+	groups[0].Conflict = "they ask for different indentation"
+	if l := merged(t, m, groups).Learnings[0]; l.Text != "Indent YAML with two spaces." {
+		t.Fatalf("text = %q, want the maintainer's", l.Text)
+	}
+}

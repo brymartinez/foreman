@@ -822,7 +822,9 @@ the same commit. The commit message records why it changed.
   decide the status, even when every member was retired by observation; with none,
   history and evidence replay by the promotion rules. When members disagree on
   retirement, or the agent flags a conflict, the winning correction's text is kept
-  too; otherwise the agent's text is. Without a flag, corrections differ only by
+  too; otherwise the agent's text is. That text is the learning's text when the
+  correction was recorded, rebuilt from the rewrites in force by then, so a later
+  observed rewrite never replaces what the maintainer backed. Without a flag, corrections differ only by
   retirement, since the agent judged their texts the same guidance. A member's stance is its latest
   correction: maintainer evidence, a restore, or a confirm keeps it, and a
   retirement whose evaluation has a maintainer revision retires it. An observed
