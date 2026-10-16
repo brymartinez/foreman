@@ -635,17 +635,18 @@ func TestResetFindsTheCheckoutOfAnOlderTaskThroughItsWorktree(t *testing.T) {
 	}
 }
 
-func TestResetOfAnOlderTaskWithNoWorktreeWarnsWhenTheBranchIsNotInTheManagedCheckout(t *testing.T) {
+func TestResetOfAnOlderTaskWithNoWorktreeDeletesNothingWhenTheBranchIsNotInTheManagedCheckout(t *testing.T) {
 	f := newFixture()
 	rec := failedTask(t, f, 912)
 	rec.Delegation.RepoDir = ""
 	got, err := f.app.Reset(context.Background(), rec)
-	if err == nil || !strings.Contains(err.Error(), "branch "+rec.Delegation.Branch) || !strings.Contains(err.Error(), "checkout the task started from") {
-		t.Fatalf("err = %v; the branch may remain elsewhere, so the reset must not report success", err)
+	if err == nil || !strings.Contains(err.Error(), "branch "+rec.Delegation.Branch) || !strings.Contains(err.Error(), "nothing was deleted") {
+		t.Fatalf("err = %v; the branch may remain in another checkout, so the reset must refuse", err)
 	}
-	if got == nil || got.Reset == nil || got.Reset.PR != 912 {
-		t.Fatalf("record = %+v", got)
+	if got != nil {
+		t.Errorf("record = %+v", got)
 	}
+	unchanged(t, f, rec)
 
 	f2 := newFixture()
 	rec2 := failedTask(t, f2, 912)
