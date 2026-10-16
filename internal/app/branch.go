@@ -40,11 +40,24 @@ func (a App) ProposeBranch(ctx context.Context, req StartRequest) (BranchProposa
 	if rec != nil && rec.Delegation != nil && rec.Delegation.Branch != "" {
 		return BranchProposal{Name: rec.Delegation.Branch, Reason: "existing task branch"}, nil
 	}
+	prior, continuePR, err := a.priorPR(ctx, rec)
+	if err != nil {
+		return BranchProposal{}, err
+	}
+	if continuePR {
+		return BranchProposal{Name: prior.HeadRefName, Reason: fmt.Sprintf("branch of open PR #%d from the reset run", prior.Key.Number)}, nil
+	}
 	issue, err := a.issue(ctx, key)
 	if err != nil {
 		return BranchProposal{}, err
 	}
-	return a.proposeBranch(ctx, req, info.DefaultBranch, issue)
+	p, err := a.proposeBranch(ctx, req, info.DefaultBranch, issue)
+	if err == nil && !p.Uncertain {
+		if taken := priorBranch(prior, p.Name); taken != nil {
+			p.Uncertain, p.Reason = true, taken.Error()
+		}
+	}
+	return p, err
 }
 
 func defaultBranch(req StartRequest, key task.Key, issue Issue) string {

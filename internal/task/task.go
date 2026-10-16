@@ -154,6 +154,9 @@ type Delegation struct {
 	RunnerLog         string
 	PR                int
 	PRURL             string
+	// PriorPR is the PR of a run the developer reset. Each fresh session reads it
+	// again as context. It equals PR when this run continues that PR.
+	PriorPR int
 	// PRHead is the PR's head commit when foreman last read it. A review covers one head.
 	PRHead string
 	// CheckpointHead is the last accepted implementation commit, or the head when

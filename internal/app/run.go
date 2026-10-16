@@ -609,6 +609,10 @@ func (a App) brief(ctx context.Context, rec *task.Record, log io.Writer) (agent.
 	if err != nil {
 		return agent.TaskBrief{}, err
 	}
+	prior, err := a.priorBrief(ctx, rec)
+	if err != nil {
+		return agent.TaskBrief{}, err
+	}
 	var contextText []byte
 	if d.ContextFile != "" {
 		if contextText, err = os.ReadFile(d.ContextFile); err != nil {
@@ -616,6 +620,7 @@ func (a App) brief(ctx context.Context, rec *task.Record, log io.Writer) (agent.
 		}
 	}
 	return agent.TaskBrief{
+		PriorPR:    prior,
 		Key:        rec.Key,
 		Identifier: issue.Identifier,
 		Title:      issue.Title,

@@ -90,9 +90,15 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		return nil, fmt.Errorf("%s no longer has the triaged label", issueLabel(key, issue.Identifier))
 	}
 
+	prior, continuePR, err := a.priorPR(ctx, existing)
+	if err != nil {
+		return nil, err
+	}
 	branch := ""
 	if existing != nil && existing.Delegation != nil && existing.Delegation.Branch != "" {
 		branch = existing.Delegation.Branch
+	} else if continuePR {
+		branch = prior.HeadRefName
 	} else {
 		branch = req.BranchName
 		// A confirmed name skips the proposal, but the checkout and its guidance can
@@ -118,6 +124,9 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		if !task.ValidBranchName(branch) {
 			return nil, fmt.Errorf("invalid branch name %q", branch)
 		}
+		if err := priorBranch(prior, branch); err != nil {
+			return nil, err
+		}
 	}
 	workName := task.WorkNameOf(branch)
 	wt := WorktreeRequest{
@@ -125,6 +134,11 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		Path:    task.WorktreePath(a.WorktreesDir, key.Repo, workName),
 		Branch:  branch,
 		BaseRef: "origin/" + info.DefaultBranch,
+	}
+	base := wt.BaseRef
+	if continuePR {
+		// The worktree starts at the PR's head; the PR keeps the base it targets.
+		wt.BaseRef, base = "origin/"+branch, "origin/"+prior.BaseRefName
 	}
 	if err := a.Worktrees.Ensure(ctx, wt); err != nil {
 		return nil, err
@@ -160,7 +174,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			StartedAt:      now,
 			Reviewer:       req.Agent.Reviewer(),
 			Branch:         wt.Branch,
-			BaseRef:        wt.BaseRef,
+			BaseRef:        base,
 			Worktree:       wt.Path,
 			ContextFile:    req.ContextFile,
 			Profile:        req.Profile,
@@ -170,6 +184,15 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		// The pin belongs to the task, not the agent, so every restart keeps it.
 		if prev != nil {
 			cur.Delegation.Account, cur.Delegation.AccountEmail = prev.Account, prev.AccountEmail
+			cur.Delegation.PriorPR = prev.PriorPR
+		}
+		reset := cur.Reset != nil
+		if reset {
+			cur.Delegation.PriorPR = cur.Reset.PR
+			if continuePR {
+				cur.Delegation.PR, cur.Delegation.PRURL = prior.Key.Number, prior.URL
+			}
+			cur.Reset = nil
 		}
 		// The same branch has the same PR, so a restart can pick up at its review.
 		// Another implementer starts over: its reviewer wrote the existing PR. A
@@ -201,7 +224,11 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		// A kept PR continues its attempt, or stays with the older record when it
 		// predates attempts. So does an attempt that has no PR yet: the earlier runs
 		// were work toward the PR this one opens. Anything else is a new attempt.
+		// A reset discarded the attempts and the log, so the run starts the first one,
+		// even when it continues a PR.
 		switch at := cur.CurrentAttempt(); {
+		case reset:
+			cur.Attempts = []task.Attempt{{Agent: req.Agent}}
 		case cur.Delegation.PR != 0:
 		case at != nil && at.PR == 0:
 			at.Agent = req.Agent
@@ -327,6 +354,9 @@ func logSize(prev *task.Delegation) int64 {
 }
 
 func newOnly(req StartRequest, rec *task.Record) error {
+	if req.NewOnly && rec != nil && rec.Reset != nil {
+		return fmt.Errorf("%s was reset and waits for a manual start: %w", taskRef(rec), ErrDelegated)
+	}
 	if req.NewOnly && rec != nil && rec.Delegation != nil {
 		return fmt.Errorf("%s#%d is %s: %w", rec.Repo, rec.Number, rec.State, ErrDelegated)
 	}

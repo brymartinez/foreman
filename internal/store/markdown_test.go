@@ -585,3 +585,16 @@ func TestStoreRoundTripsResetMarkWithoutADelegation(t *testing.T) {
 		t.Errorf("cleared reset mark is still saved:\n%s", raw)
 	}
 }
+
+func TestStoreRoundTripsThePriorPR(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	want := delegated()
+	want.Delegation.PriorPR = 12
+	if err := s.Save(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, want.Key)
+	if err != nil || got.Delegation.PriorPR != 12 {
+		t.Fatalf("prior PR = %+v, %v", got.Delegation, err)
+	}
+}
