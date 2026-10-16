@@ -27,7 +27,7 @@ func (a App) conflict(ctx context.Context, rec *task.Record, pr PullRequest) (*t
 	if d.ConflictAttempted(pr.HeadSHA, base) {
 		return rec, "", nil
 	}
-	var note string
+	var note, token string
 	updated, err := a.update(ctx, rec.Key, func(cur *task.Record) (*task.Record, error) {
 		// Read again under the lock: a resume or another refresh since the gate's list
 		// owns the task now, and the pair is recorded here so only one run starts.
@@ -42,12 +42,14 @@ func (a App) conflict(ctx context.Context, rec *task.Record, pr PullRequest) (*t
 		cur.State, cur.CI = task.Working, nil
 		note = fmt.Sprintf("PR #%d conflicts with %s; %s is repairing it", cd.PR, pr.BaseRefName, cd.Implementer.Agent)
 		cur.LastOutcome = &task.Outcome{Status: "conflict_repair", Summary: note, At: a.Now()}
-		return cur, nil
+		var err error
+		token, err = a.claimLaunch(cur)
+		return cur, err
 	})
 	if err != nil || note == "" {
 		return updated, "", err
 	}
-	updated, err = a.launch(ctx, rec.Key)
+	updated, err = a.launch(ctx, rec.Key, token)
 	return updated, note, err
 }
 

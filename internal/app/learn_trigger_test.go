@@ -18,7 +18,7 @@ func TestRunnerStartsOneLearnerAfterACleanReview(t *testing.T) {
 	f.app.Knowledge, f.app.Learning = knowledge.Store{Dir: t.TempDir()}, true
 	key := started(t, f, startReq(t))
 	f.claude.turn = prTurn("sid-1")
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(f.runners.learned, []task.Key{key}) {
@@ -31,7 +31,7 @@ func TestRunnerStartsNoLearnerWhenLearningIsOff(t *testing.T) {
 	f.app.Knowledge = knowledge.Store{Dir: t.TempDir()}
 	key := started(t, f, startReq(t))
 	f.claude.turn = prTurn("sid-1")
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.runners.learned) != 0 {
@@ -45,7 +45,7 @@ func TestRunnerStartsNoLearnerWhenTheReviewFails(t *testing.T) {
 	key := started(t, f, startReq(t))
 	f.claude.turn = prTurn("sid-1")
 	f.codex.reviewErr = errors.New("reviewer crashed")
-	_ = f.app.RunTask(context.Background(), key, 4242, io.Discard)
+	_ = f.run(context.Background(), key, 4242, io.Discard)
 	if len(f.runners.learned) != 0 {
 		t.Fatalf("learners started = %v; want none", f.runners.learned)
 	}
@@ -58,7 +58,7 @@ func TestALearnerThatFailsToStartLeavesTheRunAndTaskAlone(t *testing.T) {
 	key := started(t, f, startReq(t))
 	f.claude.turn = prTurn("sid-1")
 	var log strings.Builder
-	if err := f.app.RunTask(context.Background(), key, 4242, &log); err != nil {
+	if err := f.run(context.Background(), key, 4242, &log); err != nil {
 		t.Fatalf("RunTask = %v; a learner error must not fail the run", err)
 	}
 	if got := f.store.recs[key]; got.State != task.Reviewing {

@@ -2,8 +2,6 @@ package app
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -318,11 +316,10 @@ func taskRef(rec *task.Record) string {
 // its run or gives up, because finishReset force-removes the path the new worktree
 // takes. It returns the claimed record and its owner token.
 func (a App) claimReset(ctx context.Context, read *task.Record) (*task.Record, string, error) {
-	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
+	owner, err := newToken()
+	if err != nil {
 		return nil, "", err
 	}
-	owner := hex.EncodeToString(b[:])
 	claimed, err := a.update(ctx, read.Key, func(cur *task.Record) (*task.Record, error) {
 		if err := a.startable(cur); err != nil {
 			return nil, err

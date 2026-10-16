@@ -17,7 +17,7 @@ func resumeRun(t *testing.T, f fixture, key task.Key) *task.Record {
 	if _, err := f.app.Resume(context.Background(), key); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.app.RunTask(context.Background(), key, 4243, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	return f.store.recs[key]
@@ -36,7 +36,7 @@ func TestDisabledPRFeedbackDoesNotStartReplyTurnAtHandover(t *testing.T) {
 	f.gh.addPRComment(912, prComment(4401, "<!-- linear-linkback --> linked issue"))
 	key := started(t, f, StartRequest{Repo: "ridezoomo/armada-backend", Issue: 825, Agent: task.Claude})
 	f.claude.turn = prTurn("sid-1")
-	if err := f.app.RunTask(context.Background(), key, 4243, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.claude.resumed) != 0 || f.gh.prCommentReads != 1 {
@@ -52,7 +52,7 @@ func TestDisabledPRFeedbackRestartsFailedReplyWithoutAgentTurn(t *testing.T) {
 	if _, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Issue: key.Number, Agent: task.Claude}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.app.RunTask(context.Background(), key, 4243, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	rec := f.store.recs[key]
@@ -70,7 +70,7 @@ func TestDisabledPRFeedbackKeepsCIUnverifiedAfterFailedReply(t *testing.T) {
 	if _, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Issue: key.Number, Agent: task.Claude}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.app.RunTask(context.Background(), key, 4243, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	rec := f.store.recs[key]
@@ -195,7 +195,7 @@ func TestRestartWithAnotherAgentAnswersTheWaitingComments(t *testing.T) {
 	}
 	f.codex.turn = prTurn("cx-1")
 	f.codex.turn.Session.Agent = task.Codex
-	if err := f.app.RunTask(context.Background(), key, 4244, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4244, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if f.codex.starts != 1 || !strings.Contains(f.codex.prompt, "This retries 4xx too.") {
@@ -230,7 +230,7 @@ func TestCommentsDuringARunAreAnsweredBeforeHandover(t *testing.T) {
 		f.gh.addPRComment(912, prComment(4401, "One more thing."))
 		f.claude.during = nil
 	}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	rec := f.store.recs[key]
@@ -279,7 +279,7 @@ func TestCancelledFeedbackTurnIsRecordedAsCancelled(t *testing.T) {
 	f.claude.onResume = func() { cancel(errors.New("terminated signal received")) }
 	f.claude.resumeErr = errors.New("claude printed no result (signal: terminated)")
 	var log strings.Builder
-	if err := f.app.RunTask(ctx, key, 4243, &log); err != nil {
+	if err := f.run(ctx, key, 4243, &log); err != nil {
 		t.Fatal(err)
 	}
 	rec := f.store.recs[key]

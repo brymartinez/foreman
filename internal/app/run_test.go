@@ -35,7 +35,7 @@ func TestReviewLoopCleanFirstRound(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	f.claude.turn = prTurn("sid-1")
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -59,7 +59,7 @@ func TestReviewLoopFixesFindingsThenReReviews(t *testing.T) {
 	key := started(t, f, startReq(t))
 	f.claude.turns = []agent.Turn{prTurn("sid-1"), prTurn("sid-1")}
 	f.codex.reviews = []agent.ReviewOutcome{findings("blocking")}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -82,7 +82,7 @@ func TestReviewLoopEscalatesAfterRoundCapAndResumesOnAnswer(t *testing.T) {
 	key := started(t, f, startReq(t))
 	f.claude.turn = prTurn("sid-1")
 	f.codex.reviews = []agent.ReviewOutcome{findings("blocking"), findings("blocking"), findings("blocking"), findings("should_fix")}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -105,7 +105,7 @@ func TestReviewLoopEscalatesAfterRoundCapAndResumesOnAnswer(t *testing.T) {
 		t.Fatal(err)
 	}
 	resumedBefore := len(f.claude.resumed)
-	if err := f.app.RunTask(context.Background(), key, 4243, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got = f.store.recs[key]
@@ -128,7 +128,7 @@ func TestFixRoundsCapsTheLoopApartFromReviewRounds(t *testing.T) {
 	key := started(t, f, startReq(t))
 	f.claude.turn = prTurn("sid-1")
 	f.codex.reviews = []agent.ReviewOutcome{findings("blocking"), findings("blocking")}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -146,7 +146,7 @@ func TestReviewLoopStopsWhenImplementerBlocksDuringFix(t *testing.T) {
 	q := retryQuestion
 	f.claude.turns = []agent.Turn{prTurn("sid-1"), {Session: task.Session{Agent: task.Claude, ID: "sid-1"}, Outcome: agent.Outcome{Status: agent.Blocked, Summary: "?", Questions: []task.Question{q}}}}
 	f.codex.reviews = []agent.ReviewOutcome{findings("blocking")}
-	f.app.RunTask(context.Background(), key, 4242, io.Discard)
+	f.run(context.Background(), key, 4242, io.Discard)
 	if got := f.store.recs[key]; got.State != task.NeedsDecision || len(got.Reviews) != 1 {
 		t.Fatalf("state %s reviews %d", got.State, len(got.Reviews))
 	}
@@ -157,7 +157,7 @@ func TestReviewFailureFailsTask(t *testing.T) {
 	key := started(t, f, startReq(t))
 	f.claude.turn = prTurn("sid-1")
 	f.codex.reviewErr = errors.New("codex never started a thread")
-	f.app.RunTask(context.Background(), key, 4242, io.Discard)
+	f.run(context.Background(), key, 4242, io.Discard)
 	got := f.store.recs[key]
 	if got.State != task.Failed || !strings.Contains(got.LastOutcome.Summary, "codex review failed") || got.Delegation.PR != 912 {
 		t.Fatalf("state %s outcome %+v pr %d", got.State, got.LastOutcome, got.Delegation.PR)
@@ -170,7 +170,7 @@ func TestCodexImplementationIsReviewedByClaude(t *testing.T) {
 	req.Agent = task.Codex
 	key := started(t, f, req)
 	f.codex.turn = agent.Turn{Session: task.Session{Agent: task.Codex, ID: "th-1"}, Outcome: prTurn("").Outcome}
-	f.app.RunTask(context.Background(), key, 4242, io.Discard)
+	f.run(context.Background(), key, 4242, io.Discard)
 	got := f.store.recs[key]
 	if got.State != task.Reviewing || len(f.claude.reviewed) != 1 || len(f.codex.reviewed) != 0 || got.Reviews[0].Reviewer != task.Claude {
 		t.Fatalf("state %s claude reviews %d codex reviews %d", got.State, len(f.claude.reviewed), len(f.codex.reviewed))
@@ -184,7 +184,7 @@ func TestCodexPRUsesCodexReviewWhenAxiConfirmsClaudeNotSetUp(t *testing.T) {
 	req.Agent = task.Codex
 	key := started(t, f, req)
 	f.codex.turn = agent.Turn{Session: task.Session{Agent: task.Codex, ID: "th-1"}, Outcome: prTurn("").Outcome}
-	f.app.RunTask(context.Background(), key, 4242, io.Discard)
+	f.run(context.Background(), key, 4242, io.Discard)
 	got := f.store.recs[key]
 	if got.State != task.Reviewing || len(f.codex.reviewed) != 1 || len(f.claude.reviewed) != 0 || got.Reviews[0].Reviewer != task.Codex || got.Delegation.Reviewer != task.Codex {
 		t.Fatalf("state %s reviewer %s reviews %+v; codex %d claude %d", got.State, got.Delegation.Reviewer, got.Reviews, len(f.codex.reviewed), len(f.claude.reviewed))
@@ -198,7 +198,7 @@ func TestCodexPRFallsBackToCodexReviewWhenClaudeAuthenticationFails(t *testing.T
 	key := started(t, f, req)
 	f.codex.turn = agent.Turn{Session: task.Session{Agent: task.Codex, ID: "th-1"}, Outcome: prTurn("").Outcome}
 	f.claude.reviewErr = fmt.Errorf("OAuth session expired: %w", agent.ErrUnavailable)
-	f.app.RunTask(context.Background(), key, 4242, io.Discard)
+	f.run(context.Background(), key, 4242, io.Discard)
 	got := f.store.recs[key]
 	if got.State != task.Reviewing || len(f.claude.reviewed) != 1 || len(f.codex.reviewed) != 1 || got.Reviews[0].Reviewer != task.Codex || got.Delegation.Reviewer != task.Codex {
 		t.Fatalf("state %s reviewer %s reviews %+v; codex %d claude %d", got.State, got.Delegation.Reviewer, got.Reviews, len(f.codex.reviewed), len(f.claude.reviewed))
@@ -216,7 +216,7 @@ func TestFreshTurnCarriesOpenFindingsWhenSessionIsGone(t *testing.T) {
 	f.claude.turns = []agent.Turn{prTurn("sid-1"), prTurn("sid-2")}
 	f.claude.resumeErr = errors.Join(errors.New("gone"), agent.ErrNoSession)
 	f.codex.reviews = []agent.ReviewOutcome{findings("blocking")}
-	f.app.RunTask(context.Background(), key, 4242, io.Discard)
+	f.run(context.Background(), key, 4242, io.Discard)
 	if !strings.Contains(f.claude.prompt, "## Outstanding review findings") || !strings.Contains(f.claude.prompt, "[blocking] 4xx retried (retry.go)") {
 		t.Errorf("fresh prompt lacks findings:\n%s", f.claude.prompt)
 	}
@@ -230,7 +230,7 @@ func TestImplementationPromptGetsImplementAndPRInstructionsOnly(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	f.claude.turn = prTurn("sid-1")
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	p := f.claude.prompt
@@ -253,7 +253,7 @@ func TestUnreadableStageInstructionsFailTheTask(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	f.stages.err = errors.New("stage instructions /cfg/stages/implement.md: permission denied")
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -266,7 +266,7 @@ func TestReviewPromptGetsOnlyReviewInstructions(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	f.claude.turn = prTurn("sid-1")
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	p := f.codex.reviewed[0]
@@ -286,7 +286,7 @@ func TestReviewPromptUsesPRBodyNotIssue(t *testing.T) {
 	f.gh.prComments = map[int][]PRComment{912: {{Kind: task.IssueComment, ID: 1, Author: "dev", Body: "Also handle 429."}}}
 	key := started(t, f, startReq(t))
 	f.claude.turn = prTurn("sid-1")
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	p := f.codex.reviewed[0]
@@ -310,7 +310,7 @@ func TestReviewStopsWhenPRDescriptionIsEmpty(t *testing.T) {
 	f.gh.prs[912] = pr
 	key := started(t, f, startReq(t))
 	f.claude.turn = prTurn("sid-1")
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -337,7 +337,7 @@ func TestReviewRunsWhenPRCommentsCannotBeRead(t *testing.T) {
 	f.gh.prCommentErr = errors.New("gh: HTTP 502")
 	key := started(t, f, startReq(t))
 	f.claude.turn = prTurn("sid-1")
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.codex.reviewed) != 1 || !strings.Contains(f.codex.reviewed[0], "could not be loaded (gh: HTTP 502)") {
@@ -363,7 +363,7 @@ func TestUnreadableReviewInstructionsFailTheReview(t *testing.T) {
 	f.app.Stages = &failingStage{stage: task.StageReview}
 	key := started(t, f, startReq(t))
 	f.claude.turn = prTurn("sid-1")
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -376,7 +376,7 @@ func TestUnreadablePRInstructionsFailBeforeTheImplementerRuns(t *testing.T) {
 	f := newFixture()
 	f.app.Stages = &failingStage{stage: task.StagePR}
 	key := started(t, f, startReq(t))
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.store.recs[key]; got.State != task.Failed || f.claude.starts != 0 {
@@ -389,7 +389,7 @@ func TestRunTaskStopsWhenTheTaskFileIsRemoved(t *testing.T) {
 	key := started(t, f, startReq(t))
 	f.claude.turn = prTurn("sid-1")
 	f.claude.during = func() { delete(f.store.recs, key) }
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); !errors.Is(err, errTaskRemoved) {
+	if err := f.run(context.Background(), key, 4242, io.Discard); !errors.Is(err, errTaskRemoved) {
 		t.Fatalf("err = %v, want errTaskRemoved", err)
 	}
 	if _, ok := f.store.recs[key]; ok {
@@ -405,7 +405,7 @@ func TestRunTaskStopsWhenThePRIsClosed(t *testing.T) {
 	// closes the PR. The runner must record nothing over it, least of all a failure.
 	f.claude.during = func() { f.store.recs[key].State = task.PRClosed }
 	f.notes.sent = nil
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); !errors.Is(err, errPRClosed) {
+	if err := f.run(context.Background(), key, 4242, io.Discard); !errors.Is(err, errPRClosed) {
 		t.Fatalf("err = %v, want errPRClosed", err)
 	}
 	if got := f.store.recs[key]; got.State != task.PRClosed {
@@ -424,7 +424,7 @@ func TestRunTaskRecordsACancelledTurn(t *testing.T) {
 	f.claude.err = errors.New("claude printed no result (signal: terminated)")
 	f.claude.during = func() { cancel(errors.New("terminated signal received")) }
 	var log strings.Builder
-	if err := f.app.RunTask(ctx, key, 4242, &log); err != nil {
+	if err := f.run(ctx, key, 4242, &log); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -449,7 +449,7 @@ func TestRunTaskRecordsACancelledReview(t *testing.T) {
 	f.claude.turn = prTurn("sid-1")
 	f.claude.during = cancel
 	f.codex.reviewErr = errors.New("codex never started a thread")
-	if err := f.app.RunTask(ctx, key, 4242, io.Discard); err != nil {
+	if err := f.run(ctx, key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -462,7 +462,7 @@ func TestAFailedTurnWithoutACancelIsNotCancelled(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	f.claude.err = errors.New("claude exited: exit status 1")
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.store.recs[key]; got.State != task.Failed || got.LastOutcome.Status != "failed" {
@@ -482,7 +482,7 @@ func TestPlanIsPostedThenAFreshSessionImplementsIt(t *testing.T) {
 	key := started(t, f, startReq(t))
 	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2")}
 	var log strings.Builder
-	if err := f.app.RunTask(context.Background(), key, 4242, &log); err != nil {
+	if err := f.run(context.Background(), key, 4242, &log); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -518,7 +518,7 @@ func TestReviewFindingsResumeImplementationSessionAfterPlan(t *testing.T) {
 	key := started(t, f, startReq(t))
 	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2"), prTurn("sid-2")}
 	f.codex.reviews = []agent.ReviewOutcome{findings("blocking")}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if f.claude.starts != 2 || len(f.claude.resumed) != 1 || !strings.HasPrefix(f.claude.resumed[0], "sid-2: Review round 1 of PR #912") {
@@ -534,7 +534,7 @@ func TestReplanningEditsTheSameComments(t *testing.T) {
 	key := started(t, f, startReq(t))
 	f.gh.postErr, f.gh.postOK = errors.New("gh: HTTP 502"), 2
 	f.claude.turns = []agent.Turn{plannedTurn("sid-1")}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -547,7 +547,7 @@ func TestReplanningEditsTheSameComments(t *testing.T) {
 	delete(f.gh.comments, 1002)
 	started(t, f, startReq(t))
 	f.claude.turns = []agent.Turn{plannedTurn("sid-2"), prTurn("sid-3")}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got = f.store.recs[key]
@@ -563,7 +563,7 @@ func TestAnsweredPlanningQuestionResumesThePlanning(t *testing.T) {
 	rec.Delegation.Implementer.ID = "sid-1"
 	rec.Decisions = []task.Decision{{Question: task.Question{Issue: "Retry 4xx?"}, Answer: "A. 5xx only", AnsweredAt: f.app.Now()}}
 	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2")}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -580,7 +580,7 @@ func TestATaskWithAPRSkipsPlanning(t *testing.T) {
 	key := started(t, f, startReq(t))
 	f.store.recs[key].Delegation.PR = 912
 	f.claude.turn = prTurn("sid-1")
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(f.claude.prompt, "## Plan first") || len(f.gh.comments) != 0 {
@@ -603,7 +603,7 @@ func TestCodexPlansAndClaudeReviewsWithoutThePRD(t *testing.T) {
 	planned := plannedTurn("th-1")
 	planned.Session.Agent = task.Codex
 	f.codex.turns = []agent.Turn{planned, {Session: task.Session{Agent: task.Codex, ID: "th-2"}, Outcome: prTurn("").Outcome}}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -624,7 +624,7 @@ func TestPlanIsPostedAgainWhenItsCommentWasDeleted(t *testing.T) {
 	// An earlier plan's analysis comment that the developer has since deleted.
 	f.store.recs[key].SetPlanComment(task.PlanComment{Doc: task.Analysis, CommentID: 77, URL: "https://github.com/x/issues/825#issuecomment-77"})
 	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2")}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -642,7 +642,7 @@ func TestFailedPlanPostNamesTheDocument(t *testing.T) {
 	key := started(t, f, startReq(t))
 	f.gh.postErr = errors.New("gh: HTTP 502")
 	f.claude.turns = []agent.Turn{plannedTurn("sid-1")}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]

@@ -15,7 +15,7 @@ func TestPlanFixAndReviewTurnsCarryTheirSteps(t *testing.T) {
 	key := started(t, f, startReq(t))
 	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2"), prTurn("sid-2")}
 	f.codex.reviews = []agent.ReviewOutcome{findings("blocking")}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if want := []string{agent.StepPlan, agent.StepImplement, agent.StepImplement}; !slices.Equal(f.claude.steps, want) {
@@ -56,7 +56,7 @@ func TestConflictRepairFallbackGivesEachTurnTheMergeStep(t *testing.T) {
 	f.claude.steps = nil
 	f.claude.resumeErr = errors.Join(errors.New("gone"), agent.ErrNoSession)
 	f.claude.during = func() { pushHead(f, "merged1") }
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if want := []string{agent.StepMerge, agent.StepMerge}; !slices.Equal(f.claude.steps, want) {

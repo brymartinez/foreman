@@ -31,6 +31,7 @@ func delegated() *task.Record {
 			Worktree:          "/wt/ridezoomo-armada-backend/825-provider-retries",
 			WorktreeRemovedAt: time.Date(2026, 9, 25, 8, 0, 0, 0, time.UTC),
 			ContextFile:       "/ctx/825.md",
+			Launch:            &task.Launch{Token: "5eed", PID: 4100, Since: time.Date(2026, 9, 24, 16, 0, 0, 0, time.UTC)},
 			PR:                912,
 			PRURL:             "https://github.com/ridezoomo/armada-backend/pull/912",
 			PRHead:            "beef002",

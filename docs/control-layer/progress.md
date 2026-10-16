@@ -11,6 +11,11 @@ decide conflicts; an unordered pair stops the ingest. Saves are all or nothing u
 the repository lock. Vet, Go tests, build, and the `knowledge_transfer` end-to-end
 scenario pass.
 
+Duplicate runner prevention (#76) is complete. Every launch stores a launch claim in
+the write that makes the task WORKING, and a start during that launch gets "already
+starting". The runner takes the task only with the claim's token. Vet, Go tests,
+build, and the end-to-end scenarios pass.
+
 Issue #77 is complete. Launch aborts when its task file disappears before spawning.
 If deletion happens after spawning, launch stops and waits for the new runner.
 Regression tests cover removal before spawn, during worktree restoration, and after

@@ -85,11 +85,12 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			}
 			ci.CheckedAt = a.Now()
 		}
-		var note string
+		var note, token string
 		updated, err := a.update(ctx, r.Key, func(cur *task.Record) (*task.Record, error) {
 			if cur.Delegation == nil || cur.Delegation.PR != r.Delegation.PR {
 				return cur, nil
 			}
+			was := cur.State
 			// The state is read again under the lock, so a runner that saved since the
 			// list is not overwritten by what this refresh expected to find.
 			switch {
@@ -100,13 +101,19 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			case gated(cur):
 				note = advance(cur, pr, ci, a.Now())
 			}
+			if was != task.Working && cur.State == task.Working {
+				var err error
+				if token, err = a.claimLaunch(cur); err != nil {
+					return nil, err
+				}
+			}
 			return cur, nil
 		})
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		if updated.State == task.Working && r.State != task.Working {
-			if updated, err = a.launch(ctx, r.Key); err != nil {
+		if token != "" {
+			if updated, err = a.launch(ctx, r.Key, token); err != nil {
 				return nil, nil, nil, err
 			}
 		}

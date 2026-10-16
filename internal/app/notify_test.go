@@ -34,7 +34,7 @@ func TestNotifiesEveryTransitionThatNeedsTheDeveloper(t *testing.T) {
 			key := started(t, f, startReq(t))
 			f.claude.turn = prTurn("sid-1")
 			f.codex.reviews = []agent.ReviewOutcome{findings("blocking"), findings("blocking"), findings("blocking"), findings("blocking")}
-			if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+			if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 				t.Fatal(err)
 			}
 		}, []string{title + ": Needs your decision"}},
@@ -98,7 +98,7 @@ func TestNotifyCarriesTheStateAndMarksCancelledRuns(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	f.claude.err = errors.New("claude printed no result (signal: terminated)")
 	f.claude.during = func() { cancel(errors.New("terminated signal received")) }
-	if err := f.app.RunTask(ctx, key, 4242, io.Discard); err != nil {
+	if err := f.run(ctx, key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.notes.alerts) != 1 {

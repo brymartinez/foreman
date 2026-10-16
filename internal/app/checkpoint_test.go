@@ -30,7 +30,7 @@ func TestCheckpointStartsFreshImplementationSessionWithOnlyDurableHandoff(t *tes
 	postedPlan(f.store.recs[key])
 	f.wt.checkpointHeads = []string{"commit1"}
 	f.claude.turns = []agent.Turn{checkpointTurn("first-session", "Add the dashboard log pager"), prTurn("second-session")}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -65,7 +65,7 @@ func TestFailedCheckpointValidationResumesSameSessionForRepair(t *testing.T) {
 	failed.Outcome.Validation = append(failed.Outcome.Validation, task.Check{Command: "pnpm lint", Passed: false})
 	f.claude.turns = []agent.Turn{failed, checkpointTurn("first-session", "Continue work"), prTurn("second-session")}
 	f.claude.turnErrs = []error{&agent.CheckpointValidationError{Failed: []string{"pnpm lint"}}, nil, nil}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -92,7 +92,7 @@ func TestRepeatedFailedCheckpointValidationStopsAfterRepairLimit(t *testing.T) {
 		&agent.CheckpointValidationError{Failed: []string{"pnpm lint"}},
 		&agent.CheckpointValidationError{Failed: []string{"pnpm lint"}},
 	}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -107,7 +107,7 @@ func TestCheckpointVerificationFailureStopsBeforeAnotherSession(t *testing.T) {
 	postedPlan(f.store.recs[key])
 	f.wt.checkpointErr = errors.New("checkpoint has uncommitted files")
 	f.claude.turn = checkpointTurn("first-session", "Continue work")
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -152,7 +152,7 @@ func TestCheckpointRepairStopsBeforeResumingWhenGHSwitchesAccounts(t *testing.T)
 	f.claude.turns = []agent.Turn{failed, checkpointTurn("first-session", "Continue work")}
 	f.claude.turnErrs = []error{&agent.CheckpointValidationError{Failed: []string{"pnpm lint"}}, nil}
 	f.claude.during = func() { f.accts.active = Account{Login: "octo-home", ID: 7} }
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]

@@ -136,7 +136,7 @@ func TestLinearRunnerReadsStoredSourceAndPostsFourPlanningComments(t *testing.T)
 	f.app.Linear = tracker
 	started(t, f, StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude})
 	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2")}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	rec := f.store.recs[key]
@@ -166,7 +166,7 @@ func TestLinearReplanningRepostsDeletedCommentAndEditsOtherComments(t *testing.T
 	f.store.recs[key].SetPlanComment(task.PlanComment{Doc: task.Analysis, ExternalCommentID: "old-analysis", URL: "https://linear.app/comment/old-analysis"})
 	f.store.recs[key].SetPlanComment(task.PlanComment{Doc: task.PRD, ExternalCommentID: "old-prd", URL: "https://linear.app/comment/old-prd"})
 	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2")}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	// The deleted PRD is found missing before the edit, so it is posted anew.

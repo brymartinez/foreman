@@ -70,7 +70,7 @@ func TestAFullPlanOnTheGitHubIssueIsAdoptedWithoutPosting(t *testing.T) {
 	f.gh.issueComments = append([]IssueComment{{ID: 400, Body: "Thanks, looking."}}, githubPlanComments(f, task.DescriptionFingerprint(f.gh.issue.Body), task.PlanDocs...)...)
 	posted := len(f.gh.comments)
 	f.claude.turns = []agent.Turn{prTurn("sid-1")}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -92,7 +92,7 @@ func TestAFullLegacyPlanOnTheLinearIssueIsAdoptedWithoutPosting(t *testing.T) {
 	key, tracker := linearTask(t, &f)
 	tracker.comments = linearPlanComments("", task.PlanDocs...)
 	f.claude.turns = []agent.Turn{prTurn("sid-1")}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -116,7 +116,7 @@ func TestAPartialPlanOnTheGitHubIssueGoesToPlanningAndOnlyMissingDocumentsArePos
 	f.gh.issueComments = githubPlanComments(f, "", task.Analysis, task.PRD)
 	turn := keepingTurn(task.Analysis)
 	f.claude.turns = []agent.Turn{turn, prTurn("sid-2")}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -137,7 +137,7 @@ func TestAPartialPlanOnTheLinearIssueKeepsValidCommentsAndPostsOnlyMissingOnes(t
 	key, tracker := linearTask(t, &f)
 	tracker.comments = linearPlanComments(task.DescriptionFingerprint(tracker.issue.Body), task.Analysis, task.PRD, task.Design)
 	f.claude.turns = []agent.Turn{keepingTurn(task.Analysis, task.PRD, task.Design), prTurn("sid-2")}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -151,7 +151,7 @@ func TestAPlanningTurnThatLeavesAMissingDocumentEmptyFailsWithoutPosting(t *test
 	key := started(t, f, startReq(t))
 	f.gh.issueComments = githubPlanComments(f, "", task.Analysis)
 	f.claude.turns = []agent.Turn{keepingTurn(task.Analysis, task.Design)}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -166,7 +166,7 @@ func TestAPlanWrittenForAnEarlierDescriptionAsksTheDeveloper(t *testing.T) {
 		f := newFixture()
 		key := started(t, f, startReq(t))
 		f.gh.issueComments = githubPlanComments(f, stale, task.PlanDocs...)
-		if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 			t.Fatal(err)
 		}
 		got := f.store.recs[key]
@@ -182,7 +182,7 @@ func TestAPlanWrittenForAnEarlierDescriptionAsksTheDeveloper(t *testing.T) {
 		f := newFixture()
 		key, tracker := linearTask(t, &f)
 		tracker.comments = linearPlanComments(stale, task.Analysis)
-		if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 			t.Fatal(err)
 		}
 		got := f.store.recs[key]
@@ -197,7 +197,7 @@ func TestAPlanWrittenForAnEarlierDescriptionAsksTheDeveloper(t *testing.T) {
 
 // answerPlanConflict blocks the task on a stale plan, then records the answer.
 func answerPlanConflict(t *testing.T, f fixture, key task.Key, answer task.Option) {
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	rec := f.store.recs[key]
@@ -214,7 +214,7 @@ func TestKeepingAConflictingPlanAdoptsItWithoutPosting(t *testing.T) {
 	f.gh.issueComments = githubPlanComments(f, task.DescriptionFingerprint("An older description."), task.PlanDocs...)
 	answerPlanConflict(t, f, key, keepPlanOption)
 	f.claude.turns = []agent.Turn{prTurn("sid-1")}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -229,7 +229,7 @@ func TestRevisingAConflictingPlanEditsItsCommentsForTheCurrentDescription(t *tes
 	f.gh.issueComments = githubPlanComments(f, task.DescriptionFingerprint("An older description."), task.PlanDocs...)
 	answerPlanConflict(t, f, key, revisePlanOption)
 	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2")}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -251,7 +251,7 @@ func TestAnUnreadableIssueFailsTheTaskBeforePlanning(t *testing.T) {
 		f := newFixture()
 		key := started(t, f, startReq(t))
 		f.gh.issueCommentsErr = readErr
-		if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 			t.Fatal(err)
 		}
 		got := f.store.recs[key]
@@ -263,7 +263,7 @@ func TestAnUnreadableIssueFailsTheTaskBeforePlanning(t *testing.T) {
 		f := newFixture()
 		key, tracker := linearTask(t, &f)
 		tracker.commentsErr = readErr
-		if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 			t.Fatal(err)
 		}
 		got := f.store.recs[key]
@@ -285,7 +285,7 @@ func TestOnlyTheNewestMarkedCommentCountsAsAPlanningDocument(t *testing.T) {
 	}
 	f.gh.comments[400], f.gh.comments[401] = f.gh.issueComments[0], f.gh.issueComments[1]
 	f.claude.turns = []agent.Turn{keepingTurn(task.Analysis), prTurn("sid-2")}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -305,7 +305,7 @@ func TestARecordedCommentThatLostItsMarkerIsNotEdited(t *testing.T) {
 	f.gh.issueComments = []IssueComment{unmarked}
 	f.store.recs[key].SetPlanComment(task.PlanComment{Doc: task.Analysis, CommentID: 77, URL: unmarked.URL})
 	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2")}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -320,7 +320,7 @@ func TestAKeepAnswerForAnEarlierDescriptionAsksAgain(t *testing.T) {
 	f.gh.issueComments = githubPlanComments(f, task.DescriptionFingerprint("An older description."), task.PlanDocs...)
 	answerPlanConflict(t, f, key, keepPlanOption)
 	f.gh.issue.Body = "The description changed again."
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
@@ -337,7 +337,7 @@ func TestAResumedPlanningTurnReceivesDocumentsFoundOnTheIssue(t *testing.T) {
 	rec.Decisions = []task.Decision{{Question: task.Question{Issue: "Retry 4xx?"}, Answer: "A. 5xx only", AnsweredAt: f.app.Now()}}
 	f.gh.issueComments = githubPlanComments(f, "", task.Analysis)
 	f.claude.turns = []agent.Turn{keepingTurn(task.Analysis), prTurn("sid-2")}
-	if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.claude.resumed) != 1 || !strings.Contains(f.claude.resumed[0], "## Documents already on the issue") || !strings.Contains(f.claude.resumed[0], "### Analysis\n\nPosted analysis.") {
@@ -360,7 +360,7 @@ func TestAPlanCommentUnmarkedDuringThePlanningTurnIsNotEdited(t *testing.T) {
 			f.gh.comments[502] = c
 		}
 		f.claude.turns = []agent.Turn{keepingTurn(task.Analysis), prTurn("sid-2")}
-		if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 			t.Fatal(err)
 		}
 		got := f.store.recs[key]
@@ -374,7 +374,7 @@ func TestAPlanCommentUnmarkedDuringThePlanningTurnIsNotEdited(t *testing.T) {
 		tracker.comments = linearPlanComments("", task.Analysis, task.PRD)
 		f.claude.during = func() { tracker.comments[1].Body = "## PRD\n\nThe marker was removed." }
 		f.claude.turns = []agent.Turn{keepingTurn(task.Analysis), prTurn("sid-2")}
-		if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 			t.Fatal(err)
 		}
 		if got := f.store.recs[key]; !got.PlanPosted() || slices.Contains(tracker.postIDs, "lin-prd") || got.PlanComment(task.PRD).ExternalCommentID == "lin-prd" {
@@ -394,7 +394,7 @@ func TestAKeptDocumentRemovedDuringThePlanningTurnFailsWithoutPosting(t *testing
 			f.gh.comments[501] = c
 		}
 		f.claude.turns = []agent.Turn{keepingTurn(task.Analysis)}
-		if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 			t.Fatal(err)
 		}
 		got := f.store.recs[key]
@@ -408,7 +408,7 @@ func TestAKeptDocumentRemovedDuringThePlanningTurnFailsWithoutPosting(t *testing
 		tracker.comments = linearPlanComments("", task.Analysis)
 		f.claude.during = func() { tracker.missing = map[string]bool{"lin-analysis": true} }
 		f.claude.turns = []agent.Turn{keepingTurn(task.Analysis)}
-		if err := f.app.RunTask(context.Background(), key, 4242, io.Discard); err != nil {
+		if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 			t.Fatal(err)
 		}
 		got := f.store.recs[key]
