@@ -2,6 +2,11 @@
 
 ## Current stage
 
+Issue #77 is complete. Launch aborts when its task file disappears before spawning.
+If deletion happens after spawning, launch stops and waits for the new runner.
+Regression tests cover removal before spawn, during worktree restoration, and after
+spawn, including failed stops. Vet, Go tests, build, and end-to-end checks pass.
+
 Reset of failed delegated runs (#72) is complete. `x` on a FAILED task confirms, then
 `App.Reset` resolves the run's PR, saves a record with only that link, and deletes the
 worktree, local branch, and runner log. Auto mode skips the reset issue. A manual start

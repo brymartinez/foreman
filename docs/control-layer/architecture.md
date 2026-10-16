@@ -248,9 +248,11 @@ the same commit. The commit message records why it changed.
   cancel with a 5-second `WaitDelay`. `App.Cancel` waits up to 30 seconds and never
   SIGKILLs the runner, because that would leave the agent running. Any SIGTERM, SIGINT,
   or SIGHUP counts as a cancel and records FAILED with outcome `cancelled`.
-- **A removed task file stops its runner.** Runner writes go through `existing`, which
-  saves nothing once the file or its delegation is gone. Deleting the file is a way to
-  drop a task.
+- **A removed task file cancels launch and stops its runner.** Launch stops before
+  spawning if a preflight read finds no record. If it disappears after spawning,
+  launch waits for the new runner to stop and reports a failed stop. Runner writes go
+  through `existing`, which saves nothing once the file or its delegation is gone.
+  Deleting the file is a way to drop a task.
 
 ### Runner
 
