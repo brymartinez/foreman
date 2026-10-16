@@ -507,7 +507,7 @@ func TestReevaluationWithdrawsTheTasksEarlierRetirement(t *testing.T) {
 	if got.Status != Active || !strings.Contains(knowledgeMD(t, s, repo), "e2e script") {
 		t.Fatalf("the replaced retirement still holds: %+v", got)
 	}
-	if last := got.History[len(got.History)-1]; last.Action != "revert" || last.Task != "9" {
+	if last := got.History[len(got.History)-1]; last.Action != "revert-retire" || last.Task != "9" {
 		t.Errorf("history = %+v", got.History)
 	}
 }
@@ -573,5 +573,23 @@ func TestWithdrawingTheLaterRewriteRestoresTheEarlierOne(t *testing.T) {
 	mustApply(t, s, repo, eval("9", 10))
 	if got := learnings(t, s, repo)[0].Text; got != "Run the e2e script nightly." {
 		t.Fatalf("text = %q, want task 8's rewrite", got)
+	}
+}
+
+func TestReevaluatingTwoRetiringTasksRestoresTheLearning(t *testing.T) {
+	s, _ := newStore(t)
+	l := activeLearning(t, s)
+	for _, id := range []string{"8", "9"} {
+		ev := eval(id, 10)
+		ev.Revisions = []Revision{{ID: l.ID, Action: Retire, Reason: "removed", Source: Maintainer, Cites: []string{"C1"}}}
+		mustApply(t, s, repo, ev)
+	}
+	mustApply(t, s, repo, eval("8", 10))
+	if got := learnings(t, s, repo)[0]; got.Status != Retired {
+		t.Fatalf("task 9's retirement no longer holds: %+v", got)
+	}
+	mustApply(t, s, repo, eval("9", 10))
+	if got := learnings(t, s, repo)[0]; got.Status != Active || !strings.Contains(knowledgeMD(t, s, repo), "e2e script") {
+		t.Fatalf("both retirements withdrawn, but the learning is %+v", got)
 	}
 }
