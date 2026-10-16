@@ -152,9 +152,18 @@ func (Git) Remove(ctx context.Context, req app.WorktreeRemoval) error {
 		}
 		common = strings.TrimSpace(string(out))
 		args := []string{"worktree", "remove", req.Path}
+		// A forced removal discards work, so it takes only the worktree it was asked
+		// for. Another worktree made at the same path is kept.
+		if req.Force && req.RepoDir != "" {
+			out, err := git(ctx, req.RepoDir, "rev-parse", "--path-format=absolute", "--git-common-dir")
+			if err != nil {
+				return err
+			}
+			if want := strings.TrimSpace(string(out)); canonical(want) != canonical(common) {
+				return fmt.Errorf("%s is a worktree of another repository (%s, not %s), so it was kept", req.Path, common, want)
+			}
+		}
 		if req.Force && req.Branch != "" {
-			// A forced removal discards work, so it takes only the worktree it was asked
-			// for. Another worktree made at the same path is kept.
 			held, err := heldBranch(ctx, req.Path)
 			if err != nil {
 				return err

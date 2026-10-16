@@ -122,8 +122,9 @@ app.Reset             -> FAILED with no live runner only
                          store: replace the record with one holding only the PR
                          in `reset`, state DISCOVERED, no delegation, and the
                          files to remove with the removal marked running
-                         git: worktree remove --force, only while the path holds
-                         the task's branch; branch -D; delete the log
+                         git: worktree remove --force, only while the path is a
+                         worktree of the run's repository on the task's branch;
+                         branch -D; delete the log
                          store: clear the list, or keep what failed for the next
                          start and mark the removal finished
 foreman [-a|--auto|--no-auto]
@@ -341,9 +342,10 @@ the same commit. The commit message records why it changed.
   blocks, however long the owner ran. A start also refuses when a reset lands between its read and its write.
   The branch is deleted in the checkout the task's worktree was made from, which the
   delegation stores as `repo_dir`; for an older task without it, the worktree names its
-  repository, and with no worktree the managed checkout is checked. When the branch is
-  not there, the reset deletes nothing, because the branch may be in a checkout no
-  record names; that task can still restart. A
+  repository. With neither, the reset deletes nothing, because a branch of that name in
+  any checkout may be other work; that task can still restart. A forced removal takes
+  the worktree only while it belongs to that checkout's repository and holds the task's
+  branch, so another worktree made at the path is kept. A
   failed removal names what is left and keeps only that listed; a worktree removed
   while its branch was kept leaves only the branch. A start never deletes a listed
   worktree or branch, because nothing proves it is still the reset run's: it refuses

@@ -43,7 +43,7 @@ func (a App) Reset(ctx context.Context, rec *task.Record) (*task.Record, error) 
 	}
 	repoDir := d.RepoDir
 	if repoDir == "" {
-		if repoDir, err = a.branchCheckout(ctx, cur.Repo, d); err != nil {
+		if repoDir, err = a.branchCheckout(ctx, d); err != nil {
 			return nil, fmt.Errorf("nothing was deleted: %w", err)
 		}
 	}
@@ -98,28 +98,17 @@ func (a App) Reset(ctx context.Context, rec *task.Record) (*task.Record, error) 
 
 // branchCheckout finds the checkout that holds a task's branch when the task did not
 // record it, as tasks from before RepoDir do not. A worktree on disk names its own
-// repository. Without one, the managed checkout is the only place to look. A branch
-// missing there may be in the checkout the task started from, which nothing recorded,
-// so the reset refuses rather than leave that branch behind.
-func (a App) branchCheckout(ctx context.Context, repo task.Repo, d task.Delegation) (string, error) {
+// repository. Without one, nothing ties the branch to a checkout: a branch of that
+// name in the managed checkout may be other work, since the task may have started
+// from another checkout. The reset refuses rather than delete the wrong branch.
+func (a App) branchCheckout(ctx context.Context, d task.Delegation) (string, error) {
 	if _, statErr := os.Stat(d.Worktree); d.Worktree != "" && statErr == nil {
 		return a.Worktrees.CommonDir(ctx, d.Worktree)
 	}
-	req := StartRequest{Repo: repo}
-	if _, err := a.sourceRepo(ctx, &req); err != nil {
-		return "", err
-	}
 	if d.Branch == "" {
-		return req.Dir, nil
+		return "", nil
 	}
-	exists, err := a.Worktrees.BranchExists(ctx, req.Dir, d.Branch)
-	if err != nil {
-		return "", err
-	}
-	if !exists {
-		return "", fmt.Errorf("branch %s is not in %s, and the task did not record the checkout that holds it, so it cannot be reset; restart it instead", d.Branch, req.Dir)
-	}
-	return req.Dir, nil
+	return "", fmt.Errorf("the task did not record the checkout that holds branch %s, and its worktree is gone, so it cannot be reset; restart it instead", d.Branch)
 }
 
 // cleanUp removes a reset run's worktree with its uncommitted work, its local branch,

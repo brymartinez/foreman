@@ -383,6 +383,28 @@ func TestForcedRemoveKeepsAWorktreeOnAnotherBranchAtThePath(t *testing.T) {
 	}
 }
 
+func TestForcedRemoveKeepsAWorktreeOfAnotherRepositoryAtThePath(t *testing.T) {
+	clone, _ := repoWithOrigin(t)
+	other, _ := repoWithOrigin(t)
+	ctx := context.Background()
+	req := app.WorktreeRequest{RepoDir: other, Path: filepath.Join(t.TempDir(), "825-a"), Branch: "agent/825-a", BaseRef: "origin/main"}
+	if err := (Git{}).Ensure(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	write(t, req.Path, "notes.txt", "other work")
+
+	rm := app.WorktreeRemoval{RepoDir: clone, Path: req.Path, Branch: req.Branch, DeleteBranch: true, Force: true}
+	if err := (Git{}).Remove(ctx, rm); err == nil || !strings.Contains(err.Error(), "another repository") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(req.Path, "notes.txt")); err != nil {
+		t.Errorf("the other repository's work is gone: %v", err)
+	}
+	if run(t, other, "branch", "--list", req.Branch) == "" {
+		t.Error("the other repository's branch was deleted")
+	}
+}
+
 func TestForcedRemoveDeletesAWorktreeStoppedMidRebase(t *testing.T) {
 	clone, _ := repoWithOrigin(t)
 	ctx := context.Background()

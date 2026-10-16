@@ -635,24 +635,27 @@ func TestResetFindsTheCheckoutOfAnOlderTaskThroughItsWorktree(t *testing.T) {
 	}
 }
 
-func TestResetOfAnOlderTaskWithNoWorktreeDeletesNothingWhenTheBranchIsNotInTheManagedCheckout(t *testing.T) {
-	f := newFixture()
-	rec := failedTask(t, f, 912)
-	rec.Delegation.RepoDir = ""
-	got, err := f.app.Reset(context.Background(), rec)
-	if err == nil || !strings.Contains(err.Error(), "branch "+rec.Delegation.Branch) || !strings.Contains(err.Error(), "nothing was deleted") {
-		t.Fatalf("err = %v; the branch may remain in another checkout, so the reset must refuse", err)
+func TestResetOfAnOlderTaskWithNoWorktreeDeletesNothing(t *testing.T) {
+	cases := map[string]map[string]bool{
+		"branch not in the managed checkout": nil,
+		// A branch of the same name there may belong to other work, since the run may
+		// have started from another checkout.
+		"branch of the same name in the managed checkout": {"feat/825-provider-retries": true},
 	}
-	if got != nil {
-		t.Errorf("record = %+v", got)
-	}
-	unchanged(t, f, rec)
-
-	f2 := newFixture()
-	rec2 := failedTask(t, f2, 912)
-	rec2.Delegation.RepoDir = ""
-	f2.wt.branches = map[string]bool{rec2.Delegation.Branch: true}
-	if _, err := f2.app.Reset(context.Background(), rec2); err != nil {
-		t.Fatalf("the branch is in the managed checkout: %v", err)
+	for name, branches := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture()
+			rec := failedTask(t, f, 912)
+			rec.Delegation.RepoDir = ""
+			f.wt.branches = branches
+			got, err := f.app.Reset(context.Background(), rec)
+			if err == nil || !strings.Contains(err.Error(), "branch "+rec.Delegation.Branch) || !strings.Contains(err.Error(), "nothing was deleted") {
+				t.Fatalf("err = %v; the checkout that holds the branch is unknown, so the reset must refuse", err)
+			}
+			if got != nil {
+				t.Errorf("record = %+v", got)
+			}
+			unchanged(t, f, rec)
+		})
 	}
 }
