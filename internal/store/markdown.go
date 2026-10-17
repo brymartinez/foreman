@@ -193,6 +193,10 @@ type frontmatter struct {
 	Checkpoints         int                    `yaml:"checkpoints,omitempty"`
 	ConflictAttempts    []task.ConflictAttempt `yaml:"conflict_attempts,omitempty"`
 	ConflictPending     bool                   `yaml:"conflict_pending,omitempty"`
+	ReviewBeforePR      bool                   `yaml:"review_before_pr,omitempty"`
+	LocalHead           string                 `yaml:"local_head,omitempty"`
+	ProposedTitle       string                 `yaml:"proposed_title,omitempty"`
+	ProposedBody        string                 `yaml:"proposed_body,omitempty"`
 	GitHub              *snapshot              `yaml:"github,omitempty"`
 	LastGitHubSync      *time.Time             `yaml:"last_github_sync,omitempty"`
 	Decisions           []decisionFM           `yaml:"decisions,omitempty"`
@@ -379,6 +383,10 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 			Checkpoints:      fm.Checkpoints,
 			ConflictAttempts: fm.ConflictAttempts,
 			ConflictPending:  fm.ConflictPending,
+			ReviewBeforePR:   fm.ReviewBeforePR,
+			LocalHead:        fm.LocalHead,
+			ProposedTitle:    fm.ProposedTitle,
+			ProposedBody:     fm.ProposedBody,
 		}
 		if fm.StartedAt != nil {
 			rec.Delegation.StartedAt = *fm.StartedAt
@@ -499,6 +507,7 @@ func fromRecord(rec *task.Record) frontmatter {
 		fm.PriorPR = d.PriorPR
 		fm.CheckpointHead, fm.CheckpointNext, fm.Checkpoints = d.CheckpointHead, d.CheckpointNext, d.Checkpoints
 		fm.ConflictAttempts, fm.ConflictPending = d.ConflictAttempts, d.ConflictPending
+		fm.ReviewBeforePR, fm.LocalHead, fm.ProposedTitle, fm.ProposedBody = d.ReviewBeforePR, d.LocalHead, d.ProposedTitle, d.ProposedBody
 	}
 	if s := rec.GitHub; s != nil {
 		fm.GitHub = &snapshot{UpdatedAt: s.UpdatedAt, State: s.State, Reasons: s.Reasons}

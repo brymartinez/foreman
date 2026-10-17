@@ -210,6 +210,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			Profile:        req.Profile,
 			RouteReason:    req.RouteReason,
 			CheckpointHead: head,
+			ReviewBeforePR: a.ReviewBeforePR,
 		}
 		// The pin belongs to the task, not the agent, so every restart keeps it.
 		if prev != nil {
@@ -240,6 +241,11 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		if sameAgent && prev.Branch == wt.Branch && prev.CheckpointHead == head {
 			cur.Delegation.CheckpointNext = prev.CheckpointNext
 			cur.Delegation.Checkpoints = prev.Checkpoints
+		}
+		// A restart at the commit the last run returned for review keeps it with its
+		// proposal, so the review or the PR opening picks up where the run stopped.
+		if sameAgent && prev.Branch == wt.Branch && prev.ReviewBeforePR && a.ReviewBeforePR && prev.PR == 0 && prev.LocalHead == head {
+			cur.Delegation.LocalHead, cur.Delegation.ProposedTitle, cur.Delegation.ProposedBody = prev.LocalHead, prev.ProposedTitle, prev.ProposedBody
 		}
 		// A retry with the same agent keeps its route. Choosing another agent drops it.
 		if req.Profile == nil && sameAgent && prev.Profile != nil {

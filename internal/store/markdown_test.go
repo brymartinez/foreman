@@ -613,3 +613,48 @@ func TestStoreRoundTripsTheCheckoutOfTheBranch(t *testing.T) {
 		t.Fatalf("repo dir = %+v, %v", got.Delegation, err)
 	}
 }
+
+func TestStoreRoundTripsTheLocalReviewProposal(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	want := delegated()
+	want.Delegation.PR, want.Delegation.PRURL, want.Delegation.PRHead = 0, "", ""
+	want.Delegation.ReviewBeforePR = true
+	want.Delegation.LocalHead = "abc1234"
+	want.Delegation.ProposedTitle = "feat: retry 5xx"
+	want.Delegation.ProposedBody = "## Problem\n\nRetries.\n\nCloses #825"
+	if err := s.Save(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, want.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := got.Delegation
+	if !d.ReviewBeforePR || d.LocalHead != "abc1234" || d.ProposedTitle != want.Delegation.ProposedTitle || d.ProposedBody != want.Delegation.ProposedBody {
+		t.Fatalf("delegation = %+v", d)
+	}
+}
+
+func TestOldFileLoadsWithReviewBeforePROffAndSavesNone(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	old := "---\nrepo: a/b\nnumber: 3\nkind: issue\nstate: WORKING\nimplementation_agent: claude\nbranch: feat/3-x\n---\n"
+	if err := os.WriteFile(filepath.Join(s.Dir, "a-b-3.md"), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, task.Key{Repo: "a/b", Number: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Delegation.ReviewBeforePR || got.Delegation.LocalHead != "" {
+		t.Fatalf("delegation = %+v", got.Delegation)
+	}
+	if err := s.Save(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(s.Dir, "a-b-3.md"))
+	for _, key := range []string{"review_before_pr", "local_head", "proposed_"} {
+		if strings.Contains(string(raw), key) {
+			t.Errorf("saved empty %s:\n%s", key, raw)
+		}
+	}
+}
