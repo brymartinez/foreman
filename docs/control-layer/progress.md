@@ -2,6 +2,12 @@
 
 ## Current stage
 
+Issue #86 task 1 is complete. The manual branch prompt now edits at a rune-index
+cursor with Left/Right, Home/End, Backspace/Delete, and insertion. Enter still trims
+and validates the name, and Esc cancels. Model and key-decoder regression tests pass.
+Next, render the full proposal rationale in a scrollable prompt with a fixed branch
+field and hint, then update the dashboard key reference and run repository checks.
+
 Branch-guidance discovery (#84) is complete. The reader joins wrapped lines within a
 paragraph or list item and accepts a branch-guidance description before, inside, or
 after a link, so `Follow docs/repo-coordination.md for branch naming, ...` reaches the

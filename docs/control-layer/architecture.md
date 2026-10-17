@@ -414,7 +414,8 @@ the same commit. The commit message records why it changed.
   runs the same sync and guidance read, since either can change while a person edits
   it. A tool-free
   proposal applies the repository convention to the issue and tracker suggestion;
-  repository guidance takes precedence. A manual start shows an editable proposal.
+  repository guidance takes precedence. A manual start shows an editable proposal;
+  branch name keys move a rune-index cursor and insert or delete at that position.
   Auto mode waits when the workstream or guidance is unclear. The chosen name is
   validated before making a worktree and stored at the first start. A new worktree is
   `<worktrees_dir>/<owner>-<repo>/<branch>`, with each branch slash as a directory

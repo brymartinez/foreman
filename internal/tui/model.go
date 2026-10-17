@@ -130,8 +130,9 @@ type Model struct {
 	// DecisionTop is the first wrapped question line in view while a decision is asked.
 	DecisionTop int
 
-	Mode  Mode
-	Input string // the context file or the decision answer being typed
+	Mode         Mode
+	Input        string // the context file or the decision answer being typed
+	BranchCursor int    // rune index in Input while editing a branch
 	// Message is the one line under the panes: the last result, or an error.
 	Message     string
 	Refreshing  bool
@@ -791,6 +792,7 @@ func (m *Model) Proposed(seq int, p app.BranchProposal, err error) {
 		return
 	}
 	m.Mode, m.Input = TypingBranch, p.Name
+	m.BranchCursor = len([]rune(p.Name))
 	if err != nil {
 		m.Message = "! branch proposal: " + err.Error() + "; enter a branch name"
 	} else if p.Uncertain {
@@ -805,12 +807,29 @@ func (m *Model) typeBranch(k Key) Action {
 	case KeyEscape:
 		delete(m.starting, requestKey(m.pending))
 		m.Mode, m.Input = Browsing, ""
+		m.BranchCursor = 0
+	case KeyLeft:
+		m.BranchCursor = max(m.BranchCursor-1, 0)
+	case KeyRight:
+		m.BranchCursor = min(m.BranchCursor+1, len([]rune(m.Input)))
+	case KeyHome:
+		m.BranchCursor = 0
+	case KeyEnd:
+		m.BranchCursor = len([]rune(m.Input))
 	case KeyBackspace:
-		if r := []rune(m.Input); len(r) > 0 {
-			m.Input = string(r[:len(r)-1])
+		if m.BranchCursor > 0 {
+			r := []rune(m.Input)
+			m.Input = string(slices.Delete(r, m.BranchCursor-1, m.BranchCursor))
+			m.BranchCursor--
+		}
+	case KeyDelete:
+		if r := []rune(m.Input); m.BranchCursor < len(r) {
+			m.Input = string(slices.Delete(r, m.BranchCursor, m.BranchCursor+1))
 		}
 	case KeyRune:
-		m.Input += string(k.Rune)
+		r := []rune(m.Input)
+		m.Input = string(slices.Insert(r, m.BranchCursor, k.Rune))
+		m.BranchCursor++
 	case KeyEnter:
 		name := strings.TrimSpace(m.Input)
 		if !task.ValidBranchName(name) {
@@ -820,6 +839,7 @@ func (m *Model) typeBranch(k Key) Action {
 		req := m.pending
 		req.BranchName = name
 		m.Mode, m.Input, m.manualTask = Browsing, "", false
+		m.BranchCursor = 0
 		return m.startPending(req)
 	}
 	return Action{}

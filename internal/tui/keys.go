@@ -17,6 +17,8 @@ const (
 	KeyPageUp
 	KeyPageDown
 	KeyEnd
+	KeyHome
+	KeyDelete
 	KeyEnter
 	KeyTab
 	KeyBackspace
@@ -120,8 +122,14 @@ func escapeKey(params string, final byte) Key {
 		return Key{Kind: KeyLeft}
 	case 'F':
 		return Key{Kind: KeyEnd}
+	case 'H':
+		return Key{Kind: KeyHome}
 	case '~':
 		switch params {
+		case "1", "7":
+			return Key{Kind: KeyHome}
+		case "3":
+			return Key{Kind: KeyDelete}
 		case "5":
 			return Key{Kind: KeyPageUp}
 		case "6":
