@@ -174,6 +174,9 @@ func Load() (Config, error) {
 	if cfg.Refresh < MinRefresh {
 		return Config{}, fmt.Errorf("%s: refresh is %d seconds; the minimum is %d", path, cfg.Refresh, MinRefresh)
 	}
+	if cfg.DefaultSource == "" { // default_source: with no value means unset
+		cfg.DefaultSource = task.GitHub
+	}
 	if err := ValidSource(cfg.DefaultSource); err != nil {
 		return Config{}, fmt.Errorf("%s: default_source: %w", path, err)
 	}

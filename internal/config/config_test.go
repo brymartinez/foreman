@@ -403,6 +403,9 @@ func TestDefaultSourceIsGitHubWhenUnsetAndLoadsEachValidValue(t *testing.T) {
 	if err != nil || cfg.DefaultSource != task.GitHub {
 		t.Fatalf("unset default_source = %q, %v; want github", cfg.DefaultSource, err)
 	}
+	if cfg, err := autoConfig(t, "default_source:\n"); err != nil || cfg.DefaultSource != task.GitHub {
+		t.Fatalf("empty default_source = %q, %v; want github", cfg.DefaultSource, err)
+	}
 	for _, want := range []task.Source{task.GitHub, task.Linear, SourceAll} {
 		cfg, err := autoConfig(t, "default_source: "+string(want)+"\n")
 		if err != nil || cfg.DefaultSource != want {
@@ -490,5 +493,24 @@ linear_projects:
 	cfg, err := autoConfig(t, body)
 	if err != nil || cfg.DefaultSource != SourceAll || cfg.Auto.MaxConcurrent != 2 || cfg.Codex.ReviewReasoningEffort != "low" {
 		t.Fatalf("documented config = %+v, %v", cfg, err)
+	}
+}
+
+func TestMaterializedDefaultsLoadUnderStrictKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("FOREMAN_CONFIG", path)
+	t.Setenv("FOREMAN_TASKS_DIR", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Materialize(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := os.ReadFile(path); !strings.Contains(string(raw), "default_source: github") {
+		t.Errorf("materialized config lacks default_source:\n%s", raw)
+	}
+	if _, err := Load(); err != nil {
+		t.Fatalf("the materialized config does not load: %v", err)
 	}
 }
