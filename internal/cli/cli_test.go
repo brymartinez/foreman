@@ -7,26 +7,71 @@ import (
 	"github.com/brymartinez/foreman/internal/task"
 )
 
-func TestSourceFlagSelectsGitHubOrLinearInbox(t *testing.T) {
-	for _, tc := range []struct {
+func TestSourceFlagIsAOneLaunchOverride(t *testing.T) {
+	for name, tc := range map[string]struct {
 		args   []string
 		source task.Source
 	}{
-		{nil, task.GitHub},
-		{[]string{"-a"}, task.GitHub},
-		{[]string{"--no-auto"}, task.GitHub},
-		{[]string{"-s", "github"}, task.GitHub},
-		{[]string{"-s", "linear"}, task.Linear},
-		{[]string{"--source", "linear", "-a"}, task.Linear},
+		"no flag leaves the source to config":    {nil, ""},
+		"an auto flag leaves the source alone":   {[]string{"-a"}, ""},
+		"-s github selects GitHub":               {[]string{"-s", "github"}, task.GitHub},
+		"-s linear selects Linear":               {[]string{"-s", "linear"}, task.Linear},
+		"-s all selects both trackers":           {[]string{"-s", "all"}, "all"},
+		"--source works with other flags":        {[]string{"--source", "linear", "-a"}, task.Linear},
+		"a repeated identical source is allowed": {[]string{"-s", "all", "--source", "all"}, "all"},
 	} {
-		got, err := Parse(tc.args)
-		if err != nil || got.Name != TUI || got.Source != tc.source {
-			t.Fatalf("Parse(%v) = %+v, %v", tc.args, got, err)
-		}
+		t.Run(name, func(t *testing.T) {
+			got, err := Parse(tc.args)
+			if err != nil || got.Name != TUI || got.Source != tc.source {
+				t.Fatalf("Parse(%q) = %+v, %v; want source %q", tc.args, got, err, tc.source)
+			}
+		})
 	}
-	for _, args := range [][]string{{"-s"}, {"-s", "other"}, {"-c", "-s", "linear"}} {
+}
+
+func TestSourceFlagRejectsMissingUnknownAndConflictingValues(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args []string
+		want string
+	}{
+		"missing value":      {[]string{"-s"}, "github, linear, or all"},
+		"unknown value":      {[]string{"-s", "other"}, "github, linear, or all"},
+		"conflicting values": {[]string{"-s", "github", "-s", "all"}, "conflicting"},
+		"with the editor":    {[]string{"-c", "-s", "linear"}, "-c"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Parse(tc.args); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Parse(%q) err = %v; want a usage error containing %q", tc.args, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestMentionsFlagsOverrideConfigForOneLaunch(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args []string
+		want MentionsMode
+	}{
+		"no flag keeps the config":            {nil, MentionsConfig},
+		"--mentions shows mention-only items": {[]string{"--mentions"}, MentionsOn},
+		"--no-mentions hides them":            {[]string{"--no-mentions"}, MentionsOff},
+		"a repeated flag is allowed":          {[]string{"--no-mentions", "-s", "all", "--no-mentions"}, MentionsOff},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := Parse(tc.args)
+			if err != nil || got.Name != TUI || got.Mentions != tc.want {
+				t.Fatalf("Parse(%q) = %+v, %v; want mentions %q", tc.args, got, err, tc.want)
+			}
+		})
+	}
+	for _, args := range [][]string{
+		{"--mentions", "--no-mentions"},
+		{"--no-mentions", "--mentions"},
+		{"-c", "--mentions"},
+		{"--no-mentions", "-c"},
+	} {
 		if _, err := Parse(args); err == nil {
-			t.Fatalf("Parse(%v) accepted invalid source flags", args)
+			t.Errorf("Parse(%q) succeeded; want usage error", args)
 		}
 	}
 }
@@ -36,11 +81,11 @@ func TestParseOpensTheDashboardWithTheGivenAutoMode(t *testing.T) {
 		argv []string
 		want Command
 	}{
-		"no arguments keep the saved choice": {nil, Command{Name: TUI, Source: task.GitHub}},
-		"-a turns auto mode on":              {[]string{"-a"}, Command{Name: TUI, Auto: AutoOn, Source: task.GitHub}},
-		"--auto turns auto mode on":          {[]string{"--auto"}, Command{Name: TUI, Auto: AutoOn, Source: task.GitHub}},
-		"--no-auto turns auto mode off":      {[]string{"--no-auto"}, Command{Name: TUI, Auto: AutoOff, Source: task.GitHub}},
-		"a repeated auto flag is accepted":   {[]string{"-a", "--auto"}, Command{Name: TUI, Auto: AutoOn, Source: task.GitHub}},
+		"no arguments keep the saved choice": {nil, Command{Name: TUI}},
+		"-a turns auto mode on":              {[]string{"-a"}, Command{Name: TUI, Auto: AutoOn}},
+		"--auto turns auto mode on":          {[]string{"--auto"}, Command{Name: TUI, Auto: AutoOn}},
+		"--no-auto turns auto mode off":      {[]string{"--no-auto"}, Command{Name: TUI, Auto: AutoOff}},
+		"a repeated auto flag is accepted":   {[]string{"-a", "--auto"}, Command{Name: TUI, Auto: AutoOn}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got, err := Parse(tc.argv); err != nil || got != tc.want {

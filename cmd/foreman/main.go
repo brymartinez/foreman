@@ -90,8 +90,11 @@ func run(argv []string) int {
 	if err := (stages.Files{GlobalDir: cfg.StagesDir}).RequireGlobal(); err != nil {
 		return fail(err)
 	}
-	if cmd.Name == cli.TUI && linearSelected(cfg, cmd.Source) && os.Getenv("LINEAR_API_KEY") == "" {
-		return fail(fmt.Errorf("set LINEAR_API_KEY to use Linear issues; use -s github for GitHub only"))
+	source := resolveSource(cfg, cmd)
+	if cmd.Name == cli.TUI {
+		if err := requireLinearKey(cfg, source, os.Getenv("LINEAR_API_KEY")); err != nil {
+			return fail(err)
+		}
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
@@ -142,7 +145,7 @@ func run(argv []string) int {
 		DeleteMergedBranches: cfg.Cleanup.DeleteMergedBranch,
 		IncludedRepositories: cfg.IncludedRepos,
 		ExcludedRepositories: cfg.ExcludedRepos,
-		HideMentionOnly:      !cfg.Mentions,
+		HideMentionOnly:      !resolveMentions(cfg, cmd),
 		LogDir:               cfg.LogDir,
 		Now:                  func() time.Time { return time.Now().Truncate(time.Second) },
 	}
@@ -158,7 +161,7 @@ func run(argv []string) int {
 		}
 		if err := tui.Run(ctx, tui.Options{
 			In: os.Stdin, Out: os.Stdout, Source: a,
-			IssueSource: cmd.Source,
+			IssueSource: source,
 			GitHubEvery: time.Duration(cfg.Refresh) * time.Second, LocalEvery: localRefresh,
 			Auto:     autoMode(cfg.Auto, cmd.Auto),
 			Route:    routes != nil || routesErr != nil,
@@ -200,6 +203,44 @@ func run(argv []string) int {
 		}
 	}
 	return 0
+}
+
+// resolveSource picks the dashboard's issue source: the -s flag, else default_source,
+// whose built-in value is github. all becomes the empty source, which the dashboard
+// and app.InboxSources read as both trackers.
+func resolveSource(cfg config.Config, cmd cli.Command) task.Source {
+	source := cfg.DefaultSource
+	if cmd.Source != "" {
+		source = cmd.Source
+	}
+	if source == config.SourceAll {
+		return ""
+	}
+	return source
+}
+
+// resolveMentions applies --mentions or --no-mentions over the config's mentions.
+func resolveMentions(cfg config.Config, cmd cli.Command) bool {
+	switch cmd.Mentions {
+	case cli.MentionsOn:
+		return true
+	case cli.MentionsOff:
+		return false
+	}
+	return cfg.Mentions
+}
+
+// requireLinearKey fails when the resolved source shows a visible repository mapped
+// to Linear and no API key is set.
+func requireLinearKey(cfg config.Config, source task.Source, key string) error {
+	if key != "" || !linearSelected(cfg, source) {
+		return nil
+	}
+	shown := "linear"
+	if source == "" {
+		shown = "all"
+	}
+	return fmt.Errorf("issue source %s needs LINEAR_API_KEY for the repositories mapped in linear_projects; set it, or use -s github or default_source: github for GitHub only", shown)
 }
 
 func linearSelected(cfg config.Config, source task.Source) bool {

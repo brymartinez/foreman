@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/brymartinez/foreman/internal/config"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -39,13 +40,26 @@ const (
 	AutoOff   AutoMode = "off"
 )
 
+// MentionsMode is a launch override for the mentions setting. MentionsConfig keeps
+// the config's value.
+type MentionsMode string
+
+const (
+	MentionsConfig MentionsMode = ""
+	MentionsOn     MentionsMode = "on"
+	MentionsOff    MentionsMode = "off"
+)
+
 type Command struct {
 	Name       Name
 	Repo       task.Repo // set for __run and __learn, given as owner/repo#825
 	Issue      int
 	ExternalID string
 	Auto       AutoMode
-	Source     task.Source // dashboard defaults to GitHub; empty for commands without a source
+	Mentions   MentionsMode
+	// Source is the task's tracker for __run and __learn. For the dashboard it is the
+	// -s override: github, linear, or config.SourceAll, and empty to use default_source.
+	Source task.Source
 	// File is the export's output path (empty for stdout) or the ingest's input.
 	File   string
 	Rebind bool
@@ -189,33 +203,38 @@ func parseKnowledge(argv []string) (Command, error) {
 }
 
 // parseFlags reads the launch flags. -c opens the editor instead of the dashboard,
-// so it takes no auto flag.
+// so it takes no launch flag. Each flag records only what was typed; main resolves
+// it against config.
 func parseFlags(argv []string) (Command, error) {
 	cmd := Command{Name: TUI}
 	edit := false
 	for i := 0; i < len(argv); i++ {
 		arg := argv[i]
-		if arg == "-s" || arg == "--source" {
+		var auto AutoMode
+		var mentions MentionsMode
+		switch arg {
+		case "-s", "--source":
 			i++
 			if i >= len(argv) {
-				return Command{}, usagef("%s needs github or linear", arg)
+				return Command{}, usagef("%s needs github, linear, or all", arg)
 			}
 			chosen := task.Source(argv[i])
-			if chosen != task.GitHub && chosen != task.Linear {
-				return Command{}, usagef("unknown issue source %q (want github or linear)", argv[i])
+			if err := config.ValidSource(chosen); err != nil {
+				return Command{}, usagef("%v", err)
 			}
 			if cmd.Source != "" && cmd.Source != chosen {
 				return Command{}, usagef("conflicting issue sources")
 			}
 			cmd.Source = chosen
 			continue
-		}
-		var mode AutoMode
-		switch arg {
 		case "-a", "--auto":
-			mode = AutoOn
+			auto = AutoOn
 		case "--no-auto":
-			mode = AutoOff
+			auto = AutoOff
+		case "--mentions":
+			mentions = MentionsOn
+		case "--no-mentions":
+			mentions = MentionsOff
 		case "-c":
 			edit = true
 			continue
@@ -225,19 +244,24 @@ func parseFlags(argv []string) (Command, error) {
 			}
 			return Command{}, usagef("unknown command %q", arg)
 		}
-		if cmd.Auto != AutoSaved && cmd.Auto != mode {
-			return Command{}, usagef("--auto and --no-auto cannot be used together")
+		if auto != AutoSaved {
+			if cmd.Auto != AutoSaved && cmd.Auto != auto {
+				return Command{}, usagef("--auto and --no-auto cannot be used together")
+			}
+			cmd.Auto = auto
 		}
-		cmd.Auto = mode
+		if mentions != MentionsConfig {
+			if cmd.Mentions != MentionsConfig && cmd.Mentions != mentions {
+				return Command{}, usagef("--mentions and --no-mentions cannot be used together")
+			}
+			cmd.Mentions = mentions
+		}
 	}
 	if edit {
-		if cmd.Auto != AutoSaved || cmd.Source != "" {
+		if cmd.Auto != AutoSaved || cmd.Mentions != MentionsConfig || cmd.Source != "" {
 			return Command{}, usagef("-c cannot be used with launch flags")
 		}
 		return Command{Name: Edit}, nil
-	}
-	if cmd.Source == "" {
-		cmd.Source = task.GitHub
 	}
 	return cmd, nil
 }
