@@ -241,10 +241,14 @@ func (Git) BranchExists(ctx context.Context, dir, branch string) (bool, error) {
 // MergeConflicts uses git merge-tree (git 2.38+), which merges in memory: exit 0 is a
 // clean merge and exit 1 lists the conflicting files after the tree id.
 func (Git) MergeConflicts(ctx context.Context, check app.MergeCheck) ([]string, error) {
-	if _, err := git(ctx, check.Dir, "fetch", "origin", check.Base, check.Branch); err != nil {
+	fetch, head := []string{"fetch", "origin", check.Base, check.Branch}, "origin/"+check.Branch
+	if check.Local {
+		fetch, head = []string{"fetch", "origin", check.Base}, "HEAD"
+	}
+	if _, err := git(ctx, check.Dir, fetch...); err != nil {
 		return nil, err
 	}
-	args := []string{"merge-tree", "--write-tree", "--name-only", "--no-messages", "origin/" + check.Branch, "origin/" + check.Base}
+	args := []string{"merge-tree", "--write-tree", "--name-only", "--no-messages", head, "origin/" + check.Base}
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", check.Dir}, args...)...)
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

@@ -609,3 +609,32 @@ func TestEnsureOnTheBaseKeepsAnExistingTaskBranch(t *testing.T) {
 		t.Errorf("worktree HEAD = %s, want the task branch %s", got, local)
 	}
 }
+
+func TestLocalMergeConflictsCompareTheUnpushedHeadWithTheBase(t *testing.T) {
+	wt, seed := prWorktree(t)
+	write(t, wt, "c.txt", "local\n")
+	run(t, wt, "add", ".")
+	run(t, wt, "commit", "-q", "-m", "local only")
+	advanceMain(t, seed, map[string]string{"c.txt": "main\n"})
+	c := check
+	c.Dir, c.Local = wt, true
+	got, err := (Git{}).MergeConflicts(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "c.txt" {
+		t.Errorf("conflicts = %v, want [c.txt]", got)
+	}
+	if status := run(t, wt, "status", "--porcelain"); status != "" {
+		t.Errorf("worktree changed:\n%s", status)
+	}
+}
+
+func TestLocalMergeConflictsNeedNoBranchOnOrigin(t *testing.T) {
+	wt, _ := prWorktree(t)
+	run(t, wt, "checkout", "-q", "-b", "agent/2-unpushed")
+	c := app.MergeCheck{Dir: wt, Branch: "agent/2-unpushed", Base: "main", Local: true}
+	if got, err := (Git{}).MergeConflicts(context.Background(), c); err != nil || got != nil {
+		t.Fatalf("conflicts = %v, %v; want none", got, err)
+	}
+}

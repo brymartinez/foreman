@@ -590,9 +590,10 @@ func (r *Record) LocalReview() bool {
 }
 
 // OpenPending reports a local commit with a clean review and no PR yet, so the next
-// step pushes that commit and opens the PR with the reviewed description.
+// step pushes that commit and opens the PR with the reviewed description. Answers the
+// implementer has not received go to it with that step.
 func (r *Record) OpenPending() bool {
-	if !r.LocalReview() || len(r.Undelivered()) > 0 {
+	if !r.LocalReview() {
 		return false
 	}
 	latest := r.LatestReview()

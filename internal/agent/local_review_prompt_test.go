@@ -73,3 +73,31 @@ func TestResumeMessageBeforeReviewEndsWithReviewReady(t *testing.T) {
 		t.Fatalf("message:\n%s", msg)
 	}
 }
+
+func TestReviewPromptForAProposedPRUsesTheProposedDescriptionAndLocalDiff(t *testing.T) {
+	p := ReviewPrompt(ReviewBrief{Key: task.Key{Repo: "a/b", Number: 7}, Proposed: true, PRBody: "Retry 5xx only.", Branch: "feat/7", BaseBranch: "main", Passes: 3})
+	for _, want := range []string{"proposed pull request", "Retry 5xx only.", "git diff origin/main...HEAD", "not pushed"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt lacks %q", want)
+		}
+	}
+	for _, unwanted := range []string{"pull request #0", "## Pull request comments"} {
+		if strings.Contains(p, unwanted) {
+			t.Errorf("prompt has %q", unwanted)
+		}
+	}
+}
+
+func TestOpenPRPromptPushesTheReviewedCommitWithTheReviewedDescription(t *testing.T) {
+	p := OpenPRPrompt(OpenPRBrief{Branch: "feat/7", BaseBranch: "main", Head: "abc1234", Title: "feat: retry 5xx", BodyFile: "/tmp/body.md",
+		Validation: []task.Check{{Command: "go test ./...", Passed: true}}})
+	for _, want := range []string{"abc1234", "git push -u origin feat/7", "gh pr create --base main --head feat/7", "--body-file /tmp/body.md", "feat: retry 5xx", `"pr_opened"`, "go test ./..."} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt lacks %q:\n%s", want, p)
+		}
+	}
+	decs := []task.Decision{{Question: task.Question{Issue: "Push failed; retry?"}, Answer: "A. Retry"}}
+	if p := OpenPRPrompt(OpenPRBrief{Branch: "feat/7", BaseBranch: "main", Head: "abc1234", Title: "t", BodyFile: "/f", Decisions: decs}); !strings.Contains(p, "A. Retry") {
+		t.Errorf("prompt lacks the answer:\n%s", p)
+	}
+}

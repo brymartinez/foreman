@@ -89,6 +89,25 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
                                 fixes and reports pr_opened again; re-verify; re-review
                     findings after fix_rounds reviewed fixes since the last answer ->
                                 NEEDS_DECISION (A: another round, B: accept remaining), exit
+  with review_before_pr captured on the task and no PR yet, a finished turn returns
+  review_ready instead of pr_opened (pr_opened there fails the task):
+    review_ready -> verify the branch, a clean worktree, and a new descendant commit;
+                    save the commit with the proposed PR title and description, WORKING
+                    before every review: git fetch base, then
+                      git merge-tree HEAD origin/<base>
+                      conflict -> implementer.Resume(session, merge the base locally, no
+                                  push); after two turns still conflicting -> NEEDS_DECISION
+                    review = reviewer.Review(proposed description + git diff + earlier rounds)
+                    findings -> implementer.Resume(session, findings); fix, commit locally,
+                                review_ready again with the updated description; re-review
+                    findings after fix_rounds reviewed fixes since the last answer ->
+                                NEEDS_DECISION (A: another round, B: stop, no PR), exit
+                    clean    -> an open PR for the branch with the reviewed head, title,
+                                and description is adopted; otherwise
+                                implementer turn: push exactly that commit, gh pr create
+                                with that title and --body-file; gh: confirm the PR and its
+                                head, title, and body match the review (mismatch -> FAILED)
+                                record PR and head, the clean review covers it, REVIEWING, exit
   when the loop ends on a clean review and the evidence changed since the stored
   evaluation: spawn detached `foreman __learn owner/repo#825`, then exit
 
@@ -577,6 +596,20 @@ the same commit. The commit message records why it changed.
   the PR comments, `git diff origin/<base>...HEAD`, and earlier rounds, but not the
   issue, PRD, decisions, or validation claims, so the review stays independent. A blank
   description stops the review.
+- **`review_before_pr` reviews before the PR opens.** Repositories that review every new
+  PR automatically would otherwise review code Foreman's fixes still change. The setting
+  is copied into the task when it starts, so a config change never alters a started task,
+  and a task that has a PR follows the PR workflow. The implementer commits, validates,
+  and returns `review_ready` with a proposed title and description; nothing is pushed. The
+  proposed description is the reviewer's requirements, and each fix comes back with an
+  updated description, so the description and the code are reviewed together. Reviews,
+  reviewer selection, and both round settings work as for a PR. At the fix cap, B stops
+  the task without a PR instead of accepting the findings: only a clean review opens one.
+  The agent still pushes and runs `gh pr create`, because Foreman's GitHub port is read
+  only and the agent's turn runs under the pinned account; Foreman then checks that the
+  PR's head, title, and body are the ones reviewed. The clean review becomes the review
+  of the PR's head, so the gate goes straight to CI. A restart resumes from the record:
+  a stored commit without a review goes to review, a clean one to the PR step.
 - **A review covers one PR head.** Each review records the head it read. A REVIEWING
   task whose head moved is reviewed again; new commits on a READY_FOR_HUMAN PR are only
   flagged, because that PR is the developer's now. A crash mid-review restarts at the
@@ -587,8 +620,8 @@ the same commit. The commit message records why it changed.
   files. The implementer merges the base, never rebases or force-pushes. After two
   turns that still conflict, the developer is asked.
 - **Two round settings.** `review_rounds` (3) is how many passes the reviewer makes over
-  a PR. `fix_rounds` (3) is how many reviewed fixes run before the developer is asked to
-  accept the rest or go again. The cap is checked after a review, so no fix reaches the
+  a PR or a local change. `fix_rounds` (3) is how many reviewed fixes run before the
+  developer is asked to accept the rest or go again. The cap is checked after a review, so no fix reaches the
   developer unreviewed, and answering resets it.
 
 ### CI and handover

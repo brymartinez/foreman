@@ -19,6 +19,9 @@ type turnRequest struct {
 	findings      *task.Review            // open findings from the latest review
 	feedback      []PRComment             // PR comments to answer
 	merge         *agent.MergeBrief       // a base branch to merge before the next review
+	// openBodyFile is set for the turn that pushes a reviewed local commit and opens
+	// its PR. It holds the reviewed description.
+	openBodyFile string
 }
 
 // turnResult is a finished implementer turn. pr is the verified PR when the turn
@@ -61,7 +64,7 @@ func (a App) runTurn(ctx context.Context, rec *task.Record, req turnRequest, che
 		return turnResult{turn: turn, err: err}
 	}
 	if turn.Outcome.Status == agent.Checkpoint {
-		if a.needsPlan(rec) || rec.Delegation.PR != 0 || req.findings != nil || len(req.feedback) > 0 || req.merge != nil || rec.Delegation.ConflictPending {
+		if a.needsPlan(rec) || rec.Delegation.PR != 0 || req.findings != nil || len(req.feedback) > 0 || req.merge != nil || req.openBodyFile != "" || rec.Delegation.ConflictPending {
 			return turnResult{turn: turn, err: fmt.Errorf("checkpoint is only allowed during initial implementation")}
 		}
 		if rec.Delegation.Checkpoints >= maxImplementationCheckpoints {
@@ -75,12 +78,12 @@ func (a App) runTurn(ctx context.Context, rec *task.Record, req turnRequest, che
 		return turnResult{turn: turn, checkpointHead: head}
 	}
 	if turn.Outcome.Status == agent.ReviewReady {
-		return a.checkReviewReady(ctx, rec, turn, log)
+		return a.checkReviewReady(ctx, rec, req, turn, log)
 	}
 	if turn.Outcome.Status != agent.PROpened {
 		return turnResult{turn: turn}
 	}
-	if rec.Delegation.BeforePR() {
+	if rec.Delegation.BeforePR() && req.openBodyFile == "" {
 		// The agent pushed and opened a PR that no review has passed. The task stops so
 		// the developer sees it; nothing records the PR as reviewed.
 		return turnResult{turn: turn, err: errors.New("the implementer opened a pull request before a clean review; review_before_pr requires review_ready")}
@@ -93,19 +96,19 @@ func (a App) runTurn(ctx context.Context, rec *task.Record, req turnRequest, che
 }
 
 // checkReviewReady verifies a review_ready turn: only a task reviewed before its PR
-// returns it, outside planning, and it must leave a clean worktree with a new commit
-// on the task branch. Its prior commit is the last one returned for review, or the
-// last accepted checkpoint.
-func (a App) checkReviewReady(ctx context.Context, rec *task.Record, turn agent.Turn, log io.Writer) turnResult {
+// returns it, outside planning, and it must leave a clean worktree on the task branch
+// with commits after the last accepted checkpoint. Nothing is pushed yet, so the
+// commit need not extend the one reviewed before, and a fix turn that keeps the
+// commit is reviewed again like a PR whose head did not move.
+func (a App) checkReviewReady(ctx context.Context, rec *task.Record, req turnRequest, turn agent.Turn, log io.Writer) turnResult {
 	d := rec.Delegation
+	if req.openBodyFile != "" {
+		return turnResult{turn: turn, err: errors.New("the implementer returned review_ready when asked to open the reviewed pull request")}
+	}
 	if !d.BeforePR() || a.needsPlan(rec) {
 		return turnResult{turn: turn, err: errors.New("review_ready is only allowed for a task reviewed before its pull request, once the plan is posted")}
 	}
-	prior := d.LocalHead
-	if prior == "" {
-		prior = d.CheckpointHead
-	}
-	head, err := a.Worktrees.Checkpoint(ctx, d.Worktree, d.Branch, prior)
+	head, err := a.Worktrees.Checkpoint(ctx, d.Worktree, d.Branch, d.CheckpointHead)
 	if err != nil {
 		return turnResult{turn: turn, err: fmt.Errorf("verify the change for review: %w", err)}
 	}

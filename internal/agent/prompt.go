@@ -539,3 +539,50 @@ Resolve the conflicts before anything else. A reviewer checks the result.
 
 `, base, base, branch)
 }
+
+// OpenPRBrief is the reviewed change a task reviewed before its PR now pushes: the
+// commit that passed review and the PR title and description reviewed with it.
+type OpenPRBrief struct {
+	Branch     string
+	BaseBranch string
+	Head       string
+	Title      string
+	// BodyFile holds the reviewed description, written by foreman so it reaches gh
+	// byte for byte.
+	BodyFile   string
+	Validation []task.Check
+	// Decisions are answers the implementer has not received yet.
+	Decisions []task.Decision
+}
+
+// OpenPRPrompt has the implementer push the reviewed commit and open the PR. It is
+// complete on its own, so it serves a resumed session and a fresh one alike. Foreman
+// checks the PR's head, title, and body against the review afterwards.
+func OpenPRPrompt(b OpenPRBrief) string {
+	var s strings.Builder
+	s.WriteString("Another agent reviewed your local change and found nothing to fix. Push it and open the pull request now.\n\n")
+	if len(b.Decisions) > 0 {
+		s.WriteString("The developer answered your questions:\n\n")
+		for _, d := range b.Decisions {
+			fmt.Fprintf(&s, "Question: %s\nDecision: %s\n\n", d.Question.Issue, d.Answer)
+		}
+	}
+	fmt.Fprintf(&s, `Push exactly the reviewed commit, with exactly the reviewed title and description. Do not change, commit, rebase, or amend anything.
+
+1. Check that `+"`git rev-parse HEAD`"+` is %s and `+"`git status`"+` is clean. If not, stop and end with "failed".
+2. Push with `+"`git push -u origin %s`"+`.
+3. If `+"`gh pr view %s`"+` shows an open pull request, do not open another. Otherwise run `+"`gh pr create --base %s --head %s --title <title> --body-file %s`"+` with this title, quoted for the shell:
+
+%s
+
+4. Take prNumber and prUrl from `+"`gh pr view --json number,url`"+`; do not guess them.
+
+End with JSON matching the provided schema: "pr_opened" with prNumber, prUrl, and the validation below; "blocked" with questions if a push or gh command fails in a way you cannot fix without changing the branch; or "failed". Set fields that do not apply to null, or [] for questions. Set documents to null.
+
+Validation run on the reviewed commit:
+`, b.Head, b.Branch, b.Branch, b.BaseBranch, b.Branch, b.BodyFile, b.Title)
+	for _, c := range b.Validation {
+		fmt.Fprintf(&s, "- %s: passed %t\n", c.Command, c.Passed)
+	}
+	return s.String()
+}

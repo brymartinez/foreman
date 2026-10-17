@@ -18,6 +18,7 @@ type fakeWorktrees struct {
 	reqs            []WorktreeRequest
 	head            string
 	checkpointHeads []string
+	checkpointPrior []string // the prior commit of each Checkpoint call
 	checkpointErr   error
 	removed         []WorktreeRemoval
 	removeAttempts  []WorktreeRemoval
@@ -83,7 +84,8 @@ func (f *fakeWorktrees) Head(_ context.Context, _ string) (string, error) {
 	return f.head, nil
 }
 
-func (f *fakeWorktrees) Checkpoint(_ context.Context, _, _, _ string) (string, error) {
+func (f *fakeWorktrees) Checkpoint(_ context.Context, _, _, prior string) (string, error) {
+	f.checkpointPrior = append(f.checkpointPrior, prior)
 	if f.checkpointErr != nil {
 		return "", f.checkpointErr
 	}
