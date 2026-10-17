@@ -437,10 +437,18 @@ func TestLoadRejectsUnknownKeysNamingTheKeyAndFile(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsASecondYAMLDocument(t *testing.T) {
-	_, err := autoConfig(t, "mentions: true\n---\nmentoins: false\n")
-	if err == nil || !strings.Contains(err.Error(), "config.yaml") || !strings.Contains(err.Error(), "one YAML document") {
-		t.Fatalf("a second document gave err = %v; want one naming the file and the one-document rule", err)
+func TestLoadRejectsASecondYAMLDocumentWithContent(t *testing.T) {
+	for name, body := range map[string]string{
+		"an unknown key":   "mentions: true\n---\nmentoins: false\n",
+		"an explicit null": "mentions: true\n---\nnull\n",
+		"a tilde null":     "mentions: true\n---\n~\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := autoConfig(t, body)
+			if err == nil || !strings.Contains(err.Error(), "config.yaml") || !strings.Contains(err.Error(), "one YAML document") {
+				t.Fatalf("Load(%q) err = %v; want one naming the file and the one-document rule", body, err)
+			}
+		})
 	}
 }
 

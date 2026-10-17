@@ -171,7 +171,9 @@ func Load() (Config, error) {
 			if err != nil {
 				return Config{}, fmt.Errorf("%s: %w", path, err)
 			}
-			if len(extra.Content) > 0 && extra.Content[0].Tag != "!!null" {
+			// yaml reads an empty document as a null scalar with no text; an explicit
+			// null or ~ has text, so it counts as content.
+			if len(extra.Content) > 0 && (extra.Content[0].Tag != "!!null" || extra.Content[0].Value != "") {
 				return Config{}, fmt.Errorf("%s: line %d: config must be one YAML document", path, extra.Content[0].Line)
 			}
 		}
