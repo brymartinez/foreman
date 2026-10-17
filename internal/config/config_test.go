@@ -442,6 +442,9 @@ func TestLoadRejectsASecondYAMLDocumentWithContent(t *testing.T) {
 		"an unknown key":   "mentions: true\n---\nmentoins: false\n",
 		"an explicit null": "mentions: true\n---\nnull\n",
 		"a tilde null":     "mentions: true\n---\n~\n",
+		"a tagged null":    "mentions: true\n---\n!!null ''\n",
+		"a bare null tag":  "mentions: true\n---\n!!null\n",
+		"an anchored null": "mentions: true\n---\n&a\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := autoConfig(t, body)
@@ -453,7 +456,7 @@ func TestLoadRejectsASecondYAMLDocumentWithContent(t *testing.T) {
 }
 
 func TestLoadAcceptsEmptyFilesAndEmptyExtraDocuments(t *testing.T) {
-	for _, body := range []string{"", "\n", "# nothing set yet\n", "---\nrefresh: 60\n", "refresh: 60\n---\n"} {
+	for _, body := range []string{"", "\n", "# nothing set yet\n", "---\nrefresh: 60\n", "refresh: 60\n---\n", "refresh: 60\n---\n# note\n"} {
 		if cfg, err := autoConfig(t, body); err != nil || cfg.Refresh != DefaultRefresh {
 			t.Errorf("Load(%q) = refresh %d, %v; want the defaults", body, cfg.Refresh, err)
 		}

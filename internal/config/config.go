@@ -171,9 +171,7 @@ func Load() (Config, error) {
 			if err != nil {
 				return Config{}, fmt.Errorf("%s: %w", path, err)
 			}
-			// yaml reads an empty document as a null scalar with no text; an explicit
-			// null or ~ has text, so it counts as content.
-			if len(extra.Content) > 0 && (extra.Content[0].Tag != "!!null" || extra.Content[0].Value != "") {
+			if len(extra.Content) > 0 && !emptyDocument(extra.Content[0]) {
 				return Config{}, fmt.Errorf("%s: line %d: config must be one YAML document", path, extra.Content[0].Line)
 			}
 		}
@@ -228,6 +226,13 @@ func Load() (Config, error) {
 		cfg.LinearProjects[repo] = canonical
 	}
 	return cfg, nil
+}
+
+// emptyDocument reports whether n is what yaml reads for a document with no
+// content: an untagged, unanchored null scalar with no text. An explicit null, ~,
+// tag, or anchor is content.
+func emptyDocument(n *yaml.Node) bool {
+	return n.Kind == yaml.ScalarNode && n.Tag == "!!null" && n.Value == "" && n.Style == 0 && n.Anchor == ""
 }
 
 // ValidSource accepts the dashboard's issue source choices: github, linear, or all.
