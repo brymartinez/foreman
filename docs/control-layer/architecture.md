@@ -275,7 +275,8 @@ the same commit. The commit message records why it changed.
   other setting lives in `config.yaml` or `routing.yaml` and has no flag.
 - **Unknown config keys are errors.** `config.Load` decodes with yaml's known-fields
   check, so a misspelled or retired key fails naming the key and line instead of
-  silently keeping a default. An empty file still loads.
+  silently keeping a default. The file must be one YAML document, so no key hides in a
+  later one. An empty file, or an empty trailing document, still loads.
 - **One detached runner per task.** `App.Start`, `App.Respond`, `App.Resume`, and the gate spawn
   `foreman __run owner/repo#N` with `Setsid`, so closing the terminal doesn't stop it.
   The runner inherits a locked file named for its PID in `log_dir`. A runner is alive

@@ -437,8 +437,15 @@ func TestLoadRejectsUnknownKeysNamingTheKeyAndFile(t *testing.T) {
 	}
 }
 
-func TestLoadAcceptsEmptyAndCommentOnlyFiles(t *testing.T) {
-	for _, body := range []string{"", "\n", "# nothing set yet\n"} {
+func TestLoadRejectsASecondYAMLDocument(t *testing.T) {
+	_, err := autoConfig(t, "mentions: true\n---\nmentoins: false\n")
+	if err == nil || !strings.Contains(err.Error(), "config.yaml") || !strings.Contains(err.Error(), "one YAML document") {
+		t.Fatalf("a second document gave err = %v; want one naming the file and the one-document rule", err)
+	}
+}
+
+func TestLoadAcceptsEmptyFilesAndEmptyExtraDocuments(t *testing.T) {
+	for _, body := range []string{"", "\n", "# nothing set yet\n", "---\nrefresh: 60\n", "refresh: 60\n---\n"} {
 		if cfg, err := autoConfig(t, body); err != nil || cfg.Refresh != DefaultRefresh {
 			t.Errorf("Load(%q) = refresh %d, %v; want the defaults", body, cfg.Refresh, err)
 		}

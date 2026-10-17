@@ -160,6 +160,21 @@ func Load() (Config, error) {
 		if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
 			return Config{}, fmt.Errorf("%s: %w", path, err)
 		}
+		// A later document would be ignored, along with any key in it. An empty one,
+		// such as a trailing ---, holds no setting.
+		for {
+			var extra yaml.Node
+			err := dec.Decode(&extra)
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				return Config{}, fmt.Errorf("%s: %w", path, err)
+			}
+			if len(extra.Content) > 0 && extra.Content[0].Tag != "!!null" {
+				return Config{}, fmt.Errorf("%s: line %d: config must be one YAML document", path, extra.Content[0].Line)
+			}
+		}
 	case !errors.Is(err, fs.ErrNotExist):
 		return Config{}, err
 	}
