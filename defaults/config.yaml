@@ -1,0 +1,33 @@
+tasks_dir: ~/.local/share/foreman/tasks
+worktrees_dir: ~/.local/share/foreman/worktrees
+repositories_dir: ~/.local/share/foreman/repositories
+log_dir: ~/.local/share/foreman/logs
+review_rounds: 3
+fix_rounds: 3
+refresh: 60
+mentions: false
+budgets:
+  implementer_usd: 25
+  reviewer_usd: 10
+notifications:
+  enabled: true
+  webhook_url: ""
+claude:
+  command: claude
+  model: opus
+  plan_model: sonnet
+  review_model: opus
+codex:
+  command: codex
+  model: gpt-6-sol
+  plan_model: gpt-6-luna
+  review_model: gpt-6-sol
+  reasoning_effort: medium
+  plan_reasoning_effort: xhigh
+  review_reasoning_effort: medium
+cleanup:
+  on_done: true
+  delete_merged_branch: true
+exclude_repositories: []
+include_repositories: []
+linear_projects: {}

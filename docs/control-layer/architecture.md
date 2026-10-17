@@ -545,6 +545,10 @@ the same commit. The commit message records why it changed.
   missing files; `foreman -c` and a piped `foreman` don't check them. `make config` (`scripts/install-stages.sh`) installs the defaults from
   `defaults/stages/` and never overwrites an installed file. It names each installed
   file that differs from its default and prints the `cp` command that replaces it.
+- **The shipping config is an installed file.** `defaults/config.yaml` carries the
+  selected model and budget settings into `make config` and release archives. Install
+  it only when `config.yaml` is absent, without replacing a user's file. The Go
+  defaults still resolve omitted keys and support running without an installed file.
 - **Prompts hold protocol, not workflow:** the role, the issue, paths and branch, push
   and `gh pr` commands, `Closes #N`, the question format, the JSON outcome, and
   precedence (task context and decisions beat stage files). Two rules are built in, so

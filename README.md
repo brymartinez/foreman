@@ -39,6 +39,9 @@ gh release download --repo brymartinez/foreman --pattern '*darwin_arm64.tar.gz'
 tar -xzf foreman_*_darwin_arm64.tar.gz
 mv foreman_*_darwin_arm64/foreman ~/.local/bin/
 mkdir -p ~/.config/foreman/stages
+if [ ! -e ~/.config/foreman/config.yaml ]; then
+  install -m 600 foreman_*_darwin_arm64/config.yaml ~/.config/foreman/config.yaml
+fi
 cp -n foreman_*_darwin_arm64/stages/*.md ~/.config/foreman/stages/
 cp -n foreman_*_darwin_arm64/routing.yaml ~/.config/foreman/   # optional: turns on routing
 ```
@@ -52,10 +55,11 @@ To build from source instead, clone the repository and run:
 make setup
 ```
 
-`make setup` builds foreman, installs it to `~/.local/bin`, copies the default stage
+`make setup` builds foreman, installs it to `~/.local/bin`, copies the shipping
+`defaults/config.yaml` into `~/.config/foreman/config.yaml`, copies the default stage
 instructions from `defaults/stages/` into `~/.config/foreman/stages/`, and copies the
 starter `defaults/routing.yaml` to `~/.config/foreman/routing.yaml`. It never
-overwrites a stage file or a routing file you already have. When a stage file differs
+overwrites a config, stage, or routing file you already have. When a stage file differs
 from the current default, it prints `differs <path>` and the `cp` command that replaces
 it. `make install` and `make config` run the
 steps separately; set `BIN_DIR` or `CONFIG_DIR` to change where they go.
@@ -518,8 +522,10 @@ repository, use the bullets that fit the issue, and not publish the file wholesa
 ## Configuration
 
 Foreman reads `~/.config/foreman/config.yaml`, or the file named in
-`FOREMAN_CONFIG`. Run `foreman -c` to create or edit it. Every key is optional;
-unset keys keep these defaults:
+`FOREMAN_CONFIG`. The shipped `defaults/config.yaml` has the current model and budget
+choices, with an empty webhook URL, repository filters, and Linear project mappings.
+Run `foreman -c` to create or edit your file. Every key is optional; unset keys keep
+the built-in defaults below, even when no shipping config has been installed:
 
 ```yaml
 tasks_dir: ~/.local/share/foreman/tasks

@@ -4,9 +4,35 @@ package defaults
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/brymartinez/foreman/internal/config"
 )
+
+func TestShippingConfigLoadsWithoutPersonalSettings(t *testing.T) {
+	path, err := filepath.Abs("config.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("FOREMAN_CONFIG", path)
+	t.Setenv("FOREMAN_TASKS_DIR", "")
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Mentions || cfg.Budgets.ImplementerUSD != 25 || cfg.Budgets.ReviewerUSD != 10 {
+		t.Errorf("shipping choices were not loaded: mentions=%t budgets=%+v", cfg.Mentions, cfg.Budgets)
+	}
+	if cfg.Claude.Model != "opus" || cfg.Claude.PlanModel != "sonnet" || cfg.Codex.PlanModel != "gpt-6-luna" {
+		t.Errorf("shipping models were not loaded: claude=%+v codex=%+v", cfg.Claude, cfg.Codex)
+	}
+	if cfg.Notifications.WebhookURL != "" || len(cfg.IncludedRepos) != 0 || len(cfg.ExcludedRepos) != 0 || len(cfg.LinearProjects) != 0 {
+		t.Error("shipping config contains personal settings")
+	}
+}
 
 func readStage(t *testing.T, name string) string {
 	t.Helper()
@@ -30,7 +56,7 @@ func TestDefaultPlanStageKeepsFourDocumentsAndOmitsLineLevelDetail(t *testing.T)
 			t.Errorf("plan.md lacks %q", want)
 		}
 	}
-	for _, banned := range []string{"path:lines","Name the functions, types, and test cases", "commit boundary"} {
+	for _, banned := range []string{"path:lines", "Name the functions, types, and test cases", "commit boundary"} {
 		if strings.Contains(plan, banned) {
 			t.Errorf("plan.md still asks for line-level detail: %q", banned)
 		}

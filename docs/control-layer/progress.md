@@ -2,6 +2,11 @@
 
 ## Current stage
 
+The shipping config now copies the current local model and budget choices into
+`defaults/config.yaml`, with an empty webhook URL, repository filters, and Linear
+project mappings. `make config` installs it only when missing, and release archives
+carry it. Existing config files remain untouched.
+
 Issue #86 is complete. The manual branch prompt shows the full proposal rationale in
 a scrollable viewport with a fixed, horizontally windowed branch field and hint.
 The editor changes names at a rune-index cursor with Left/Right, Home/End,
