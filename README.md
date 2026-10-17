@@ -726,10 +726,8 @@ the archives, and creates the GitHub release:
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
-Design and status are in [`docs/control-layer/`](docs/control-layer/):
+Design references are in [`docs/control-layer/`](docs/control-layer/):
 
-- [progress.md](docs/control-layer/progress.md) covers the current stage, open work,
-  and the known limitations.
 - [architecture.md](docs/control-layer/architecture.md) covers the package layout, the
   execution model, and the design rules with their reasons.
 - [capabilities.md](docs/control-layer/capabilities.md) lists the verified CLI

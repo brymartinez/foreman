@@ -2,9 +2,6 @@
 
 A local CLI that delegates GitHub issues to Claude Code or Codex.
 
-- `docs/control-layer/progress.md` is the current stage, open work, and next step. Read
-  it first, and update it at each stage boundary.
-
 Read these only when the task needs them:
 
 - `docs/control-layer/architecture.md`: the package layout, the execution model, and
