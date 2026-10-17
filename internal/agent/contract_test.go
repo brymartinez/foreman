@@ -265,3 +265,23 @@ func TestImplementationPromptMergeSection(t *testing.T) {
 		}
 	}
 }
+
+func TestParseOutcomeReviewReadyNeedsAProposedPRAndPassingValidation(t *testing.T) {
+	valid := `{"status":"review_ready","summary":"committed the change","nextObjective":null,"prNumber":null,"prUrl":null,"validation":[{"command":"go test ./...","passed":true}],"questions":[],"documents":null,"prTitle":" feat: retry 5xx ","prBody":"## Problem\n\nRetries.\n\nCloses #7\n"}`
+	got, err := ParseOutcome([]byte(valid))
+	if err != nil || got.Status != ReviewReady || got.PRTitle != "feat: retry 5xx" || got.PRBody != "## Problem\n\nRetries.\n\nCloses #7" || len(got.Validation) != 1 {
+		t.Fatalf("review_ready = %+v, %v", got, err)
+	}
+	for name, wire := range map[string]string{
+		"missing title":     strings.Replace(valid, `" feat: retry 5xx "`, "null", 1),
+		"blank description": strings.Replace(valid, `"## Problem\n\nRetries.\n\nCloses #7\n"`, `"  "`, 1),
+		"failed validation": strings.Replace(valid, `"passed":true`, `"passed":false`, 1),
+		"no validation":     strings.Replace(valid, `[{"command":"go test ./...","passed":true}]`, `[]`, 1),
+		"a PR number":       strings.Replace(valid, `"prNumber":null`, `"prNumber":12`, 1),
+		"a PR URL":          strings.Replace(valid, `"prUrl":null`, `"prUrl":"u"`, 1),
+	} {
+		if _, err := ParseOutcome([]byte(wire)); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+}

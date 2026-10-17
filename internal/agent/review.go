@@ -164,6 +164,18 @@ Address the findings under your implementation instructions, then commit and pus
 	return s.String()
 }
 
+// LocalFindingsMessage resumes the implementer of a task reviewed before its PR. The
+// fix stays local and comes back with the updated proposed description.
+func LocalFindingsMessage(r task.Review) string {
+	var s strings.Builder
+	fmt.Fprintf(&s, "Review round %d of your local change by %s requested changes.\n\n%s\n\n", r.Round, r.Reviewer, orNone(r.Summary, ""))
+	writeFindings(&s, r.Findings)
+	s.WriteString("\nAddress the findings under your implementation instructions. ")
+	s.WriteString(localFinishRule)
+	s.WriteString("End with the same JSON outcome: review_ready, blocked, or failed.\n")
+	return s.String()
+}
+
 func writeFindings(s *strings.Builder, findings []task.Finding) {
 	for i, f := range findings {
 		fmt.Fprintf(s, "%d. [%s] %s\n", i+1, f.Severity, f.Summary)

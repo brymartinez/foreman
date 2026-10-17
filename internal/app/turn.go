@@ -27,6 +27,7 @@ type turnResult struct {
 	turn           agent.Turn
 	pr             *PullRequest
 	checkpointHead string
+	localHead      string // the verified commit of a review_ready turn
 	err            error
 }
 
@@ -73,14 +74,43 @@ func (a App) runTurn(ctx context.Context, rec *task.Record, req turnRequest, che
 		fmt.Fprintf(log, "foreman: verified implementation checkpoint %s\n", short(head))
 		return turnResult{turn: turn, checkpointHead: head}
 	}
+	if turn.Outcome.Status == agent.ReviewReady {
+		return a.checkReviewReady(ctx, rec, turn, log)
+	}
 	if turn.Outcome.Status != agent.PROpened {
 		return turnResult{turn: turn}
+	}
+	if rec.Delegation.BeforePR() {
+		// The agent pushed and opened a PR that no review has passed. The task stops so
+		// the developer sees it; nothing records the PR as reviewed.
+		return turnResult{turn: turn, err: errors.New("the implementer opened a pull request before a clean review; review_before_pr requires review_ready")}
 	}
 	if a.needsPlan(rec) {
 		fmt.Fprintf(log, "foreman: %s opened a PR without posting a plan\n", rec.Delegation.Implementer.Agent)
 	}
 	pr, err := check(ctx, rec, turn.Outcome)
 	return turnResult{turn: turn, pr: pr, err: err}
+}
+
+// checkReviewReady verifies a review_ready turn: only a task reviewed before its PR
+// returns it, outside planning, and it must leave a clean worktree with a new commit
+// on the task branch. Its prior commit is the last one returned for review, or the
+// last accepted checkpoint.
+func (a App) checkReviewReady(ctx context.Context, rec *task.Record, turn agent.Turn, log io.Writer) turnResult {
+	d := rec.Delegation
+	if !d.BeforePR() || a.needsPlan(rec) {
+		return turnResult{turn: turn, err: errors.New("review_ready is only allowed for a task reviewed before its pull request, once the plan is posted")}
+	}
+	prior := d.LocalHead
+	if prior == "" {
+		prior = d.CheckpointHead
+	}
+	head, err := a.Worktrees.Checkpoint(ctx, d.Worktree, d.Branch, prior)
+	if err != nil {
+		return turnResult{turn: turn, err: fmt.Errorf("verify the change for review: %w", err)}
+	}
+	fmt.Fprintf(log, "foreman: verified local commit %s for review\n", short(head))
+	return turnResult{turn: turn, localHead: head}
 }
 
 // repairFailedCheckpoint gives the same implementation session a bounded chance

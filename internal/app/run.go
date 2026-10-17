@@ -175,7 +175,7 @@ func (r *taskRun) implement() (step, error) {
 	}
 	res := a.runTurn(r.ctx, r.rec, req, a.verifiedPR(r.log), r.log)
 	rec, err := a.finishTurn(r.ctx, r.final, r.rec.Key, during, res, func(cur *task.Record) {
-		applyTurn(cur, res.turn, res.pr, res.err, a.Now())
+		applyTurnResult(cur, res, a.Now())
 		if res.err == nil && res.turn.Outcome.Status == agent.Checkpoint {
 			cur.Delegation.CheckpointHead = res.checkpointHead
 			cur.Delegation.CheckpointNext = res.turn.Outcome.NextObjective
@@ -352,6 +352,7 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 		return agent.Turn{}, fmt.Errorf("agent %s is not configured", d.Implementer.Agent)
 	}
 	planning := a.needsPlan(rec)
+	local := d.BeforePR() && !planning
 	stage, step := task.StageImplement, agent.StepImplement
 	switch {
 	case planning:
@@ -372,15 +373,19 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 		if latest := rec.LatestReview(); latest != nil && !latest.Clean {
 			open = latest
 		}
-		resume = agent.ResumeMessage(decs, open, planning)
+		resume = agent.ResumeMessage(decs, open, planning, local)
 		if planning {
 			// Documents may have appeared on the issue since the session last saw it.
 			resume += agent.ExistingPlansMessage(req.existingPlans)
 		}
+	} else if merge != nil && local {
+		resume = agent.LocalMergeMessage(d.Branch, merge.Base, merge.Files)
 	} else if merge != nil {
 		resume = agent.MergeMessage(d.Branch, merge.Base, merge.Files)
 	} else if len(feedback) > 0 {
 		resume = agent.FeedbackMessage(rec.Repo, d.PR, feedbackItems(feedback))
+	} else if findings != nil && local {
+		resume = agent.LocalFindingsMessage(*findings)
 	} else if findings != nil {
 		resume = agent.FindingsMessage(*findings)
 	}
@@ -405,6 +410,7 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 		brief.OpenFindings = latest.Findings
 	}
 	brief.Merge = merge
+	brief.LocalReview = d.BeforePR()
 	brief.PR, brief.Feedback, brief.Conflict = d.PR, feedbackItems(feedback), conflict
 	if d.PR == 0 && d.CheckpointNext != "" {
 		brief.CheckpointHead, brief.NextObjective = d.CheckpointHead, d.CheckpointNext
@@ -743,7 +749,7 @@ func applyTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error,
 		rec.Delegation.PR, rec.Delegation.PRURL, rec.Delegation.PRHead = pr.Key.Number, pr.URL, pr.HeadSHA
 		rec.Delegation.CheckpointNext = ""
 		rec.Validation = o.Validation
-	case agent.Checkpoint:
+	case agent.Checkpoint, agent.ReviewReady:
 		rec.State = task.Working
 	case agent.Blocked:
 		rec.State = task.NeedsDecision
@@ -753,6 +759,20 @@ func applyTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error,
 	case agent.FailedRun:
 		rec.State = task.Failed
 	}
+}
+
+// applyTurnResult is applyTurn for a checked turn. A review_ready turn stores its
+// verified commit with the proposed PR in the same write, so the reviewer always
+// reads the description the commit came with.
+func applyTurnResult(rec *task.Record, res turnResult, now time.Time) {
+	applyTurn(rec, res.turn, res.pr, res.err, now)
+	if res.err != nil || res.turn.Outcome.Status != agent.ReviewReady {
+		return
+	}
+	o, d := res.turn.Outcome, rec.Delegation
+	d.LocalHead, d.ProposedTitle, d.ProposedBody = res.localHead, o.PRTitle, o.PRBody
+	d.CheckpointNext = ""
+	rec.Validation = o.Validation
 }
 
 // Cancelled is the outcome status of a run stopped by a cancel or a signal.

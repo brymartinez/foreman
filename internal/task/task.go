@@ -577,11 +577,16 @@ func (r *Record) ReviewPending() bool {
 	return latest == nil || latest.PR != d.PR || latest.Head != d.PRHead
 }
 
+// BeforePR reports a task reviewed before its PR opens that has no PR yet. Its
+// implementer commits locally and proposes the PR instead of opening it.
+func (d *Delegation) BeforePR() bool {
+	return d != nil && d.ReviewBeforePR && d.PR == 0
+}
+
 // LocalReview reports a task reviewed before its PR opens that has a local commit
 // for review. Once the PR exists, the task follows the PR workflow.
 func (r *Record) LocalReview() bool {
-	d := r.Delegation
-	return d != nil && d.ReviewBeforePR && d.PR == 0 && d.LocalHead != ""
+	return r.Delegation.BeforePR() && r.Delegation.LocalHead != ""
 }
 
 // OpenPending reports a local commit with a clean review and no PR yet, so the next

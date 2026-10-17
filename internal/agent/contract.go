@@ -21,9 +21,12 @@ var OutcomeSchema []byte
 type Status string
 
 const (
-	Planned        Status = "planned"
-	Checkpoint     Status = "checkpoint"
-	PROpened       Status = "pr_opened"
+	Planned    Status = "planned"
+	Checkpoint Status = "checkpoint"
+	PROpened   Status = "pr_opened"
+	// ReviewReady is a committed, validated change that is not pushed, with the PR
+	// the implementer proposes for it. Only a task reviewed before its PR returns it.
+	ReviewReady    Status = "review_ready"
 	Blocked        Status = "blocked"
 	FailedRun      Status = "failed"
 	BranchProposed Status = "branch_proposed"
@@ -45,6 +48,9 @@ type Outcome struct {
 	Documents  map[task.PlanDoc]string
 	BranchName string
 	Uncertain  bool
+	// PRTitle and PRBody are the pull request a review_ready turn proposes.
+	PRTitle string
+	PRBody  string
 }
 
 // CheckpointValidationError keeps the failed commands available for a repair turn.
@@ -74,6 +80,8 @@ type wireOutcome struct {
 	Documents     *wireDocuments  `json:"documents"`
 	BranchName    *string         `json:"branchName"`
 	Uncertain     *bool           `json:"uncertain"`
+	PRTitle       *string         `json:"prTitle"`
+	PRBody        *string         `json:"prBody"`
 }
 
 func ParseOutcome(raw []byte) (Outcome, error) {
@@ -109,6 +117,23 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 		if w.PRURL != nil {
 			out.PRURL = *w.PRURL
 		}
+		out.Validation = w.Validation
+	case ReviewReady:
+		if w.PRNumber != nil || w.PRURL != nil || len(w.Questions) > 0 || w.Documents != nil {
+			return Outcome{}, errors.New("review_ready outcome includes unrelated fields")
+		}
+		if w.PRTitle == nil || strings.TrimSpace(*w.PRTitle) == "" || w.PRBody == nil || strings.TrimSpace(*w.PRBody) == "" {
+			return Outcome{}, errors.New("review_ready outcome needs a proposed PR title and description")
+		}
+		if len(w.Validation) == 0 {
+			return Outcome{}, errors.New("review_ready outcome needs the validation that was run")
+		}
+		for _, check := range w.Validation {
+			if !check.Passed {
+				return Outcome{}, fmt.Errorf("review_ready validation must pass: %s failed", check.Command)
+			}
+		}
+		out.PRTitle, out.PRBody = strings.TrimSpace(*w.PRTitle), strings.TrimSpace(*w.PRBody)
 		out.Validation = w.Validation
 	case Checkpoint:
 		if w.PRNumber != nil || w.PRURL != nil || len(w.Questions) > 0 || w.Documents != nil {

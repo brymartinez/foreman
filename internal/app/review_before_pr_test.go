@@ -2,8 +2,12 @@ package app
 
 import (
 	"context"
+	"errors"
+	"io"
+	"strings"
 	"testing"
 
+	"github.com/brymartinez/foreman/internal/agent"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -70,5 +74,83 @@ func TestRestartDropsTheLocalCommitWhenTheHeadMoved(t *testing.T) {
 	}
 	if d := rec.Delegation; d.LocalHead != "" || d.ProposedBody != "" {
 		t.Fatalf("delegation = %+v; a commit that is not the head was kept", d)
+	}
+}
+
+func reviewReadyTurn(id, body string) agent.Turn {
+	return agent.Turn{Session: task.Session{Agent: task.Claude, ID: id}, Outcome: agent.Outcome{
+		Status: agent.ReviewReady, Summary: "committed", PRTitle: "feat: retry 5xx", PRBody: body,
+		Validation: []task.Check{{Command: "go test ./...", Passed: true}},
+	}}
+}
+
+// localTask starts a task with review_before_pr on and its plan posted.
+func localTask(t *testing.T, f fixture) task.Key {
+	t.Helper()
+	f.app.ReviewBeforePR = true
+	key := started(t, f, startReq(t))
+	postedPlan(f.store.recs[key])
+	return key
+}
+
+func TestReviewReadyTurnRecordsTheCommitAndItsProposalTogether(t *testing.T) {
+	f := newFixture()
+	key := localTask(t, f)
+	f.wt.checkpointHeads = []string{"commit1"}
+	f.claude.turn = reviewReadyTurn("sid-1", "Retry 5xx only.\n\nCloses #825")
+	rec := f.store.recs[key]
+	res := f.app.runTurn(context.Background(), rec, turnRequest{}, f.app.verifiedPR(io.Discard), io.Discard)
+	if res.err != nil {
+		t.Fatal(res.err)
+	}
+	applyTurnResult(rec, res, now)
+	d := rec.Delegation
+	if rec.State != task.Working || d.LocalHead != "commit1" || d.ProposedTitle != "feat: retry 5xx" || d.ProposedBody != "Retry 5xx only.\n\nCloses #825" || d.PR != 0 {
+		t.Fatalf("state %s delegation %+v", rec.State, d)
+	}
+	if len(rec.Validation) != 1 || !rec.ReviewPending() {
+		t.Fatalf("validation %v pending %t", rec.Validation, rec.ReviewPending())
+	}
+	p := f.claude.prompts[0]
+	if !strings.Contains(p, `"review_ready"`) || strings.Contains(p, "gh pr create") {
+		t.Fatalf("the implementer was told to open the PR:\n%s", p)
+	}
+}
+
+func TestReviewReadyFailsWithoutAVerifiedCommit(t *testing.T) {
+	f := newFixture()
+	key := localTask(t, f)
+	f.wt.checkpointErr = errors.New("checkpoint has uncommitted or untracked files")
+	f.claude.turn = reviewReadyTurn("sid-1", "Closes #825")
+	rec := f.store.recs[key]
+	res := f.app.runTurn(context.Background(), rec, turnRequest{}, f.app.verifiedPR(io.Discard), io.Discard)
+	if res.err == nil || !strings.Contains(res.err.Error(), "uncommitted") {
+		t.Fatalf("err = %v", res.err)
+	}
+	applyTurnResult(rec, res, now)
+	if rec.State != task.Failed || rec.Delegation.LocalHead != "" {
+		t.Fatalf("state %s local head %q", rec.State, rec.Delegation.LocalHead)
+	}
+}
+
+func TestReviewReadyIsRejectedOutsideALocalReview(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	postedPlan(f.store.recs[key])
+	f.wt.checkpointHeads = []string{"commit1"}
+	f.claude.turn = reviewReadyTurn("sid-1", "Closes #825")
+	res := f.app.runTurn(context.Background(), f.store.recs[key], turnRequest{}, f.app.verifiedPR(io.Discard), io.Discard)
+	if res.err == nil || !strings.Contains(res.err.Error(), "review_ready") {
+		t.Fatalf("err = %v", res.err)
+	}
+}
+
+func TestPROpenedBeforeACleanLocalReviewFailsTheTurn(t *testing.T) {
+	f := newFixture()
+	key := localTask(t, f)
+	f.claude.turn = prTurn("sid-1")
+	res := f.app.runTurn(context.Background(), f.store.recs[key], turnRequest{}, f.app.verifiedPR(io.Discard), io.Discard)
+	if res.err == nil || !strings.Contains(res.err.Error(), "before a clean review") {
+		t.Fatalf("err = %v", res.err)
 	}
 }

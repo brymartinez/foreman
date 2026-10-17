@@ -9,7 +9,9 @@
     "prUrl",
     "validation",
     "questions",
-    "documents"
+    "documents",
+    "prTitle",
+    "prBody"
   ],
   "properties": {
     "status": {
@@ -18,6 +20,7 @@
         "planned",
         "checkpoint",
         "pr_opened",
+        "review_ready",
         "blocked",
         "failed"
       ]
@@ -135,6 +138,18 @@
           "type": "string"
         }
       }
+    },
+    "prTitle": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "prBody": {
+      "type": [
+        "string",
+        "null"
+      ]
     }
   }
 }

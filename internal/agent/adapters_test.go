@@ -481,14 +481,14 @@ func TestPromptIncludesAnsweredDecisions(t *testing.T) {
 		t.Errorf("decisions section wrong:\n%s", p)
 	}
 	decs := []task.Decision{{Question: task.Question{Issue: "Retry 4xx?"}, Answer: "A"}}
-	if msg := ResumeMessage(decs, nil, false); !strings.Contains(msg, "Decision: A") || strings.Contains(msg, "requested these changes") || !strings.Contains(msg, "pr_opened, blocked, or failed") {
+	if msg := ResumeMessage(decs, nil, false, false); !strings.Contains(msg, "Decision: A") || strings.Contains(msg, "requested these changes") || !strings.Contains(msg, "pr_opened, blocked, or failed") {
 		t.Errorf("resume message = %q", msg)
 	}
 	open := &task.Review{Round: 4, PR: 9, Findings: []task.Finding{{Severity: "blocking", Summary: "4xx retried", File: "retry.go", Line: 40}}}
-	if msg := ResumeMessage(decs, nil, true); !strings.Contains(msg, "planned, blocked, or failed") {
+	if msg := ResumeMessage(decs, nil, true, false); !strings.Contains(msg, "planned, blocked, or failed") {
 		t.Errorf("a planning resume must end with the planned outcome: %q", msg)
 	}
-	if msg := ResumeMessage(decs, open, false); !strings.Contains(msg, "Review round 4 of PR #9") || !strings.Contains(msg, "1. [blocking] 4xx retried\n   retry.go:40") {
+	if msg := ResumeMessage(decs, open, false, false); !strings.Contains(msg, "Review round 4 of PR #9") || !strings.Contains(msg, "1. [blocking] 4xx retried\n   retry.go:40") {
 		t.Errorf("resume message must carry the unaddressed findings: %q", msg)
 	}
 }

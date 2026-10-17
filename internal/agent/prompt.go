@@ -61,6 +61,9 @@ type TaskBrief struct {
 	// Knowledge is the repository's learnings selected for this issue, one Markdown
 	// bullet each. Learned from earlier tasks, so it ranks below every other input.
 	Knowledge string
+	// LocalReview is set for a task reviewed before its PR opens and with no PR yet.
+	// The turn commits and proposes the PR; foreman has it pushed after a clean review.
+	LocalReview bool
 }
 
 // MergeBrief is the base branch a PR conflicts with and the files that conflict.
@@ -140,7 +143,7 @@ func ImplementationPrompt(b TaskBrief) string {
 
 	if b.Merge != nil {
 		s.WriteString("## Merge conflicts\n\n")
-		mergeRules(&s, b.Branch, b.Merge.Base, b.Merge.Files)
+		mergeRules(&s, b.Branch, b.Merge.Base, b.Merge.Files, b.LocalReview)
 	}
 
 	if len(b.OpenFindings) > 0 {
@@ -155,13 +158,17 @@ func ImplementationPrompt(b TaskBrief) string {
 		s.WriteString("\n")
 	}
 	if !b.Planning && b.PR == 0 && b.Conflict == nil && b.Merge == nil {
-		s.WriteString(`## Implementation checkpoints
+		finish := `open the pull request and report "pr_opened" instead. A small change may go directly to "pr_opened"`
+		if b.LocalReview {
+			finish = `commit it and report "review_ready" instead. A small change may go directly to "review_ready"`
+		}
+		fmt.Fprintf(&s, `## Implementation checkpoints
 
-For a multi-part change, complete one coherent, testable part at a time. When that part is committed and more work remains, end this session with status "checkpoint". Ensure the worktree is clean, report the validation you ran, and set nextObjective to one short, concrete objective for a fresh session. Do not push or open a pull request at a checkpoint. When the whole change is ready, open the pull request and report "pr_opened" instead. A small change may go directly to "pr_opened".
+For a multi-part change, complete one coherent, testable part at a time. When that part is committed and more work remains, end this session with status "checkpoint". Ensure the worktree is clean, report the validation you ran, and set nextObjective to one short, concrete objective for a fresh session. Do not push or open a pull request at a checkpoint. When the whole change is ready, %s.
 
 The next session receives the commit and nextObjective, not this transcript. Keep nextObjective under 500 characters; the committed code, issue, and posted plan hold the details.
 
-`)
+`, finish)
 	}
 	if b.Key.Source == task.Linear {
 		s.WriteString("GitHub hosts the pull request. Put " + b.Identifier + " in the pull request title and " + b.URL + " in the pull request body. Do not add a GitHub Closes #N line. These issue link rules override conflicting developer PR instructions below.\n\n")
@@ -172,11 +179,7 @@ The next session receives the commit and nextObjective, not this transcript. Kee
 You are in a dedicated git worktree at %s on branch %s, created from origin/%s.
 Only change files inside this worktree. Commit your work to %s. Do not switch branches.
 
-## Opening the pull request
-
-- When the change is review-ready: commit everything (the worktree must be clean), push with `+"`git push -u origin %s`"+`, then open a pull request with `+"`gh pr create --base %s --head %s`"+`. If a pull request for this branch already exists (`+"`gh pr view %s`"+`), push to it instead of opening another. %s
-- Take prNumber and prUrl from `+"`gh pr view --json number,url`"+` after pushing; do not guess them.
-%s
+%s%s
 ## When you need a decision
 
 To ask, end your turn with status "blocked" and fill "questions", one entry per decision. Each entry has:
@@ -191,12 +194,37 @@ Do not push or open a pull request when you are blocked.
 ## Final response
 
 Reply with JSON matching the provided schema:
-%s- "pr_opened" once the pull request exists: set prNumber, prUrl, and validation (each command you ran and whether it passed).
-%s- "blocked" when you need a decision, as described above.
+%s%s%s- "blocked" when you need a decision, as described above.
 - "failed" when you cannot complete the task: say why in summary.
 Set nextObjective to null except for "checkpoint". Set fields that do not apply to null, or [] for validation and questions. %s
-`, b.Worktree, b.Branch, b.BaseBranch, b.Branch, b.Branch, b.BaseBranch, b.Branch, b.Branch, prIssueRule(b), prSection(b.PRInstructions), plannedStatus(b.Planning), checkpointStatus(b), documentsRule(b.Planning))
+`, b.Worktree, b.Branch, b.BaseBranch, b.Branch, openingSection(b), prSection(b.PRInstructions), plannedStatus(b.Planning), finishedStatus(b), checkpointStatus(b), documentsRule(b.Planning))
 	return s.String()
+}
+
+// openingSection says how the finished change leaves the worktree: pushed with a PR,
+// or, for a task reviewed before its PR, committed with a proposed PR and not pushed.
+func openingSection(b TaskBrief) string {
+	if b.LocalReview {
+		return fmt.Sprintf(`## Proposing the pull request
+
+Do not push the branch or open a pull request. Another agent reviews your local branch first, and foreman asks you to push and open the pull request once that review is clean.
+
+- When the change is review-ready: commit everything (the worktree must be clean) and run the validation.
+- Write the pull request you propose in prTitle and prBody. The description is the reviewer's only statement of what the change must do, so state the requirements it meets. %s
+`, prIssueRule(b))
+	}
+	return fmt.Sprintf(`## Opening the pull request
+
+- When the change is review-ready: commit everything (the worktree must be clean), push with `+"`git push -u origin %s`"+`, then open a pull request with `+"`gh pr create --base %s --head %s`"+`. If a pull request for this branch already exists (`+"`gh pr view %s`"+`), push to it instead of opening another. %s
+- Take prNumber and prUrl from `+"`gh pr view --json number,url`"+` after pushing; do not guess them.
+`, b.Branch, b.BaseBranch, b.Branch, b.Branch, prIssueRule(b))
+}
+
+func finishedStatus(b TaskBrief) string {
+	if b.LocalReview {
+		return "- \"review_ready\" once the change is committed and validated, and not pushed: set prTitle, prBody, and validation (each command you ran and whether it passed). Every check must pass. Set prNumber and prUrl to null.\n"
+	}
+	return "- \"pr_opened\" once the pull request exists: set prNumber, prUrl, and validation (each command you ran and whether it passed).\n"
 }
 
 func prIssueRule(b TaskBrief) string {
@@ -351,7 +379,8 @@ func answeredDecisions(ds []task.Decision) []task.Decision {
 // open is the latest review when it requested changes, so the answer can say how to
 // handle findings the implementer may not have seen. planning is set when the
 // questions came from the planning turn, which still ends with the documents.
-func ResumeMessage(ds []task.Decision, open *task.Review, planning bool) string {
+// local is set for a task reviewed before its PR, which ends with review_ready.
+func ResumeMessage(ds []task.Decision, open *task.Review, planning, local bool) string {
 	var s strings.Builder
 	if len(ds) == 1 {
 		s.WriteString("The developer answered your question.\n\n")
@@ -362,13 +391,21 @@ func ResumeMessage(ds []task.Decision, open *task.Review, planning bool) string 
 		fmt.Fprintf(&s, "Question: %s\nDecision: %s\n\n", d.Question.Issue, d.Answer)
 	}
 	if open != nil {
-		fmt.Fprintf(&s, "Review round %d of PR #%d requested these changes. Handle them as the decisions say.\n\n", open.Round, open.PR)
+		if local {
+			fmt.Fprintf(&s, "Review round %d of your local change requested these changes. Handle them as the decisions say.\n\n", open.Round)
+		} else {
+			fmt.Fprintf(&s, "Review round %d of PR #%d requested these changes. Handle them as the decisions say.\n\n", open.Round, open.PR)
+		}
 		writeFindings(&s, open.Findings)
 		s.WriteString("\n")
 	}
 	outcomes := "pr_opened, blocked, or failed"
-	if planning {
+	switch {
+	case planning:
 		outcomes = "planned, blocked, or failed"
+	case local:
+		s.WriteString(localFinishRule)
+		outcomes = "review_ready, blocked, or failed"
 	}
 	fmt.Fprintf(&s, "Continue the task with these decisions under the same instructions as before. End with the same JSON outcome: %s.\n", outcomes)
 	return s.String()
@@ -378,15 +415,32 @@ func ResumeMessage(ds []task.Decision, open *task.Review, planning bool) string 
 // latest base branch. The merge is reviewed like any other change.
 func MergeMessage(branch, base string, files []string) string {
 	var s strings.Builder
-	mergeRules(&s, branch, base, files)
+	mergeRules(&s, branch, base, files, false)
 	s.WriteString("End with the same JSON outcome: pr_opened, blocked, or failed.\n")
 	return s.String()
 }
 
+// LocalMergeMessage resumes the implementer of a task reviewed before its PR when its
+// local branch conflicts with the latest base. The merge stays local until review.
+func LocalMergeMessage(branch, base string, files []string) string {
+	var s strings.Builder
+	mergeRules(&s, branch, base, files, true)
+	s.WriteString("End with the same JSON outcome: review_ready, blocked, or failed.\n")
+	return s.String()
+}
+
+// localFinishRule ends every turn of a task reviewed before its PR: the change stays
+// local and comes back with the description the reviewer reads.
+const localFinishRule = "Commit the change locally. Do not push the branch or open a pull request. Return the proposed pull request in prTitle and prBody, updated so it describes the change as it now is.\n\n"
+
 // mergeRules tells the implementer how to bring the base into an open PR. A rebase or
 // force-push would rewrite a branch the developer and reviewers already see, and an
 // aborted merge would lose the state the developer needs to finish it by hand.
-func mergeRules(s *strings.Builder, branch, base string, files []string) {
+func mergeRules(s *strings.Builder, branch, base string, files []string, local bool) {
+	if local {
+		localMergeRules(s, branch, base, files)
+		return
+	}
 	fmt.Fprintf(s, "Your pull request from %s conflicts with the latest origin/%s in these files:\n\n", branch, base)
 	for _, f := range files {
 		fmt.Fprintf(s, "- %s\n", f)
@@ -465,4 +519,23 @@ func priorPRSection(s *strings.Builder, pr PriorPR) {
 	for i, c := range pr.Comments {
 		fmt.Fprintf(s, "%d. %s, %s:\n\n%s\n\n", i+1, author(c), where(c), quote(c.Body))
 	}
+}
+
+// localMergeRules is mergeRules for a branch that is not pushed yet. The reviewer reads
+// the merged branch, so the merge is committed locally and pushed after review.
+func localMergeRules(s *strings.Builder, branch, base string, files []string) {
+	fmt.Fprintf(s, "Your local branch %s conflicts with the latest origin/%s in these files:\n\n", branch, base)
+	for _, f := range files {
+		fmt.Fprintf(s, "- %s\n", f)
+	}
+	fmt.Fprintf(s, `
+Resolve the conflicts before anything else. A reviewer checks the result.
+
+- Run `+"`git fetch origin %s`"+`, then `+"`git merge origin/%s`"+` on %s. If a merge is already in progress (`+"`git status`"+` shows it), finish that one instead.
+- Never rebase. Do not push the branch or open a pull request.
+- Resolve each file so both sides' changes keep working. Run the project's checks and commit the merge.
+- End with "review_ready", the validation, and the proposed pull request in prTitle and prBody.
+- If you can't resolve a file safely, do not run `+"`git merge --abort`"+`. Leave the merge in progress in the worktree and end with "blocked". The question names every unresolved file, says the merge is in progress in the worktree, and offers the option "I resolved the files; verify and commit".
+
+`, base, base, branch)
 }
