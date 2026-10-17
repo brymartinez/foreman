@@ -69,11 +69,13 @@ steps separately; set `BIN_DIR` or `CONFIG_DIR` to change where they go.
 Foreman is a dashboard. Everything you do with a task happens there.
 
 ```bash
-foreman                         # GitHub dashboard, auto mode off by default
-foreman -a                      # auto mode on for this session
-foreman --no-auto               # auto mode off for this session
+foreman                         # dashboard for default_source (GitHub unless set)
+foreman -a                      # auto mode on for this launch
+foreman --no-auto               # auto mode off for this launch
 foreman -s github               # show GitHub issues and delegated tasks
 foreman --source linear         # show Linear issues and delegated tasks
+foreman -s all                  # show both trackers
+foreman --mentions              # show mention-only items for this launch
 foreman -c                      # edit config in $VISUAL, $EDITOR, or vi
 foreman knowledge export owner/repo -o knowledge.md
 foreman knowledge ingest knowledge.md --dry-run
@@ -81,19 +83,36 @@ foreman --help
 foreman --version
 ```
 
-| Dashboard flag | Effect |
-|---|---|
-| `-a`, `--auto` | Turn auto mode on for this session. |
-| `--no-auto` | Turn auto mode off for this session. Off is the default until a choice is saved. |
-| `-s github`, `-s linear` | Select one issue source for INBOX and DELEGATED WORK. `--source` is the long form. GitHub is the default. |
-| `-c` | Open the config editor. Use it alone, without dashboard flags. |
-| `-h`, `--help` | Print command help. |
-| `--version` | Print the version. |
+Dashboard launch flags override a setting for one launch and save nothing:
 
-The auto flags override the saved choice for one launch; pressing `a` in the dashboard
-saves a choice for later launches. `-c` opens the config even if it cannot load. A
-missing or empty config is filled with defaults before the editor opens. Foreman
-checks it again when the editor exits.
+| Launch override | Effect |
+|---|---|
+| `-s`, `--source github\|linear\|all` | Select the issue tracker for INBOX, DELEGATED WORK, and auto mode's starts. `all` selects both. Overrides `default_source`. |
+| `-a`, `--auto` | Turn auto mode on. Overrides the choice saved with `a`. |
+| `--no-auto` | Turn auto mode off. Overrides the choice saved with `a`. |
+| `--mentions` | Show items found only because they mention you. Overrides `mentions`. |
+| `--no-mentions` | Hide those items. Overrides `mentions`. |
+
+Conflicting flags, such as `--mentions --no-mentions` or `-s github -s all`, are a
+usage error. The other flags are inputs to one command:
+
+| Command | Flags |
+|---|---|
+| `foreman -c` | Open the config editor. Use it alone, without launch overrides. |
+| `foreman knowledge export owner/repo` | `-o`, `--output FILE` |
+| `foreman knowledge ingest FILE` | `--repo owner/repo`, `--rebind`, `--agent claude\|codex`, `--dry-run` |
+| `foreman -h`, `--help` | Print command help. |
+| `foreman --version` | Print the version. |
+
+Precedence for the dashboard's source and mentions is the launch flag, then
+`default_source` or `mentions` in `config.yaml`, then the built-in default
+(`github`, and mention-only items shown). Auto mode has no config key: the launch
+flag wins, then the choice saved by pressing `a`, and with no saved choice auto mode
+is off. Every other setting lives in `config.yaml` or `routing.yaml` and has no
+launch flag.
+
+`-c` opens the config even if it cannot load. A missing or empty config is filled
+with defaults before the editor opens. Foreman checks it again when the editor exits.
 
 `knowledge export owner/repo` writes to stdout unless you pass `-o FILE` or
 `--output FILE`. `knowledge ingest FILE` accepts `--dry-run`, `--agent claude|codex`,
@@ -184,8 +203,8 @@ next one follows, and after the last the agent resumes and the pane shows its lo
 closes the prompt; answers already recorded are kept, and Enter asks the next one. A
 task whose log is open switches to its question on its own when it needs a decision.
 
-Auto mode is on by default. While the dashboard is open, it starts open issues
-assigned to you that foreman has never delegated, oldest first, with `auto.agent` and
+Auto mode is off until you turn it on with `a` or `-a`. While it is on, it starts open issues
+assigned to you that foreman has never delegated, from the selected source, oldest first, with `auto.agent` and
 no context file. It looks after the first refresh, after each successful refresh, and
 when a run leaves WORKING or REVIEWING. Only issues with the exact `triaged` label
 start automatically; you can start an unlabelled issue by hand. Mentions, FAILED
@@ -214,7 +233,7 @@ delegatable issues under GITHUB and LINEAR, with
 what changed since the last refresh beneath each one. Each search returns up to 1000
 results.
 
-Set `mentions: false` to leave out the items found only because they mention you, in the
+Set `mentions: false`, or launch with `--no-mentions`, to leave out the items found only because they mention you, in the
 inbox and in the dashboard's INBOX pane. An item that is also assigned to you, or that
 requests your review, still appears. The searches keep running either way, so the
 changes an item reports stay accurate and the items come back the moment you turn the
@@ -531,10 +550,18 @@ repository, use the bullets that fit the issue, and not publish the file wholesa
 ## Configuration
 
 Foreman reads `~/.config/foreman/config.yaml`, or the file named in
-`FOREMAN_CONFIG`. The shipped `defaults/config.yaml` has the current model and budget
-choices, with an empty webhook URL, repository filters, and Linear project mappings.
-Run `foreman -c` to create or edit your file. Every key is optional; unset keys keep
-the built-in defaults below, even when no shipping config has been installed:
+`FOREMAN_CONFIG`. Run `foreman -c` to create or edit your file. Every key is
+optional; unset keys keep the built-in defaults below, even when no shipping config
+has been installed. A key foreman does not know, such as a misspelling, stops it
+with an error that names the key and its line.
+
+The built-in defaults are not the same file as the shipped `defaults/config.yaml`,
+which `make setup` installs when you have no config. The shipped file chooses some
+different values on purpose: `mentions: false`, `opus` and `sonnet` Claude models,
+Codex plan and reasoning settings, and $25 and $10 budgets. It leaves the webhook
+URL, repository filters, and Linear project mappings empty.
+
+Built-in defaults:
 
 ```yaml
 tasks_dir: ~/.local/share/foreman/tasks
@@ -546,8 +573,9 @@ review_rounds: 3                     # reviewer passes over the whole PR per rev
 fix_rounds: 3                        # fix and re-review cycles before foreman asks you
 review_before_pr: false              # review and fix locally; open the PR after a clean review
 mentions: true                       # show items found only because they mention you
+default_source: github               # dashboard issue source: github, linear, or all
 refresh: 60                          # seconds between dashboard issue-source refreshes
-auto:                                # auto mode is off by default; press a to turn it on
+auto:                                # on/off is not here; press a or launch with -a
   agent: claude                      # claude or codex
   max_concurrent: 3                  # active runs, manual ones included
 budgets:                             # Claude only: Codex reports no cost, so it has no cap
@@ -600,9 +628,10 @@ foreman
 ```
 
 Repositories without a mapping continue to use GitHub issues. A Linear project can
-belong to only one repository. `foreman -s github` does not need `LINEAR_API_KEY`.
-If the selected view includes a mapped repository, set the key before opening the
-dashboard.
+belong to only one repository. Set `default_source: linear` or `all` to show Linear
+issues by default, or pass `-s linear` or `-s all` for one launch. `foreman -s github`
+does not need `LINEAR_API_KEY`. If the selected source is `linear` or `all` and a
+visible repository is mapped, foreman stops at startup until the key is set.
 Foreman reads and comments on Linear issues but does not change their status.
 Branches and pull requests stay on GitHub. A Linear task's PR title includes its
 Linear identifier, and its body links to the Linear issue instead of using a GitHub
