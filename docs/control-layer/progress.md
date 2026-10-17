@@ -2,6 +2,12 @@
 
 ## Current stage
 
+Branch-guidance discovery (#84) is complete. The reader joins wrapped lines within a
+paragraph or list item and accepts a branch-guidance description before, inside, or
+after a link, so `Follow docs/repo-coordination.md for branch naming, ...` reaches the
+branch prompt. Guidance errors name the specific reason. Vet, Go tests, build, and the
+end-to-end script pass.
+
 Knowledge export and ingest (#79) is complete. `foreman knowledge export owner/repo`
 writes active guidance and a `foreman-knowledge/1` YAML payload. `foreman knowledge
 ingest FILE` checks the repository identity, restores into an empty store without an

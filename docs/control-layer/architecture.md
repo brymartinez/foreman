@@ -393,16 +393,24 @@ the same commit. The commit message records why it changed.
   changes, or another checked-out branch stops manual and auto starts with the
   reason; Foreman never resets local work. A checkout the caller supplies is read as
   it is. Guidance is `AGENTS.md` plus the Markdown files it names as branch naming
-  guidance, up to two links deep. Text splits into clauses at a line end, `;`, `|`,
-  or a sentence end. A list of links starts where the clause text since the
-  previous link, with the link's own label, says "branch" and "name", "convention",
-  "rule", or "guidance". It continues through links joined by only commas, "and",
-  or "or". Each listed link is read unless its label or path says "decision log",
-  "history", "archive", or "superseded" (with `-`, `_`, `/`, or `.` read as spaces,
-  so `decision-log.md` counts); a list whose lead-in says so is skipped
-  whole. Other links, even in the same clause ("see [architecture](...)"), are not
-  read. A document that only mentions branches is not a rule. A named file that is missing, unreadable, over 32 KiB, or outside the
-  repository stops the start with its path. A start with a confirmed name
+  guidance, up to two links deep. Text splits into blocks: a paragraph, a heading,
+  or a list item. Wrapped lines in one block join, and a blank line, heading
+  (`#` or setext), thematic break, or list marker ends the block, so a description never reaches another paragraph or
+  item. Blocks split into clauses at `;`, `|`, or a sentence end. Links joined by
+  only commas, "and", or "or" form a group. Text between two groups splits at its
+  last comma, "and", "but", or "or": the part before describes the earlier group,
+  the part after leads into the later one; with no such word it all leads in. A
+  link is read when the group's lead-in, its trailing text, or the labels up to its
+  own say "branch" and "name", "convention", "rule", or "guidance", so the
+  description may come before, inside, or after the link. A link whose label or
+  path says "decision log", "history", "archive", or "superseded" (with `-`, `_`,
+  `/`, or `.` read as spaces, so `decision-log.md` counts) is skipped; a group
+  whose lead-in or trailing text says so is skipped whole. Other links, even in the
+  same clause ("see [architecture](...)"), are not read. A document that only
+  mentions branches is not a rule. A named file that is missing, unreadable, not a
+  regular file, over 32 KiB, or outside the repository stops the start with its
+  path and that reason. The proposer runs in an empty scratch directory on purpose,
+  and its prompt says the supplied excerpts are the repository's guidance. A start with a confirmed name
   runs the same sync and guidance read, since either can change while a person edits
   it. A tool-free
   proposal applies the repository convention to the issue and tracker suggestion;

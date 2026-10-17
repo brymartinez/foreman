@@ -403,3 +403,169 @@ func TestBranchGuideSkipsADecisionLogNamedOnlyByItsPath(t *testing.T) {
 		}
 	}
 }
+
+func TestBranchGuideFindsADescriptionBeforeInsideOrAfterTheLink(t *testing.T) {
+	for name, agents := range map[string]string{
+		"after an inline-code path":  "Follow `docs/branches.md` for branch naming.\n",
+		"after a Markdown link":      "Follow [this guide](docs/branches.md) for branch naming.\n",
+		"inside a Markdown label":    "Follow the [branch naming guide](docs/branches.md).\n",
+		"before an inline-code path": "Branch naming rules live in `docs/branches.md`.\n",
+		"after a list of paths":      "Follow `docs/owners.md` and `docs/branches.md` for branch naming.\n",
+		"before a second link":       "Read [design](docs/owners.md) then the branch naming rules in [guide](docs/branches.md).\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := writeRepo(t, map[string]string{
+				"AGENTS.md":        agents,
+				"docs/branches.md": "Use <owner>/<slug>.",
+				"docs/owners.md":   "Owners: bryan.",
+			})
+			guide, err := readBranchGuide(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(guide, "<owner>/<slug>") {
+				t.Fatalf("guide = %q", guide)
+			}
+		})
+	}
+}
+
+func TestBranchGuideJoinsWrappedLinesOfOneParagraphOrListItem(t *testing.T) {
+	for name, agents := range map[string]string{
+		"description after the link wraps":  "Follow `docs/branches.md` for PR expectations\nand branch naming.\n",
+		"description before the link wraps": "The branch naming rules\nare in `docs/branches.md`.\n",
+		"list item continuation":            "- Follow `docs/branches.md` for review,\n  branch naming, and merge guidance.\n- Other item.\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := writeRepo(t, map[string]string{"AGENTS.md": agents, "docs/branches.md": "Use <owner>/<slug>."})
+			guide, err := readBranchGuide(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(guide, "<owner>/<slug>") {
+				t.Fatalf("guide = %q", guide)
+			}
+		})
+	}
+}
+
+func TestBranchGuideKeepsADescriptionInsideItsParagraphOrListItem(t *testing.T) {
+	for name, agents := range map[string]string{
+		"next paragraph":        "Branch naming rules are below\n\nRead `docs/missing.md` first.\n",
+		"next list item":        "- Branch naming rules are below\n- `docs/missing.md`\n",
+		"next numbered item":    "1. Branch naming rules are below\n2. `docs/missing.md`\n",
+		"previous list item":    "- `docs/missing.md`\n- for branch naming, ask a person.\n",
+		"heading above a link":  "## Branch naming\n`docs/missing.md`\n",
+		"setext heading dashes": "Branch naming\n-------------\nRead `docs/missing.md` for context\n",
+		"setext heading equals": "Branch naming\n=============\nRead `docs/missing.md` for context\n",
+		"thematic break":        "Branch naming rules are below\n***\nRead `docs/missing.md` for context\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := readBranchGuide(writeRepo(t, map[string]string{"AGENTS.md": agents})); err != nil {
+				t.Fatalf("err = %v, want the unrelated link skipped", err)
+			}
+		})
+	}
+}
+
+func TestBranchGuideSkipsContextAndHistoricalLinksBesideATrailingDescription(t *testing.T) {
+	for name, agents := range map[string]string{
+		"context link before":        "See `docs/architecture.md`, and follow `docs/branches.md` for branch naming.\n",
+		"context link after":         "Follow `docs/branches.md` for branch naming, and see [architecture](docs/architecture.md) for context.\n",
+		"historical in the list":     "Follow `docs/branches.md` and [decision log](docs/decisions.md) for branch naming.\n",
+		"context link sharing a gap": "Follow `docs/branches.md` for branch naming and `docs/architecture.md` for context.\n",
+		"historical trailer":         "Follow `docs/branches.md` for branch naming. `docs/decisions.md` keeps the branch naming history.\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := writeRepo(t, map[string]string{
+				"AGENTS.md":            agents,
+				"docs/branches.md":     "Use <owner>/<slug>.",
+				"docs/architecture.md": "Each task gets its own branch." + strings.Repeat("x", 40<<10),
+				"docs/decisions.md":    "2024: branch names were old/<slug>." + strings.Repeat("x", 40<<10),
+			})
+			guide, err := readBranchGuide(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(guide, "<owner>/<slug>") || strings.Contains(guide, "own branch") || strings.Contains(guide, "old/<slug>") {
+				t.Fatalf("guide = %q", guide)
+			}
+		})
+	}
+}
+
+// repoCoordinationAgents is the AGENTS.md line from issue #84.
+const repoCoordinationAgents = "- Follow `docs/repo-coordination.md` for branch naming, PR expectations,\n" +
+	"  verification, visual evidence, review, and merge guidance.\n"
+
+func TestRepoCoordinationGuideReachesTheBranchPrompt(t *testing.T) {
+	f := newFixture()
+	root := writeRepo(t, map[string]string{
+		"AGENTS.md":                 repoCoordinationAgents,
+		"docs/repo-coordination.md": "Branches: <owner>/<workstream>-<short-slug>.",
+	})
+	proposer := &fakeBranchProposer{out: agent.Outcome{Status: agent.BranchProposed, BranchName: "bryan/db-825-provider-retries"}}
+	f.app.BranchProposer = proposer
+	got, err := f.app.ProposeBranch(context.Background(), StartRequest{Dir: root, Issue: 825, Agent: task.Claude})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "bryan/db-825-provider-retries" || got.Uncertain {
+		t.Fatalf("proposal = %+v", got)
+	}
+	if !strings.Contains(proposer.in.Prompt, "## docs/repo-coordination.md\nBranches: <owner>/<workstream>-<short-slug>.") {
+		t.Fatalf("prompt lacks the referenced document: %q", proposer.in.Prompt)
+	}
+	if !strings.Contains(proposer.in.Prompt, "empty scratch directory on purpose") {
+		t.Fatalf("prompt does not explain the scratch directory: %q", proposer.in.Prompt)
+	}
+}
+
+func TestUncertainProposalFromSuppliedGuidanceStaysUncertain(t *testing.T) {
+	f := newFixture()
+	root := writeRepo(t, map[string]string{
+		"AGENTS.md":                 repoCoordinationAgents,
+		"docs/repo-coordination.md": "Branches: <owner>/<workstream>-<short-slug>.",
+	})
+	f.app.BranchProposer = &fakeBranchProposer{out: agent.Outcome{Status: agent.BranchProposed, BranchName: "bryan/db-825-provider-retries", Uncertain: true, Summary: "workstream unclear"}}
+	got, err := f.app.ProposeBranch(context.Background(), StartRequest{Dir: root, Issue: 825, Agent: task.Claude})
+	if err != nil || !got.Uncertain {
+		t.Fatalf("proposal = %+v, %v", got, err)
+	}
+}
+
+func TestRequiredTrailingDescriptionGuideStopsTheProposalWithItsReason(t *testing.T) {
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "rules.md"), []byte("Use x/<slug>."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		files  map[string]string
+		reason string
+	}{
+		"missing":  {map[string]string{}, "no such file"},
+		"oversize": {map[string]string{"docs/repo-coordination.md": strings.Repeat("x", 33<<10)}, "too large"},
+		"a folder": {map[string]string{"docs/repo-coordination.md/x": "x"}, "not a regular file"},
+		"outside":  {map[string]string{"docs/other.md": "x"}, "escapes repository"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture()
+			tc.files["AGENTS.md"] = repoCoordinationAgents
+			root := writeRepo(t, tc.files)
+			if name == "outside" {
+				if err := os.Symlink(filepath.Join(outside, "rules.md"), filepath.Join(root, "docs/repo-coordination.md")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			proposer := &fakeBranchProposer{}
+			f.app.BranchProposer = proposer
+			got, err := f.app.ProposeBranch(context.Background(), StartRequest{Dir: root, Issue: 825, Agent: task.Claude})
+			if err == nil || !strings.Contains(err.Error(), "docs/repo-coordination.md") || !strings.Contains(err.Error(), tc.reason) {
+				t.Fatalf("err = %v, want the path and %q", err, tc.reason)
+			}
+			if got.Name != "" || proposer.in.Prompt != "" {
+				t.Fatalf("proposal = %+v after a guidance error", got)
+			}
+		})
+	}
+}
