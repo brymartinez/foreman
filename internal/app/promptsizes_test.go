@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,9 +10,10 @@ import (
 	"github.com/brymartinez/foreman/internal/task"
 )
 
-// TestPromptSizes prints the fixed size of each agent prompt, built with an empty
-// issue body and the shipped default stage files, as the baseline for issue #90.
-// It asserts nothing about sizes, so prompt edits do not break it.
+// TestPromptSizes prints the size of each agent prompt, built with an empty issue
+// body and the shipped default stage files, as the baseline for issue #90. A row
+// marked fixed overhead leaves out text a real call always carries. It asserts
+// nothing about sizes, so prompt edits do not break it.
 //
 //	FOREMAN_PROMPT_SIZES=1 go test ./internal/app -run PromptSizes -v
 func TestPromptSizes(t *testing.T) {
@@ -45,13 +47,45 @@ func TestPromptSizes(t *testing.T) {
 	}
 	issue := Issue{Key: key, Identifier: "#1", Title: "Example issue"}
 
+	// The routing prompt comes from the shipped rules and an issue read through the
+	// GitHub port, so it is built through App with the test fakes.
+	f := newFixture()
+	f.app.Routing = starterRouting(t)
+	f.gh.issue = Issue{Title: issue.Title}
+	route, err := f.app.routePrompt(context.Background(), RouteRequest{Repo: key.Repo, Issue: key.Number})
+	if err != nil {
+		t.Fatalf("build the routing prompt: %v", err)
+	}
+
+	// App.review refuses an empty PR description, so a real review always carries
+	// one. This sample is the size of a short Problem, Fix, Risk description.
+	const sampleDescription = `## Problem
+
+Retries hide provider outages. A request that fails with a 5xx is retried forever,
+so the caller never sees the error and the queue backs up.
+
+## Fix
+
+Retry a failed request at most three times with backoff, and only on a 5xx. Return
+the last error to the caller after the third failure.
+
+## Risk
+
+Low. Callers already handle the error path; only the retry count changes.
+
+Closes #1
+`
+	reviewBrief := agent.ReviewBrief{Key: key, PR: 2, Branch: brief.Branch, BaseBranch: "main", StageInstructions: review}
+	sampleReview := reviewBrief
+	sampleReview.PRBody = sampleDescription
+
 	rows := []struct{ name, prompt string }{
 		{"plan turn", agent.ImplementationPrompt(planBrief)},
 		{"implement turn", agent.ImplementationPrompt(brief)},
 		{"implement turn, local review", agent.ImplementationPrompt(localBrief)},
-		{"review", agent.ReviewPrompt(agent.ReviewBrief{
-			Key: key, PR: 2, Branch: brief.Branch, BaseBranch: "main", StageInstructions: review,
-		})},
+		{"routing, shipped rules", route},
+		{"review, fixed overhead only", agent.ReviewPrompt(reviewBrief)},
+		{"review, sample description", agent.ReviewPrompt(sampleReview)},
 		{"post-review PR turn", agent.OpenPRPrompt(agent.OpenPRBrief{
 			Branch: brief.Branch, BaseBranch: "main", Head: "0123456789abcdef0123456789abcdef01234567",
 			Title: "feat: example", BodyFile: "/tmp/body.md",
