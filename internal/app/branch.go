@@ -174,16 +174,19 @@ var markdownLink = regexp.MustCompile("`([A-Za-z0-9_./-]+\\.md)`?|\\[[^\\]]*\\]\
 var guideClause = regexp.MustCompile(`[;|]|\.\s`)
 
 // heading and listItem match lines that start a new block. A heading is a block of
-// its own.
+// its own. rule matches a setext heading underline or a thematic break, which ends
+// the block above it, so a setext heading never describes the paragraph below.
 var (
 	heading  = regexp.MustCompile(`^#{1,6}\s`)
 	listItem = regexp.MustCompile(`^([-*+]|\d+[.)])\s`)
+	rule     = regexp.MustCompile(`^(=+|-+|\*{3,}|_{3,})$`)
 )
 
 // guideBlocks splits Markdown into paragraphs, headings, and list items, joining
 // wrapped lines with a space so a description split across lines reads as one text.
-// A blank line, a heading, or a list marker ends a block, so a description never
-// vouches for a link in another paragraph or list item.
+// A blank line, a heading, a setext underline, a thematic break, or a list marker
+// ends a block, so a description never vouches for a link in another paragraph or
+// list item.
 func guideBlocks(content string) []string {
 	var blocks, lines []string
 	flush := func() {
@@ -194,6 +197,10 @@ func guideBlocks(content string) []string {
 	}
 	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(line)
+		if rule.MatchString(line) {
+			flush()
+			continue
+		}
 		title := heading.MatchString(line)
 		if line == "" || title || listItem.MatchString(line) {
 			flush()

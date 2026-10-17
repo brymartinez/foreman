@@ -451,11 +451,14 @@ func TestBranchGuideJoinsWrappedLinesOfOneParagraphOrListItem(t *testing.T) {
 
 func TestBranchGuideKeepsADescriptionInsideItsParagraphOrListItem(t *testing.T) {
 	for name, agents := range map[string]string{
-		"next paragraph":       "Branch naming rules are below\n\nRead `docs/missing.md` first.\n",
-		"next list item":       "- Branch naming rules are below\n- `docs/missing.md`\n",
-		"next numbered item":   "1. Branch naming rules are below\n2. `docs/missing.md`\n",
-		"previous list item":   "- `docs/missing.md`\n- for branch naming, ask a person.\n",
-		"heading above a link": "## Branch naming\n`docs/missing.md`\n",
+		"next paragraph":        "Branch naming rules are below\n\nRead `docs/missing.md` first.\n",
+		"next list item":        "- Branch naming rules are below\n- `docs/missing.md`\n",
+		"next numbered item":    "1. Branch naming rules are below\n2. `docs/missing.md`\n",
+		"previous list item":    "- `docs/missing.md`\n- for branch naming, ask a person.\n",
+		"heading above a link":  "## Branch naming\n`docs/missing.md`\n",
+		"setext heading dashes": "Branch naming\n-------------\nRead `docs/missing.md` for context\n",
+		"setext heading equals": "Branch naming\n=============\nRead `docs/missing.md` for context\n",
+		"thematic break":        "Branch naming rules are below\n***\nRead `docs/missing.md` for context\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := readBranchGuide(writeRepo(t, map[string]string{"AGENTS.md": agents})); err != nil {

@@ -394,8 +394,8 @@ the same commit. The commit message records why it changed.
   reason; Foreman never resets local work. A checkout the caller supplies is read as
   it is. Guidance is `AGENTS.md` plus the Markdown files it names as branch naming
   guidance, up to two links deep. Text splits into blocks: a paragraph, a heading,
-  or a list item. Wrapped lines in one block join, and a blank line, heading, or
-  list marker ends the block, so a description never reaches another paragraph or
+  or a list item. Wrapped lines in one block join, and a blank line, heading
+  (`#` or setext), thematic break, or list marker ends the block, so a description never reaches another paragraph or
   item. Blocks split into clauses at `;`, `|`, or a sentence end. Links joined by
   only commas, "and", or "or" form a group. Text between two groups splits at its
   last comma, "and", "but", or "or": the part before describes the earlier group,
