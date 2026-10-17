@@ -75,7 +75,10 @@ Low. Callers already handle the error path; only the retry count changes.
 
 Closes #1
 `
-	reviewBrief := agent.ReviewBrief{Key: key, PR: 2, Branch: brief.Branch, BaseBranch: "main", StageInstructions: review}
+	reviewBrief := agent.ReviewBrief{
+		Key: key, PR: 2, Branch: brief.Branch, BaseBranch: "main", StageInstructions: review,
+		Passes: App{}.reviewRounds(),
+	}
 	sampleReview := reviewBrief
 	sampleReview.PRBody = sampleDescription
 
