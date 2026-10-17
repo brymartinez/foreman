@@ -272,6 +272,28 @@ func TestBranchEditorDeletesAdjacentRunesAndStartsWithEditedName(t *testing.T) {
 	}
 }
 
+func TestBranchPromptScrollKeysKeepEditorActive(t *testing.T) {
+	m := model()
+	m.Width, m.Height = minWidth, minHeight
+	a := press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter})
+	m.Proposed(a.ProposalSeq, app.BranchProposal{Name: "fix/86-prompt", Reason: strings.Repeat("guidance applies here. ", 40)}, nil)
+	press(&m, Key{Kind: KeyDown})
+	if !strings.Contains(screen(m), "lines 2-") || m.Mode != TypingBranch {
+		t.Fatalf("down did not scroll prompt: %v", m.Mode)
+	}
+	press(&m, Key{Kind: KeyPageDown})
+	if strings.Contains(screen(m), "lines 2-") {
+		t.Fatal("page down did not move beyond the second line")
+	}
+	press(&m, Key{Kind: KeyPageUp}, Key{Kind: KeyUp})
+	if !strings.Contains(screen(m), "lines 1-") {
+		t.Fatal("scroll up did not return to the first line")
+	}
+	if got := press(&m, Key{Kind: KeyEnter}); got.Kind != ActionStart || got.Start.BranchName != "fix/86-prompt" {
+		t.Fatalf("scrolling changed the branch action: %+v", got)
+	}
+}
+
 func TestBranchEditorKeepsInvalidNameForCorrectionAndEscapeCancels(t *testing.T) {
 	m := model()
 	a := press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter})

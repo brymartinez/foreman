@@ -122,7 +122,9 @@ task's state. The selected row is drawn in reverse video with no color inside it
 |---|---|
 | `tab`, `←` `→`, `h` `l` | switch between inbox and delegated work |
 | `↑` `↓`, `k` `j` | move the focused list cursor |
-| `enter` on an issue | delegate it: pick `1` for Claude, `2` for Codex, or `3` to route it, type an optional context file, then confirm or edit the proposed branch. A `FAILED` issue starts again on its stored branch |
+| `enter` on an issue | delegate it: pick `1` for Claude, `2` for Codex, or `3` to route it, type an optional context file, then review and edit the proposed branch. A `FAILED` issue starts again on its stored branch |
+| `↑` `↓`, `pgup` `pgdn` in the branch prompt | scroll the proposal rationale; the branch field stays visible |
+| `←` `→`, `home` `end`, `backspace` `delete` in the branch prompt | move the branch cursor or remove a character; typing inserts at the cursor |
 | `enter` on a task | open its log below, or the waiting question on a `NEEDS_DECISION` task |
 | `c` | cancel the highlighted delegated task, after a `y`/`n` confirm |
 | `a` | turn auto mode on or off; the choice is kept for the next launch |
@@ -136,6 +138,12 @@ task's state. The selected row is drawn in reverse video with no color inside it
 | `esc` | close the log or abandon a prompt |
 | `?` | show the keys and the version |
 | `q`, `ctrl+c` | quit |
+
+The branch prompt shows the complete proposal rationale, including repository guidance.
+Its heading marks proposals that need your choice. The line range shows where you are
+when the rationale is longer than the screen. The branch field scrolls horizontally
+around the cursor for long names. Press Enter to start with the edited name, or Escape
+to cancel.
 
 Delegated work is re-read from the task files every second, so a state change shows up
 on its own. The selected issue sources refresh every `refresh` seconds, 60 by default,
