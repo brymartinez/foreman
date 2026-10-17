@@ -6,6 +6,7 @@ review_rounds: 3
 fix_rounds: 3
 refresh: 60
 mentions: false
+default_source: github
 budgets:
   implementer_usd: 25
   reviewer_usd: 10

@@ -2,9 +2,11 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/url"
 	"os"
@@ -30,6 +32,9 @@ type Config struct {
 	ReviewBeforePR bool `yaml:"review_before_pr"`
 	// Mentions shows items the searches found only because they mention you.
 	Mentions bool `yaml:"mentions"`
+	// DefaultSource is the issue tracker the dashboard shows when -s is not given:
+	// github, linear, or all.
+	DefaultSource task.Source `yaml:"default_source"`
 	// Refresh is how often the dashboard reads GitHub, in seconds.
 	Refresh       int           `yaml:"refresh"`
 	Budgets       Budgets       `yaml:"budgets"`
@@ -50,6 +55,9 @@ type Config struct {
 	// so ~/.config/foreman/stages by default. It is a convention, not a setting.
 	StagesDir string `yaml:"-"`
 }
+
+// SourceAll selects every issue tracker. It is a dashboard choice, not a task's source.
+const SourceAll task.Source = "all"
 
 // DefaultRefresh and MinRefresh bound the dashboard's GitHub refresh, in seconds.
 // The floor keeps a run of searches, the readiness gate, and the cleanup from
@@ -128,6 +136,7 @@ func Load() (Config, error) {
 		ReviewRounds:    3,
 		FixRounds:       3,
 		Mentions:        true,
+		DefaultSource:   task.GitHub,
 		Refresh:         DefaultRefresh,
 		Claude:          Claude{Command: "claude", Model: "claude-opus-5"},
 		Codex:           Codex{Command: "codex", Model: "gpt-6-sol"},
@@ -144,7 +153,11 @@ func Load() (Config, error) {
 	raw, err := os.ReadFile(path)
 	switch {
 	case err == nil:
-		if err := yaml.Unmarshal(raw, &cfg); err != nil {
+		// KnownFields makes a misspelled or retired key an error that names it,
+		// instead of a setting that silently keeps its default.
+		dec := yaml.NewDecoder(bytes.NewReader(raw))
+		dec.KnownFields(true)
+		if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
 			return Config{}, fmt.Errorf("%s: %w", path, err)
 		}
 	case !errors.Is(err, fs.ErrNotExist):
@@ -160,6 +173,9 @@ func Load() (Config, error) {
 	}
 	if cfg.Refresh < MinRefresh {
 		return Config{}, fmt.Errorf("%s: refresh is %d seconds; the minimum is %d", path, cfg.Refresh, MinRefresh)
+	}
+	if err := ValidSource(cfg.DefaultSource); err != nil {
+		return Config{}, fmt.Errorf("%s: default_source: %w", path, err)
 	}
 	if cfg.Learning.BudgetUSD < 0 {
 		return Config{}, fmt.Errorf("%s: learning.budget_usd is %g; it cannot be negative", path, cfg.Learning.BudgetUSD)
@@ -192,6 +208,15 @@ func Load() (Config, error) {
 		cfg.LinearProjects[repo] = canonical
 	}
 	return cfg, nil
+}
+
+// ValidSource accepts the dashboard's issue source choices: github, linear, or all.
+func ValidSource(s task.Source) error {
+	switch s {
+	case task.GitHub, task.Linear, SourceAll:
+		return nil
+	}
+	return fmt.Errorf("unknown issue source %q (want github, linear, or all)", s)
 }
 
 func (c Config) IssueSource(repo task.Repo) task.Source {

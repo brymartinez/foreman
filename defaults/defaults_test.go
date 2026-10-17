@@ -23,6 +23,9 @@ func TestShippingConfigLoadsWithoutPersonalSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if cfg.DefaultSource != "github" {
+		t.Errorf("shipping default_source = %q, want github", cfg.DefaultSource)
+	}
 	if cfg.Mentions || cfg.Budgets.ImplementerUSD != 25 || cfg.Budgets.ReviewerUSD != 10 {
 		t.Errorf("shipping choices were not loaded: mentions=%t budgets=%+v", cfg.Mentions, cfg.Budgets)
 	}

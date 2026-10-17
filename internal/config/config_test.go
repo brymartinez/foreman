@@ -186,16 +186,6 @@ func TestLinearProjectsRejectInvalidRepositoriesAndDuplicateProjects(t *testing.
 	}
 }
 
-func TestLoadIgnoresRetiredIgnoreKey(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	t.Setenv("FOREMAN_CONFIG", path)
-	os.WriteFile(path, []byte("ignore_repositories: [acme/widgets]\n"), 0o600)
-	cfg, err := Load()
-	if err != nil || len(cfg.IncludedRepos) != 0 || len(cfg.ExcludedRepos) != 0 {
-		t.Fatalf("included = %+v, excluded = %+v, err = %v; want both empty", cfg.IncludedRepos, cfg.ExcludedRepos, err)
-	}
-}
-
 func TestMaterializeWritesDefaultsOnlyForEmptyFiles(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
@@ -405,5 +395,100 @@ func TestReviewBeforePRDefaultsToOffAndLoadsFromConfig(t *testing.T) {
 	os.WriteFile(filepath.Join(home, ".config/foreman/config.yaml"), []byte("review_before_pr: true\n"), 0o644)
 	if cfg, err = Load(); err != nil || !cfg.ReviewBeforePR {
 		t.Fatalf("review_before_pr %t err %v", cfg.ReviewBeforePR, err)
+	}
+}
+
+func TestDefaultSourceIsGitHubWhenUnsetAndLoadsEachValidValue(t *testing.T) {
+	cfg, err := autoConfig(t, "")
+	if err != nil || cfg.DefaultSource != task.GitHub {
+		t.Fatalf("unset default_source = %q, %v; want github", cfg.DefaultSource, err)
+	}
+	for _, want := range []task.Source{task.GitHub, task.Linear, SourceAll} {
+		cfg, err := autoConfig(t, "default_source: "+string(want)+"\n")
+		if err != nil || cfg.DefaultSource != want {
+			t.Errorf("default_source: %s loaded as %q, %v", want, cfg.DefaultSource, err)
+		}
+	}
+}
+
+func TestDefaultSourceRejectsAnUnknownValueNamingTheKey(t *testing.T) {
+	_, err := autoConfig(t, "default_source: jira\n")
+	if err == nil || !strings.Contains(err.Error(), "default_source") || !strings.Contains(err.Error(), "jira") {
+		t.Fatalf("an unknown default_source gave err = %v; want one naming default_source and jira", err)
+	}
+}
+
+func TestLoadRejectsUnknownKeysNamingTheKeyAndFile(t *testing.T) {
+	for name, tc := range map[string]struct{ body, key string }{
+		"top-level misspelling":    {"mentoins: false\n", "mentoins"},
+		"nested misspelling":       {"claude:\n  modle: haiku\n", "modle"},
+		"retired ignore list":      {"ignore_repositories: [acme/widgets]\n", "ignore_repositories"},
+		"auto mode on/off setting": {"auto:\n  enabled: true\n", "enabled"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := autoConfig(t, tc.body)
+			if err == nil || !strings.Contains(err.Error(), tc.key) || !strings.Contains(err.Error(), "config.yaml") {
+				t.Fatalf("Load(%q) err = %v; want one naming %q and the file", tc.body, err, tc.key)
+			}
+		})
+	}
+}
+
+func TestLoadAcceptsEmptyAndCommentOnlyFiles(t *testing.T) {
+	for _, body := range []string{"", "\n", "# nothing set yet\n"} {
+		if cfg, err := autoConfig(t, body); err != nil || cfg.Refresh != DefaultRefresh {
+			t.Errorf("Load(%q) = refresh %d, %v; want the defaults", body, cfg.Refresh, err)
+		}
+	}
+}
+
+func TestLoadAcceptsEveryDocumentedKey(t *testing.T) {
+	body := `tasks_dir: ~/t
+worktrees_dir: ~/w
+repositories_dir: ~/r
+log_dir: ~/l
+knowledge_dir: ~/k
+review_rounds: 2
+fix_rounds: 2
+review_before_pr: true
+mentions: false
+default_source: all
+refresh: 30
+budgets:
+  implementer_usd: 5
+  reviewer_usd: 2
+learning:
+  enabled: false
+  budget_usd: 1
+notifications:
+  enabled: false
+  webhook_url: ""
+claude:
+  command: claude
+  model: opus
+  plan_model: sonnet
+  review_model: opus
+codex:
+  command: codex
+  model: m
+  plan_model: p
+  review_model: r
+  reasoning_effort: medium
+  plan_reasoning_effort: high
+  review_reasoning_effort: low
+cleanup:
+  on_done: false
+  delete_merged_branch: false
+auto:
+  agent: codex
+  max_concurrent: 2
+include_repositories: [acme/web]
+exclude_repositories: [acme/api]
+linear_projects:
+  acme/web: https://linear.app/acme/project/web-123
+`
+	cfg, err := autoConfig(t, body)
+	if err != nil || cfg.DefaultSource != SourceAll || cfg.Auto.MaxConcurrent != 2 || cfg.Codex.ReviewReasoningEffort != "low" {
+		t.Fatalf("documented config = %+v, %v", cfg, err)
 	}
 }
