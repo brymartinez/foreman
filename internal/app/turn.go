@@ -112,8 +112,32 @@ func (a App) checkReviewReady(ctx context.Context, rec *task.Record, req turnReq
 	if err != nil {
 		return turnResult{turn: turn, err: fmt.Errorf("verify the change for review: %w", err)}
 	}
+	if err := a.checkUnpublished(ctx, rec); err != nil {
+		return turnResult{turn: turn, err: err}
+	}
 	fmt.Fprintf(log, "foreman: verified local commit %s for review\n", short(head))
 	return turnResult{turn: turn, localHead: head}
+}
+
+// checkUnpublished fails a review_ready turn that pushed the branch or opened a PR,
+// because automated reviews on GitHub may already be running on unreviewed code.
+func (a App) checkUnpublished(ctx context.Context, rec *task.Record) error {
+	d := rec.Delegation
+	pr, err := a.GitHub.OpenPullRequestForBranch(ctx, rec.Repo, d.Branch)
+	if err != nil {
+		return fmt.Errorf("check that no PR is open for %s: %w", d.Branch, err)
+	}
+	if pr != nil {
+		return fmt.Errorf("the implementer opened PR #%d before a clean review; review_before_pr keeps the change local until then", pr.Key.Number)
+	}
+	remote, err := a.Worktrees.RemoteBranchHead(ctx, d.Worktree, d.Branch)
+	if err != nil {
+		return fmt.Errorf("check that %s is not pushed: %w", d.Branch, err)
+	}
+	if remote != "" {
+		return fmt.Errorf("the implementer pushed %s at %s before a clean review; review_before_pr keeps the change local until then", d.Branch, short(remote))
+	}
+	return nil
 }
 
 // repairFailedCheckpoint gives the same implementation session a bounded chance

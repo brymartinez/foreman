@@ -495,8 +495,8 @@ type Review struct {
 	Findings []Finding
 	At       time.Time
 	Head     string // the PR head commit reviewed; empty on records from before heads were recorded
-	// Proposal is the Digest of the proposed description a local review read with
-	// Head. A fix may keep the commit and change only the description.
+	// Proposal is the ProposalDigest of the proposed title and description a local
+	// review read with Head. A fix may keep the commit and change only those.
 	Proposal string
 }
 
@@ -604,8 +604,14 @@ func (r *Record) OpenPending() bool {
 }
 
 // coversLocal reports whether review read the stored local commit together with its
-// current proposed description.
+// current proposed title and description.
 func (r *Record) coversLocal(review *Review) bool {
 	d := r.Delegation
-	return review != nil && review.Head == d.LocalHead && review.Proposal == Digest(d.ProposedBody)
+	return review != nil && review.Head == d.LocalHead && review.Proposal == ProposalDigest(d.ProposedTitle, d.ProposedBody)
+}
+
+// ProposalDigest identifies a proposed PR title and description, so a review records
+// which proposal it read.
+func ProposalDigest(title, body string) string {
+	return Digest(strings.TrimSpace(title) + "\n\n" + body)
 }

@@ -4,9 +4,9 @@ import "testing"
 
 func TestLocalReviewHelpersFollowTheStoredCommitAndItsReviews(t *testing.T) {
 	local := func(head string, reviews ...Review) *Record {
-		return &Record{State: Working, Delegation: &Delegation{ReviewBeforePR: true, LocalHead: head, ProposedBody: "Closes #7"}, Reviews: reviews}
+		return &Record{State: Working, Delegation: &Delegation{ReviewBeforePR: true, LocalHead: head, ProposedTitle: "feat: x", ProposedBody: "Closes #7"}, Reviews: reviews}
 	}
-	reviewed := Digest("Closes #7")
+	reviewed := ProposalDigest("feat: x", "Closes #7")
 	for name, tc := range map[string]struct {
 		rec                        *Record
 		localReview, pending, open bool
@@ -27,13 +27,16 @@ func TestLocalReviewHelpersFollowTheStoredCommitAndItsReviews(t *testing.T) {
 			rec: local("h1", Review{Head: "h1", Proposal: reviewed}), localReview: true,
 		},
 		"the same commit with a new description waits for review": {
-			rec: local("h1", Review{Head: "h1", Proposal: Digest("Closes #7, retries 5xx")}), localReview: true, pending: true,
+			rec: local("h1", Review{Head: "h1", Proposal: ProposalDigest("feat: x", "Closes #7, retries 5xx")}), localReview: true, pending: true,
+		},
+		"the same commit and description with a new title waits for review": {
+			rec: local("h1", Review{Head: "h1", Proposal: ProposalDigest("feat: y", "Closes #7"), Clean: true}), localReview: true, pending: true,
 		},
 		"a clean review of the commit waits for the PR": {
 			rec: local("h1", Review{Head: "h1", Proposal: reviewed, Clean: true}), localReview: true, open: true,
 		},
 		"a clean review of another description does not open": {
-			rec: local("h1", Review{Head: "h1", Proposal: Digest("Closes #7, retries 5xx"), Clean: true}), localReview: true, pending: true,
+			rec: local("h1", Review{Head: "h1", Proposal: ProposalDigest("feat: x", "Closes #7, retries 5xx"), Clean: true}), localReview: true, pending: true,
 		},
 		"a clean review of an older commit does not open": {
 			rec: local("h2", Review{Head: "h1", Proposal: reviewed, Clean: true}), localReview: true, pending: true,

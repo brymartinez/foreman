@@ -91,7 +91,8 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
                                 NEEDS_DECISION (A: another round, B: accept remaining), exit
   with review_before_pr captured on the task and no PR yet, a finished turn returns
   review_ready instead of pr_opened (pr_opened there fails the task):
-    review_ready -> verify the branch, a clean worktree, and a new descendant commit;
+    review_ready -> verify the branch, a clean worktree, and a new descendant commit,
+                    and that no PR is open and origin has no such branch (else FAILED);
                     save the commit with the proposed PR title and description, WORKING
                     before every review: git fetch base, then
                       git merge-tree HEAD origin/<base>
@@ -610,7 +611,7 @@ the same commit. The commit message records why it changed.
   only and the agent's turn runs under the pinned account; Foreman then checks that the
   PR's head, title, and body are the ones reviewed. The clean review becomes the review
   of the PR's head, so the gate goes straight to CI. Each local review records the
-  commit and a digest of the description it read, and a restart resumes from the record:
+  commit and a digest of the title and description it read, and a restart resumes from the record:
   a commit or description without a review goes to review, a clean pair to the PR step.
 - **A review covers one PR head.** Each review records the head it read. A REVIEWING
   task whose head moved is reviewed again; new commits on a READY_FOR_HUMAN PR are only

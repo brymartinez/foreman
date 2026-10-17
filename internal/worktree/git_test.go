@@ -638,3 +638,14 @@ func TestLocalMergeConflictsNeedNoBranchOnOrigin(t *testing.T) {
 		t.Fatalf("conflicts = %v, %v; want none", got, err)
 	}
 }
+
+func TestRemoteBranchHeadReportsOnlyPushedBranches(t *testing.T) {
+	wt, _ := prWorktree(t)
+	want := run(t, wt, "rev-parse", "origin/agent/1-x")
+	if got, err := (Git{}).RemoteBranchHead(context.Background(), wt, "agent/1-x"); err != nil || got != want {
+		t.Fatalf("pushed branch head = %q, %v; want %s", got, err, want)
+	}
+	if got, err := (Git{}).RemoteBranchHead(context.Background(), wt, "agent/2-unpushed"); err != nil || got != "" {
+		t.Fatalf("unpushed branch head = %q, %v; want none", got, err)
+	}
+}

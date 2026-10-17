@@ -568,7 +568,7 @@ func (a App) review(ctx context.Context, rec *task.Record, log io.Writer) (agent
 	if err != nil {
 		return agent.ReviewOutcome{}, chosen, err
 	}
-	brief := agent.ReviewBrief{Key: rec.Key, PR: d.PR, PRBody: body, Branch: d.Branch, BaseBranch: strings.TrimPrefix(d.BaseRef, "origin/"),
+	brief := agent.ReviewBrief{Key: rec.Key, PR: d.PR, PRTitle: d.ProposedTitle, PRBody: body, Branch: d.Branch, BaseBranch: strings.TrimPrefix(d.BaseRef, "origin/"),
 		StageInstructions: instructions.Content(), Previous: rec.Reviews, Passes: a.reviewRounds(), Proposed: local}
 	// Comments are history, not requirements, so the review goes on without them. A
 	// local commit has no PR to read them from.
@@ -966,7 +966,7 @@ func applyReview(rec *task.Record, r agent.ReviewOutcome, reviewErr error, now t
 	}
 	head, proposal := rec.Delegation.PRHead, ""
 	if rec.LocalReview() {
-		head, proposal = rec.Delegation.LocalHead, task.Digest(rec.Delegation.ProposedBody)
+		head, proposal = rec.Delegation.LocalHead, task.ProposalDigest(rec.Delegation.ProposedTitle, rec.Delegation.ProposedBody)
 	}
 	rec.Reviews = append(rec.Reviews, task.Review{
 		Round:    len(rec.Reviews) + 1,

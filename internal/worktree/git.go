@@ -276,6 +276,15 @@ func (Git) MergeConflicts(ctx context.Context, check app.MergeCheck) ([]string, 
 	return files, nil
 }
 
+func (Git) RemoteBranchHead(ctx context.Context, dir, branch string) (string, error) {
+	out, err := git(ctx, dir, "ls-remote", "--heads", "origin", "refs/heads/"+branch)
+	if err != nil {
+		return "", err
+	}
+	sha, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\t")
+	return sha, nil
+}
+
 func (Git) Contains(ctx context.Context, dir, ancestor, descendant string) (bool, error) {
 	if _, err := git(ctx, dir, "fetch", "origin"); err != nil {
 		return false, err

@@ -50,7 +50,7 @@ func TestRestartKeepsTheLocalCommitAndProposalAtTheSameHead(t *testing.T) {
 	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.Failed,
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Branch: "feat/825-provider-retries",
 			ReviewBeforePR: true, LocalHead: head, ProposedTitle: "feat: retries", ProposedBody: "Closes #825"},
-		Reviews: []task.Review{{Head: head, Proposal: task.Digest("Closes #825"), Clean: true}}}
+		Reviews: []task.Review{{Head: head, Proposal: task.ProposalDigest("feat: retries", "Closes #825"), Clean: true}}}
 	rec, err := f.app.Start(context.Background(), startReq(t))
 	if err != nil {
 		t.Fatal(err)
@@ -84,13 +84,20 @@ func reviewReadyTurn(id, body string) agent.Turn {
 	}}
 }
 
-// localTask starts a task with review_before_pr on and its plan posted.
+// localTask starts a task with review_before_pr on and its plan posted. The branch
+// has no PR on GitHub until a test opens one.
 func localTask(t *testing.T, f fixture) task.Key {
 	t.Helper()
 	f.app.ReviewBeforePR = true
 	key := started(t, f, startReq(t))
 	postedPlan(f.store.recs[key])
+	delete(f.gh.prs, 912)
 	return key
+}
+
+// fixturePR is the fixture's PR #912 on the task branch.
+func fixturePR() PullRequest {
+	return newFixture().gh.prs[912]
 }
 
 func TestReviewReadyTurnRecordsTheCommitAndItsProposalTogether(t *testing.T) {
@@ -165,8 +172,7 @@ const (
 // reviewer must have finished by then.
 func opensPR(t *testing.T, f fixture, head, title, body string, reviews int) {
 	t.Helper()
-	pr := f.gh.prs[912]
-	delete(f.gh.prs, 912)
+	pr := fixturePR()
 	pr.HeadSHA, pr.Title, pr.Body = head, title, body
 	f.claude.onResume = func() {
 		if !strings.Contains(f.claude.resumed[len(f.claude.resumed)-1], "gh pr create") {
@@ -409,7 +415,7 @@ func TestReviewBeforePRResumesACleanCommitAtThePROpening(t *testing.T) {
 	rec := f.store.recs[key]
 	rec.Delegation.LocalHead, rec.Delegation.ProposedTitle, rec.Delegation.ProposedBody = "commit1", proposedTitle, proposedBody
 	rec.Delegation.Implementer.ID = "sid-1"
-	rec.Reviews = []task.Review{{Round: 1, Reviewer: task.Codex, Head: "commit1", Proposal: task.Digest(proposedBody), Clean: true, At: now}}
+	rec.Reviews = []task.Review{{Round: 1, Reviewer: task.Codex, Head: "commit1", Proposal: task.ProposalDigest(proposedTitle, proposedBody), Clean: true, At: now}}
 	f.claude.turns = []agent.Turn{prTurn("sid-1")}
 	opensPR(t, f, "commit1", proposedTitle, proposedBody, 0)
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
@@ -429,8 +435,8 @@ func TestReviewBeforePRAdoptsAMatchingPRWithoutAnotherTurn(t *testing.T) {
 	key := localTask(t, f)
 	rec := f.store.recs[key]
 	rec.Delegation.LocalHead, rec.Delegation.ProposedTitle, rec.Delegation.ProposedBody = "commit1", proposedTitle, proposedBody
-	rec.Reviews = []task.Review{{Round: 1, Reviewer: task.Codex, Head: "commit1", Proposal: task.Digest(proposedBody), Clean: true, At: now}}
-	pr := f.gh.prs[912]
+	rec.Reviews = []task.Review{{Round: 1, Reviewer: task.Codex, Head: "commit1", Proposal: task.ProposalDigest(proposedTitle, proposedBody), Clean: true, At: now}}
+	pr := fixturePR()
 	pr.HeadSHA, pr.Title, pr.Body = "commit1", proposedTitle, proposedBody+"\n"
 	f.gh.prs[912] = pr
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
@@ -455,10 +461,9 @@ func TestReviewBeforePRFailsWhenThePRDoesNotMatchTheReview(t *testing.T) {
 			rec := f.store.recs[key]
 			rec.Delegation.LocalHead, rec.Delegation.ProposedTitle, rec.Delegation.ProposedBody = "commit1", proposedTitle, proposedBody
 			rec.Delegation.Implementer.ID = "sid-1"
-			rec.Reviews = []task.Review{{Round: 1, Reviewer: task.Codex, Head: "commit1", Proposal: task.Digest(proposedBody), Clean: true, At: now}}
+			rec.Reviews = []task.Review{{Round: 1, Reviewer: task.Codex, Head: "commit1", Proposal: task.ProposalDigest(proposedTitle, proposedBody), Clean: true, At: now}}
 			f.claude.turns = []agent.Turn{prTurn("sid-1")}
-			pr := f.gh.prs[912]
-			delete(f.gh.prs, 912)
+			pr := fixturePR()
 			pr.HeadSHA, pr.Title, pr.Body = "commit1", proposedTitle, proposedBody
 			change(&pr)
 			f.claude.onResume = func() { f.gh.prs[912] = pr }
@@ -507,7 +512,7 @@ func TestReviewBeforePRResumesAnUpdatedDescriptionAtItsReview(t *testing.T) {
 	rec := f.store.recs[key]
 	rec.Delegation.LocalHead, rec.Delegation.ProposedTitle, rec.Delegation.ProposedBody = "commit1", proposedTitle, updated
 	rec.Delegation.Implementer.ID = "sid-1"
-	rec.Reviews = []task.Review{{Round: 1, Reviewer: task.Codex, Head: "commit1", Proposal: task.Digest(proposedBody), At: now,
+	rec.Reviews = []task.Review{{Round: 1, Reviewer: task.Codex, Head: "commit1", Proposal: task.ProposalDigest(proposedTitle, proposedBody), At: now,
 		Findings: []task.Finding{{Severity: "blocking", Summary: "description says 4xx"}}}}
 	f.claude.turns = []agent.Turn{prTurn("sid-1")}
 	opensPR(t, f, "commit1", proposedTitle, updated, 1)
@@ -518,7 +523,7 @@ func TestReviewBeforePRResumesAnUpdatedDescriptionAtItsReview(t *testing.T) {
 	if len(f.codex.reviewed) != 1 || !strings.Contains(f.codex.reviewed[0], "never 4xx") {
 		t.Fatalf("the updated description was not reviewed: %q", f.codex.reviewed)
 	}
-	if got.Delegation.PR != 912 || got.LatestReview().Proposal != task.Digest(updated) {
+	if got.Delegation.PR != 912 || got.LatestReview().Proposal != task.ProposalDigest(proposedTitle, updated) {
 		t.Fatalf("pr %d reviews %+v", got.Delegation.PR, got.Reviews)
 	}
 }
@@ -537,5 +542,55 @@ func TestRestartWithTheSettingOffKeepsTheLocalReviewWorkflow(t *testing.T) {
 	}
 	if d := rec.Delegation; !d.ReviewBeforePR || d.LocalHead != head || !rec.ReviewPending() {
 		t.Fatalf("delegation = %+v; the restart left the local review workflow", d)
+	}
+}
+
+func TestReviewReadyFailsWhenThePRIsAlreadyOpen(t *testing.T) {
+	f := newFixture()
+	key := localTask(t, f)
+	f.gh.prs[912] = fixturePR()
+	f.wt.checkpointHeads = []string{"commit1"}
+	f.claude.turn = reviewReadyTurn("sid-1", proposedBody)
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Failed || !strings.Contains(got.LastOutcome.Summary, "PR #912") || len(f.codex.reviewed) != 0 || got.Delegation.LocalHead != "" {
+		t.Fatalf("state %s outcome %+v reviews %d", got.State, got.LastOutcome, len(f.codex.reviewed))
+	}
+}
+
+func TestReviewReadyFailsWhenTheBranchIsPushed(t *testing.T) {
+	f := newFixture()
+	key := localTask(t, f)
+	f.wt.remoteHeads = map[string]string{"feat/825-provider-retries": "commit1"}
+	f.wt.checkpointHeads = []string{"commit1"}
+	f.claude.turn = reviewReadyTurn("sid-1", proposedBody)
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Failed || !strings.Contains(got.LastOutcome.Summary, "pushed") || len(f.codex.reviewed) != 0 {
+		t.Fatalf("state %s outcome %+v reviews %d", got.State, got.LastOutcome, len(f.codex.reviewed))
+	}
+}
+
+func TestReviewBeforePRReviewsAChangedTitleBeforeOpening(t *testing.T) {
+	f := newFixture()
+	key := localTask(t, f)
+	rec := f.store.recs[key]
+	rec.Delegation.LocalHead, rec.Delegation.ProposedTitle, rec.Delegation.ProposedBody = "commit1", "feat: retry everything", proposedBody
+	rec.Delegation.Implementer.ID = "sid-1"
+	rec.Reviews = []task.Review{{Round: 1, Reviewer: task.Codex, Head: "commit1", Proposal: task.ProposalDigest(proposedTitle, proposedBody), Clean: true, At: now}}
+	f.claude.turns = []agent.Turn{prTurn("sid-1")}
+	opensPR(t, f, "commit1", "feat: retry everything", proposedBody, 1)
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.codex.reviewed) != 1 || !strings.Contains(f.codex.reviewed[0], "feat: retry everything") {
+		t.Fatalf("the new title was not reviewed: %q", f.codex.reviewed)
+	}
+	if got := f.store.recs[key]; got.Delegation.PR != 912 {
+		t.Fatalf("state %s pr %d", got.State, got.Delegation.PR)
 	}
 }
