@@ -65,22 +65,36 @@ steps separately; set `BIN_DIR` or `CONFIG_DIR` to change where they go.
 Foreman is a dashboard. Everything you do with a task happens there.
 
 ```bash
-foreman              # open the dashboard: inbox, delegated work, and logs
-foreman -a           # open it with auto mode on for this session (also --auto)
-foreman --no-auto    # open it with auto mode off for this session
-foreman -s github    # show only GitHub issues in the inbox
-foreman -s linear    # show only Linear issues in the inbox
-foreman -c           # edit the config in $VISUAL, $EDITOR, or vi
-foreman knowledge export owner/repo -o knowledge.md  # move learned knowledge to another machine
-foreman knowledge ingest knowledge.md                # and store it there
+foreman                         # dashboard for both issue sources
+foreman -a                      # auto mode on for this session
+foreman --no-auto               # auto mode off for this session
+foreman -s github               # show GitHub issues and delegated tasks
+foreman --source linear         # show Linear issues and delegated tasks
+foreman -c                      # edit config in $VISUAL, $EDITOR, or vi
+foreman knowledge export owner/repo -o knowledge.md
+foreman knowledge ingest knowledge.md --dry-run
 foreman --help
 foreman --version
 ```
 
-`-a` and `--no-auto` override the saved auto mode choice for this session only and
-don't change it. `-c` opens the config even when it fails to load, shows the error
-first, and checks the file again once the editor exits. A missing or empty config is
-filled with the defaults before it opens.
+| Dashboard flag | Effect |
+|---|---|
+| `-a`, `--auto` | Turn auto mode on for this session. |
+| `--no-auto` | Turn auto mode off for this session. |
+| `-s github`, `-s linear` | Select one issue source for INBOX and DELEGATED WORK. `--source` is the long form. Without this flag, both sources appear. |
+| `-c` | Open the config editor. Use it alone, without dashboard flags. |
+| `-h`, `--help` | Print command help. |
+| `--version` | Print the version. |
+
+The auto flags override the saved choice for one launch; pressing `a` in the dashboard
+saves a choice for later launches. `-c` opens the config even if it cannot load. A
+missing or empty config is filled with defaults before the editor opens. Foreman
+checks it again when the editor exits.
+
+`knowledge export owner/repo` writes to stdout unless you pass `-o FILE` or
+`--output FILE`. `knowledge ingest FILE` accepts `--dry-run`, `--agent claude|codex`,
+and `--repo owner/repo`. Use `--rebind` with `--repo` to import an export under a
+different repository. See [Moving knowledge between machines](#moving-knowledge-between-machines).
 
 ## Dashboard
 
@@ -108,7 +122,7 @@ the log open, `u`/`d` and `g`/`G` scroll it while `j`/`k` still select tasks. Th
 opens at its tail. Scrolling past the oldest loaded line reads older lines from the log
 file, and `g` reads back to its first line. Press `R` to switch between cleaned lines
 and the raw agent JSONL; the log returns to its tail and the heading says `raw`. Press
-`s`, from either list, to swap the log for everything recorded for the task: its state,
+`s`, with a log open, to swap it for everything recorded for the task: its state,
 branch, worktree, PR, planning comments, CI, usage, and last outcome, scrolled with the
 same keys. Press `s` again to return to the log. Press `c` from either list to cancel
 the highlighted delegated task, after confirmation. Press `?` for the keys and the
@@ -127,8 +141,11 @@ task's state. The selected row is drawn in reverse video with no color inside it
 | `←` `→`, `home` `end`, `backspace` `delete` in the branch prompt | move the branch cursor or remove a character; typing inserts at the cursor |
 | `enter` on a task | open its log below, or the waiting question on a `NEEDS_DECISION` task |
 | `c` | cancel the highlighted delegated task, after a `y`/`n` confirm |
+| `x` on a `FAILED` task | confirm a reset of its local run, then offer the issue for a manual start |
 | `a` | turn auto mode on or off; the choice is kept for the next launch |
 | `r` | refresh the selected issue sources now |
+| `p` | open merged and closed PR history; Enter or Tab focuses its log, and Esc returns |
+| `space` with a log open | pause or resume log redraws; any navigation key resumes |
 | `u` `d` with a log open | scroll up or down one page |
 | `ctrl+u` `ctrl+d` with a log open | scroll up or down half a page |
 | `g` `G` with a log open | jump to the log's first line or follow the tail |
@@ -252,6 +269,9 @@ part of the task.
    the right branch.
 4. The other agent reviews the PR in a read-only, throwaway session. Findings go back
    to the implementer's session, and the loop repeats until the review is clean.
+   Foreman has no `wait_for_pr` flag or config key: the first push and PR happen
+   before this review. Fixes found during review are committed and pushed to the
+   same PR before the next review pass.
 5. On the next GitHub refresh, foreman reads the PR's CI checks on
    GitHub, the same list as at the bottom of the PR page. Once they finish, the task is
    `READY_FOR_HUMAN`.
@@ -317,12 +337,18 @@ Foreman never reads or changes those files.
 ## Cleaning up worktrees
 
 When a refresh finds a task DONE, it removes the task's worktree. When the PR was
-merged, it also deletes the local `feat/...` or `fix/...` branch. There is no manual
-cleanup: the worktree of a FAILED or PR_CLOSED task stays until you remove it with
-`git worktree remove`.
+merged, it also deletes the local branch. A PR_CLOSED task keeps its worktree and
+branch. A FAILED task also keeps them so you can retry the run.
 
-- A worktree with uncommitted or untracked changes is never removed. A later refresh
-  removes it once it is tidy.
+To discard a FAILED run, select it in DELEGATED WORK and press `x`. Foreman shows
+the task file, runner log, worktree, and local branch it will remove. Press `y` to
+confirm. The replacement task record keeps the PR link, and Foreman offers the
+issue for a manual start. The reset does not change GitHub; inspect the branch for
+uncommitted work before confirming.
+
+- DONE cleanup keeps a worktree with uncommitted or untracked changes. A later
+  refresh removes it once it is tidy. A confirmed reset of a FAILED run removes
+  its worktree even when it has such changes.
 - A branch whose PR wasn't merged is kept, so a new start can pick the work up again.
 - Remote branches are left to GitHub's "Automatically delete head branches" setting.
 
@@ -384,7 +410,7 @@ every refresh tries again.
 | `REVIEWING` | PR open; under review, or waiting on CI | Wait, or `c` on the task to stop a running review |
 | `READY_FOR_HUMAN` | Review clean, CI finished (✓ or ✗ shown) | Review and merge the PR |
 | `DONE` | PR merged or issue closed | Nothing |
-| `FAILED` | The agent failed, the run was cancelled, or the runner died | `s` on the task to see why, then Enter on it in the inbox to retry |
+| `FAILED` | The agent failed, the run was cancelled, or the runner died | `s` on the task to see why, then Enter on it in the inbox to retry or `x` on the task to reset its local run |
 | `PR_CLOSED` | You closed the PR without merging it | Nothing, or reopen the PR |
 
 ## Task files
@@ -491,8 +517,9 @@ repository, use the bullets that fit the issue, and not publish the file wholesa
 
 ## Configuration
 
-Foreman reads `~/.config/foreman/config.yaml`, or the file named in `$FOREMAN_CONFIG`.
-Every key is optional. These are the defaults:
+Foreman reads `~/.config/foreman/config.yaml`, or the file named in
+`FOREMAN_CONFIG`. Run `foreman -c` to create or edit it. Every key is optional;
+unset keys keep these defaults:
 
 ```yaml
 tasks_dir: ~/.local/share/foreman/tasks
@@ -537,7 +564,11 @@ cleanup:
   delete_merged_branch: true      # and the local branch, once the PR is merged
 ```
 
-`FOREMAN_TASKS_DIR` overrides `tasks_dir`.
+`FOREMAN_TASKS_DIR` overrides `tasks_dir` after Foreman reads the file. Directory
+values beginning with `~/` expand to your home directory. The `stages/` directory
+and `routing.yaml` sit beside the selected config file; neither has a separate
+config key. Auto mode's on/off choice lives in
+`~/.local/share/foreman/state.json`, outside `config.yaml`.
 
 To use Linear issues for a repository, map it to one Linear project URL and set a
 personal API key before starting Foreman:
@@ -553,8 +584,9 @@ foreman
 ```
 
 Repositories without a mapping continue to use GitHub issues. A Linear project can
-belong to only one repository. `foreman -s github` uses only GitHub issues and does
-not need `LINEAR_API_KEY`. A view that includes a mapped repository needs the key.
+belong to only one repository. `foreman -s github` does not need `LINEAR_API_KEY`.
+If the selected view includes a mapped repository, set the key before opening the
+dashboard.
 Foreman reads and comments on Linear issues but does not change their status.
 Branches and pull requests stay on GitHub. A Linear task's PR title includes its
 Linear identifier, and its body links to the Linear issue instead of using a GitHub
@@ -595,9 +627,11 @@ automatic starts until both sources refresh successfully.
 
 ## Routing
 
-`~/.config/foreman/routing.yaml`, next to `config.yaml`, lets foreman choose the agent
-and models for each new issue you start from the dashboard. Without the file, routing
-is off and the dashboard works as before. `make setup` installs this starter file:
+`routing.yaml`, next to the selected `config.yaml`, lets foreman choose the agent
+and models for each new issue. Without it, routing is off. `make setup` installs
+the starter file without replacing an existing one. For a release archive, copy its
+`routing.yaml` to the same directory as `config.yaml` to enable routing. The starter
+file is:
 
 ```yaml
 selector:
