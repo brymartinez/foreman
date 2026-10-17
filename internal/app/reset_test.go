@@ -58,7 +58,7 @@ func TestResetDeletesTheRunAndKeepsTheStoredPR(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := &task.ResetMark{At: now, PR: 912, PRURL: "https://github.com/ridezoomo/armada-backend/pull/912", Branch: "feat/825-provider-retries", PRState: "open"}
+	want := &task.ResetMark{At: now, PR: 912, PRURL: "https://github.com/testorg/example/pull/912", Branch: "feat/825-provider-retries", PRState: "open"}
 	if got.Delegation != nil || got.State != task.Discovered || !reflect.DeepEqual(got.Reset, want) {
 		t.Fatalf("record = %s %+v reset %+v", got.State, got.Delegation, got.Reset)
 	}
@@ -68,7 +68,7 @@ func TestResetDeletesTheRunAndKeepsTheStoredPR(t *testing.T) {
 	if f.store.recs[rec.Key] != got {
 		t.Error("reset record not saved")
 	}
-	wantRm := WorktreeRemoval{Path: d.Worktree, Branch: d.Branch, DeleteBranch: true, Force: true, RepoDir: "/src/armada-backend"}
+	wantRm := WorktreeRemoval{Path: d.Worktree, Branch: d.Branch, DeleteBranch: true, Force: true, RepoDir: "/src/example"}
 	if !reflect.DeepEqual(f.wt.removed, []WorktreeRemoval{wantRm}) {
 		t.Errorf("removed %+v, want %+v", f.wt.removed, wantRm)
 	}
@@ -159,7 +159,7 @@ func TestResetDeletesNothingWhenTheStoredPRIsOnAnotherBranch(t *testing.T) {
 
 func TestResetDeletesNothingWhenSeveralPRsShareTheBranch(t *testing.T) {
 	f := newFixture()
-	f.gh.prs[913] = PullRequest{Key: task.Key{Repo: "ridezoomo/armada-backend", Number: 913}, State: "closed", HeadRefName: "feat/825-provider-retries"}
+	f.gh.prs[913] = PullRequest{Key: task.Key{Repo: "testorg/example", Number: 913}, State: "closed", HeadRefName: "feat/825-provider-retries"}
 	rec := failedTask(t, f, 0)
 	if _, err := f.app.Reset(context.Background(), rec); err == nil || !strings.Contains(err.Error(), "#912, #913") {
 		t.Fatalf("err = %v", err)
@@ -247,7 +247,7 @@ func TestStartAfterResetRefusesAndKeepsAWorktreeAtTheOpenPRPath(t *testing.T) {
 	f.app.WorktreesDir = t.TempDir()
 	resetTask(t, f, "open")
 	f.wt.removed = nil
-	path := filepath.Join(f.app.WorktreesDir, "ridezoomo-armada-backend", "feat", "825-provider-retries")
+	path := filepath.Join(f.app.WorktreesDir, "testorg-example", "feat", "825-provider-retries")
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +334,7 @@ func TestStartAfterResetContinuesAnOpenPRFromItsRemoteBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := WorktreeRequest{RepoDir: "/src/armada-backend", Path: "/wt/ridezoomo-armada-backend/feat/825-provider-retries", Branch: "feat/825-provider-retries", BaseRef: "origin/feat/825-provider-retries"}
+	want := WorktreeRequest{RepoDir: "/src/example", Path: "/wt/testorg-example/feat/825-provider-retries", Branch: "feat/825-provider-retries", BaseRef: "origin/feat/825-provider-retries"}
 	if len(f.wt.reqs) != 1 || f.wt.reqs[0] != want {
 		t.Errorf("worktree = %+v", f.wt.reqs)
 	}
@@ -613,7 +613,7 @@ func TestAStartLeavesABranchTheResetKept(t *testing.T) {
 func TestStartRecordsTheCheckoutThatHoldsTheBranch(t *testing.T) {
 	f := newFixture()
 	rec := failedTask(t, f, 912)
-	if rec.Delegation.RepoDir != "/src/armada-backend" {
+	if rec.Delegation.RepoDir != "/src/example" {
 		t.Fatalf("repo dir = %q", rec.Delegation.RepoDir)
 	}
 }

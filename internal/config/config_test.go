@@ -311,15 +311,15 @@ func TestAutoRejectsZeroMax(t *testing.T) {
 	}
 }
 
-func TestAutoStateDefaultsToOn(t *testing.T) {
+func TestAutoStateDefaultsToOff(t *testing.T) {
 	on, err := LoadAutoEnabled(filepath.Join(t.TempDir(), "state.json"))
-	if err != nil || !on {
-		t.Fatalf("a missing state file = %t, %v; want on", on, err)
+	if err != nil || on {
+		t.Fatalf("a missing state file = %t, %v; want off", on, err)
 	}
 	path := filepath.Join(t.TempDir(), "state.json")
 	os.WriteFile(path, []byte("{}"), 0o600)
-	if on, err := LoadAutoEnabled(path); err != nil || !on {
-		t.Fatalf("a state file without auto = %t, %v; want on", on, err)
+	if on, err := LoadAutoEnabled(path); err != nil || on {
+		t.Fatalf("a state file without auto = %t, %v; want off", on, err)
 	}
 }
 

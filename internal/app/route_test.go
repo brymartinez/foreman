@@ -52,7 +52,7 @@ func routed(t *testing.T, sel agent.Selection, quota QuotaChecker) (fixture, *fa
 	return f, s
 }
 
-var routeReq = RouteRequest{Repo: "ridezoomo/armada-backend", Issue: 825}
+var routeReq = RouteRequest{Repo: "testorg/example", Issue: 825}
 
 func TestRoutePicksRuleProfile(t *testing.T) {
 	cases := []struct {
@@ -90,7 +90,7 @@ func TestRoutePromptListsRulesAndIssue(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := s.calls[0].Prompt
-	for _, want := range []string{"1. Broad or ambiguous", "2. Narrow, well-specified", "3. Any other work.", "ridezoomo/armada-backend", "#825 Provider retries", "refactor, area/store", "Retry failed requests."} {
+	for _, want := range []string{"1. Broad or ambiguous", "2. Narrow, well-specified", "3. Any other work.", "testorg/example", "#825 Provider retries", "refactor, area/store", "Retry failed requests."} {
 		if !strings.Contains(p, want) {
 			t.Errorf("prompt lacks %q:\n%s", want, p)
 		}

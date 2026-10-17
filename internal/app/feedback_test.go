@@ -13,7 +13,7 @@ import (
 // prComment is one comment on PR #912, as GitHub would report it.
 func prComment(id int64, body string) PRComment {
 	return PRComment{Kind: task.IssueComment, ID: id, Author: "brymartinez", Body: body,
-		URL: "https://github.com/ridezoomo/armada-backend/pull/912#issuecomment-1", UpdatedAt: t1}
+		URL: "https://github.com/testorg/example/pull/912#issuecomment-1", UpdatedAt: t1}
 }
 
 // ready runs a task to READY_FOR_HUMAN: a clean review, then a passing CI gate.

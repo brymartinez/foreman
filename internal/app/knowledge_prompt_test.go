@@ -11,7 +11,7 @@ import (
 	"github.com/brymartinez/foreman/internal/knowledge"
 )
 
-const fixtureRepo = "ridezoomo/armada-backend"
+const fixtureRepo = "testorg/example"
 
 // learn stores texts as active learnings of repo, backed by a maintainer.
 func learn(t *testing.T, ks knowledge.Store, repo, taskID string, texts ...string) {
@@ -112,7 +112,7 @@ func TestRunsWithoutTheKnowledgeSectionWhenTheStoreIsEmptyOrUnreadable(t *testin
 		f := newFixture()
 		dir := t.TempDir()
 		f.app.Knowledge = knowledge.Store{Dir: dir}
-		path := filepath.Join(dir, "ridezoomo", "armada-backend", "learnings.yaml")
+		path := filepath.Join(dir, "testorg", "example", "learnings.yaml")
 		os.MkdirAll(filepath.Dir(path), 0o700)
 		os.WriteFile(path, []byte("learnings: [unterminated"), 0o600)
 		key := started(t, f, startReq(t))

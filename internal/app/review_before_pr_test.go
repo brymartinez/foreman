@@ -29,7 +29,7 @@ func TestRestartKeepsTheCapturedReviewBeforePR(t *testing.T) {
 	for _, on := range []bool{false, true} {
 		f := newFixture()
 		f.app.ReviewBeforePR = on
-		key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+		key := task.Key{Repo: "testorg/example", Number: 825}
 		f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.Failed,
 			Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Branch: "feat/825-provider-retries", ReviewBeforePR: !on}}
 		rec, err := f.app.Start(context.Background(), startReq(t))
@@ -46,7 +46,7 @@ func TestRestartKeepsTheLocalCommitAndProposalAtTheSameHead(t *testing.T) {
 	f := newFixture()
 	f.app.ReviewBeforePR = true
 	head, _ := f.wt.Head(context.Background(), "")
-	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+	key := task.Key{Repo: "testorg/example", Number: 825}
 	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.Failed,
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Branch: "feat/825-provider-retries",
 			ReviewBeforePR: true, LocalHead: head, ProposedTitle: "feat: retries", ProposedBody: "Closes #825"},
@@ -64,7 +64,7 @@ func TestRestartKeepsTheLocalCommitAndProposalAtTheSameHead(t *testing.T) {
 func TestRestartDropsTheLocalCommitWhenTheHeadMoved(t *testing.T) {
 	f := newFixture()
 	f.app.ReviewBeforePR = true
-	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+	key := task.Key{Repo: "testorg/example", Number: 825}
 	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.Failed,
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Branch: "feat/825-provider-retries",
 			ReviewBeforePR: true, LocalHead: "0ld0001", ProposedTitle: "feat: retries", ProposedBody: "Closes #825"}}
@@ -398,7 +398,7 @@ func TestReviewBeforePRResumesAStoredCommitAtItsReview(t *testing.T) {
 		if len(f.codex.reviewed) != 1 {
 			t.Error("the implementer ran before the stored commit was reviewed")
 		}
-		f.gh.prs[912] = PullRequest{Key: task.Key{Repo: "ridezoomo/armada-backend", Number: 912}, URL: "https://github.com/ridezoomo/armada-backend/pull/912",
+		f.gh.prs[912] = PullRequest{Key: task.Key{Repo: "testorg/example", Number: 912}, URL: "https://github.com/testorg/example/pull/912",
 			State: "open", HeadRefName: "feat/825-provider-retries", BaseRefName: "main", HeadSHA: "commit1", Title: proposedTitle, Body: proposedBody}
 	}
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
@@ -532,7 +532,7 @@ func TestRestartWithTheSettingOffKeepsTheLocalReviewWorkflow(t *testing.T) {
 	f := newFixture()
 	f.app.ReviewBeforePR = false
 	head, _ := f.wt.Head(context.Background(), "")
-	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+	key := task.Key{Repo: "testorg/example", Number: 825}
 	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.Failed,
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Branch: "feat/825-provider-retries",
 			ReviewBeforePR: true, LocalHead: head, ProposedTitle: proposedTitle, ProposedBody: proposedBody}}

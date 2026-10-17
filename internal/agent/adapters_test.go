@@ -374,12 +374,12 @@ func TestCodexStartReportsTurnFailure(t *testing.T) {
 
 func TestImplementationPromptCarriesDurableContext(t *testing.T) {
 	p := ImplementationPrompt(TaskBrief{
-		Key: task.Key{Repo: "ridezoomo/armada-backend", Number: 825}, Title: "Provider retries", URL: "https://x/825",
+		Key: task.Key{Repo: "testorg/example", Number: 825}, Title: "Provider retries", URL: "https://x/825",
 		IssueBody: "Retry failed requests.", Context: "Preserve the existing 5xx-only retry semantics.",
 		Branch: "agent/825-provider-retries", BaseBranch: "main", Worktree: "/wt/825-provider-retries",
 	})
 	for _, want := range []string{
-		"ridezoomo/armada-backend#825",
+		"testorg/example#825",
 		"Retry failed requests.",
 		"authoritative",
 		"Preserve the existing 5xx-only retry semantics.",

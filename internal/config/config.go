@@ -251,22 +251,21 @@ type state struct {
 	Auto *bool `json:"auto,omitempty"`
 }
 
-// LoadAutoEnabled reads the saved auto mode choice. Auto mode is on until the
-// developer turns it off, so a missing file or key means on.
+// LoadAutoEnabled reads the saved auto mode choice. A missing file or key means off.
 func LoadAutoEnabled(path string) (bool, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return true, nil
+		return false, nil
 	}
 	if err != nil {
-		return true, err
+		return false, err
 	}
 	var s state
 	if err := json.Unmarshal(raw, &s); err != nil {
-		return true, fmt.Errorf("%s: %w", path, err)
+		return false, fmt.Errorf("%s: %w", path, err)
 	}
 	if s.Auto == nil {
-		return true, nil
+		return false, nil
 	}
 	return *s.Auto, nil
 }

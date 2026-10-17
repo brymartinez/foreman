@@ -28,7 +28,7 @@ func TestBranchAndWorktreeUseFullBranchName(t *testing.T) {
 	if got := BranchName("fix", name); got != "fix/825-provider-retries" {
 		t.Errorf("branch = %q", got)
 	}
-	if got := WorktreePath("/wt", "ridezoomo/armada-backend", BranchName("fix", name)); got != "/wt/ridezoomo-armada-backend/fix/825-provider-retries" {
+	if got := WorktreePath("/wt", "testorg/example", BranchName("fix", name)); got != "/wt/testorg-example/fix/825-provider-retries" {
 		t.Errorf("worktree = %q", got)
 	}
 }
@@ -47,7 +47,7 @@ func TestTrackerBranchNameValidation(t *testing.T) {
 }
 
 func TestRepositoryPath(t *testing.T) {
-	if got := RepositoryPath("/repos", "ridezoomo/armada-backend"); got != "/repos/ridezoomo-armada-backend" {
+	if got := RepositoryPath("/repos", "testorg/example"); got != "/repos/testorg-example" {
 		t.Errorf("repository = %q", got)
 	}
 }

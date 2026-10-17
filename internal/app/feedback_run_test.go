@@ -34,7 +34,7 @@ func TestDisabledPRFeedbackDoesNotStartReplyTurnAtHandover(t *testing.T) {
 	f := newFixture()
 	f.app.ReplyToPRFeedback = false
 	f.gh.addPRComment(912, prComment(4401, "<!-- linear-linkback --> linked issue"))
-	key := started(t, f, StartRequest{Repo: "ridezoomo/armada-backend", Issue: 825, Agent: task.Claude})
+	key := started(t, f, StartRequest{Repo: "testorg/example", Issue: 825, Agent: task.Claude})
 	f.claude.turn = prTurn("sid-1")
 	if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
 		t.Fatal(err)

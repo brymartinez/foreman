@@ -86,7 +86,7 @@ func TestConfirmedBranchIsUsedWithoutASecondProposal(t *testing.T) {
 	if rec.Delegation.Branch != "bryan/db-825-provider-retries" || f.wt.reqs[0].Branch != rec.Delegation.Branch {
 		t.Fatalf("branch was not kept: %+v", rec.Delegation)
 	}
-	if want := filepath.Join(f.app.WorktreesDir, "ridezoomo-armada-backend", rec.Delegation.Branch); rec.Delegation.Worktree != want {
+	if want := filepath.Join(f.app.WorktreesDir, "testorg-example", rec.Delegation.Branch); rec.Delegation.Worktree != want {
 		t.Fatalf("worktree = %q, want %q", rec.Delegation.Worktree, want)
 	}
 }
@@ -140,7 +140,7 @@ func TestSyncFailureStopsManualAndAutoStartsBeforeTheProposer(t *testing.T) {
 	f.app.BranchProposer = proposer
 	ctx := context.Background()
 	req := StartRequest{Repo: f.repos.info.Repo, Issue: 825, Agent: task.Claude}
-	if _, err := f.app.ProposeBranch(ctx, req); err == nil || !strings.Contains(err.Error(), "refresh ridezoomo/armada-backend default branch: local main has diverged") {
+	if _, err := f.app.ProposeBranch(ctx, req); err == nil || !strings.Contains(err.Error(), "refresh testorg/example default branch: local main has diverged") {
 		t.Fatalf("propose error = %v", err)
 	}
 	auto := req

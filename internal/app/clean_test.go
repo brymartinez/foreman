@@ -34,7 +34,7 @@ func TestInboxCleansDoneTasksWhenEnabled(t *testing.T) {
 	if len(report.Changed) != 1 || !slices.Equal(report.Changed[0].Changes[len(report.Changed[0].Changes)-2:], []string{"PR #912 merged", "worktree and merged branch removed"}) {
 		t.Fatalf("changed %+v", report.Changed)
 	}
-	want := WorktreeRemoval{Path: "/wt/ridezoomo-armada-backend/feat/825-provider-retries", Branch: "feat/825-provider-retries", DeleteBranch: true, RepoDir: "/src/armada-backend"}
+	want := WorktreeRemoval{Path: "/wt/testorg-example/feat/825-provider-retries", Branch: "feat/825-provider-retries", DeleteBranch: true, RepoDir: "/src/example"}
 	if !slices.Equal(f.wt.removed, []WorktreeRemoval{want}) || !f.store.recs[key].Delegation.WorktreeRemovedAt.Equal(now) {
 		t.Fatalf("removed %+v, rec %+v", f.wt.removed, f.store.recs[key].Delegation)
 	}
@@ -56,7 +56,7 @@ func TestInboxCleansAPRClosedWorktreeAndKeepsItsBranchWhileTheIssueIsOpen(t *tes
 	f.app.DeleteMergedBranches = true
 	key, report := refreshDone(t, f, "closed")
 	got := f.store.recs[key]
-	want := WorktreeRemoval{Path: "/wt/ridezoomo-armada-backend/feat/825-provider-retries", Branch: "feat/825-provider-retries", RepoDir: "/src/armada-backend"}
+	want := WorktreeRemoval{Path: "/wt/testorg-example/feat/825-provider-retries", Branch: "feat/825-provider-retries", RepoDir: "/src/example"}
 	if got.State != task.PRClosed || !slices.Equal(f.wt.removed, []WorktreeRemoval{want}) || !got.Delegation.WorktreeRemovedAt.Equal(now) {
 		t.Fatalf("state %s, removed %+v", got.State, f.wt.removed)
 	}
@@ -92,7 +92,7 @@ func TestInboxRetriesMergedBranchDeletionAfterWorktreeRemoval(t *testing.T) {
 	if changes := report.Changed[0].Changes; changes[len(changes)-1] != "worktree removed; branch remains; cleanup will retry" {
 		t.Fatalf("changes = %v", changes)
 	}
-	want := WorktreeRemoval{Path: f.store.recs[key].Delegation.Worktree, Branch: f.store.recs[key].Delegation.Branch, DeleteBranch: true, RepoDir: "/src/armada-backend"}
+	want := WorktreeRemoval{Path: f.store.recs[key].Delegation.Worktree, Branch: f.store.recs[key].Delegation.Branch, DeleteBranch: true, RepoDir: "/src/example"}
 	if !slices.Equal(f.wt.removeAttempts, []WorktreeRemoval{want}) {
 		t.Fatalf("first removal = %+v", f.wt.removeAttempts)
 	}
@@ -121,7 +121,7 @@ func TestInboxCompletesCleanupWhenBranchDeletionIsDisabledOnRetry(t *testing.T) 
 	if _, err := f.app.Inbox(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.wt.removeAttempts) != 2 || f.wt.removeAttempts[1].DeleteBranch || f.wt.removeAttempts[1].RepoDir != "/src/armada-backend" || f.store.recs[key].Delegation.WorktreeRemovedAt.IsZero() {
+	if len(f.wt.removeAttempts) != 2 || f.wt.removeAttempts[1].DeleteBranch || f.wt.removeAttempts[1].RepoDir != "/src/example" || f.store.recs[key].Delegation.WorktreeRemovedAt.IsZero() {
 		t.Fatalf("retry requests = %+v, removed at %v", f.wt.removeAttempts, f.store.recs[key].Delegation.WorktreeRemovedAt)
 	}
 }
@@ -329,7 +329,7 @@ func TestReopenedPRRecreatesACleanedWorktreeWhenWorkResumes(t *testing.T) {
 	}
 	// No base ref: the kept branch must exist, or the restore fails instead of starting
 	// a new branch without the task's commits.
-	want := WorktreeRequest{RepoDir: "/repos/ridezoomo-armada-backend", Path: got.Delegation.Worktree, Branch: got.Delegation.Branch}
+	want := WorktreeRequest{RepoDir: "/repos/testorg-example", Path: got.Delegation.Worktree, Branch: got.Delegation.Branch}
 	if len(f.wt.reqs) != ensured+1 || f.wt.reqs[ensured] != want || !got.Delegation.WorktreeRemovedAt.IsZero() {
 		t.Errorf("ensured %+v, removed at %v", f.wt.reqs[ensured:], got.Delegation.WorktreeRemovedAt)
 	}
@@ -337,14 +337,14 @@ func TestReopenedPRRecreatesACleanedWorktreeWhenWorkResumes(t *testing.T) {
 
 func TestRestoreWorktreeUsesStoredLegacyPath(t *testing.T) {
 	f := newFixture()
-	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
-	path := "/wt/ridezoomo-armada-backend/825-provider-retries"
+	key := task.Key{Repo: "testorg/example", Number: 825}
+	path := "/wt/testorg-example/825-provider-retries"
 	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.PRClosed,
 		Delegation: &task.Delegation{Branch: "fix/825-provider-retries", Worktree: path, WorktreeRemovedAt: t0}}
 	if err := f.app.restoreWorktree(context.Background(), key); err != nil {
 		t.Fatal(err)
 	}
-	want := WorktreeRequest{RepoDir: "/repos/ridezoomo-armada-backend", Path: path, Branch: "fix/825-provider-retries"}
+	want := WorktreeRequest{RepoDir: "/repos/testorg-example", Path: path, Branch: "fix/825-provider-retries"}
 	if len(f.wt.reqs) != 1 || f.wt.reqs[0] != want || !f.store.recs[key].Delegation.WorktreeRemovedAt.IsZero() {
 		t.Fatalf("worktree requests = %+v, delegation = %+v", f.wt.reqs, f.store.recs[key].Delegation)
 	}

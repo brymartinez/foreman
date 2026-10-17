@@ -150,9 +150,10 @@ app.Reset             -> FAILED with no live runner only
                          branch -D; delete the log
                          store: clear the list, or keep what failed for the next
                          start and mark the removal finished
-foreman [-a|--auto|--no-auto]
+foreman [-a|--auto|--no-auto] [-s github|linear]
                       -> the dashboard, until q or ctrl+c. A launch flag sets auto
-                         mode for this session and saves nothing.
+                         mode for this session and saves nothing. GitHub is the default
+                         source; auto mode starts off until a choice is saved.
                          every 1s : app.Tasks re-reads the task files and, when open,
                                     reads the bytes the runner added to the selected
                                     task's log; no GitHub call
@@ -254,7 +255,8 @@ the same commit. The commit message records why it changed.
   daemon, a watcher, or a runner that waits for CI.
 - **The dashboard is the only interface for tasks.** Bare `foreman` opens it;
   `-a`/`--auto` and `--no-auto` set auto mode for the session, `-s github|linear`
-  selects an inbox source, and `-c` edits the config. The other verbs are
+  selects an inbox source (GitHub by default), and `-c` edits the config. Auto mode
+  defaults to off until a choice is saved. The other verbs are
   `knowledge export` and `knowledge ingest`, which move a repository's knowledge and
   need no stage files, and the hidden `__run` and `__learn`. Task subcommands were
   dropped because they duplicated the dashboard, and a piped `foreman` still prints

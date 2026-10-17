@@ -43,7 +43,7 @@ func TestEnsureCreatesFromFreshBaseAndIsIdempotent(t *testing.T) {
 	clone, originHead := repoWithOrigin(t)
 	req := app.WorktreeRequest{
 		RepoDir: clone,
-		Path:    filepath.Join(t.TempDir(), "ridezoomo-armada", "825-provider-retries"),
+		Path:    filepath.Join(t.TempDir(), "testorg-example", "825-provider-retries"),
 		Branch:  "agent/825-provider-retries",
 		BaseRef: "origin/main",
 	}

@@ -230,11 +230,11 @@ func linearSelected(cfg config.Config, source task.Source) bool {
 }
 
 // autoMode reads the saved auto mode choice. A state file that cannot be read
-// leaves auto mode on, and the dashboard shows why. A launch flag replaces the
+// leaves auto mode off, and the dashboard shows why. A launch flag replaces the
 // saved choice for this session without writing it, so its read error is moot;
 // toggling with a still saves.
 func autoMode(cfg config.Auto, override cli.AutoMode) tui.Auto {
-	auto := tui.Auto{Enabled: true, Agent: cfg.Agent, Max: cfg.MaxConcurrent}
+	auto := tui.Auto{Enabled: false, Agent: cfg.Agent, Max: cfg.MaxConcurrent}
 	path, err := config.StatePath()
 	if err != nil {
 		auto.LoadErr = err

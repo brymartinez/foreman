@@ -45,6 +45,13 @@ func TestAutoModeWithoutAFlagUsesTheSavedChoice(t *testing.T) {
 	}
 }
 
+func TestAutoModeDefaultsOffWithoutSavedChoice(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if auto := autoMode(config.Auto{}, cli.AutoSaved); auto.Enabled || auto.LoadErr != nil {
+		t.Fatalf("auto mode without saved choice = enabled %v, err %v; want off", auto.Enabled, auto.LoadErr)
+	}
+}
+
 func TestAutoModeToggleStillSavesAfterALaunchOverride(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	auto := autoMode(config.Auto{}, cli.AutoOn)

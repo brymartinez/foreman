@@ -18,30 +18,30 @@ var ctx = context.Background()
 func delegated() *task.Record {
 	synced := time.Date(2026, 9, 24, 20, 0, 0, 0, time.FixedZone("CEST", 2*3600))
 	return &task.Record{
-		Key:   task.Key{Repo: "ridezoomo/armada-backend", Number: 825},
+		Key:   task.Key{Repo: "testorg/example", Number: 825},
 		Kind:  task.Issue,
 		Title: "Provider retries",
-		URL:   "https://github.com/ridezoomo/armada-backend/issues/825",
+		URL:   "https://github.com/testorg/example/issues/825",
 		State: task.Working,
 		Delegation: &task.Delegation{
 			Implementer:       task.Session{Agent: task.Claude, ID: "d46213bb-3c77-45e9-9d7c-52856e03ab18"},
 			StartedAt:         time.Date(2026, 9, 24, 16, 0, 0, 0, time.UTC),
 			Reviewer:          task.Codex,
 			Branch:            "agent/825-provider-retries",
-			Worktree:          "/wt/ridezoomo-armada-backend/825-provider-retries",
+			Worktree:          "/wt/testorg-example/825-provider-retries",
 			WorktreeRemovedAt: time.Date(2026, 9, 25, 8, 0, 0, 0, time.UTC),
 			ContextFile:       "/ctx/825.md",
 			Launch:            &task.Launch{Token: "5eed", PID: 4100, Since: time.Date(2026, 9, 24, 16, 0, 0, 0, time.UTC)},
 			PR:                912,
-			PRURL:             "https://github.com/ridezoomo/armada-backend/pull/912",
+			PRURL:             "https://github.com/testorg/example/pull/912",
 			PRHead:            "beef002",
 			ConflictAttempts:  []task.ConflictAttempt{{Head: "beef000", Base: "ba5e000"}, {Head: "beef001", Base: "ba5e001"}},
 			ConflictPending:   true,
 		},
 		Validation: []task.Check{{Command: "go test ./...", Passed: true}, {Command: "golangci-lint run", Passed: false}},
 		Plan: []task.PlanComment{
-			{Doc: task.Analysis, CommentID: 3301, URL: "https://github.com/ridezoomo/armada-backend/issues/825#issuecomment-3301"},
-			{Doc: task.ImplementationPlan, CommentID: 3304, URL: "https://github.com/ridezoomo/armada-backend/issues/825#issuecomment-3304"},
+			{Doc: task.Analysis, CommentID: 3301, URL: "https://github.com/testorg/example/issues/825#issuecomment-3301"},
+			{Doc: task.ImplementationPlan, CommentID: 3304, URL: "https://github.com/testorg/example/issues/825#issuecomment-3304"},
 		},
 		Reviews: []task.Review{
 			{Round: 1, Reviewer: task.Codex, PR: 912, Summary: "one bug", At: time.Date(2026, 9, 24, 18, 0, 0, 0, time.UTC),
@@ -49,13 +49,13 @@ func delegated() *task.Record {
 			{Round: 2, Reviewer: task.Codex, PR: 912, Clean: true, Summary: "ok", At: time.Date(2026, 9, 24, 19, 0, 0, 0, time.UTC), Head: "c0ffee1"},
 		},
 		Feedback: []task.Feedback{
-			{Kind: task.IssueComment, ID: 4401, Author: "brymartinez", URL: "https://github.com/ridezoomo/armada-backend/pull/912#issuecomment-4401",
+			{Kind: task.IssueComment, ID: 4401, Author: "brymartinez", URL: "https://github.com/testorg/example/pull/912#issuecomment-4401",
 				At: time.Date(2026, 9, 25, 9, 0, 0, 0, time.UTC), Digest: task.Digest("ship it?"), HandledAt: time.Date(2026, 9, 25, 9, 30, 0, 0, time.UTC)},
-			{Kind: task.ReviewComment, ID: 4402, Author: "dependabot[bot]", URL: "https://github.com/ridezoomo/armada-backend/pull/912#discussion_r4402",
+			{Kind: task.ReviewComment, ID: 4402, Author: "dependabot[bot]", URL: "https://github.com/testorg/example/pull/912#discussion_r4402",
 				At: time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC), Digest: task.Digest("this retries forever")},
 		},
 		CI: &task.CIStatus{State: task.CIFailing, CheckedAt: time.Date(2026, 9, 24, 19, 30, 0, 0, time.UTC),
-			Failing: []task.CheckRun{{Name: "test", Link: "https://github.com/ridezoomo/armada-backend/actions/runs/1"}}},
+			Failing: []task.CheckRun{{Name: "test", Link: "https://github.com/testorg/example/actions/runs/1"}}},
 		GitHub: &task.Snapshot{
 			UpdatedAt: time.Date(2026, 9, 24, 17, 0, 0, 0, time.UTC),
 			State:     "open",
@@ -229,9 +229,9 @@ func TestFileMatchesDesignDocShape(t *testing.T) {
 	if err := s.Save(ctx, delegated()); err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := os.ReadFile(filepath.Join(s.Dir, "ridezoomo-armada-backend-825.md"))
+	raw, _ := os.ReadFile(filepath.Join(s.Dir, "testorg-example-825.md"))
 	for _, line := range []string{
-		"---\nrepo: ridezoomo/armada-backend\nnumber: 825\n",
+		"---\nrepo: testorg/example\nnumber: 825\n",
 		"\nstate: WORKING\n",
 		"\nimplementation_agent: claude\n",
 		"\nreview_agent: codex\n",
@@ -267,7 +267,7 @@ func TestSavePreservesUserFrontmatterAndBody(t *testing.T) {
 	if err := s.Save(ctx, rec); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(s.Dir, "ridezoomo-armada-backend-825.md")
+	path := filepath.Join(s.Dir, "testorg-example-825.md")
 	raw, _ := os.ReadFile(path)
 	edited := strings.Replace(string(raw), "---\nrepo:", "---\n# my note\ntags: [work, retries]\nrepo:", 1)
 	edited = strings.Replace(edited, "state: WORKING", "state: WORKING # watching this one", 1)
@@ -308,7 +308,7 @@ func TestSaveRemovesClearedOwnedKeys(t *testing.T) {
 	if err := s.Save(ctx, rec); err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := os.ReadFile(filepath.Join(s.Dir, "ridezoomo-armada-backend-825.md"))
+	raw, _ := os.ReadFile(filepath.Join(s.Dir, "testorg-example-825.md"))
 	if strings.Contains(string(raw), "context_file") {
 		t.Errorf("cleared key still present:\n%s", raw)
 	}

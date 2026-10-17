@@ -69,7 +69,7 @@ steps separately; set `BIN_DIR` or `CONFIG_DIR` to change where they go.
 Foreman is a dashboard. Everything you do with a task happens there.
 
 ```bash
-foreman                         # dashboard for both issue sources
+foreman                         # GitHub dashboard, auto mode off by default
 foreman -a                      # auto mode on for this session
 foreman --no-auto               # auto mode off for this session
 foreman -s github               # show GitHub issues and delegated tasks
@@ -84,8 +84,8 @@ foreman --version
 | Dashboard flag | Effect |
 |---|---|
 | `-a`, `--auto` | Turn auto mode on for this session. |
-| `--no-auto` | Turn auto mode off for this session. |
-| `-s github`, `-s linear` | Select one issue source for INBOX and DELEGATED WORK. `--source` is the long form. Without this flag, both sources appear. |
+| `--no-auto` | Turn auto mode off for this session. Off is the default until a choice is saved. |
+| `-s github`, `-s linear` | Select one issue source for INBOX and DELEGATED WORK. `--source` is the long form. GitHub is the default. |
 | `-c` | Open the config editor. Use it alone, without dashboard flags. |
 | `-h`, `--help` | Print command help. |
 | `--version` | Print the version. |
@@ -108,10 +108,10 @@ pressing Enter on a delegated task:
 ```
 foreman · 2 delegated · 3 in the inbox · auto on 1/3 · refreshed 10:01:22
 ▸ INBOX                           │ DELEGATED WORK
-> midsoln/foreman#1  Be interactive │ ridezoomo/armada#340   Codex   READY_FOR_HUMAN
-    assigned to you                │   Cache fleet lookups · ridezoomo/armada
+> midsoln/foreman#1  Be interactive │ testorg/example#340   Codex   READY_FOR_HUMAN
+    assigned to you                │   Cache fleet lookups
                                    │   PR #912 · reviewer: Claude · CI ✓ · review ✓
-  ridezoomo/armada#351  Retry 5xx  │
+  testorg/example#351  Retry 5xx  │
     mentions you                   │ > midsoln/foreman#2      Claude  WORKING
 ────────────────────────────────────────────────────────────────────────────────
 LOG · midsoln/foreman#2 · ~/.local/share/foreman/logs/2.log
@@ -547,7 +547,7 @@ fix_rounds: 3                        # fix and re-review cycles before foreman a
 review_before_pr: false              # review and fix locally; open the PR after a clean review
 mentions: true                       # show items found only because they mention you
 refresh: 60                          # seconds between dashboard issue-source refreshes
-auto:                                # the dashboard's auto mode; press a to turn it off
+auto:                                # auto mode is off by default; press a to turn it on
   agent: claude                      # claude or codex
   max_concurrent: 3                  # active runs, manual ones included
 budgets:                             # Claude only: Codex reports no cost, so it has no cap

@@ -327,10 +327,10 @@ func newFixture() fixture {
 	f := fixture{
 		store: &fakeStore{recs: map[task.Key]*task.Record{}},
 		gh: &fakeGitHub{
-			repo:  RepoInfo{Repo: "ridezoomo/armada-backend", DefaultBranch: "main"},
+			repo:  RepoInfo{Repo: "testorg/example", DefaultBranch: "main"},
 			issue: Issue{Title: "Provider retries", Body: "Retry failed requests.", URL: "https://x/825", State: "open", UpdatedAt: t0},
 			prs: map[int]PullRequest{912: {
-				Key: task.Key{Repo: "ridezoomo/armada-backend", Number: 912}, URL: "https://github.com/ridezoomo/armada-backend/pull/912",
+				Key: task.Key{Repo: "testorg/example", Number: 912}, URL: "https://github.com/testorg/example/pull/912",
 				State: "open", HeadRefName: "feat/825-provider-retries", BaseRefName: "main", HeadSHA: "c0ffee1",
 				Body: "Retry 5xx only.\n\nCloses #825",
 			}},
@@ -338,7 +338,7 @@ func newFixture() fixture {
 		wt:      &fakeWorktrees{},
 		runners: &fakeRunners{alive: map[int]bool{}},
 		stages:  &fakeStages{},
-		repos:   &fakeRepositories{info: RepoInfo{Repo: "ridezoomo/armada-backend", DefaultBranch: "main"}},
+		repos:   &fakeRepositories{info: RepoInfo{Repo: "testorg/example", DefaultBranch: "main"}},
 		claude:  &fakeAgent{name: task.Claude},
 		codex:   &fakeAgent{name: task.Codex},
 		notes:   &fakeNotifier{},
@@ -375,17 +375,17 @@ func (f fixture) run(ctx context.Context, key task.Key, pid int, log io.Writer) 
 
 func TestStartFromInboxUsesRepositoryCheckoutInsteadOfCurrentDirectory(t *testing.T) {
 	f := newFixture()
-	rec, err := f.app.Start(context.Background(), StartRequest{Repo: "ridezoomo/armada-backend", Issue: 825, Agent: task.Claude})
+	rec, err := f.app.Start(context.Background(), StartRequest{Repo: "testorg/example", Issue: 825, Agent: task.Claude})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(f.repos.calls) != 1 || f.repos.calls[0] != "ridezoomo/armada-backend" {
+	if len(f.repos.calls) != 1 || f.repos.calls[0] != "testorg/example" {
 		t.Fatalf("repository checkout calls = %v", f.repos.calls)
 	}
-	if len(f.wt.reqs) != 1 || f.wt.reqs[0].RepoDir != "/repos/ridezoomo-armada-backend" {
+	if len(f.wt.reqs) != 1 || f.wt.reqs[0].RepoDir != "/repos/testorg-example" {
 		t.Fatalf("worktree source = %+v", f.wt.reqs)
 	}
-	if rec.Repo != "ridezoomo/armada-backend" {
+	if rec.Repo != "testorg/example" {
 		t.Fatalf("record repo = %s", rec.Repo)
 	}
 }
@@ -401,7 +401,7 @@ func TestNewTaskWorktreeUsesFullBranchName(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture()
-			rec, err := f.app.Start(context.Background(), StartRequest{Dir: "/src/armada-backend", Issue: 825, Agent: task.Claude, BranchName: tc.branch})
+			rec, err := f.app.Start(context.Background(), StartRequest{Dir: "/src/example", Issue: 825, Agent: task.Claude, BranchName: tc.branch})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -409,7 +409,7 @@ func TestNewTaskWorktreeUsesFullBranchName(t *testing.T) {
 			if branch == "" {
 				branch = "feat/825-provider-retries"
 			}
-			want := filepath.Join("/wt/ridezoomo-armada-backend", branch)
+			want := filepath.Join("/wt/testorg-example", branch)
 			if f.wt.reqs[0].Path != want || rec.Delegation.Worktree != want {
 				t.Fatalf("worktree request %q, stored %q, want %q", f.wt.reqs[0].Path, rec.Delegation.Worktree, want)
 			}
@@ -419,8 +419,8 @@ func TestNewTaskWorktreeUsesFullBranchName(t *testing.T) {
 
 func TestRestartKeepsStoredWorktreePath(t *testing.T) {
 	f := newFixture()
-	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
-	want := "/wt/ridezoomo-armada-backend/legacy/825-provider-retries"
+	key := task.Key{Repo: "testorg/example", Number: 825}
+	want := "/wt/testorg-example/legacy/825-provider-retries"
 	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.Failed,
 		Delegation: &task.Delegation{Branch: "fix/825-provider-retries", Worktree: want}}
 	rec, err := f.app.Start(context.Background(), startReq(t))
@@ -435,7 +435,7 @@ func TestRestartKeepsStoredWorktreePath(t *testing.T) {
 func startReq(t *testing.T) StartRequest {
 	ctxFile := filepath.Join(t.TempDir(), "825.md")
 	os.WriteFile(ctxFile, []byte("Preserve the existing 5xx-only retry semantics."), 0o644)
-	return StartRequest{Issue: 825, Agent: task.Claude, ContextFile: ctxFile, Dir: "/src/armada-backend"}
+	return StartRequest{Issue: 825, Agent: task.Claude, ContextFile: ctxFile, Dir: "/src/example"}
 }
 
 func TestStartDispatches(t *testing.T) {
@@ -446,8 +446,8 @@ func TestStartDispatches(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantWT := WorktreeRequest{
-		RepoDir: "/src/armada-backend",
-		Path:    "/wt/ridezoomo-armada-backend/feat/825-provider-retries",
+		RepoDir: "/src/example",
+		Path:    "/wt/testorg-example/feat/825-provider-retries",
 		Branch:  "feat/825-provider-retries",
 		BaseRef: "origin/main",
 	}
@@ -467,27 +467,27 @@ func TestStartDispatches(t *testing.T) {
 
 func TestStartRefuses(t *testing.T) {
 	cases := map[string]func(f *fixture, r *StartRequest){
-		"other repo":      func(f *fixture, r *StartRequest) { r.Repo = "ridezoomo/sw-automations" },
+		"other repo":      func(f *fixture, r *StartRequest) { r.Repo = "testorg/other-example" },
 		"closed issue":    func(f *fixture, r *StartRequest) { f.gh.issue.State = "closed" },
 		"missing context": func(f *fixture, r *StartRequest) { r.ContextFile = "/nope/825.md" },
 		"running": func(f *fixture, r *StartRequest) {
 			rec := seen(825, task.Working, "open", t0)
-			rec.Repo = "ridezoomo/armada-backend"
-			rec.Key = task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+			rec.Repo = "testorg/example"
+			rec.Key = task.Key{Repo: "testorg/example", Number: 825}
 			rec.Delegation = &task.Delegation{RunnerPID: 77}
 			f.store.recs[rec.Key] = rec
 			f.runners.alive[77] = true
 		},
 		"needs decision": func(f *fixture, r *StartRequest) {
 			rec := seen(825, task.NeedsDecision, "open", t0)
-			rec.Key = task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+			rec.Key = task.Key{Repo: "testorg/example", Number: 825}
 			f.store.recs[rec.Key] = rec
 		},
 		// The gate leaves a PR_CLOSED task its pid until the stop succeeds, and
 		// that runner is still working in the worktree a second one would share.
 		"PR_CLOSED with a live runner": func(f *fixture, r *StartRequest) {
 			rec := seen(825, task.PRClosed, "open", t0)
-			rec.Key = task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+			rec.Key = task.Key{Repo: "testorg/example", Number: 825}
 			rec.Delegation = &task.Delegation{Implementer: task.Session{Agent: task.Claude}, RunnerPID: 77}
 			f.store.recs[rec.Key] = rec
 			f.runners.alive[77] = true
@@ -510,7 +510,7 @@ func TestStartRefuses(t *testing.T) {
 
 func TestStartAcceptsPRClosed(t *testing.T) {
 	f := newFixture()
-	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+	key := task.Key{Repo: "testorg/example", Number: 825}
 	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.PRClosed,
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Branch: "feat/825-provider-retries", PR: 912}}
 	rec, err := f.app.Start(context.Background(), startReq(t))
@@ -529,7 +529,7 @@ func TestStartAcceptsPRClosed(t *testing.T) {
 
 func TestRestartWithAnotherAgentKeepsThePRWithCommentsWaiting(t *testing.T) {
 	f := newFixture()
-	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+	key := task.Key{Repo: "testorg/example", Number: 825}
 	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.Failed,
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex, ID: "old"}, Branch: "feat/825-provider-retries", PR: 912, PRHead: "abc"},
 		Feedback:   []task.Feedback{{Kind: task.IssueComment, ID: 1, Digest: "d"}}}
@@ -548,7 +548,7 @@ func TestRestartWithAnotherAgentKeepsThePRWithCommentsWaiting(t *testing.T) {
 
 func TestRestartWithAnotherAgentStartsOverWithNoCommentsWaiting(t *testing.T) {
 	f := newFixture()
-	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+	key := task.Key{Repo: "testorg/example", Number: 825}
 	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.Failed,
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex}, Branch: "feat/825-provider-retries", PR: 912}}
 	rec, err := f.app.Start(context.Background(), startReq(t))
@@ -562,15 +562,15 @@ func TestRestartWithAnotherAgentStartsOverWithNoCommentsWaiting(t *testing.T) {
 
 func TestRestartKeepsBranchWhenTitleChanged(t *testing.T) {
 	f := newFixture()
-	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+	key := task.Key{Repo: "testorg/example", Number: 825}
 	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.Failed,
-		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex}, Branch: "agent/825-old-title", Worktree: "/wt/ridezoomo-armada-backend/825-old-title"}}
+		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex}, Branch: "agent/825-old-title", Worktree: "/wt/testorg-example/825-old-title"}}
 	f.gh.issue.Title = "A completely new title"
 	rec, err := f.app.Start(context.Background(), startReq(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.Delegation.Branch != "agent/825-old-title" || f.wt.reqs[0].Path != "/wt/ridezoomo-armada-backend/825-old-title" {
+	if rec.Delegation.Branch != "agent/825-old-title" || f.wt.reqs[0].Path != "/wt/testorg-example/825-old-title" {
 		t.Errorf("branch %s path %s", rec.Delegation.Branch, f.wt.reqs[0].Path)
 	}
 	if rec.Delegation.Implementer.Agent != task.Claude {
@@ -589,7 +589,7 @@ func TestRunTaskAppliesOutcome(t *testing.T) {
 	}{
 		{"pr opened", agent.Turn{Outcome: agent.Outcome{Status: agent.PROpened, Summary: "done", PRNumber: 912, Validation: []task.Check{{Command: "go test ./...", Passed: true}}}}, nil, task.Reviewing,
 			func(t *testing.T, r *task.Record) {
-				if r.Delegation.PR != 912 || r.Delegation.PRURL != "https://github.com/ridezoomo/armada-backend/pull/912" || len(r.Validation) != 1 {
+				if r.Delegation.PR != 912 || r.Delegation.PRURL != "https://github.com/testorg/example/pull/912" || len(r.Validation) != 1 {
 					t.Errorf("pr = %d %q validation %v", r.Delegation.PR, r.Delegation.PRURL, r.Validation)
 				}
 			}},
@@ -635,7 +635,7 @@ func TestRunTaskAppliesOutcome(t *testing.T) {
 
 func TestRunTaskRefusesNonWorkingTask(t *testing.T) {
 	f := newFixture()
-	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+	key := task.Key{Repo: "testorg/example", Number: 825}
 	f.store.recs[key] = &task.Record{Key: key, State: task.Discovered}
 	if err := f.run(context.Background(), key, 1, io.Discard); err == nil {
 		t.Fatal("ran a DISCOVERED task")
@@ -668,7 +668,7 @@ func TestStatusReapsDeadRunner(t *testing.T) {
 
 func TestRunTaskVerifiesReportedPR(t *testing.T) {
 	good := func() PullRequest {
-		return PullRequest{Key: task.Key{Repo: "ridezoomo/armada-backend", Number: 913}, URL: "u913", State: "open", HeadRefName: "feat/825-provider-retries", BaseRefName: "main", Body: "Retry 5xx only."}
+		return PullRequest{Key: task.Key{Repo: "testorg/example", Number: 913}, URL: "u913", State: "open", HeadRefName: "feat/825-provider-retries", BaseRefName: "main", Body: "Retry 5xx only."}
 	}
 	cases := []struct {
 		name     string
@@ -725,7 +725,7 @@ func TestStartPicksBranchTypeFromLabelsOrOverride(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if rec.Delegation.Branch != tc.want || f.wt.reqs[0].Path != "/wt/ridezoomo-armada-backend/"+tc.want {
+		if rec.Delegation.Branch != tc.want || f.wt.reqs[0].Path != "/wt/testorg-example/"+tc.want {
 			t.Errorf("override %q: branch %s path %s", tc.override, rec.Delegation.Branch, f.wt.reqs[0].Path)
 		}
 	}
@@ -739,7 +739,7 @@ func TestLinearStartUsesTrackerBranchName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.Delegation.Branch != "bryan/web-42-fix-cache" || f.wt.reqs[0].Branch != rec.Delegation.Branch || f.wt.reqs[0].Path != "/wt/ridezoomo-armada-backend/bryan/web-42-fix-cache" {
+	if rec.Delegation.Branch != "bryan/web-42-fix-cache" || f.wt.reqs[0].Branch != rec.Delegation.Branch || f.wt.reqs[0].Path != "/wt/testorg-example/bryan/web-42-fix-cache" {
 		t.Fatalf("branch = %q, worktree = %+v", rec.Delegation.Branch, f.wt.reqs[0])
 	}
 }
@@ -760,7 +760,7 @@ func TestStartNewOnlyRefusesAnIssueAlreadyDelegated(t *testing.T) {
 	// The dashboard's inbox can be a refresh old: another command may have started the
 	// issue, and it may already be PR_CLOSED, which the dashboard's task list leaves out.
 	f := newFixture()
-	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+	key := task.Key{Repo: "testorg/example", Number: 825}
 	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.PRClosed,
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Branch: "feat/825-provider-retries"}}
 	_, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Issue: 825, Agent: task.Claude, NewOnly: true})
@@ -775,7 +775,7 @@ func TestStartNewOnlyRefusesAnIssueAlreadyDelegated(t *testing.T) {
 func TestStartNewOnlyStartsAnIssueNeverDelegated(t *testing.T) {
 	f := newFixture()
 	f.gh.issue.Labels = []string{"triaged"}
-	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+	key := task.Key{Repo: "testorg/example", Number: 825}
 	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.Discovered}
 	rec, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Issue: 825, Agent: task.Claude, NewOnly: true})
 	if err != nil || rec.State != task.Working || len(f.runners.spawned) != 1 {
@@ -785,7 +785,7 @@ func TestStartNewOnlyStartsAnIssueNeverDelegated(t *testing.T) {
 
 func TestStartNewOnlyRejectsIssueWhoseTriagedLabelWasRemoved(t *testing.T) {
 	f := newFixture()
-	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+	key := task.Key{Repo: "testorg/example", Number: 825}
 	_, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Issue: key.Number, Agent: task.Claude, NewOnly: true})
 	if err == nil || !strings.Contains(err.Error(), "triaged") {
 		t.Fatalf("auto start = %v; want missing triaged label error", err)

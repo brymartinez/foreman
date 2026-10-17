@@ -48,7 +48,7 @@ func TestASecondStartWhileTheFirstIsSpawningIsRefusedAndOneRunnerStarts(t *testi
 	f := newFixture()
 	req := startReq(t)
 	resume := holdSpawn(t, f, func() (*task.Record, error) { return f.app.Start(context.Background(), req) })
-	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+	key := task.Key{Repo: "testorg/example", Number: 825}
 	claim := f.store.recs[key].Delegation.Launch
 	if claim == nil || claim.Token == "" || claim.PID != os.Getpid() {
 		t.Fatalf("the first start spawned without a launch claim: %+v", claim)
@@ -212,7 +212,7 @@ func TestARunnerThatTakesTheTaskBeforeItsLaunchFinishesKeepsItsRecordAndLog(t *t
 	f.claude.turn = prTurn("sid-1")
 	req := startReq(t)
 	resume := holdSpawn(t, f, func() (*task.Record, error) { return f.app.Start(context.Background(), req) })
-	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+	key := task.Key{Repo: "testorg/example", Number: 825}
 	if err := f.app.RunTask(context.Background(), key, 4242, f.runners.tokens[0], io.Discard); err != nil {
 		t.Fatal(err)
 	}

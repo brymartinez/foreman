@@ -45,7 +45,7 @@ type Command struct {
 	Issue      int
 	ExternalID string
 	Auto       AutoMode
-	Source     task.Source // empty selects both issue sources
+	Source     task.Source // dashboard defaults to GitHub; empty for commands without a source
 	// File is the export's output path (empty for stdout) or the ingest's input.
 	File   string
 	Rebind bool
@@ -58,8 +58,8 @@ const Usage = `foreman: delegate GitHub issues to Claude Code or Codex
 Usage:
   foreman             Open the dashboard: inbox, delegated work, and logs
   foreman -a, --auto  Open the dashboard with auto mode on for this session
-  foreman --no-auto   Open the dashboard with auto mode off for this session
-  foreman -s github|linear  Show only the selected issue source in the inbox
+  foreman --no-auto   Open the dashboard with auto mode off for this session (default)
+  foreman -s github|linear  Show only the selected issue source in the inbox (default github)
   foreman -c          Edit the configuration file
   foreman knowledge export owner/repo [-o FILE]
                       Write the repository's learned knowledge to FILE or stdout
@@ -82,7 +82,7 @@ func usagef(format string, args ...any) error { return UsageError{fmt.Sprintf(fo
 
 func Parse(argv []string) (Command, error) {
 	if len(argv) == 0 {
-		return Command{Name: TUI}, nil
+		return parseFlags(nil)
 	}
 	name, rest := argv[0], argv[1:]
 	switch name {
@@ -235,6 +235,9 @@ func parseFlags(argv []string) (Command, error) {
 			return Command{}, usagef("-c cannot be used with launch flags")
 		}
 		return Command{Name: Edit}, nil
+	}
+	if cmd.Source == "" {
+		cmd.Source = task.GitHub
 	}
 	return cmd, nil
 }

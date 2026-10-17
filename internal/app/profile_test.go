@@ -44,7 +44,7 @@ func TestStartRejectsProfileAgentMismatch(t *testing.T) {
 }
 
 func failedRouted(f fixture) task.Key {
-	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 825}
+	key := task.Key{Repo: "testorg/example", Number: 825}
 	p := codexProfile
 	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.Failed,
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex, ID: "th-1"}, Profile: &p, RouteReason: "narrow", RouteLogged: true, Branch: "feat/825-provider-retries"}}

@@ -12,6 +12,9 @@ func TestSourceFlagSelectsGitHubOrLinearInbox(t *testing.T) {
 		args   []string
 		source task.Source
 	}{
+		{nil, task.GitHub},
+		{[]string{"-a"}, task.GitHub},
+		{[]string{"--no-auto"}, task.GitHub},
 		{[]string{"-s", "github"}, task.GitHub},
 		{[]string{"-s", "linear"}, task.Linear},
 		{[]string{"--source", "linear", "-a"}, task.Linear},
@@ -33,11 +36,11 @@ func TestParseOpensTheDashboardWithTheGivenAutoMode(t *testing.T) {
 		argv []string
 		want Command
 	}{
-		"no arguments keep the saved choice": {nil, Command{Name: TUI}},
-		"-a turns auto mode on":              {[]string{"-a"}, Command{Name: TUI, Auto: AutoOn}},
-		"--auto turns auto mode on":          {[]string{"--auto"}, Command{Name: TUI, Auto: AutoOn}},
-		"--no-auto turns auto mode off":      {[]string{"--no-auto"}, Command{Name: TUI, Auto: AutoOff}},
-		"a repeated auto flag is accepted":   {[]string{"-a", "--auto"}, Command{Name: TUI, Auto: AutoOn}},
+		"no arguments keep the saved choice": {nil, Command{Name: TUI, Source: task.GitHub}},
+		"-a turns auto mode on":              {[]string{"-a"}, Command{Name: TUI, Auto: AutoOn, Source: task.GitHub}},
+		"--auto turns auto mode on":          {[]string{"--auto"}, Command{Name: TUI, Auto: AutoOn, Source: task.GitHub}},
+		"--no-auto turns auto mode off":      {[]string{"--no-auto"}, Command{Name: TUI, Auto: AutoOff, Source: task.GitHub}},
+		"a repeated auto flag is accepted":   {[]string{"-a", "--auto"}, Command{Name: TUI, Auto: AutoOn, Source: task.GitHub}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got, err := Parse(tc.argv); err != nil || got != tc.want {

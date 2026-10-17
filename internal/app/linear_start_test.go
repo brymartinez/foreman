@@ -95,7 +95,7 @@ func TestLinearManualStartDoesNotRequireTriagedLabel(t *testing.T) {
 	if err != nil || rec == nil || rec.Key != key || rec.Delegation.Branch != "feat/linear-web-42-fix-cache" {
 		t.Fatalf("start = %+v, %v", rec, err)
 	}
-	if rec.Delegation.Worktree != "/wt/ridezoomo-armada-backend/feat/linear-web-42-fix-cache" {
+	if rec.Delegation.Worktree != "/wt/testorg-example/feat/linear-web-42-fix-cache" {
 		t.Fatalf("worktree = %q", rec.Delegation.Worktree)
 	}
 }
@@ -108,7 +108,7 @@ func TestLinearSuggestionUsesFullBranchWorktreePath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.Delegation.Branch != "bryan/web-42-fix-cache" || rec.Delegation.Worktree != "/wt/ridezoomo-armada-backend/bryan/web-42-fix-cache" {
+	if rec.Delegation.Branch != "bryan/web-42-fix-cache" || rec.Delegation.Worktree != "/wt/testorg-example/bryan/web-42-fix-cache" {
 		t.Fatalf("delegation = %+v", rec.Delegation)
 	}
 }

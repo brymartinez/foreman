@@ -12,14 +12,14 @@ import (
 
 func TestTaskRowsCarryStateAndBadges(t *testing.T) {
 	rows := TaskRows(&task.Record{
-		Key: task.Key{Repo: "ridezoomo/armada-backend", Number: 831}, Title: "Provider retries", State: task.Reviewing,
+		Key: task.Key{Repo: "testorg/example", Number: 831}, Title: "Provider retries", State: task.Reviewing,
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912},
 		CI:         &task.CIStatus{State: task.CIPassing},
 		Reviews:    []task.Review{{Round: 1, Clean: true}},
 	})
 	want := []string{
-		"ridezoomo/armada-backend#831 Claude  REVIEWING",
-		"Provider retries · ridezoomo/armada-backend",
+		"testorg/example#831       Claude  REVIEWING",
+		"Provider retries",
 		"PR #912 · reviewer: Codex · CI ✓ · review ✓",
 	}
 	if !slices.Equal(rows, want) {
@@ -156,7 +156,7 @@ func TestShowUndelegated(t *testing.T) {
 func TestShowPendingDecisionUsesBlockedFormat(t *testing.T) {
 	var buf bytes.Buffer
 	Show(&buf, &task.Record{
-		Key: task.Key{Repo: "ridezoomo/armada-backend", Number: 825}, Title: "Provider retries", State: task.NeedsDecision,
+		Key: task.Key{Repo: "testorg/example", Number: 825}, Title: "Provider retries", State: task.NeedsDecision,
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex},
 		Decisions: []task.Decision{
 			{Question: task.Question{Issue: "Earlier?"}, Answer: "A. yes"},

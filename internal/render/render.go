@@ -57,14 +57,14 @@ func checkNames(checks []task.CheckRun) string {
 }
 
 // TaskRows is one delegated task as the dashboard shows it: the identity with its agent
-// and state, the title with its repo, and the PR with its CI and review badges. The
+// and state, the title, and the PR with its CI and review badges. The
 // dashboard's pane uses the same rows, so the two views cannot drift.
 func TaskRows(r *task.Record) []string {
 	d := r.Delegation
 	identity, agent, state := TaskHead(r)
 	rows := []string{
 		fmt.Sprintf("%-25s %-7s %s", identity, agent, state),
-		fmt.Sprintf("%s · %s", r.Title, r.Repo),
+		r.Title,
 	}
 	if d.PR > 0 {
 		s := TaskPR(r)

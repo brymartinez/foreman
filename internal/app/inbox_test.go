@@ -19,7 +19,7 @@ var (
 	now = t0.Add(2 * time.Hour)
 )
 
-func key(n int) task.Key { return task.Key{Repo: "ridezoomo/armada-backend", Number: n} }
+func key(n int) task.Key { return task.Key{Repo: "testorg/example", Number: n} }
 
 func item(n int, state string, updated time.Time, reasons ...task.InboxReason) InboxItem {
 	return InboxItem{Key: key(n), Kind: task.Issue, Title: "Issue", URL: "u", State: state, UpdatedAt: updated, Reasons: reasons}

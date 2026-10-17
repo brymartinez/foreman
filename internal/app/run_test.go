@@ -243,7 +243,7 @@ func TestImplementationPromptGetsImplementAndPRInstructionsOnly(t *testing.T) {
 	if strings.Contains(p, "review instructions") {
 		t.Errorf("implementation prompt carries review instructions:\n%s", p)
 	}
-	root := "/wt/ridezoomo-armada-backend/feat/825-provider-retries "
+	root := "/wt/testorg-example/feat/825-provider-retries "
 	if got := f.stages.calls[:2]; !slices.Equal(got, []string{root + "implement", root + "pr"}) {
 		t.Errorf("resolved %q; want implement and pr at the worktree root", got)
 	}
@@ -276,7 +276,7 @@ func TestReviewPromptGetsOnlyReviewInstructions(t *testing.T) {
 	if strings.Contains(p, "implement instructions") || strings.Contains(p, "pr instructions") {
 		t.Errorf("review prompt carries another stage's instructions:\n%s", p)
 	}
-	if got := f.stages.calls; len(got) != 4 || got[2] != "/wt/ridezoomo-armada-backend/feat/825-provider-retries plan" || got[3] != "/wt/ridezoomo-armada-backend/feat/825-provider-retries review" {
+	if got := f.stages.calls; len(got) != 4 || got[2] != "/wt/testorg-example/feat/825-provider-retries plan" || got[3] != "/wt/testorg-example/feat/825-provider-retries review" {
 		t.Errorf("lookups %q; want implement, pr, plan, then review, all at the worktree root", got)
 	}
 }

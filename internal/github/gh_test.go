@@ -24,7 +24,7 @@ func fixtures(t *testing.T) Runner {
 			"issues --mentions=@me":                     "mentioned",
 			"prs --mentions=@me":                        "mentioned_prs",
 			"--review-requested=@me":                    "review_requested",
-			"repos/ridezoomo/armada-backend/issues/912": "merged_pr",
+			"repos/testorg/example/issues/912": "merged_pr",
 			"issue view 825":                            "issue",
 			"repo view":                                 "repo",
 			"pr view 912":                               "pr",
@@ -52,7 +52,7 @@ func TestInboxItemsMergesReasons(t *testing.T) {
 		t.Fatalf("want 3 merged items, got %d: %+v", len(items), items)
 	}
 	first := items[0]
-	if first.Key != (task.Key{Repo: "ridezoomo/armada-backend", Number: 825}) ||
+	if first.Key != (task.Key{Repo: "testorg/example", Number: 825}) ||
 		!slices.Equal(first.Reasons, []task.InboxReason{task.Assigned, task.Mentioned}) ||
 		!slices.Equal(first.Labels, []string{"bug", "triaged"}) {
 		t.Errorf("825 = %+v", first)
@@ -86,7 +86,7 @@ func TestInboxItemsReportsSearchesAtTheLimit(t *testing.T) {
 }
 
 func TestGetItemDetectsMergedPR(t *testing.T) {
-	item, err := Client{Run: fixtures(t)}.GetItem(context.Background(), task.Key{Repo: "ridezoomo/armada-backend", Number: 912})
+	item, err := Client{Run: fixtures(t)}.GetItem(context.Background(), task.Key{Repo: "testorg/example", Number: 912})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,12 +105,12 @@ func TestSearchErrorPropagates(t *testing.T) {
 
 func TestGetIssueAndRepoAt(t *testing.T) {
 	c := Client{Run: fixtures(t)}
-	issue, err := c.GetIssue(context.Background(), task.Key{Repo: "ridezoomo/armada-backend", Number: 825})
+	issue, err := c.GetIssue(context.Background(), task.Key{Repo: "testorg/example", Number: 825})
 	if err != nil || issue.Title != "Provider retries" || !strings.Contains(issue.Body, "5xx") || issue.State != "open" || len(issue.Labels) != 1 || issue.Labels[0] != "bug" {
 		t.Fatalf("issue = %+v, %v", issue, err)
 	}
 	info, err := c.RepoAt(context.Background(), "/some/checkout")
-	if err != nil || info.Repo != "ridezoomo/armada-backend" || info.DefaultBranch != "main" {
+	if err != nil || info.Repo != "testorg/example" || info.DefaultBranch != "main" {
 		t.Fatalf("repo = %+v, %v", info, err)
 	}
 }
@@ -125,26 +125,26 @@ func TestEnsureCheckoutClonesMissingRepository(t *testing.T) {
 		return fixtures(t)(context.Background(), "", args...)
 	}
 	path := filepath.Join(t.TempDir(), "checkout")
-	info, err := (Client{Run: run}).Ensure(context.Background(), "ridezoomo/armada-backend", path)
-	if err != nil || info.Repo != "ridezoomo/armada-backend" {
+	info, err := (Client{Run: run}).Ensure(context.Background(), "testorg/example", path)
+	if err != nil || info.Repo != "testorg/example" {
 		t.Fatalf("info = %+v, err = %v", info, err)
 	}
-	if len(calls) == 0 || calls[0] != "repo clone ridezoomo/armada-backend "+path {
+	if len(calls) == 0 || calls[0] != "repo clone testorg/example "+path {
 		t.Fatalf("clone calls = %v", calls)
 	}
 }
 
 func TestPullRequests(t *testing.T) {
 	c := Client{Run: fixtures(t)}
-	pr, err := c.GetPullRequest(context.Background(), task.Key{Repo: "ridezoomo/armada-backend", Number: 912})
+	pr, err := c.GetPullRequest(context.Background(), task.Key{Repo: "testorg/example", Number: 912})
 	if err != nil || pr.State != "open" || pr.HeadRefName != "agent/825-provider-retries" || pr.HeadSHA != "c0ffee1c0ffee1c0ffee1c0ffee1c0ffee1c0ffe" || pr.BaseRefName != "main" || pr.URL == "" {
 		t.Fatalf("pr = %+v, %v", pr, err)
 	}
-	found, err := c.OpenPullRequestForBranch(context.Background(), "ridezoomo/armada-backend", "agent/825-provider-retries")
+	found, err := c.OpenPullRequestForBranch(context.Background(), "testorg/example", "agent/825-provider-retries")
 	if err != nil || found == nil || found.Key.Number != 912 {
 		t.Fatalf("by branch = %+v, %v", found, err)
 	}
-	none, err := c.OpenPullRequestForBranch(context.Background(), "ridezoomo/armada-backend", "agent/1-none")
+	none, err := c.OpenPullRequestForBranch(context.Background(), "testorg/example", "agent/1-none")
 	if err != nil || none != nil {
 		t.Fatalf("empty = %+v, %v", none, err)
 	}
@@ -212,7 +212,7 @@ func TestBranchHead(t *testing.T) {
 }
 
 func TestCIStatus(t *testing.T) {
-	key := task.Key{Repo: "ridezoomo/armada-backend", Number: 912}
+	key := task.Key{Repo: "testorg/example", Number: 912}
 	for _, tc := range []struct {
 		name    string
 		out     string
@@ -228,7 +228,7 @@ func TestCIStatus(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := Client{Run: func(_ context.Context, _ string, args ...string) ([]byte, error) {
-				if got := strings.Join(args, " "); got != "pr checks 912 --repo ridezoomo/armada-backend --json name,bucket,link" {
+				if got := strings.Join(args, " "); got != "pr checks 912 --repo testorg/example --json name,bucket,link" {
 					t.Errorf("args = %s", got)
 				}
 				return []byte(tc.out), tc.err
@@ -317,7 +317,7 @@ func TestPullRequestCommentsReadsEveryThread(t *testing.T) {
 		}
 		return nil, fmt.Errorf("unexpected gh call: %q", args)
 	}
-	got, err := Client{Run: run}.PullRequestComments(context.Background(), task.Key{Repo: "ridezoomo/armada-backend", Number: 912})
+	got, err := Client{Run: run}.PullRequestComments(context.Background(), task.Key{Repo: "testorg/example", Number: 912})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,17 +332,17 @@ func TestPullRequestCommentsReadsEveryThread(t *testing.T) {
 	}
 	want := []app.PRComment{
 		{Kind: task.IssueComment, ID: 4401, Author: "brymartinez", Body: "Looks good, ship it.",
-			URL: "https://github.com/ridezoomo/armada-backend/pull/912#issuecomment-4401", UpdatedAt: time.Date(2026, 9, 25, 9, 0, 0, 0, time.UTC)},
+			URL: "https://github.com/testorg/example/pull/912#issuecomment-4401", UpdatedAt: time.Date(2026, 9, 25, 9, 0, 0, 0, time.UTC)},
 		{Kind: task.IssueComment, ID: 4402, Author: "brymartinez", Body: "<!-- foreman:reply -->\nAnswered: the retry is capped.",
-			URL: "https://github.com/ridezoomo/armada-backend/pull/912#issuecomment-4402", UpdatedAt: time.Date(2026, 9, 25, 9, 10, 0, 0, time.UTC)},
+			URL: "https://github.com/testorg/example/pull/912#issuecomment-4402", UpdatedAt: time.Date(2026, 9, 25, 9, 10, 0, 0, time.UTC)},
 		{Kind: task.ReviewComment, ID: 5501, Author: "brymartinez", Body: "This retries 4xx too.",
-			URL: "https://github.com/ridezoomo/armada-backend/pull/912#discussion_r5501", UpdatedAt: time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC),
+			URL: "https://github.com/testorg/example/pull/912#discussion_r5501", UpdatedAt: time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC),
 			Path: "internal/retry/retry.go", Line: 42},
 		{Kind: task.ReviewComment, ID: 5502, Author: "dependabot[bot]", Body: "Same here.",
-			URL: "https://github.com/ridezoomo/armada-backend/pull/912#discussion_r5502", UpdatedAt: time.Date(2026, 9, 25, 10, 5, 0, 0, time.UTC),
+			URL: "https://github.com/testorg/example/pull/912#discussion_r5502", UpdatedAt: time.Date(2026, 9, 25, 10, 5, 0, 0, time.UTC),
 			Path: "internal/retry/retry.go", Line: 50, InReplyTo: 5501},
 		{Kind: task.ReviewSummary, ID: 6601, Author: "brymartinez", Body: "Two things to fix before this goes in.",
-			URL: "https://github.com/ridezoomo/armada-backend/pull/912#pullrequestreview-6601", UpdatedAt: time.Date(2026, 9, 25, 10, 10, 0, 0, time.UTC)},
+			URL: "https://github.com/testorg/example/pull/912#pullrequestreview-6601", UpdatedAt: time.Date(2026, 9, 25, 10, 10, 0, 0, time.UTC)},
 	}
 	for i, w := range want {
 		if got[i] != w {
@@ -400,12 +400,12 @@ func TestIssueCommentsReadsEveryPage(t *testing.T) {
 	var calls [][]string
 	run := func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		calls = append(calls, args)
-		if len(args) > 1 && args[1] == "repos/ridezoomo/armada-backend/issues/912/comments" {
+		if len(args) > 1 && args[1] == "repos/testorg/example/issues/912/comments" {
 			return os.ReadFile("testdata/pr_issue_comments.json")
 		}
 		return nil, fmt.Errorf("unexpected gh call: %q", args)
 	}
-	got, err := Client{Run: run}.IssueComments(context.Background(), task.Key{Repo: "ridezoomo/armada-backend", Number: 912})
+	got, err := Client{Run: run}.IssueComments(context.Background(), task.Key{Repo: "testorg/example", Number: 912})
 	if err != nil {
 		t.Fatal(err)
 	}

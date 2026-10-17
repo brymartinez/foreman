@@ -24,7 +24,7 @@ func (f *fakeNotifier) Notify(a Alert) error {
 }
 
 func TestNotifiesEveryTransitionThatNeedsTheDeveloper(t *testing.T) {
-	const title = "Foreman ridezoomo/armada-backend#825"
+	const title = "Foreman testorg/example#825"
 	cases := []struct {
 		name string
 		run  func(t *testing.T, f fixture)
@@ -86,7 +86,7 @@ func TestNotifyLinksThePRWhenOneExistsElseTheIssue(t *testing.T) {
 	t.Run("a task with a PR links the PR", func(t *testing.T) {
 		f := newFixture()
 		ready(t, f)
-		if len(f.notes.alerts) != 1 || f.notes.alerts[0].URL != "https://github.com/ridezoomo/armada-backend/pull/912" {
+		if len(f.notes.alerts) != 1 || f.notes.alerts[0].URL != "https://github.com/testorg/example/pull/912" {
 			t.Errorf("alerts = %+v, want one linking PR 912", f.notes.alerts)
 		}
 	})
