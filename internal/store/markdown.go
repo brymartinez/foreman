@@ -193,6 +193,10 @@ type frontmatter struct {
 	Checkpoints         int                    `yaml:"checkpoints,omitempty"`
 	ConflictAttempts    []task.ConflictAttempt `yaml:"conflict_attempts,omitempty"`
 	ConflictPending     bool                   `yaml:"conflict_pending,omitempty"`
+	ReviewBeforePR      bool                   `yaml:"review_before_pr,omitempty"`
+	LocalHead           string                 `yaml:"local_head,omitempty"`
+	ProposedTitle       string                 `yaml:"proposed_title,omitempty"`
+	ProposedBody        string                 `yaml:"proposed_body,omitempty"`
 	GitHub              *snapshot              `yaml:"github,omitempty"`
 	LastGitHubSync      *time.Time             `yaml:"last_github_sync,omitempty"`
 	Decisions           []decisionFM           `yaml:"decisions,omitempty"`
@@ -243,6 +247,7 @@ type reviewFM struct {
 	Findings []task.Finding `yaml:"findings,omitempty"`
 	At       time.Time      `yaml:"at"`
 	Head     string         `yaml:"head,omitempty"`
+	Proposal string         `yaml:"proposal,omitempty"`
 }
 
 type outcomeFM struct {
@@ -379,6 +384,10 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 			Checkpoints:      fm.Checkpoints,
 			ConflictAttempts: fm.ConflictAttempts,
 			ConflictPending:  fm.ConflictPending,
+			ReviewBeforePR:   fm.ReviewBeforePR,
+			LocalHead:        fm.LocalHead,
+			ProposedTitle:    fm.ProposedTitle,
+			ProposedBody:     fm.ProposedBody,
 		}
 		if fm.StartedAt != nil {
 			rec.Delegation.StartedAt = *fm.StartedAt
@@ -420,7 +429,7 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 		if r.Verdict != "clean" && r.Verdict != "changes_requested" {
 			return nil, fmt.Errorf("review round %d has unknown verdict %q", r.Round, r.Verdict)
 		}
-		rec.Reviews = append(rec.Reviews, task.Review{Round: r.Round, Reviewer: r.Reviewer, PR: r.PR, Clean: r.Verdict == "clean", Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head})
+		rec.Reviews = append(rec.Reviews, task.Review{Round: r.Round, Reviewer: r.Reviewer, PR: r.PR, Clean: r.Verdict == "clean", Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head, Proposal: r.Proposal})
 	}
 	if c := fm.CI; c != nil {
 		switch c.State {
@@ -499,6 +508,7 @@ func fromRecord(rec *task.Record) frontmatter {
 		fm.PriorPR = d.PriorPR
 		fm.CheckpointHead, fm.CheckpointNext, fm.Checkpoints = d.CheckpointHead, d.CheckpointNext, d.Checkpoints
 		fm.ConflictAttempts, fm.ConflictPending = d.ConflictAttempts, d.ConflictPending
+		fm.ReviewBeforePR, fm.LocalHead, fm.ProposedTitle, fm.ProposedBody = d.ReviewBeforePR, d.LocalHead, d.ProposedTitle, d.ProposedBody
 	}
 	if s := rec.GitHub; s != nil {
 		fm.GitHub = &snapshot{UpdatedAt: s.UpdatedAt, State: s.State, Reasons: s.Reasons}
@@ -526,7 +536,7 @@ func fromRecord(rec *task.Record) frontmatter {
 		if r.Clean {
 			verdict = "clean"
 		}
-		fm.Reviews = append(fm.Reviews, reviewFM{Round: r.Round, Reviewer: r.Reviewer, PR: r.PR, Verdict: verdict, Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head})
+		fm.Reviews = append(fm.Reviews, reviewFM{Round: r.Round, Reviewer: r.Reviewer, PR: r.PR, Verdict: verdict, Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head, Proposal: r.Proposal})
 	}
 	if c := rec.CI; c != nil {
 		fm.CI = &ciFM{State: c.State, Failing: c.Failing, CheckedAt: c.CheckedAt}

@@ -391,3 +391,19 @@ func TestLoadRejectsANegativeLearningBudget(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestReviewBeforePRDefaultsToOffAndLoadsFromConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("FOREMAN_CONFIG", "")
+	t.Setenv("FOREMAN_TASKS_DIR", "")
+	cfg, err := Load()
+	if err != nil || cfg.ReviewBeforePR {
+		t.Fatalf("default review_before_pr %t err %v", cfg.ReviewBeforePR, err)
+	}
+	os.MkdirAll(filepath.Join(home, ".config/foreman"), 0o755)
+	os.WriteFile(filepath.Join(home, ".config/foreman/config.yaml"), []byte("review_before_pr: true\n"), 0o644)
+	if cfg, err = Load(); err != nil || !cfg.ReviewBeforePR {
+		t.Fatalf("review_before_pr %t err %v", cfg.ReviewBeforePR, err)
+	}
+}

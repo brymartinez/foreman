@@ -383,6 +383,15 @@ after the third fix (`fix_rounds`) still has findings, foreman asks the same way
 another round, or accept the remaining findings. The implementer gets those findings
 along with your answer.
 
+With `review_before_pr: true`, a new task is reviewed before its PR opens, so
+automated reviews that run on new PRs see the finished change. The implementer
+commits locally and proposes a PR title and description. The reviewer reads that
+description and the local diff, and fixes stay local. After a clean review, the
+implementer pushes the reviewed commit and opens the PR with the reviewed description,
+and foreman checks that the PR matches. If the fix limit is reached first, you choose
+another round or stopping the task without a PR. A task keeps the setting it started
+with, including when you restart it.
+
 ## When you close a PR
 
 Closing a delegated PR without merging it ends the task. On the next GitHub refresh,
@@ -529,6 +538,7 @@ log_dir: ~/.local/share/foreman/logs
 knowledge_dir: ~/.local/share/foreman/knowledge # what foreman learns, per repository
 review_rounds: 3                     # reviewer passes over the whole PR per review
 fix_rounds: 3                        # fix and re-review cycles before foreman asks you
+review_before_pr: false              # review and fix locally; open the PR after a clean review
 mentions: true                       # show items found only because they mention you
 refresh: 60                          # seconds between dashboard issue-source refreshes
 auto:                                # the dashboard's auto mode; press a to turn it off

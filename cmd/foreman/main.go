@@ -134,6 +134,7 @@ func run(argv []string) int {
 		RepositoriesDir:      cfg.RepositoriesDir,
 		ReviewRounds:         cfg.ReviewRounds,
 		FixRounds:            cfg.FixRounds,
+		ReviewBeforePR:       cfg.ReviewBeforePR,
 		ImplementerBudgetUSD: cfg.Budgets.ImplementerUSD,
 		ReviewerBudgetUSD:    cfg.Budgets.ReviewerUSD,
 		Notifier:             notification(cfg),

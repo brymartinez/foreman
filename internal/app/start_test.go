@@ -18,6 +18,8 @@ type fakeWorktrees struct {
 	reqs            []WorktreeRequest
 	head            string
 	checkpointHeads []string
+	checkpointPrior []string          // the prior commit of each Checkpoint call
+	remoteHeads     map[string]string // branches on origin, for RemoteBranchHead
 	checkpointErr   error
 	removed         []WorktreeRemoval
 	removeAttempts  []WorktreeRemoval
@@ -83,7 +85,8 @@ func (f *fakeWorktrees) Head(_ context.Context, _ string) (string, error) {
 	return f.head, nil
 }
 
-func (f *fakeWorktrees) Checkpoint(_ context.Context, _, _, _ string) (string, error) {
+func (f *fakeWorktrees) Checkpoint(_ context.Context, _, _, prior string) (string, error) {
+	f.checkpointPrior = append(f.checkpointPrior, prior)
 	if f.checkpointErr != nil {
 		return "", f.checkpointErr
 	}
@@ -93,6 +96,10 @@ func (f *fakeWorktrees) Checkpoint(_ context.Context, _, _, _ string) (string, e
 	head := f.checkpointHeads[0]
 	f.checkpointHeads = f.checkpointHeads[1:]
 	return head, nil
+}
+
+func (f *fakeWorktrees) RemoteBranchHead(_ context.Context, _, branch string) (string, error) {
+	return f.remoteHeads[branch], nil
 }
 
 func (f *fakeWorktrees) Contains(_ context.Context, dir, ancestor, descendant string) (bool, error) {

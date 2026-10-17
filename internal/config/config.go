@@ -25,6 +25,9 @@ type Config struct {
 	KnowledgeDir string `yaml:"knowledge_dir"`
 	ReviewRounds int    `yaml:"review_rounds"` // reviewer passes per review; 0 means 3
 	FixRounds    int    `yaml:"fix_rounds"`    // fix and re-review cycles before asking; 0 means 3
+	// ReviewBeforePR has the agent review finish on the local branch before the PR
+	// opens. A task keeps the value it started with.
+	ReviewBeforePR bool `yaml:"review_before_pr"`
 	// Mentions shows items the searches found only because they mention you.
 	Mentions bool `yaml:"mentions"`
 	// Refresh is how often the dashboard reads GitHub, in seconds.

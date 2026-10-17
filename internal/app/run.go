@@ -78,6 +78,13 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, token string, l
 		}))
 		return err
 	}
+	if stoppedBeforePR(rec) {
+		_, err = a.update(final, rec.Key, existing(func(cur *task.Record) {
+			failTask(cur, "stopped by the maintainer; no PR opened", a.Now())
+			markDelivered(cur, a.Now())
+		}))
+		return err
+	}
 	r := &taskRun{a: a, ctx: ctx, final: final, log: log, rec: rec, feedback: feedback}
 	if err := r.loop(firstStep(rec, len(feedback))); err != nil {
 		return err
@@ -104,17 +111,23 @@ const (
 	stepImplement    step = iota // an implementer turn that plans, implements, or fixes findings
 	stepAnswer                   // an implementer turn that answers waiting PR comments
 	stepPickUpReview             // verify a PR head the last run left unreviewed
-	stepReview                   // resolve merge conflicts, then review the PR head
+	stepReview                   // resolve merge conflicts, then review the PR head or local commit
+	stepOpenPR                   // push a cleanly reviewed local commit and open its PR
 	stepHandover                 // read comments that arrived during the run
 	stepDone
 )
 
 // firstStep is where a run starts once any conflict repair is done: waiting comments
-// first, then a verified PR head that has no review, and otherwise an implementer turn.
+// first, then a reviewed local commit that has no PR, then a verified PR head or a
+// local commit that has no review, and otherwise an implementer turn.
 func firstStep(rec *task.Record, waiting int) step {
 	switch {
 	case waiting > 0:
 		return stepAnswer
+	case rec.OpenPending():
+		return stepOpenPR
+	case rec.ReviewPending() && rec.LocalReview():
+		return stepReview
 	case rec.ReviewPending():
 		return stepPickUpReview
 	}
@@ -146,6 +159,8 @@ func (r *taskRun) loop(next step) error {
 			next, err = r.pickUpReview()
 		case stepReview:
 			next, err = r.review()
+		case stepOpenPR:
+			next, err = r.openPR()
 		case stepHandover:
 			next, err = r.handover()
 		default:
@@ -175,7 +190,7 @@ func (r *taskRun) implement() (step, error) {
 	}
 	res := a.runTurn(r.ctx, r.rec, req, a.verifiedPR(r.log), r.log)
 	rec, err := a.finishTurn(r.ctx, r.final, r.rec.Key, during, res, func(cur *task.Record) {
-		applyTurn(cur, res.turn, res.pr, res.err, a.Now())
+		applyTurnResult(cur, res, a.Now())
 		if res.err == nil && res.turn.Outcome.Status == agent.Checkpoint {
 			cur.Delegation.CheckpointHead = res.checkpointHead
 			cur.Delegation.CheckpointNext = res.turn.Outcome.NextObjective
@@ -196,6 +211,9 @@ func (r *taskRun) implement() (step, error) {
 	}
 	if res.err == nil && res.turn.Outcome.Status == agent.Checkpoint {
 		return stepImplement, nil
+	}
+	if res.err == nil && res.turn.Outcome.Status == agent.ReviewReady && rec.State == task.Working {
+		return stepReview, nil
 	}
 	if rec.State != task.Reviewing {
 		return stepDone, nil
@@ -267,8 +285,8 @@ func (r *taskRun) review() (step, error) {
 		}
 		addUsage(&cur.Usage, review.Usage)
 		// Every fix is reviewed; the developer is asked only once fix_rounds fixes
-		// still leave findings.
-		if cur.State == task.Working && cur.ChangeRequestsSinceDecision() > a.fixRounds() {
+		// still leave findings. A local review keeps the task WORKING when clean.
+		if reviewErr == nil && !review.Clean && cur.State == task.Working && cur.ChangeRequestsSinceDecision() > a.fixRounds() {
 			escalateReview(cur, a.fixRounds(), a.Now())
 		}
 	})); err != nil {
@@ -276,6 +294,8 @@ func (r *taskRun) review() (step, error) {
 	}
 	r.rec = rec
 	switch {
+	case rec.State == task.Working && rec.OpenPending():
+		return stepOpenPR, nil
 	case rec.State == task.Working:
 		r.findings = rec.LatestReview()
 		return stepImplement, nil
@@ -352,6 +372,7 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 		return agent.Turn{}, fmt.Errorf("agent %s is not configured", d.Implementer.Agent)
 	}
 	planning := a.needsPlan(rec)
+	local := d.BeforePR() && !planning
 	stage, step := task.StageImplement, agent.StepImplement
 	switch {
 	case planning:
@@ -362,6 +383,9 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 		step = agent.StepFeedback
 	}
 	in := agent.StartInput{Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD, Stage: stage, Step: step, Profile: d.Profile}
+	if req.openBodyFile != "" {
+		return a.openTurn(ctx, rec, adapter, in, req.openBodyFile, log)
+	}
 	resume := ""
 	var conflict *agent.Conflict
 	if d.ConflictPending {
@@ -372,15 +396,19 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 		if latest := rec.LatestReview(); latest != nil && !latest.Clean {
 			open = latest
 		}
-		resume = agent.ResumeMessage(decs, open, planning)
+		resume = agent.ResumeMessage(decs, open, planning, local)
 		if planning {
 			// Documents may have appeared on the issue since the session last saw it.
 			resume += agent.ExistingPlansMessage(req.existingPlans)
 		}
+	} else if merge != nil && local {
+		resume = agent.LocalMergeMessage(d.Branch, merge.Base, merge.Files)
 	} else if merge != nil {
 		resume = agent.MergeMessage(d.Branch, merge.Base, merge.Files)
 	} else if len(feedback) > 0 {
 		resume = agent.FeedbackMessage(rec.Repo, d.PR, feedbackItems(feedback))
+	} else if findings != nil && local {
+		resume = agent.LocalFindingsMessage(*findings)
 	} else if findings != nil {
 		resume = agent.FindingsMessage(*findings)
 	}
@@ -405,6 +433,7 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 		brief.OpenFindings = latest.Findings
 	}
 	brief.Merge = merge
+	brief.LocalReview = d.BeforePR()
 	brief.PR, brief.Feedback, brief.Conflict = d.PR, feedbackItems(feedback), conflict
 	if d.PR == 0 && d.CheckpointNext != "" {
 		brief.CheckpointHead, brief.NextObjective = d.CheckpointHead, d.CheckpointNext
@@ -520,26 +549,36 @@ func (a App) review(ctx context.Context, rec *task.Record, log io.Writer) (agent
 		return agent.ReviewOutcome{}, chosen, fmt.Errorf("reviewer %s is not configured", chosen)
 	}
 	// The PR description is the reviewer's only statement of requirements, so a review
-	// without one cannot pass.
-	pr, err := a.GitHub.GetPullRequest(ctx, task.Key{Repo: rec.Repo, Number: d.PR})
-	if err != nil {
-		return agent.ReviewOutcome{}, chosen, fmt.Errorf("review PR #%d: %w", d.PR, err)
+	// without one cannot pass. A local commit is reviewed with the proposed one.
+	local, target := rec.LocalReview(), fmt.Sprintf("PR #%d", d.PR)
+	var body string
+	if local {
+		target, body = "the local branch "+d.Branch, d.ProposedBody
+	} else {
+		pr, err := a.GitHub.GetPullRequest(ctx, task.Key{Repo: rec.Repo, Number: d.PR})
+		if err != nil {
+			return agent.ReviewOutcome{}, chosen, fmt.Errorf("review %s: %w", target, err)
+		}
+		body = pr.Body
 	}
-	if strings.TrimSpace(pr.Body) == "" {
-		return agent.ReviewOutcome{}, chosen, fmt.Errorf("review PR #%d: the pull request description is empty", d.PR)
+	if strings.TrimSpace(body) == "" {
+		return agent.ReviewOutcome{}, chosen, fmt.Errorf("review %s: the pull request description is empty", target)
 	}
 	instructions, err := a.Stages.Resolve(d.Worktree, task.StageReview)
 	if err != nil {
 		return agent.ReviewOutcome{}, chosen, err
 	}
-	brief := agent.ReviewBrief{Key: rec.Key, PR: d.PR, PRBody: pr.Body, Branch: d.Branch, BaseBranch: strings.TrimPrefix(d.BaseRef, "origin/"),
-		StageInstructions: instructions.Content(), Previous: rec.Reviews, Passes: a.reviewRounds()}
-	// Comments are history, not requirements, so the review goes on without them.
-	if comments, err := a.GitHub.PullRequestComments(ctx, task.Key{Repo: rec.Repo, Number: d.PR}); err != nil {
-		brief.CommentsErr = err.Error()
-		fmt.Fprintf(log, "foreman: reviewing without the PR comments: %v\n", err)
-	} else {
-		brief.Comments = feedbackItems(slices.DeleteFunc(comments, func(c PRComment) bool { return strings.TrimSpace(c.Body) == "" }))
+	brief := agent.ReviewBrief{Key: rec.Key, PR: d.PR, PRTitle: d.ProposedTitle, PRBody: body, Branch: d.Branch, BaseBranch: strings.TrimPrefix(d.BaseRef, "origin/"),
+		StageInstructions: instructions.Content(), Previous: rec.Reviews, Passes: a.reviewRounds(), Proposed: local}
+	// Comments are history, not requirements, so the review goes on without them. A
+	// local commit has no PR to read them from.
+	if !local {
+		if comments, err := a.GitHub.PullRequestComments(ctx, task.Key{Repo: rec.Repo, Number: d.PR}); err != nil {
+			brief.CommentsErr = err.Error()
+			fmt.Fprintf(log, "foreman: reviewing without the PR comments: %v\n", err)
+		} else {
+			brief.Comments = feedbackItems(slices.DeleteFunc(comments, func(c PRComment) bool { return strings.TrimSpace(c.Body) == "" }))
+		}
 	}
 	if err := a.startAttempt(ctx, rec); err != nil {
 		return agent.ReviewOutcome{}, chosen, err
@@ -551,7 +590,7 @@ func (a App) review(ctx context.Context, rec *task.Record, log io.Writer) (agent
 		Prompt:       agent.ReviewPrompt(brief),
 		Step:         agent.StepReview,
 	}
-	fmt.Fprintf(log, "foreman: %s reviewing PR #%d (round %d)\n", reviewer.Name(), d.PR, len(rec.Reviews)+1)
+	fmt.Fprintf(log, "foreman: %s reviewing %s (round %d)\n", reviewer.Name(), target, len(rec.Reviews)+1)
 	out, err := reviewer.Review(ctx, in)
 	if errors.Is(err, agent.ErrUnavailable) && chosen != d.Implementer.Agent {
 		chosen = d.Implementer.Agent
@@ -560,7 +599,7 @@ func (a App) review(ctx context.Context, rec *task.Record, log io.Writer) (agent
 			return agent.ReviewOutcome{}, chosen, fmt.Errorf("reviewer %s is not configured", chosen)
 		}
 		fmt.Fprintf(log, "foreman: %s unavailable; using %s for review\n", d.Reviewer, chosen)
-		fmt.Fprintf(log, "foreman: %s reviewing PR #%d (round %d)\n", reviewer.Name(), d.PR, len(rec.Reviews)+1)
+		fmt.Fprintf(log, "foreman: %s reviewing %s (round %d)\n", reviewer.Name(), target, len(rec.Reviews)+1)
 		out, err = reviewer.Review(ctx, in)
 	}
 	return out, chosen, err
@@ -730,11 +769,7 @@ func applyTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error,
 	}
 	// The agent acted on the branch, so the gate's last CI result no longer applies.
 	rec.CI = nil
-	for i := range rec.Decisions {
-		if d := &rec.Decisions[i]; d.Answer != "" && d.DeliveredAt.IsZero() {
-			d.DeliveredAt = now
-		}
-	}
+	markDelivered(rec, now)
 	o := turn.Outcome
 	rec.LastOutcome = &task.Outcome{Status: string(o.Status), Summary: o.Summary, At: now}
 	switch o.Status {
@@ -743,7 +778,7 @@ func applyTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error,
 		rec.Delegation.PR, rec.Delegation.PRURL, rec.Delegation.PRHead = pr.Key.Number, pr.URL, pr.HeadSHA
 		rec.Delegation.CheckpointNext = ""
 		rec.Validation = o.Validation
-	case agent.Checkpoint:
+	case agent.Checkpoint, agent.ReviewReady:
 		rec.State = task.Working
 	case agent.Blocked:
 		rec.State = task.NeedsDecision
@@ -753,6 +788,29 @@ func applyTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error,
 	case agent.FailedRun:
 		rec.State = task.Failed
 	}
+}
+
+// markDelivered records that every answered decision reached the implementer.
+func markDelivered(rec *task.Record, now time.Time) {
+	for i := range rec.Decisions {
+		if d := &rec.Decisions[i]; d.Answer != "" && d.DeliveredAt.IsZero() {
+			d.DeliveredAt = now
+		}
+	}
+}
+
+// applyTurnResult is applyTurn for a checked turn. A review_ready turn stores its
+// verified commit with the proposed PR in the same write, so the reviewer always
+// reads the description the commit came with.
+func applyTurnResult(rec *task.Record, res turnResult, now time.Time) {
+	applyTurn(rec, res.turn, res.pr, res.err, now)
+	if res.err != nil || res.turn.Outcome.Status != agent.ReviewReady {
+		return
+	}
+	o, d := res.turn.Outcome, rec.Delegation
+	d.LocalHead, d.ProposedTitle, d.ProposedBody = res.localHead, o.PRTitle, o.PRBody
+	d.CheckpointNext = ""
+	rec.Validation = o.Validation
 }
 
 // Cancelled is the outcome status of a run stopped by a cancel or a signal.
@@ -906,11 +964,16 @@ func applyReview(rec *task.Record, r agent.ReviewOutcome, reviewErr error, now t
 		failTask(rec, fmt.Sprintf("%s review failed: %v", rec.Delegation.Reviewer, reviewErr), now)
 		return
 	}
+	head, proposal := rec.Delegation.PRHead, ""
+	if rec.LocalReview() {
+		head, proposal = rec.Delegation.LocalHead, task.ProposalDigest(rec.Delegation.ProposedTitle, rec.Delegation.ProposedBody)
+	}
 	rec.Reviews = append(rec.Reviews, task.Review{
 		Round:    len(rec.Reviews) + 1,
 		Reviewer: rec.Delegation.Reviewer,
 		PR:       rec.Delegation.PR,
-		Head:     rec.Delegation.PRHead,
+		Head:     head,
+		Proposal: proposal,
 		Clean:    r.Clean,
 		Summary:  r.Summary,
 		Findings: r.Findings,
@@ -926,10 +989,17 @@ func applyReview(rec *task.Record, r agent.ReviewOutcome, reviewErr error, now t
 
 // escalateReview asks the developer how to proceed when the review budget is spent.
 // The answer goes to the implementer like any decision, and resets the budget.
+// A task reviewed before its PR has no PR to accept findings on, so its B stops the
+// task instead, and the PR opens only after a clean review.
 func escalateReview(rec *task.Record, rounds int, now time.Time) {
 	latest := rec.LatestReview()
+	local := rec.LocalReview()
+	subject := fmt.Sprintf("PR #%d", rec.Delegation.PR)
+	if local {
+		subject = "the local change"
+	}
 	var ctx strings.Builder
-	fmt.Fprintf(&ctx, "%s re-reviewed PR #%d after %s of fixes without a clean result. Latest findings, not yet addressed:", rec.Delegation.Reviewer, rec.Delegation.PR, roundsText(rounds))
+	fmt.Fprintf(&ctx, "%s re-reviewed %s after %s of fixes without a clean result. Latest findings, not yet addressed:", rec.Delegation.Reviewer, subject, roundsText(rounds))
 	recommend := "B"
 	for _, f := range latest.Findings {
 		fmt.Fprintf(&ctx, "\n- [%s] %s", f.Severity, f.Summary)
@@ -937,18 +1007,43 @@ func escalateReview(rec *task.Record, rounds int, now time.Time) {
 			recommend = "A"
 		}
 	}
+	options := []task.Option{
+		{Label: "A", Description: "Address the remaining findings in another round"},
+		{Label: "B", Description: "Leave the code as is; treat the remaining findings as accepted"},
+	}
+	impact := "A spends more agent time on disputed findings; B sends the remaining findings to your review unfixed."
+	if local {
+		options[1], recommend = stopBeforePROption, "A"
+		ctx.WriteString("\nNo pull request is open. It opens only after a clean review.")
+		impact = "A spends more agent time on disputed findings; B ends the task without a pull request."
+	}
 	rec.State = task.NeedsDecision
 	rec.LastOutcome = &task.Outcome{Status: "blocked", Summary: "review not clean after " + roundsText(rounds), At: now}
 	rec.Decisions = append(rec.Decisions, task.Decision{AskedAt: now, Question: task.Question{
-		Issue:   fmt.Sprintf("The reviewer still requests changes after %s of fixes. How should %s proceed?", roundsText(rounds), rec.Delegation.Implementer.Agent),
-		Context: ctx.String(),
-		Options: []task.Option{
-			{Label: "A", Description: "Address the remaining findings in another round"},
-			{Label: "B", Description: "Leave the code as is; treat the remaining findings as accepted"},
-		},
+		Issue:          fmt.Sprintf("The reviewer still requests changes after %s of fixes. How should %s proceed?", roundsText(rounds), rec.Delegation.Implementer.Agent),
+		Context:        ctx.String(),
+		Options:        options,
 		Recommendation: recommend,
-		ImpactIfWrong:  "A spends more agent time on disputed findings; B sends the remaining findings to your review unfixed.",
+		ImpactIfWrong:  impact,
 	}})
+}
+
+// stopBeforePROption ends a task reviewed before its PR that the developer does not
+// want fixed further. The next run fails the task, so no PR opens without a clean review.
+var stopBeforePROption = task.Option{Label: "B", Description: "Stop the task without opening a pull request"}
+
+// stoppedBeforePR reports a task reviewed before its PR whose developer chose to stop
+// it, in an answer the runner has not acted on yet.
+func stoppedBeforePR(rec *task.Record) bool {
+	if !rec.Delegation.BeforePR() {
+		return false
+	}
+	for _, d := range rec.Undelivered() {
+		if d.Answer == optionText(stopBeforePROption) {
+			return true
+		}
+	}
+	return false
 }
 
 func roundsText(n int) string {

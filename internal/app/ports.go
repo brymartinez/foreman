@@ -244,8 +244,12 @@ type WorktreeManager interface {
 	Contains(ctx context.Context, dir, ancestor, descendant string) (bool, error)
 	// MergeConflicts fetches Base and Branch from origin and lists the files that
 	// conflict when origin/Base merges into origin/Branch. None means a clean merge. It
-	// changes neither the branch nor the worktree.
+	// changes neither the branch nor the worktree. A Local check fetches only Base and
+	// merges it into the worktree's HEAD, for a branch that is not pushed yet.
 	MergeConflicts(ctx context.Context, check MergeCheck) ([]string, error)
+	// RemoteBranchHead returns the commit branch points at on origin, or "" when
+	// origin has no such branch. It changes neither the branch nor the worktree.
+	RemoteBranchHead(ctx context.Context, dir, branch string) (string, error)
 	// ConfigureIdentity sets the commit author and committer for the worktree at dir
 	// only, leaving the shared repository config and the global config alone.
 	ConfigureIdentity(ctx context.Context, dir, name, email string) error
@@ -265,6 +269,7 @@ type MergeCheck struct {
 	Dir    string
 	Branch string
 	Base   string
+	Local  bool
 }
 
 type AgentAdapter interface {

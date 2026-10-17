@@ -253,6 +253,25 @@ if [[ " $* " == *" --resume "* ]]; then
 		echo "claude resume" >>"$E2E_STATE/agents.log"
 		printf '%s' "$2" >"$E2E_STATE/resume-prompt.txt"
 		[[ "$2" == *"planned, blocked, or failed"* ]] && planning=1
+		# review_before_pr: fix findings locally, or push the reviewed commit and open the PR.
+		if [[ "$2" == *"of your local change by"* ]]; then
+			echo "claude local-fix" >>"$E2E_STATE/agents.log"
+			echo "// retry 429" >>widgets.go
+			git commit -qam "fix: retry 429"
+			echo '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"review_ready","summary":"retried 429","nextObjective":null,"prNumber":null,"prUrl":null,"validation":[{"command":"go test ./...","passed":true}],"questions":[],"documents":null,"prTitle":"feat: add retries","prBody":"Retry 5xx and 429.\n\nCloses #42"}}'
+			exit 0
+		fi
+		if [[ "$2" == *"Push it and open the pull request now"* ]]; then
+			echo "claude open-pr" >>"$E2E_STATE/agents.log"
+			b=$(git branch --show-current); i=${b#*/}; pr=$((900 + ${i%%-*}))
+			git push -q origin "$b"
+			echo "push $b $(git rev-parse HEAD)" >>"$E2E_STATE/pushes.log"
+			file=$(printf '%s' "$2" | sed -n 's/.*--body-file \([^`]*\)`.*/\1/p' | head -n 1)
+			body=$(sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' "$file" | awk '{printf "%s\\n", $0}')
+			printf '{"number":%s,"url":"https://github.com/acme/widgets/pull/%s","state":"OPEN","headRefName":"%s","headRefOid":"%s","baseRefName":"main","isCrossRepository":false,"title":"feat: add retries","body":"%s"}\n' "$pr" "$pr" "$b" "$(git rev-parse HEAD)" "$body" >"$E2E_STATE/pr-$pr.json"
+			printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"pr_opened","summary":"opened the PR","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s","validation":[{"command":"go test ./...","passed":true}],"questions":[]}}\n' "$pr" "$pr"
+			exit 0
+		fi
 		# A merge conflict: merge main, keep both sides, push, and report the PR.
 		if [[ "$2" == *"conflicts with the latest origin/main"* ]]; then
 			echo "claude merge" >>"$E2E_STATE/agents.log"
@@ -319,6 +338,12 @@ branch=$(git branch --show-current)
 echo "// retries" >>widgets.go
 # No -c identity: foreman sets the commit author in the worktree's own config.
 git commit -qam "feat: retries"
+# review_before_pr: commit only, and propose the PR for review.
+if [[ "$*" == *"## Proposing the pull request"* ]]; then
+	echo "claude review-ready" >>"$E2E_STATE/agents.log"
+	echo '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.25,"structured_output":{"status":"review_ready","summary":"added retries","nextObjective":null,"prNumber":null,"prUrl":null,"validation":[{"command":"go test ./...","passed":true}],"questions":[],"documents":null,"prTitle":"feat: add retries","prBody":"Retry 5xx only.\n\nCloses #42"}}'
+	exit 0
+fi
 git push -q origin "$branch"
 # main-moves is a command that changes main while this turn runs: a change to
 # widgets.go conflicts with the branch, and a new file merges cleanly.
@@ -360,12 +385,25 @@ if [[ "$prompt" == *"You evaluate one finished task"* ]]; then
 	exit 0
 fi
 if [[ " $* " == *" --ephemeral "* ]]; then echo "codex review"; printf '%s' "${@: -1}" >"$E2E_STATE/review-prompt.txt"; else echo "codex implement"; fi >>"$E2E_STATE/agents.log"
+wt=
+prev=
+for arg in "$@"; do [ "$prev" = -C ] && wt=$arg; prev=$arg; done
+[[ " $* " == *" --ephemeral "* ]] || wt=
+if [ -n "$wt" ]; then
+	b=$(git -C "$wt" branch --show-current)
+	if git --git-dir="$E2E_ORIGIN" show-ref --verify --quiet "refs/heads/$b"; then echo pushed; else echo local; fi >>"$E2E_STATE/review-origin.log"
+fi
 last=
 while [ $# -gt 0 ]; do [ "$1" = -o ] && last=$2; shift; done
 echo '{"type":"thread.started","thread_id":"t1"}'
 echo "$$" >"$E2E_STATE/review-agent.pid"
 sleep "${E2E_REVIEW_SLEEP:-0}"
 echo '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":20,"reasoning_output_tokens":5}}'
+if [ -n "$wt" ] && [ -f "$E2E_STATE/findings-once" ]; then
+	rm "$E2E_STATE/findings-once"
+	echo '{"verdict":"changes_requested","summary":"429 is missing","findings":[{"severity":"blocking","file":"widgets.go","line":1,"summary":"429 is not retried","detail":"retry 429 too"}]}' >"$last"
+	exit 0
+fi
 echo '{"verdict":"clean","summary":"looks right","findings":[]}' >"$last"
 EOF
 
@@ -453,6 +491,27 @@ scenario_runner() {
 	rm "$sandbox/stages/pr.md"
 	check "a missing stage file stops foreman" bash -c "! dash -- 2>'$sandbox/err.txt'"
 	check "and names the file" contains "$sandbox/err.txt" "stages/pr.md"
+}
+
+scenario_review_before_pr() {
+	echo "review_before_pr: the PR opens only after a clean review of the local branch"
+	setup review_before_pr
+	echo "review_before_pr: true" >>"$sandbox/config.yaml"
+	touch "$state/findings-once"
+	check "the dashboard delegates #42" start 42
+	check "the runner reaches a clean review" wait_status "review ✓"
+	local task_file="$sandbox/tasks/acme-widgets-42.md" head
+	check "the implementer proposed the PR without pushing" contains "$state/agents.log" "claude review-ready"
+	check "the findings were fixed locally" contains "$state/agents.log" "claude local-fix"
+	check "two reviews ran" test "$(grep -c '^codex review' "$state/agents.log")" = 2
+	check "no review saw the branch on origin" bash -c "test \"\$(sort -u '$state/review-origin.log')\" = local"
+	check "the re-review read the updated description" contains "$state/review-prompt.txt" "> Retry 5xx and 429."
+	check "the review read a proposed pull request" contains "$state/review-prompt.txt" "proposed pull request"
+	check "the branch was pushed once" test "$(wc -l <"$state/pushes.log" | tr -d ' ')" = 1
+	head=$(git --git-dir="$sandbox/origin.git" rev-parse "$(sed -n 's/^branch: *//p' "$task_file")")
+	check "the task records the pushed commit as the PR head" contains "$task_file" "pr_head: $head"
+	check "the last review covered the pushed commit" contains "$task_file" "head: $head"
+	check "the PR has the reviewed description" contains "$state/pr-942.json" "Retry 5xx and 429."
 }
 
 scenario_plan_reuse() {
@@ -1213,7 +1272,7 @@ scenario_account() {
 	unset E2E_CLONE_URL
 }
 
-scenarios=${*:-runner plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui routing history linear account learning knowledge_transfer}
+scenarios=${*:-runner review_before_pr plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui routing history linear account learning knowledge_transfer}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"
