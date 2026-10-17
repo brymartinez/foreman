@@ -229,6 +229,94 @@ func TestManualStartCanEditAnUncertainBranchBeforeStarting(t *testing.T) {
 	}
 }
 
+func TestBranchEditorMovesAndInsertsAtTheCursor(t *testing.T) {
+	m := model()
+	a := press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter})
+	m.Proposed(a.ProposalSeq, app.BranchProposal{Name: "feat/old-suffix"}, nil)
+	if m.BranchCursor != len([]rune(m.Input)) {
+		t.Fatalf("initial cursor = %d", m.BranchCursor)
+	}
+	press(&m, Key{Kind: KeyHome})
+	if m.BranchCursor != 0 {
+		t.Fatalf("home cursor = %d", m.BranchCursor)
+	}
+	press(&m, Key{Kind: KeyLeft}, Key{Kind: KeyRight}, Key{Kind: KeyEnd}, Key{Kind: KeyRight})
+	for range "old-suffix" {
+		press(&m, Key{Kind: KeyLeft})
+	}
+	press(&m, rune_('n'), rune_('e'), rune_('w'))
+	if m.Input != "feat/newold-suffix" {
+		t.Fatalf("input %q", m.Input)
+	}
+	if m.BranchCursor != len([]rune("feat/new")) {
+		t.Fatalf("insert cursor = %d", m.BranchCursor)
+	}
+}
+
+func TestBranchEditorDeletesAdjacentRunesAndStartsWithEditedName(t *testing.T) {
+	m := model()
+	a := press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter})
+	m.Proposed(a.ProposalSeq, app.BranchProposal{Name: "feat/界old-tail"}, nil)
+	press(&m, Key{Kind: KeyHome})
+	for range "feat/" {
+		press(&m, Key{Kind: KeyRight})
+	}
+	press(&m, Key{Kind: KeyDelete}, Key{Kind: KeyDelete}, Key{Kind: KeyDelete}, Key{Kind: KeyDelete})
+	press(&m, rune_('n'), rune_('e'), rune_('w'), Key{Kind: KeyBackspace}, rune_('w'))
+	if m.Input != "feat/new-tail" {
+		t.Fatalf("edited input = %q", m.Input)
+	}
+	got := press(&m, Key{Kind: KeyEnter})
+	if got.Kind != ActionStart || got.Start.BranchName != "feat/new-tail" {
+		t.Fatalf("start = %+v", got)
+	}
+}
+
+func TestBranchPromptScrollKeysKeepEditorActive(t *testing.T) {
+	m := model()
+	m.Width, m.Height = minWidth, minHeight
+	a := press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter})
+	m.Proposed(a.ProposalSeq, app.BranchProposal{Name: "fix/86-prompt", Reason: strings.Repeat("guidance applies here. ", 40)}, nil)
+	press(&m, Key{Kind: KeyDown})
+	if !strings.Contains(screen(m), "lines 2-") || m.Mode != TypingBranch {
+		t.Fatalf("down did not scroll prompt: %v", m.Mode)
+	}
+	press(&m, Key{Kind: KeyPageDown})
+	if strings.Contains(screen(m), "lines 2-") {
+		t.Fatal("page down did not move beyond the second line")
+	}
+	press(&m, Key{Kind: KeyPageUp}, Key{Kind: KeyUp})
+	if !strings.Contains(screen(m), "lines 1-") {
+		t.Fatal("scroll up did not return to the first line")
+	}
+	if got := press(&m, Key{Kind: KeyEnter}); got.Kind != ActionStart || got.Start.BranchName != "fix/86-prompt" {
+		t.Fatalf("scrolling changed the branch action: %+v", got)
+	}
+}
+
+func TestBranchEditorKeepsInvalidNameForCorrectionAndEscapeCancels(t *testing.T) {
+	m := model()
+	a := press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter})
+	m.Proposed(a.ProposalSeq, app.BranchProposal{Name: "feat/name"}, nil)
+	press(&m, Key{Kind: KeyHome})
+	press(&m, rune_(' '))
+	press(&m, Key{Kind: KeyEnd}, rune_(' '), rune_('!'))
+	if got := press(&m, Key{Kind: KeyEnter}); got.Kind != ActionNone || m.Mode != TypingBranch {
+		t.Fatalf("invalid name started: %+v mode %v", got, m.Mode)
+	}
+	press(&m, Key{Kind: KeyBackspace}, Key{Kind: KeyBackspace})
+	if got := press(&m, Key{Kind: KeyEnter}); got.Kind != ActionStart || got.Start.BranchName != "feat/name" {
+		t.Fatalf("trimmed name = %+v", got)
+	}
+	m = model()
+	a = press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter})
+	m.Proposed(a.ProposalSeq, app.BranchProposal{Name: "feat/name"}, nil)
+	press(&m, Key{Kind: KeyEscape})
+	if m.Mode != Browsing || m.Input != "" || m.starting[requestKey(m.pending)] {
+		t.Fatalf("escape left mode %v input %q starting %v", m.Mode, m.Input, m.starting)
+	}
+}
+
 func TestEscapeAbandonsDelegation(t *testing.T) {
 	for _, keys := range [][]Key{
 		{Key{Kind: KeyEnter}, {Kind: KeyEscape}},

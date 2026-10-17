@@ -157,8 +157,8 @@ def main():
         elif name == "pick":
             d.pick(arg)
         elif name == "confirm-branch":
-            d.until(lambda: "Branch name (edit, enter to start)" in d.screen() or "Started " in d.screen(), "a branch proposal or restart")
-            if "Branch name (edit, enter to start)" in d.screen():
+            d.until(lambda: "BRANCH PROPOSAL" in d.screen() or "Started " in d.screen(), "a branch proposal or restart")
+            if "BRANCH PROPOSAL" in d.screen():
                 d.press(b"\r")
         elif name == "sleep":
             end = time.time() + float(arg)

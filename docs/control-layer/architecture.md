@@ -414,7 +414,8 @@ the same commit. The commit message records why it changed.
   runs the same sync and guidance read, since either can change while a person edits
   it. A tool-free
   proposal applies the repository convention to the issue and tracker suggestion;
-  repository guidance takes precedence. A manual start shows an editable proposal.
+  repository guidance takes precedence. A manual start shows an editable proposal;
+  branch name keys move a rune-index cursor and insert or delete at that position.
   Auto mode waits when the workstream or guidance is unclear. The chosen name is
   validated before making a worktree and stored at the first start. A new worktree is
   `<worktrees_dir>/<owner>-<repo>/<branch>`, with each branch slash as a directory
@@ -704,6 +705,13 @@ the same commit. The commit message records why it changed.
   the oldest unanswered one. It takes half of the body, because a question is read in
   full before it is answered, and the answer line is always its last row. Opening it
   pins the cursor to the task, so a new delegation cannot move it mid-answer.
+- **Manual branch proposals use a focused prompt.** The model keeps the complete
+  rationale, uncertainty, scroll position, and rune-index branch cursor separately.
+  The frame wraps the rationale across the available columns and shows its line range
+  above a fixed branch field and action hint. Up/Down and PageUp/PageDown scroll the
+  rationale. Left/Right, Home/End, Backspace/Delete, and typed runes edit the name at
+  the cursor; the field windows long names by terminal columns. Enter still trims and
+  validates the name, and Esc cancels.
 - **The log pane pages by byte offset.** Opening a log reads its last 128 KiB
   (`logChunk`); each tick reads only the bytes past the loaded end, so lines loaded
   by scrolling back stay. Scrolling past the oldest loaded line reads the chunk before

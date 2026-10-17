@@ -48,6 +48,9 @@ func Frame(m Model) []string {
 	if m.Mode == ConfirmingReset {
 		return append(lines, resetConfirmLines(m)...)
 	}
+	if m.Mode == TypingBranch {
+		return branchFrame(m, lines)
+	}
 
 	right := m.Width - lay.leftWidth - 1
 	left := paneLines(inboxPane(m), lay.leftWidth, lay.topHeight, m.Focus == InboxPane, m.InboxCursor)
@@ -63,6 +66,85 @@ func Frame(m Model) []string {
 	lines = append(lines, messageLine(m))
 	lines = append(lines, dimmed(pad(truncate(footer(m), m.Width), m.Width)))
 	return lines
+}
+
+func branchFrame(m Model, lines []string) []string {
+	title := "BRANCH PROPOSAL"
+	if m.BranchUncertain {
+		title += " · needs your choice"
+	}
+	lines = append(lines, colored(pad(truncate(title, m.Width), m.Width), cyan))
+	rationale := m.branchLines()
+	page := m.branchPage()
+	top := min(m.BranchTop, max(len(rationale)-page, 0))
+	end := min(top+page, len(rationale))
+	rangeText := fmt.Sprintf("Rationale · lines %d-%d of %d", top+1, end, len(rationale))
+	if top > 0 {
+		rangeText += " · more above"
+	}
+	if end < len(rationale) {
+		rangeText += " · more below"
+	}
+	lines = append(lines, dimmed(pad(truncate(rangeText, m.Width), m.Width)))
+	for _, line := range rationale[top:end] {
+		lines = append(lines, pad(line, m.Width))
+	}
+	for len(lines) < m.Height-3 {
+		lines = append(lines, strings.Repeat(" ", m.Width))
+	}
+	lines = append(lines, pad(branchField(m), m.Width))
+	lines = append(lines, messageLine(m))
+	return append(lines, dimmed(pad(footer(m), m.Width)))
+}
+
+func branchField(m Model) string {
+	const label = "Branch: "
+	available := m.Width - textWidth(label)
+	if available < 1 {
+		return label
+	}
+	runes := []rune(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, m.Input))
+	cursor := min(max(m.BranchCursor, 0), len(runes))
+	// Place the cursor near the center when the whole field cannot fit.
+	leftWidth := textWidth(string(runes[:cursor]))
+	totalWidth := textWidth(string(runes)) + 1
+	startColumn := min(max(leftWidth-available/2, 0), max(totalWidth-available, 0))
+	start, column := 0, 0
+	for start < len(runes) && column+runeWidth(runes[start]) <= startColumn {
+		column += runeWidth(runes[start])
+		start++
+	}
+	for start < cursor && leftWidth-column+1 > available {
+		column += runeWidth(runes[start])
+		start++
+	}
+	var b strings.Builder
+	used := 0
+	for i := start; i <= len(runes); i++ {
+		if i == cursor {
+			if used+1 > available {
+				break
+			}
+			b.WriteRune('█')
+			used++
+		}
+		if i == len(runes) {
+			break
+		}
+		r := runes[i]
+		w := runeWidth(r)
+		if used+w > available {
+			break
+		}
+		b.WriteRune(r)
+		used += w
+	}
+	return label + b.String()
 }
 
 // withReset fits the reset hint into the short hints by dropping the hints after it,
@@ -632,7 +714,7 @@ func footer(m Model) string {
 	case ProposingBranch:
 		return "Reading repository branch rules…   esc cancel"
 	case TypingBranch:
-		return "Branch name (edit, enter to start): " + m.Input + "█"
+		return "arrows edit/scroll · pgup/pgdn · enter start · esc cancel"
 	case ConfirmingCancel:
 		if m.cancelTarget == (task.Key{}) {
 			return "Nothing to cancel. [y/n]"

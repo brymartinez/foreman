@@ -130,8 +130,12 @@ type Model struct {
 	// DecisionTop is the first wrapped question line in view while a decision is asked.
 	DecisionTop int
 
-	Mode  Mode
-	Input string // the context file or the decision answer being typed
+	Mode            Mode
+	Input           string // the context file or the decision answer being typed
+	BranchCursor    int    // rune index in Input while editing a branch
+	BranchReason    string
+	BranchUncertain bool
+	BranchTop       int
 	// Message is the one line under the panes: the last result, or an error.
 	Message     string
 	Refreshing  bool
@@ -781,6 +785,7 @@ func (m *Model) prepareBranch(req app.StartRequest) Action {
 	}
 	m.pending = req
 	m.Mode, m.Input = ProposingBranch, ""
+	m.BranchReason, m.BranchUncertain, m.BranchTop = "", false, 0
 	m.starting = mark(m.starting, requestKey(req))
 	m.proposalSeq++
 	return Action{Kind: ActionPropose, Start: req, ProposalSeq: m.proposalSeq}
@@ -791,12 +796,14 @@ func (m *Model) Proposed(seq int, p app.BranchProposal, err error) {
 		return
 	}
 	m.Mode, m.Input = TypingBranch, p.Name
+	m.BranchCursor = len([]rune(p.Name))
+	m.BranchReason, m.BranchUncertain, m.BranchTop = p.Reason, p.Uncertain, 0
 	if err != nil {
 		m.Message = "! branch proposal: " + err.Error() + "; enter a branch name"
 	} else if p.Uncertain {
-		m.Message = "! branch needs your choice: " + p.Reason
+		m.Message = "! branch needs your choice"
 	} else {
-		m.Message = "Proposed branch: " + p.Reason
+		m.Message = "Proposed branch"
 	}
 }
 
@@ -805,12 +812,38 @@ func (m *Model) typeBranch(k Key) Action {
 	case KeyEscape:
 		delete(m.starting, requestKey(m.pending))
 		m.Mode, m.Input = Browsing, ""
+		m.BranchCursor = 0
+		m.BranchReason, m.BranchUncertain, m.BranchTop = "", false, 0
+	case KeyUp:
+		m.scrollBranch(-1)
+	case KeyDown:
+		m.scrollBranch(1)
+	case KeyPageUp:
+		m.scrollBranch(-m.branchPage())
+	case KeyPageDown:
+		m.scrollBranch(m.branchPage())
+	case KeyLeft:
+		m.BranchCursor = max(m.BranchCursor-1, 0)
+	case KeyRight:
+		m.BranchCursor = min(m.BranchCursor+1, len([]rune(m.Input)))
+	case KeyHome:
+		m.BranchCursor = 0
+	case KeyEnd:
+		m.BranchCursor = len([]rune(m.Input))
 	case KeyBackspace:
-		if r := []rune(m.Input); len(r) > 0 {
-			m.Input = string(r[:len(r)-1])
+		if m.BranchCursor > 0 {
+			r := []rune(m.Input)
+			m.Input = string(slices.Delete(r, m.BranchCursor-1, m.BranchCursor))
+			m.BranchCursor--
+		}
+	case KeyDelete:
+		if r := []rune(m.Input); m.BranchCursor < len(r) {
+			m.Input = string(slices.Delete(r, m.BranchCursor, m.BranchCursor+1))
 		}
 	case KeyRune:
-		m.Input += string(k.Rune)
+		r := []rune(m.Input)
+		m.Input = string(slices.Insert(r, m.BranchCursor, k.Rune))
+		m.BranchCursor++
 	case KeyEnter:
 		name := strings.TrimSpace(m.Input)
 		if !task.ValidBranchName(name) {
@@ -820,9 +853,30 @@ func (m *Model) typeBranch(k Key) Action {
 		req := m.pending
 		req.BranchName = name
 		m.Mode, m.Input, m.manualTask = Browsing, "", false
+		m.BranchCursor = 0
+		m.BranchReason, m.BranchUncertain, m.BranchTop = "", false, 0
 		return m.startPending(req)
 	}
 	return Action{}
+}
+
+func (m *Model) branchLines() []string {
+	reason := m.BranchReason
+	if reason == "" {
+		reason = "No rationale provided."
+	}
+	var lines []string
+	for _, line := range strings.Split(reason, "\n") {
+		lines = append(lines, wrapLine(printable(line), m.Width)...)
+	}
+	return lines
+}
+
+func (m *Model) branchPage() int { return max(m.Height-6, 1) }
+
+func (m *Model) scrollBranch(by int) {
+	limit := max(len(m.branchLines())-m.branchPage(), 0)
+	m.BranchTop = min(max(min(m.BranchTop, limit)+by, 0), limit)
 }
 
 func (m *Model) startPending(req app.StartRequest) Action {

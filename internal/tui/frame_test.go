@@ -23,6 +23,99 @@ func plain(lines []string) []string {
 
 func screen(m Model) string { return strings.Join(plain(Frame(m)), "\n") }
 
+func branchPrompt(reason, name string) Model {
+	m := model()
+	m.Width, m.Height = minWidth, minHeight
+	a := press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter})
+	m.Proposed(a.ProposalSeq, app.BranchProposal{Name: name, Reason: reason, Uncertain: true}, nil)
+	return m
+}
+
+func TestBranchPromptKeepsFieldAndHintVisibleAtMinimumSize(t *testing.T) {
+	m := branchPrompt("Use the team's branch rule for this issue.", "fix/86-branch-prompt")
+	lines := plain(Frame(m))
+	if len(lines) != minHeight {
+		t.Fatalf("frame has %d rows", len(lines))
+	}
+	for i, line := range lines {
+		if textWidth(line) > minWidth {
+			t.Errorf("row %d has %d columns", i, textWidth(line))
+		}
+	}
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{"BRANCH PROPOSAL", "needs your choice", "Use the team's branch rule", "Branch: fix/86-branch-prompt█", "enter start", "esc cancel"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("prompt lacks %q:\n%s", want, got)
+		}
+	}
+	if !strings.Contains(lines[minHeight-3], "Branch: ") || !strings.Contains(lines[minHeight-1], "enter start") {
+		t.Errorf("field or hint is not fixed below rationale:\n%s", got)
+	}
+}
+
+func TestBranchPromptScrollsThroughEveryWrappedRationaleLine(t *testing.T) {
+	reason := strings.Repeat("follow branch guidance and keep the issue number visible. ", 18) + "FINAL GUIDANCE"
+	m := branchPrompt(reason, "fix/86-branch-prompt")
+	initial := screen(m)
+	if strings.Contains(initial, "FINAL GUIDANCE") || !strings.Contains(initial, "lines 1-") || !strings.Contains(initial, "more below") {
+		t.Fatalf("initial viewport does not show its range and overflow:\n%s", initial)
+	}
+	seen := initial
+	for i := 0; i < 30 && !strings.Contains(seen, "FINAL GUIDANCE"); i++ {
+		press(&m, Key{Kind: KeyPageDown})
+		seen += "\n" + screen(m)
+	}
+	if !strings.Contains(seen, "FINAL GUIDANCE") || !strings.Contains(screen(m), "more above") {
+		t.Fatalf("scrolling cannot reach the final rationale:\n%s", screen(m))
+	}
+	for _, line := range plain(Frame(m)) {
+		if textWidth(line) > m.Width {
+			t.Errorf("scrolled prompt exceeds width: %q", line)
+		}
+	}
+	if got := plain(Frame(m)); !strings.Contains(got[minHeight-3], "Branch: ") || !strings.Contains(got[minHeight-1], "enter start") {
+		t.Errorf("scrolling displaced field or hint:\n%s", screen(m))
+	}
+}
+
+func TestBranchPromptShowsCursorAndNearbyTextInLongName(t *testing.T) {
+	m := branchPrompt("Reason", "fix/"+strings.Repeat("a", 60)+"middle"+strings.Repeat("z", 60))
+	press(&m, Key{Kind: KeyHome})
+	if field := plain(Frame(m))[minHeight-3]; !strings.Contains(field, "Branch: █fix/") {
+		t.Fatalf("home does not show the start: %q", field)
+	}
+	press(&m, Key{Kind: KeyEnd})
+	if field := plain(Frame(m))[minHeight-3]; !strings.Contains(field, "zzzz█") {
+		t.Fatalf("end does not show the suffix: %q", field)
+	}
+	for range 62 {
+		press(&m, Key{Kind: KeyLeft})
+	}
+	if field := plain(Frame(m))[minHeight-3]; !strings.Contains(field, "midd█le") || textWidth(field) > minWidth {
+		t.Fatalf("middle cursor or nearby text is hidden: %q", field)
+	}
+}
+
+func TestBranchPromptKeepsCursorVisibleBesideWideRunes(t *testing.T) {
+	m := branchPrompt("Reason", "fix/"+strings.Repeat("界", 55)+"end")
+	press(&m, Key{Kind: KeyEnd})
+	for range 3 {
+		press(&m, Key{Kind: KeyLeft})
+	}
+	field := plain(Frame(m))[minHeight-3]
+	if !strings.Contains(field, "█end") || !strings.Contains(field, "界") || textWidth(field) > minWidth {
+		t.Fatalf("wide branch hides cursor or neighbors: %q", field)
+	}
+}
+
+func TestBranchPromptPreservesRationaleParagraphs(t *testing.T) {
+	m := branchPrompt("First rule.\n\nSecond rule for 界 paths.", "fix/86-prompt")
+	got := screen(m)
+	if !strings.Contains(got, "First rule.") || !strings.Contains(got, "Second rule for 界 paths.") || !strings.Contains(got, "lines 1-3 of 3") {
+		t.Fatalf("rationale paragraphs were lost: \n%s", got)
+	}
+}
+
 func TestFrameFillsTheScreen(t *testing.T) {
 	for _, size := range [][2]int{{minWidth, minHeight}, {100, 30}, {200, 60}} {
 		m := model()

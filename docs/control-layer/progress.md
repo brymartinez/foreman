@@ -2,6 +2,13 @@
 
 ## Current stage
 
+Issue #86 is complete. The manual branch prompt shows the full proposal rationale in
+a scrollable viewport with a fixed, horizontally windowed branch field and hint.
+The editor changes names at a rune-index cursor with Left/Right, Home/End,
+Backspace/Delete, and insertion. Enter trims and validates the name, and Esc cancels.
+Model, key-decoder, and frame regression tests cover the prompt and editor.
+Vet, Go tests, build, and the end-to-end script pass.
+
 Branch-guidance discovery (#84) is complete. The reader joins wrapped lines within a
 paragraph or list item and accepts a branch-guidance description before, inside, or
 after a link, so `Follow docs/repo-coordination.md for branch naming, ...` reaches the
