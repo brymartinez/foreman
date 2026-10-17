@@ -70,20 +70,50 @@ type Command struct {
 const Usage = `foreman: delegate GitHub issues to Claude Code or Codex
 
 Usage:
-  foreman             Open the dashboard: inbox, delegated work, and logs
-  foreman -a, --auto  Open the dashboard with auto mode on for this session
-  foreman --no-auto   Open the dashboard with auto mode off for this session (default)
-  foreman -s github|linear  Show only the selected issue source in the inbox (default github)
-  foreman -c          Edit the configuration file
+  foreman [launch overrides]  Open the dashboard: inbox, delegated work, and logs
+  foreman -c                  Edit the configuration file
   foreman knowledge export owner/repo [-o FILE]
-                      Write the repository's learned knowledge to FILE or stdout
+                              Write the repository's learned knowledge to FILE or stdout
   foreman knowledge ingest FILE [--repo owner/repo [--rebind]] [--agent claude|codex] [--dry-run]
-                      Store an export, merging with this machine's knowledge.
-                      --repo must match the export unless --rebind is given;
-                      --agent picks the merge agent (default auto.agent);
-                      --dry-run prints the result without saving
-  foreman -h, --help  Show this help
-  foreman --version   Show the version
+                              Store an export, merging with this machine's knowledge
+  foreman -h, --help          Show this help
+  foreman --version           Show the version
+
+Dashboard launch overrides (this launch only; nothing is saved):
+  -s, --source github|linear|all
+                      Show only this tracker's issues in INBOX and its tasks in
+                      DELEGATED WORK, and auto mode starts only from them; all
+                      shows both. Overrides default_source.
+  -a, --auto          Turn auto mode on. Overrides the choice saved with the a key.
+  --no-auto           Turn auto mode off. Overrides the choice saved with the a key.
+  --mentions          Show items found only because they mention you.
+                      Overrides mentions.
+  --no-mentions       Hide those items. Overrides mentions.
+
+Operation inputs:
+  knowledge export:
+    -o, --output FILE     Write to FILE instead of stdout
+  knowledge ingest:
+    --repo owner/repo     Store under this repository; it must match the
+                          export unless --rebind is given
+    --rebind              Store the export under a different --repo
+    --agent claude|codex  Agent that merges the knowledge (default auto.agent)
+    --dry-run             Print the merged result without saving it
+
+Precedence:
+  Source and mentions: launch flag, then config.yaml (default_source, mentions),
+  then the built-in default (github; mention-only items shown).
+  Auto mode: launch flag, then the choice saved with the a key in the dashboard.
+  With no saved choice it is off. config.yaml has no auto on/off setting.
+  The built-in defaults apply to keys missing from config.yaml. The shipped
+  defaults/config.yaml that make setup installs sets some different values,
+  such as mentions: false, models, and budgets.
+
+Settings without launch flags:
+  config.yaml: refresh, repository filters and linear_projects, directories,
+  agent commands and models, budgets, review policy, learning, notifications,
+  cleanup, auto.agent, and auto.max_concurrent. Unknown keys are an error.
+  routing.yaml: selector, profiles, and rules.
 
 Press ? in the dashboard for its keys.
 `

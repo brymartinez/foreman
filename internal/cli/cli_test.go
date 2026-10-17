@@ -240,3 +240,43 @@ func TestUsageListsTheKnowledgeCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestUsageSeparatesLaunchOverridesFromOperationInputs(t *testing.T) {
+	overrides := strings.Index(Usage, "Dashboard launch overrides")
+	inputs := strings.Index(Usage, "Operation inputs")
+	precedence := strings.Index(Usage, "Precedence")
+	if overrides < 0 || inputs < overrides || precedence < inputs {
+		t.Fatalf("usage lacks the override, input, and precedence sections in order:\n%s", Usage)
+	}
+	section := func(start, end int) string { return Usage[start:end] }
+	for _, flag := range []string{"-s, --source github|linear|all", "-a, --auto", "--no-auto", "--mentions", "--no-mentions"} {
+		if !strings.Contains(section(overrides, inputs), flag) {
+			t.Errorf("launch overrides lack %q:\n%s", flag, Usage)
+		}
+	}
+	for _, flag := range []string{"knowledge export", "-o, --output FILE", "knowledge ingest", "--repo owner/repo", "--rebind", "--agent claude|codex", "--dry-run"} {
+		if !strings.Contains(section(inputs, precedence), flag) {
+			t.Errorf("operation inputs lack %q:\n%s", flag, Usage)
+		}
+	}
+}
+
+func TestUsageExplainsPrecedenceAndWhereSettingsLive(t *testing.T) {
+	for _, want := range []string{
+		"DELEGATED WORK",
+		"launch flag, then config.yaml",
+		"then the built-in default",
+		"saved with the a key",
+		"no saved choice it is off",
+		"routing.yaml: selector, profiles, and rules",
+		"Unknown keys are an error",
+		"defaults/config.yaml",
+	} {
+		if !strings.Contains(Usage, want) {
+			t.Errorf("usage lacks %q:\n%s", want, Usage)
+		}
+	}
+	if strings.Contains(Usage, "in the inbox (default github)") {
+		t.Errorf("usage still says --source filters only the inbox:\n%s", Usage)
+	}
+}
