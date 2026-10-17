@@ -658,3 +658,16 @@ func TestOldFileLoadsWithReviewBeforePROffAndSavesNone(t *testing.T) {
 		}
 	}
 }
+
+func TestStoreRoundTripsTheReviewedProposal(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	want := delegated()
+	want.Reviews[1].Proposal = task.Digest("Closes #825")
+	if err := s.Save(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, want.Key)
+	if err != nil || got.Reviews[1].Proposal != want.Reviews[1].Proposal || got.Reviews[0].Proposal != "" {
+		t.Fatalf("reviews = %+v, %v", got.Reviews, err)
+	}
+}

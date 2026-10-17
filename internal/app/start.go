@@ -212,6 +212,12 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			CheckpointHead: head,
 			ReviewBeforePR: a.ReviewBeforePR,
 		}
+		// A restart is the same task, so it keeps the review setting it started with,
+		// and unreviewed local commits are never pushed by a PR-workflow turn. A reset
+		// discarded the run, so it starts with the current setting.
+		if prev != nil {
+			cur.Delegation.ReviewBeforePR = prev.ReviewBeforePR
+		}
 		// The pin belongs to the task, not the agent, so every restart keeps it.
 		if prev != nil {
 			cur.Delegation.Account, cur.Delegation.AccountEmail = prev.Account, prev.AccountEmail
@@ -244,7 +250,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		}
 		// A restart at the commit the last run returned for review keeps it with its
 		// proposal, so the review or the PR opening picks up where the run stopped.
-		if sameAgent && prev.Branch == wt.Branch && prev.ReviewBeforePR && a.ReviewBeforePR && prev.PR == 0 && prev.LocalHead == head {
+		if sameAgent && prev.Branch == wt.Branch && prev.ReviewBeforePR && prev.PR == 0 && prev.LocalHead == head {
 			cur.Delegation.LocalHead, cur.Delegation.ProposedTitle, cur.Delegation.ProposedBody = prev.LocalHead, prev.ProposedTitle, prev.ProposedBody
 		}
 		// A retry with the same agent keeps its route. Choosing another agent drops it.

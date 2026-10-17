@@ -495,6 +495,9 @@ type Review struct {
 	Findings []Finding
 	At       time.Time
 	Head     string // the PR head commit reviewed; empty on records from before heads were recorded
+	// Proposal is the Digest of the proposed description a local review read with
+	// Head. A fix may keep the commit and change only the description.
+	Proposal string
 }
 
 // LatestReview is the most recent review round, or nil.
@@ -569,7 +572,7 @@ func (r *Record) ReviewPending() bool {
 	}
 	latest := r.LatestReview()
 	if r.LocalReview() {
-		return latest == nil || latest.Head != d.LocalHead
+		return !r.coversLocal(latest)
 	}
 	if d.PR == 0 || d.PRHead == "" {
 		return false
@@ -597,5 +600,12 @@ func (r *Record) OpenPending() bool {
 		return false
 	}
 	latest := r.LatestReview()
-	return latest != nil && latest.Clean && latest.Head == r.Delegation.LocalHead
+	return r.coversLocal(latest) && latest.Clean
+}
+
+// coversLocal reports whether review read the stored local commit together with its
+// current proposed description.
+func (r *Record) coversLocal(review *Review) bool {
+	d := r.Delegation
+	return review != nil && review.Head == d.LocalHead && review.Proposal == Digest(d.ProposedBody)
 }

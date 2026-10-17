@@ -247,6 +247,7 @@ type reviewFM struct {
 	Findings []task.Finding `yaml:"findings,omitempty"`
 	At       time.Time      `yaml:"at"`
 	Head     string         `yaml:"head,omitempty"`
+	Proposal string         `yaml:"proposal,omitempty"`
 }
 
 type outcomeFM struct {
@@ -428,7 +429,7 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 		if r.Verdict != "clean" && r.Verdict != "changes_requested" {
 			return nil, fmt.Errorf("review round %d has unknown verdict %q", r.Round, r.Verdict)
 		}
-		rec.Reviews = append(rec.Reviews, task.Review{Round: r.Round, Reviewer: r.Reviewer, PR: r.PR, Clean: r.Verdict == "clean", Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head})
+		rec.Reviews = append(rec.Reviews, task.Review{Round: r.Round, Reviewer: r.Reviewer, PR: r.PR, Clean: r.Verdict == "clean", Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head, Proposal: r.Proposal})
 	}
 	if c := fm.CI; c != nil {
 		switch c.State {
@@ -535,7 +536,7 @@ func fromRecord(rec *task.Record) frontmatter {
 		if r.Clean {
 			verdict = "clean"
 		}
-		fm.Reviews = append(fm.Reviews, reviewFM{Round: r.Round, Reviewer: r.Reviewer, PR: r.PR, Verdict: verdict, Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head})
+		fm.Reviews = append(fm.Reviews, reviewFM{Round: r.Round, Reviewer: r.Reviewer, PR: r.PR, Verdict: verdict, Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head, Proposal: r.Proposal})
 	}
 	if c := rec.CI; c != nil {
 		fm.CI = &ciFM{State: c.State, Failing: c.Failing, CheckedAt: c.CheckedAt}

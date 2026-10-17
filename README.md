@@ -390,7 +390,7 @@ description and the local diff, and fixes stay local. After a clean review, the
 implementer pushes the reviewed commit and opens the PR with the reviewed description,
 and foreman checks that the PR matches. If the fix limit is reached first, you choose
 another round or stopping the task without a PR. A task keeps the setting it started
-with.
+with, including when you restart it.
 
 ## When you close a PR
 

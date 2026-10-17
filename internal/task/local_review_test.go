@@ -4,8 +4,9 @@ import "testing"
 
 func TestLocalReviewHelpersFollowTheStoredCommitAndItsReviews(t *testing.T) {
 	local := func(head string, reviews ...Review) *Record {
-		return &Record{State: Working, Delegation: &Delegation{ReviewBeforePR: true, LocalHead: head}, Reviews: reviews}
+		return &Record{State: Working, Delegation: &Delegation{ReviewBeforePR: true, LocalHead: head, ProposedBody: "Closes #7"}, Reviews: reviews}
 	}
+	reviewed := Digest("Closes #7")
 	for name, tc := range map[string]struct {
 		rec                        *Record
 		localReview, pending, open bool
@@ -20,20 +21,26 @@ func TestLocalReviewHelpersFollowTheStoredCommitAndItsReviews(t *testing.T) {
 			rec: local("h1"), localReview: true, pending: true,
 		},
 		"a commit after findings waits for review": {
-			rec: local("h2", Review{Head: "h1"}), localReview: true, pending: true,
+			rec: local("h2", Review{Head: "h1", Proposal: reviewed}), localReview: true, pending: true,
 		},
 		"a reviewed commit with findings does not wait": {
-			rec: local("h1", Review{Head: "h1"}), localReview: true,
+			rec: local("h1", Review{Head: "h1", Proposal: reviewed}), localReview: true,
+		},
+		"the same commit with a new description waits for review": {
+			rec: local("h1", Review{Head: "h1", Proposal: Digest("Closes #7, retries 5xx")}), localReview: true, pending: true,
 		},
 		"a clean review of the commit waits for the PR": {
-			rec: local("h1", Review{Head: "h1", Clean: true}), localReview: true, open: true,
+			rec: local("h1", Review{Head: "h1", Proposal: reviewed, Clean: true}), localReview: true, open: true,
+		},
+		"a clean review of another description does not open": {
+			rec: local("h1", Review{Head: "h1", Proposal: Digest("Closes #7, retries 5xx"), Clean: true}), localReview: true, pending: true,
 		},
 		"a clean review of an older commit does not open": {
-			rec: local("h2", Review{Head: "h1", Clean: true}), localReview: true, pending: true,
+			rec: local("h2", Review{Head: "h1", Proposal: reviewed, Clean: true}), localReview: true, pending: true,
 		},
 		"an undelivered answer goes to the implementer first": {
 			rec: func() *Record {
-				r := local("h1", Review{Head: "h1"})
+				r := local("h1", Review{Head: "h1", Proposal: reviewed})
 				r.Decisions = []Decision{{Answer: "A"}}
 				return r
 			}(), localReview: true,

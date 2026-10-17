@@ -964,15 +964,16 @@ func applyReview(rec *task.Record, r agent.ReviewOutcome, reviewErr error, now t
 		failTask(rec, fmt.Sprintf("%s review failed: %v", rec.Delegation.Reviewer, reviewErr), now)
 		return
 	}
-	head := rec.Delegation.PRHead
+	head, proposal := rec.Delegation.PRHead, ""
 	if rec.LocalReview() {
-		head = rec.Delegation.LocalHead
+		head, proposal = rec.Delegation.LocalHead, task.Digest(rec.Delegation.ProposedBody)
 	}
 	rec.Reviews = append(rec.Reviews, task.Review{
 		Round:    len(rec.Reviews) + 1,
 		Reviewer: rec.Delegation.Reviewer,
 		PR:       rec.Delegation.PR,
 		Head:     head,
+		Proposal: proposal,
 		Clean:    r.Clean,
 		Summary:  r.Summary,
 		Findings: r.Findings,

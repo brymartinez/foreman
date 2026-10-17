@@ -598,8 +598,9 @@ the same commit. The commit message records why it changed.
   description stops the review.
 - **`review_before_pr` reviews before the PR opens.** Repositories that review every new
   PR automatically would otherwise review code Foreman's fixes still change. The setting
-  is copied into the task when it starts, so a config change never alters a started task,
-  and a task that has a PR follows the PR workflow. The implementer commits, validates,
+  is copied into the task when it starts, and a restart keeps it, so a config change never
+  alters a started task; only a reset takes the current value. A task that has a PR
+  follows the PR workflow. The implementer commits, validates,
   and returns `review_ready` with a proposed title and description; nothing is pushed. The
   proposed description is the reviewer's requirements, and each fix comes back with an
   updated description, so the description and the code are reviewed together. Reviews,
@@ -608,8 +609,9 @@ the same commit. The commit message records why it changed.
   The agent still pushes and runs `gh pr create`, because Foreman's GitHub port is read
   only and the agent's turn runs under the pinned account; Foreman then checks that the
   PR's head, title, and body are the ones reviewed. The clean review becomes the review
-  of the PR's head, so the gate goes straight to CI. A restart resumes from the record:
-  a stored commit without a review goes to review, a clean one to the PR step.
+  of the PR's head, so the gate goes straight to CI. Each local review records the
+  commit and a digest of the description it read, and a restart resumes from the record:
+  a commit or description without a review goes to review, a clean pair to the PR step.
 - **A review covers one PR head.** Each review records the head it read. A REVIEWING
   task whose head moved is reviewed again; new commits on a READY_FOR_HUMAN PR are only
   flagged, because that PR is the developer's now. A crash mid-review restarts at the
