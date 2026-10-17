@@ -70,7 +70,7 @@ func (r *Record) PhaseOf() Phase {
 	switch r.State {
 	case Working:
 		switch {
-		case d.PR != 0:
+		case d.PR != 0, r.LocalReview():
 			return PhaseReview
 		case r.PlanPosted():
 			return PhaseImplementation

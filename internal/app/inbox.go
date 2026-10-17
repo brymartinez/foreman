@@ -49,19 +49,22 @@ type App struct {
 	GitHub GitHubClient
 	// ReplyToPRFeedback is disabled in the CLI. It remains available to exercise
 	// the older feedback flow in tests while stored tasks are migrated.
-	ReplyToPRFeedback    bool
-	Linear               IssueTracker
-	LinearProjects       map[task.Repo]string
-	Repositories         RepositoryManager
-	Worktrees            WorktreeManager
-	Agents               map[task.Agent]AgentAdapter
-	BranchProposer       BranchProposer
-	Runners              Runners
-	Stages               StageInstructionResolver
-	WorktreesDir         string
-	RepositoriesDir      string
-	ReviewRounds         int // reviewer passes per review; 0 means DefaultReviewRounds
-	FixRounds            int // fix and re-review cycles before asking; 0 means DefaultFixRounds
+	ReplyToPRFeedback bool
+	Linear            IssueTracker
+	LinearProjects    map[task.Repo]string
+	Repositories      RepositoryManager
+	Worktrees         WorktreeManager
+	Agents            map[task.Agent]AgentAdapter
+	BranchProposer    BranchProposer
+	Runners           Runners
+	Stages            StageInstructionResolver
+	WorktreesDir      string
+	RepositoriesDir   string
+	ReviewRounds      int // reviewer passes per review; 0 means DefaultReviewRounds
+	FixRounds         int // fix and re-review cycles before asking; 0 means DefaultFixRounds
+	// ReviewBeforePR is copied into each task's delegation when it starts. Runs read
+	// the task's copy, so a config change never alters a started task.
+	ReviewBeforePR       bool
 	ImplementerBudgetUSD float64
 	ReviewerBudgetUSD    float64
 	Notifier             Notifier

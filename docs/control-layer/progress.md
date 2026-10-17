@@ -7,6 +7,14 @@ The shipping config now copies the current local model and budget choices into
 project mappings. `make config` installs it only when missing, and release archives
 carry it. Existing config files remain untouched.
 
+Review before PR (#88) is complete. `review_before_pr` (default false) is copied into a
+task when it starts. Such a task's implementer commits and returns `review_ready` with a
+proposed PR title and description. The reviewer reads that description and the local
+diff, fixes stay local, and the fix cap asks for another round or a stop with no PR.
+After a clean review the implementer pushes the reviewed commit and opens the PR, and
+Foreman checks its head, title, and body before the gate takes over. Vet, Go tests,
+build, and the `review_before_pr` end-to-end scenario pass.
+
 Issue #86 is complete. The manual branch prompt shows the full proposal rationale in
 a scrollable viewport with a fixed, horizontally windowed branch field and hint.
 The editor changes names at a rune-index cursor with Left/Right, Home/End,

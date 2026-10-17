@@ -174,6 +174,15 @@ type Delegation struct {
 	// until the runner has run the last one.
 	ConflictAttempts []ConflictAttempt
 	ConflictPending  bool
+	// ReviewBeforePR is config's review_before_pr when the task started. Set, the
+	// agent review runs on the local branch and the PR opens only after a clean review.
+	ReviewBeforePR bool
+	// LocalHead is the committed, unpushed change the implementer last returned for
+	// review, and ProposedTitle and ProposedBody are the PR it proposed with it. The
+	// three change together, so a commit is always reviewed with its own description.
+	LocalHead     string
+	ProposedTitle string
+	ProposedBody  string
 }
 
 // Launch is taken under the task lock before a runner is spawned, by the foreman
@@ -486,6 +495,9 @@ type Review struct {
 	Findings []Finding
 	At       time.Time
 	Head     string // the PR head commit reviewed; empty on records from before heads were recorded
+	// Proposal is the ProposalDigest of the proposed title and description a local
+	// review read with Head. A fix may keep the commit and change only those.
+	Proposal string
 }
 
 // LatestReview is the most recent review round, or nil.
@@ -555,9 +567,51 @@ func (r *Record) CommitsSinceReview() bool {
 // review, or after new commits on a PR that had a clean review.
 func (r *Record) ReviewPending() bool {
 	d := r.Delegation
-	if d == nil || d.PR == 0 || d.PRHead == "" || len(r.Undelivered()) > 0 {
+	if d == nil || len(r.Undelivered()) > 0 {
 		return false
 	}
 	latest := r.LatestReview()
+	if r.LocalReview() {
+		return !r.coversLocal(latest)
+	}
+	if d.PR == 0 || d.PRHead == "" {
+		return false
+	}
 	return latest == nil || latest.PR != d.PR || latest.Head != d.PRHead
+}
+
+// BeforePR reports a task reviewed before its PR opens that has no PR yet. Its
+// implementer commits locally and proposes the PR instead of opening it.
+func (d *Delegation) BeforePR() bool {
+	return d != nil && d.ReviewBeforePR && d.PR == 0
+}
+
+// LocalReview reports a task reviewed before its PR opens that has a local commit
+// for review. Once the PR exists, the task follows the PR workflow.
+func (r *Record) LocalReview() bool {
+	return r.Delegation.BeforePR() && r.Delegation.LocalHead != ""
+}
+
+// OpenPending reports a local commit with a clean review and no PR yet, so the next
+// step pushes that commit and opens the PR with the reviewed description. Answers the
+// implementer has not received go to it with that step.
+func (r *Record) OpenPending() bool {
+	if !r.LocalReview() {
+		return false
+	}
+	latest := r.LatestReview()
+	return r.coversLocal(latest) && latest.Clean
+}
+
+// coversLocal reports whether review read the stored local commit together with its
+// current proposed title and description.
+func (r *Record) coversLocal(review *Review) bool {
+	d := r.Delegation
+	return review != nil && review.Head == d.LocalHead && review.Proposal == ProposalDigest(d.ProposedTitle, d.ProposedBody)
+}
+
+// ProposalDigest identifies a proposed PR title and description, so a review records
+// which proposal it read.
+func ProposalDigest(title, body string) string {
+	return Digest(strings.TrimSpace(title) + "\n\n" + body)
 }

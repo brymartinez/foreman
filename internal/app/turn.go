@@ -19,6 +19,9 @@ type turnRequest struct {
 	findings      *task.Review            // open findings from the latest review
 	feedback      []PRComment             // PR comments to answer
 	merge         *agent.MergeBrief       // a base branch to merge before the next review
+	// openBodyFile is set for the turn that pushes a reviewed local commit and opens
+	// its PR. It holds the reviewed description.
+	openBodyFile string
 }
 
 // turnResult is a finished implementer turn. pr is the verified PR when the turn
@@ -27,6 +30,7 @@ type turnResult struct {
 	turn           agent.Turn
 	pr             *PullRequest
 	checkpointHead string
+	localHead      string // the verified commit of a review_ready turn
 	err            error
 }
 
@@ -60,7 +64,7 @@ func (a App) runTurn(ctx context.Context, rec *task.Record, req turnRequest, che
 		return turnResult{turn: turn, err: err}
 	}
 	if turn.Outcome.Status == agent.Checkpoint {
-		if a.needsPlan(rec) || rec.Delegation.PR != 0 || req.findings != nil || len(req.feedback) > 0 || req.merge != nil || rec.Delegation.ConflictPending {
+		if a.needsPlan(rec) || rec.Delegation.PR != 0 || req.findings != nil || len(req.feedback) > 0 || req.merge != nil || req.openBodyFile != "" || rec.Delegation.ConflictPending {
 			return turnResult{turn: turn, err: fmt.Errorf("checkpoint is only allowed during initial implementation")}
 		}
 		if rec.Delegation.Checkpoints >= maxImplementationCheckpoints {
@@ -73,14 +77,67 @@ func (a App) runTurn(ctx context.Context, rec *task.Record, req turnRequest, che
 		fmt.Fprintf(log, "foreman: verified implementation checkpoint %s\n", short(head))
 		return turnResult{turn: turn, checkpointHead: head}
 	}
+	if turn.Outcome.Status == agent.ReviewReady {
+		return a.checkReviewReady(ctx, rec, req, turn, log)
+	}
 	if turn.Outcome.Status != agent.PROpened {
 		return turnResult{turn: turn}
+	}
+	if rec.Delegation.BeforePR() && req.openBodyFile == "" {
+		// The agent pushed and opened a PR that no review has passed. The task stops so
+		// the developer sees it; nothing records the PR as reviewed.
+		return turnResult{turn: turn, err: errors.New("the implementer opened a pull request before a clean review; review_before_pr requires review_ready")}
 	}
 	if a.needsPlan(rec) {
 		fmt.Fprintf(log, "foreman: %s opened a PR without posting a plan\n", rec.Delegation.Implementer.Agent)
 	}
 	pr, err := check(ctx, rec, turn.Outcome)
 	return turnResult{turn: turn, pr: pr, err: err}
+}
+
+// checkReviewReady verifies a review_ready turn: only a task reviewed before its PR
+// returns it, outside planning, and it must leave a clean worktree on the task branch
+// with commits after the last accepted checkpoint. Nothing is pushed yet, so the
+// commit need not extend the one reviewed before, and a fix turn that keeps the
+// commit is reviewed again like a PR whose head did not move.
+func (a App) checkReviewReady(ctx context.Context, rec *task.Record, req turnRequest, turn agent.Turn, log io.Writer) turnResult {
+	d := rec.Delegation
+	if req.openBodyFile != "" {
+		return turnResult{turn: turn, err: errors.New("the implementer returned review_ready when asked to open the reviewed pull request")}
+	}
+	if !d.BeforePR() || a.needsPlan(rec) {
+		return turnResult{turn: turn, err: errors.New("review_ready is only allowed for a task reviewed before its pull request, once the plan is posted")}
+	}
+	head, err := a.Worktrees.Checkpoint(ctx, d.Worktree, d.Branch, d.CheckpointHead)
+	if err != nil {
+		return turnResult{turn: turn, err: fmt.Errorf("verify the change for review: %w", err)}
+	}
+	if err := a.checkUnpublished(ctx, rec); err != nil {
+		return turnResult{turn: turn, err: err}
+	}
+	fmt.Fprintf(log, "foreman: verified local commit %s for review\n", short(head))
+	return turnResult{turn: turn, localHead: head}
+}
+
+// checkUnpublished fails a review_ready turn that pushed the branch or opened a PR,
+// because automated reviews on GitHub may already be running on unreviewed code.
+func (a App) checkUnpublished(ctx context.Context, rec *task.Record) error {
+	d := rec.Delegation
+	pr, err := a.GitHub.OpenPullRequestForBranch(ctx, rec.Repo, d.Branch)
+	if err != nil {
+		return fmt.Errorf("check that no PR is open for %s: %w", d.Branch, err)
+	}
+	if pr != nil {
+		return fmt.Errorf("the implementer opened PR #%d before a clean review; review_before_pr keeps the change local until then", pr.Key.Number)
+	}
+	remote, err := a.Worktrees.RemoteBranchHead(ctx, d.Worktree, d.Branch)
+	if err != nil {
+		return fmt.Errorf("check that %s is not pushed: %w", d.Branch, err)
+	}
+	if remote != "" {
+		return fmt.Errorf("the implementer pushed %s at %s before a clean review; review_before_pr keeps the change local until then", d.Branch, short(remote))
+	}
+	return nil
 }
 
 // repairFailedCheckpoint gives the same implementation session a bounded chance

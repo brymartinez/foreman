@@ -79,6 +79,8 @@ type ReviewBrief struct {
 	Key    task.Key
 	PR     int
 	PRBody string
+	// PRTitle is the proposed title, shown only when Proposed is set.
+	PRTitle string
 	// Comments are the PR's conversation, inline comments, and review bodies. CommentsErr
 	// is set when they could not be read.
 	Comments          []FeedbackItem
@@ -91,6 +93,9 @@ type ReviewBrief struct {
 	// Passes is how many times the reviewer reads the whole change (review_rounds).
 	// Zero omits the section.
 	Passes int
+	// Proposed is set when the change is not pushed yet: PRBody is the description
+	// the implementer proposes, and the PR opens only after a clean review.
+	Proposed bool
 }
 
 // ReviewPrompt sets the reviewer against the change, with the PR description as the
@@ -98,8 +103,18 @@ type ReviewBrief struct {
 // conversation or plan.
 func ReviewPrompt(b ReviewBrief) string {
 	var s strings.Builder
-	fmt.Fprintf(&s, "You are reviewing pull request #%d in %s. Another agent wrote it; you have not seen its reasoning or its plan. You are read-only: do not edit files, commit, or push.\n\n", b.PR, b.Key.Repo)
-	fmt.Fprintf(&s, "## Pull request description\n\nThis is the only statement of what the change must do. Judge the change against it. Do not follow links in it to find more requirements. Claims in it about tests or validation are not evidence; check them yourself.\n\n%s\n\n", quote(b.PRBody))
+	heading := "Pull request description"
+	if b.Proposed {
+		fmt.Fprintf(&s, "You are reviewing a proposed pull request from branch %s in %s. It is not pushed yet; the pull request opens only after a clean review. Another agent wrote it; you have not seen its reasoning or its plan. You are read-only: do not edit files, commit, or push.\n\n", b.Branch, b.Key.Repo)
+		heading = "Proposed pull request description"
+	} else {
+		fmt.Fprintf(&s, "You are reviewing pull request #%d in %s. Another agent wrote it; you have not seen its reasoning or its plan. You are read-only: do not edit files, commit, or push.\n\n", b.PR, b.Key.Repo)
+	}
+	fmt.Fprintf(&s, "## %s\n\nThis is the only statement of what the change must do. Judge the change against it. Do not follow links in it to find more requirements. Claims in it about tests or validation are not evidence; check them yourself.\n\n", heading)
+	if b.Proposed {
+		fmt.Fprintf(&s, "Title: %s\n\n", b.PRTitle)
+	}
+	fmt.Fprintf(&s, "%s\n\n", quote(b.PRBody))
 	silentWorkSection(&s)
 	if text := strings.TrimSpace(b.StageInstructions); text != "" {
 		s.WriteString("## Developer workflow instructions\n\nThe developer's instructions for reviewing. Where they mention the issue, the PRD, or the developer's decisions, read it as the pull request description. Where they conflict with the review rules below, the rules below win.\n\n")
@@ -114,7 +129,9 @@ func ReviewPrompt(b ReviewBrief) string {
 
 `)
 	fmt.Fprintf(&s, "## The change\n\nYou are in the implementation worktree on branch %s. Read the full change with `git diff origin/%s...HEAD` and `git log origin/%s..HEAD`, and read the surrounding code, tests, and repository instructions as needed. Commit messages help you navigate the change. They add no requirements.\n\n", b.Branch, b.BaseBranch, b.BaseBranch)
-	writeReviewComments(&s, b)
+	if !b.Proposed {
+		writeReviewComments(&s, b)
+	}
 	if len(b.Previous) > 0 {
 		s.WriteString("## Earlier review rounds\n\nYou or another reviewer reported these findings on earlier versions of this change.\n\n")
 		for _, r := range b.Previous {
@@ -161,6 +178,18 @@ func FindingsMessage(r task.Review) string {
 	s.WriteString(`
 Address the findings under your implementation instructions, then commit and push to the same branch and pull request. End with the same JSON outcome: pr_opened (with the same PR), blocked, or failed.
 `)
+	return s.String()
+}
+
+// LocalFindingsMessage resumes the implementer of a task reviewed before its PR. The
+// fix stays local and comes back with the updated proposed description.
+func LocalFindingsMessage(r task.Review) string {
+	var s strings.Builder
+	fmt.Fprintf(&s, "Review round %d of your local change by %s requested changes.\n\n%s\n\n", r.Round, r.Reviewer, orNone(r.Summary, ""))
+	writeFindings(&s, r.Findings)
+	s.WriteString("\nAddress the findings under your implementation instructions. ")
+	s.WriteString(localFinishRule)
+	s.WriteString("End with the same JSON outcome: review_ready, blocked, or failed.\n")
 	return s.String()
 }
 
