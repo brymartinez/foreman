@@ -4,7 +4,8 @@
 cmd/foreman           wiring: build adapters, open the dashboard or run a task
 internal/cli          argv -> Command (launch flags, knowledge export and ingest, __run,
                       and __learn); no I/O beyond parsing
-internal/config       config.yaml: directories, budgets, learning, and their validation
+internal/config       config.yaml: directories, budgets, learning, default source, and
+                      their validation, rejecting unknown keys
 internal/routing      routing.yaml: profiles, rules, default, and their validation
 internal/render       terminal formatting of app results
 internal/tui          the dashboard: pure Model and Frame, one terminal loop
@@ -150,10 +151,11 @@ app.Reset             -> FAILED with no live runner only
                          branch -D; delete the log
                          store: clear the list, or keep what failed for the next
                          start and mark the removal finished
-foreman [-a|--auto|--no-auto] [-s github|linear]
-                      -> the dashboard, until q or ctrl+c. A launch flag sets auto
-                         mode for this session and saves nothing. GitHub is the default
-                         source; auto mode starts off until a choice is saved.
+foreman [-a|--auto|--no-auto] [-s github|linear|all] [--mentions|--no-mentions]
+                      -> the dashboard, until q or ctrl+c. A launch flag overrides
+                         its setting for this launch and saves nothing. The source is
+                         -s, else default_source, else github; auto mode starts off
+                         until a choice is saved.
                          every 1s : app.Tasks re-reads the task files and, when open,
                                     reads the bytes the runner added to the selected
                                     task's log; no GitHub call
@@ -254,13 +256,26 @@ the same commit. The commit message records why it changed.
   check run on each dashboard refresh. Rejected: a
   daemon, a watcher, or a runner that waits for CI.
 - **The dashboard is the only interface for tasks.** Bare `foreman` opens it;
-  `-a`/`--auto` and `--no-auto` set auto mode for the session, `-s github|linear`
-  selects an inbox source (GitHub by default), and `-c` edits the config. Auto mode
-  defaults to off until a choice is saved. The other verbs are
+  `-c` edits the config. The other verbs are
   `knowledge export` and `knowledge ingest`, which move a repository's knowledge and
   need no stage files, and the hidden `__run` and `__learn`. Task subcommands were
   dropped because they duplicated the dashboard, and a piped `foreman` still prints
   usage.
+- **Launch flags override; files configure.** A dashboard launch flag overrides one
+  setting for one launch and writes nothing: `-s github|linear|all` over
+  `default_source`, `--mentions`/`--no-mentions` over `mentions`, and
+  `-a`/`--auto`/`--no-auto` over the choice the `a` key saves in `state.json`. Without a
+  flag, the config key applies, then the built-in default (`github`, mentions shown).
+  A missing saved auto choice means off, and `config.yaml` has no auto on/off key, so
+  toggling never rewrites the config. `internal/cli` records only what was typed, and
+  `cmd/foreman` resolves it against config, because the piped-usage path parses argv
+  before any config loads. `-c` takes no launch flag. Command flags such as
+  `knowledge export -o` and `knowledge ingest --repo --rebind --agent --dry-run` are
+  operation inputs, not overrides; ingest without `--agent` uses `auto.agent`. Every
+  other setting lives in `config.yaml` or `routing.yaml` and has no flag.
+- **Unknown config keys are errors.** `config.Load` decodes with yaml's known-fields
+  check, so a misspelled or retired key fails naming the key and line instead of
+  silently keeping a default. An empty file still loads.
 - **One detached runner per task.** `App.Start`, `App.Respond`, `App.Resume`, and the gate spawn
   `foreman __run owner/repo#N` with `Setsid`, so closing the terminal doesn't stop it.
   The runner inherits a locked file named for its PID in `log_dir`. A runner is alive
@@ -700,9 +715,10 @@ the same commit. The commit message records why it changed.
   repositories and overrides `exclude_repositories`; otherwise the exclude list hides
   its repositories. Mapped repositories discover issues through Linear, while their
   GitHub PR search results remain in the refresh report. Unmapped repositories discover
-  issues through GitHub. `-s github` and `-s linear` limit inbox
-  discovery to one tracker. A missing Linear key blocks startup only when a visible
-  repository needs it. A failed source leaves successful results and a warning, while
+  issues through GitHub. The resolved source (`-s`, else `default_source`) limits
+  inbox discovery to `github` or `linear`; `all` becomes the empty source, which
+  selects both. A missing Linear key blocks startup only when the source is `linear`
+  or `all` and a visible repository is mapped. A failed source leaves successful results and a warning, while
   auto mode waits for all selected sources to refresh successfully. The inbox groups
   selectable issues under GITHUB and LINEAR. `App.InboxSources` drops filtered items before
   `Reconcile`, so the configured view writes no records for them and reports no waiting

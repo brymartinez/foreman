@@ -653,7 +653,8 @@ scenario_inbox() {
 	check "the include list shows its repositories" contains "$sandbox/include.txt" "acme/other#5"
 	check "the include list beats the exclude list" contains "$sandbox/include.txt" "acme/ignored#7"
 	check "the include list hides other repositories" bash -c "! grep -q 'acme/widgets#43' '$sandbox/include.txt'"
-	check "the inbox names the configured view" contains "$sandbox/include.txt" "INBOX · configured repos"
+	dash --no-auto -s all -- refreshed print >"$sandbox/include-all.txt" 2>/dev/null
+	check "the inbox names the configured view" contains "$sandbox/include-all.txt" "INBOX · configured repos"
 	dash -- refreshed keys=v print >"$sandbox/view.txt" 2>/dev/null
 	check "v keeps the configured repository filter" bash -c "! grep -q 'acme/widgets#43' '$sandbox/view.txt'"
 	cp "$sandbox/config.exclude" "$sandbox/config.yaml"
@@ -664,6 +665,9 @@ scenario_inbox() {
 	check "-c runs an editor with arguments" bash -c "cd '$sandbox' && EDITOR='editor -w' VISUAL= '$work/foreman' -c </dev/null && grep -qF '$sandbox/config.yaml' '$sandbox/edited'"
 	check "-c prefers VISUAL" bash -c "cd '$sandbox' && rm '$sandbox/edited' && VISUAL='editor -w' EDITOR=false '$work/foreman' -c </dev/null && test -f '$sandbox/edited'"
 	cp "$sandbox/config.yaml" "$sandbox/config.good"
+	echo "mentoins: false" >>"$sandbox/config.yaml"
+	check "a misspelled config key stops the dashboard and names the key" bash -c "! dash -- 2>'$sandbox/unknown-key.txt' && grep -qF mentoins '$sandbox/unknown-key.txt'"
+	cp "$sandbox/config.good" "$sandbox/config.yaml"
 	printf 'exclude_repositories:\n  - "acme/typo\\""\n' >>"$sandbox/config.yaml"
 	check "an invalid config stops the dashboard" bash -c "! dash -- 2>/dev/null"
 	check "and -c does not fix it by itself" bash -c "cd '$sandbox' && ! EDITOR=true VISUAL= '$work/foreman' -c 2>'$sandbox/edit-err.txt' </dev/null"
@@ -688,7 +692,7 @@ linear_projects:
 EOF
 	issue 43 "GitHub work" '[{"name":"triaged"}]'
 	echo "[$(hit acme/widgets 43 'GitHub work'),$(hit acme/linear 44 'Mapped GitHub work')]" >"$state/search-issues-assignee.json"
-	dash -- refreshed print >"$sandbox/mixed.txt" 2>/dev/null
+	dash --no-auto -s all -- refreshed print >"$sandbox/mixed.txt" 2>/dev/null
 	check "the mixed inbox shows the GitHub section" contains "$sandbox/mixed.txt" "GITHUB"
 	check "the mixed inbox shows the Linear section" contains "$sandbox/mixed.txt" "LINEAR"
 	check "the mixed inbox shows both issues" bash -c "grep -qF 'acme/widgets#43' '$sandbox/mixed.txt' && grep -qF 'acme/linear · LIN-7' '$sandbox/mixed.txt'"
@@ -698,7 +702,7 @@ EOF
 	dash --no-auto -s linear -- refreshed print >"$sandbox/linear.txt" 2>/dev/null
 	check "the Linear filter hides GitHub inbox issues" bash -c "grep -qF 'LIN-7' '$sandbox/linear.txt' && ! grep -qF 'GITHUB' '$sandbox/linear.txt'"
 	touch "$state/linear-fail"
-	dash --auto -- refreshed print >"$sandbox/failed.txt" 2>/dev/null
+	dash --auto -s all -- refreshed print >"$sandbox/failed.txt" 2>/dev/null
 	check "a failed Linear refresh keeps GitHub results with a warning" bash -c "grep -qF 'acme/widgets#43' '$sandbox/failed.txt' && grep -qF 'warning' '$sandbox/failed.txt'"
 	check "a failed mixed refresh blocks all auto starts" grep -q '^state: DISCOVERED' "$sandbox/tasks/acme-widgets-43.md"
 	rm -f "$state/linear-fail"
@@ -719,10 +723,13 @@ EOF
 	check "the GitHub-only view hides delegated Linear work" bash -c "! grep -qF 'LIN-7' '$sandbox/github-delegated.txt'"
 	dash --no-auto -s linear -- refreshed print >"$sandbox/linear-delegated.txt" 2>/dev/null
 	check "the Linear-only view shows delegated Linear work" contains "$sandbox/linear-delegated.txt" "LIN-7"
+	dash --no-auto -- refreshed print >"$sandbox/default-delegated.txt" 2>/dev/null
+	check "the built-in default source hides delegated Linear work" bash -c "! grep -qF 'LIN-7' '$sandbox/default-delegated.txt'"
+	echo "default_source: all" >>"$sandbox/config.yaml"
 	dash --no-auto -- refreshed print >"$sandbox/both-delegated.txt" 2>/dev/null
-	check "the view of both sources shows delegated Linear work" contains "$sandbox/both-delegated.txt" "LIN-7"
+	check "default_source all shows delegated Linear work" contains "$sandbox/both-delegated.txt" "LIN-7"
 	unset LINEAR_API_KEY
-	check "GitHub-only use needs no Linear key" dash --no-auto -s github -- refreshed
+	check "-s github overrides default_source and needs no Linear key" dash --no-auto -s github -- refreshed
 	check "mixed use without a Linear key gives a setup error" bash -c "! dash -- 2>'$sandbox/missing-key.txt' && grep -qF LINEAR_API_KEY '$sandbox/missing-key.txt'"
 	unset FOREMAN_LINEAR_ENDPOINT
 }
@@ -905,7 +912,7 @@ scenario_tui() {
 	setup tui
 	foreman </dev/null >"$sandbox/usage.txt" 2>&1
 	check "foreman exits 0 on a pipe" test $? -eq 0
-	check "and prints usage" contains "$sandbox/usage.txt" "foreman -a, --auto"
+	check "and prints usage" contains "$sandbox/usage.txt" "-a, --auto"
 	check "the usage names -c" contains "$sandbox/usage.txt" "foreman -c"
 	check "the usage lists no removed command" bash -c "! grep -qE 'foreman (inbox|status|show|start|respond|resume|cancel|clean|config|logs)' '$sandbox/usage.txt'"
 	local cmd
@@ -919,7 +926,7 @@ scenario_tui() {
 	mv "$sandbox/stages/implement.md" "$sandbox/implement.md"
 	foreman </dev/null >"$sandbox/broken.txt" 2>&1
 	check "a missing stage file still gets usage on a pipe" test $? -eq 0
-	check "and prints usage, not the error" contains "$sandbox/broken.txt" "foreman -a, --auto"
+	check "and prints usage, not the error" contains "$sandbox/broken.txt" "-a, --auto"
 	mv "$sandbox/implement.md" "$sandbox/stages/implement.md"
 
 	local saved="$sandbox/home/.local/share/foreman/state.json" version
