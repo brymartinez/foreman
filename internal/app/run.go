@@ -66,7 +66,7 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, token string, l
 		if err != nil || done {
 			return err
 		}
-	} else if len(rec.UnhandledFeedback()) > 0 && rec.Delegation.PR != 0 && reviewCovers(rec, rec.Delegation.PRHead) {
+	} else if len(rec.UnhandledFeedback()) > 0 && rec.Delegation.PR != 0 && reviewCovers(rec, rec.Delegation.PRHead, rec.Delegation.PRDigest) {
 		// A task left by the old feedback flow already passed review. Hand it
 		// back without resuming the implementer on the same comments.
 		_, err = a.update(final, rec.Key, existing(func(cur *task.Record) {
@@ -576,7 +576,7 @@ func applyFeedbackTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runEr
 	d := rec.Delegation
 	// The same bar the gate applies: a clean review of this head and CI that finished.
 	// Without both, the task stays under review and the gate hands it over.
-	if reviewCovers(rec, pr.HeadSHA) && ci != nil && ci.State != task.CIPending {
+	if reviewCovers(rec, pr.HeadSHA, task.ProposalDigest(pr.Title, pr.Body)) && ci != nil && ci.State != task.CIPending {
 		rec.State = task.ReadyForHuman
 		rec.LastOutcome = &task.Outcome{Status: "feedback_answered",
 			Summary: fmt.Sprintf("answered %d %s on PR #%d; no change was needed", len(comments), plural(len(comments), "comment", "comments"), d.PR), At: now}

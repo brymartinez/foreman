@@ -293,3 +293,26 @@ func TestCancelledFeedbackTurnIsRecordedAsCancelled(t *testing.T) {
 		t.Errorf("log = %q", log.String())
 	}
 }
+
+func TestOldFeedbackDoesNotHandOverAnEditedDescriptionWithoutReviews(t *testing.T) {
+	f := newFixture()
+	key := waiting(t, f)
+	pr := f.gh.prs[912]
+	pr.Body = "Retry 5xx and 429.\n\nCloses #825"
+	f.gh.prs[912] = pr
+	rec := f.store.recs[key]
+	// The gate stored the new description's digest when it sent the task back.
+	rec.State, rec.Delegation.PRDigest = task.Failed, task.ProposalDigest(pr.Title, pr.Body)
+	reviews := len(rec.Reviews)
+	f.app.ReplyToPRFeedback = false
+	if _, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Issue: key.Number, Agent: task.Claude}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if len(got.Reviews) != reviews+2 || !strings.HasSuffix(kinds(got), "self competing") || got.LatestCompeting().Proposal != got.Delegation.PRDigest {
+		t.Fatalf("state %s reviews %s; want a self-review and a competing review of the new description", got.State, kinds(got))
+	}
+}

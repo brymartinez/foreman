@@ -259,6 +259,9 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		}
 		if was != task.PRClosed && prev != nil && prev.Branch == wt.Branch && (sameAgent || (a.ReplyToPRFeedback && len(cur.UnhandledFeedback()) > 0)) {
 			cur.Delegation.PR, cur.Delegation.PRURL, cur.Delegation.PRHead = prev.PR, prev.PRURL, prev.PRHead
+			// The description digest goes with the head: without it, a review of an
+			// earlier description would cover the kept PR.
+			cur.Delegation.PRDigest = prev.PRDigest
 			// The same PR keeps its conflict repair: a spent one is not repeated, and one a
 			// dead runner left pending is finished by this run.
 			cur.Delegation.ConflictAttempts, cur.Delegation.ConflictPending = prev.ConflictAttempts, prev.ConflictPending
