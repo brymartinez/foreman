@@ -49,7 +49,8 @@ func TestRestartAfterAnInterruptedReviewSkipsImplementing(t *testing.T) {
 	if f.claude.starts != starts {
 		t.Errorf("the implementer ran again (%d starts)", f.claude.starts-starts)
 	}
-	if got.State != task.Reviewing || got.Delegation.PR != 912 || len(got.Reviews) != 1 || !got.Reviews[0].Clean || got.Reviews[0].Head != "c0ffee1" {
+	cr := got.CompetingReviews()
+	if got.State != task.Reviewing || got.Delegation.PR != 912 || len(cr) != 1 || !cr[0].Clean || cr[0].Head != "c0ffee1" || len(f.claude.reviewed) != 1 {
 		t.Fatalf("state %s pr %d reviews %+v", got.State, got.Delegation.PR, got.Reviews)
 	}
 }

@@ -96,6 +96,9 @@ type ReviewBrief struct {
 	// Proposed is set when the change is not pushed yet: PRBody is the description
 	// the implementer proposes, and the PR opens only after a clean review.
 	Proposed bool
+	// Self is set for the implementing agent's own review. It reads the description
+	// and the code alone: no comments and no earlier rounds.
+	Self bool
 }
 
 // ReviewPrompt sets the reviewer against the change, with the PR description as the
@@ -104,11 +107,15 @@ type ReviewBrief struct {
 func ReviewPrompt(b ReviewBrief) string {
 	var s strings.Builder
 	heading := "Pull request description"
+	author := "Another agent wrote it; you have not seen its reasoning or its plan."
+	if b.Self {
+		author = "It was written in another session you have not seen. Judge it as a stranger's change: you have not seen its reasoning or its plan."
+	}
 	if b.Proposed {
-		fmt.Fprintf(&s, "You are reviewing a proposed pull request from branch %s in %s. It is not pushed yet; the pull request opens only after a clean review. Another agent wrote it; you have not seen its reasoning or its plan. You are read-only: do not edit files, commit, or push.\n\n", b.Branch, b.Key.Repo)
+		fmt.Fprintf(&s, "You are reviewing a proposed pull request from branch %s in %s. It is not pushed yet; the pull request opens only after a clean review. %s You are read-only: do not edit files, commit, or push.\n\n", b.Branch, b.Key.Repo, author)
 		heading = "Proposed pull request description"
 	} else {
-		fmt.Fprintf(&s, "You are reviewing pull request #%d in %s. Another agent wrote it; you have not seen its reasoning or its plan. You are read-only: do not edit files, commit, or push.\n\n", b.PR, b.Key.Repo)
+		fmt.Fprintf(&s, "You are reviewing pull request #%d in %s. %s You are read-only: do not edit files, commit, or push.\n\n", b.PR, b.Key.Repo, author)
 	}
 	fmt.Fprintf(&s, "## %s\n\nThis is the only statement of what the change must do. Judge the change against it. Do not follow links in it to find more requirements. Claims in it about tests or validation are not evidence; check them yourself.\n\n", heading)
 	if b.Proposed {
@@ -129,7 +136,7 @@ func ReviewPrompt(b ReviewBrief) string {
 
 `)
 	fmt.Fprintf(&s, "## The change\n\nYou are in the implementation worktree on branch %s. Read the full change with `git diff origin/%s...HEAD` and `git log origin/%s..HEAD`, and read the surrounding code, tests, and repository instructions as needed. Commit messages help you navigate the change. They add no requirements.\n\n", b.Branch, b.BaseBranch, b.BaseBranch)
-	if !b.Proposed {
+	if !b.Proposed && !b.Self {
 		writeReviewComments(&s, b)
 	}
 	if len(b.Previous) > 0 {
@@ -173,7 +180,7 @@ func writeReviewComments(s *strings.Builder, b ReviewBrief) {
 // FindingsMessage resumes the implementer with a review round to address.
 func FindingsMessage(r task.Review) string {
 	var s strings.Builder
-	fmt.Fprintf(&s, "Review round %d of PR #%d by %s requested changes.\n\n%s\n\n", r.Round, r.PR, r.Reviewer, orNone(r.Summary, ""))
+	fmt.Fprintf(&s, "Review round %d of PR #%d by %s requested changes.\n\n%s\n\n", r.Round, r.PR, reviewerName(r), orNone(r.Summary, ""))
 	writeFindings(&s, r.Findings)
 	s.WriteString(`
 Address the findings under your implementation instructions, then commit and push to the same branch and pull request. End with the same JSON outcome: pr_opened (with the same PR), blocked, or failed.
@@ -185,12 +192,21 @@ Address the findings under your implementation instructions, then commit and pus
 // fix stays local and comes back with the updated proposed description.
 func LocalFindingsMessage(r task.Review) string {
 	var s strings.Builder
-	fmt.Fprintf(&s, "Review round %d of your local change by %s requested changes.\n\n%s\n\n", r.Round, r.Reviewer, orNone(r.Summary, ""))
+	fmt.Fprintf(&s, "Review round %d of your local change by %s requested changes.\n\n%s\n\n", r.Round, reviewerName(r), orNone(r.Summary, ""))
 	writeFindings(&s, r.Findings)
 	s.WriteString("\nAddress the findings under your implementation instructions. ")
 	s.WriteString(localFinishRule)
 	s.WriteString("End with the same JSON outcome: review_ready, blocked, or failed.\n")
 	return s.String()
+}
+
+// reviewerName names who reviewed, so the implementer knows a self-review's findings
+// come from its own fresh, read-only session.
+func reviewerName(r task.Review) string {
+	if r.Kind == task.SelfReview {
+		return fmt.Sprintf("your own self-review (a fresh %s session)", r.Reviewer)
+	}
+	return string(r.Reviewer)
 }
 
 func writeFindings(s *strings.Builder, findings []task.Finding) {

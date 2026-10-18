@@ -220,7 +220,7 @@ func TestReviewBeforePRReviewsTheLocalCommitThenOpensThePR(t *testing.T) {
 	if got.State != task.Reviewing || d.PR != 912 || d.PRHead != "commit1" || d.LocalHead != "" || d.ProposedBody != "" {
 		t.Fatalf("state %s delegation %+v", got.State, d)
 	}
-	if r := got.LatestReview(); r == nil || !r.Clean || r.PR != 912 || r.Head != "commit1" || len(got.Reviews) != 1 {
+	if r := got.LatestReview(); r == nil || !r.Clean || r.PR != 912 || r.Head != "commit1" || len(got.CompetingReviews()) != 1 {
 		t.Fatalf("reviews = %+v", got.Reviews)
 	}
 	if got.ReviewPending() || got.PhaseOf() != task.PhaseCI {
@@ -250,7 +250,7 @@ func TestReviewBeforePRFixesFindingsLocallyAndOpensWithTheUpdatedDescription(t *
 	if got.State != task.Reviewing || got.Delegation.PR != 912 || got.Delegation.PRHead != "commit2" || openTurns(f) != 1 {
 		t.Fatalf("state %s delegation %+v open turns %d", got.State, got.Delegation, openTurns(f))
 	}
-	if got.Reviews[0].Head != "commit1" || got.Reviews[0].PR != 0 || got.Reviews[1].Head != "commit2" || got.Reviews[1].PR != 912 {
+	if cr := got.CompetingReviews(); cr[0].Head != "commit1" || cr[0].PR != 0 || cr[1].Head != "commit2" || cr[1].PR != 912 {
 		t.Fatalf("reviews = %+v", got.Reviews)
 	}
 	// Local history may be rewritten before the push, so each commit only has to

@@ -570,7 +570,7 @@ func (r *Record) CurrentChange() (head, proposal string) {
 // of another head or description as current.
 func (r *Record) selfCovers(review *Review) bool {
 	head, proposal := r.CurrentChange()
-	return review != nil && review.Kind == SelfReview && head != "" && review.PR == r.Delegation.PR && review.Head == head && review.Proposal == proposal
+	return review != nil && review.Kind == SelfReview && review.PR == r.Delegation.PR && review.Head == head && review.Proposal == proposal
 }
 
 // SelfReviewPassed reports a clean self-review of the current change and description.

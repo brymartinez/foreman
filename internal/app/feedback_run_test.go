@@ -116,13 +116,13 @@ func TestFeedbackTurnWithoutCommitsReturnsReady(t *testing.T) {
 func TestFeedbackTurnWithCommitsIsReviewed(t *testing.T) {
 	f := newFixture()
 	key := waiting(t, f)
-	reviews := len(f.store.recs[key].Reviews)
+	reviews := len(f.store.recs[key].CompetingReviews())
 	f.claude.turn = prTurn("sid-1")
 	movesHead(f, "d00d002")
 
 	rec := resumeRun(t, f, key)
-	if len(rec.Reviews) != reviews+1 {
-		t.Fatalf("%d review rounds, want %d", len(rec.Reviews), reviews+1)
+	if got := len(rec.CompetingReviews()); got != reviews+1 || !rec.SelfReviewPassed() {
+		t.Fatalf("%d competing review rounds, want %d after a self-review of the new head", got, reviews+1)
 	}
 	if rec.State != task.Reviewing || rec.CI != nil {
 		t.Fatalf("state = %s ci = %+v; the gate must check CI for the new head", rec.State, rec.CI)
@@ -244,8 +244,8 @@ func TestCommentsDuringARunAreAnsweredBeforeHandover(t *testing.T) {
 	if f.claude.starts != 1 {
 		t.Errorf("implementer started %d times", f.claude.starts)
 	}
-	if rec.State != task.Reviewing || len(rec.Reviews) != 1 {
-		t.Errorf("state = %s reviews = %d; the clean review still stands", rec.State, len(rec.Reviews))
+	if rec.State != task.Reviewing || len(rec.CompetingReviews()) != 1 {
+		t.Errorf("state = %s reviews = %d; the clean review still stands", rec.State, len(rec.CompetingReviews()))
 	}
 }
 

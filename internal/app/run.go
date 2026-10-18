@@ -145,6 +145,9 @@ type taskRun struct {
 	feedback   []PRComment  // the comments the next stepAnswer answers
 	rounds     int          // how many times this run has answered comments
 	plan       issuePlan    // the plan on the issue, read before a planning turn
+	// selfPassed is set when this run's self-review just passed the change, so the
+	// competing review of the same change follows without a second conflict check.
+	selfPassed bool
 }
 
 func (r *taskRun) loop(next step) error {
@@ -265,27 +268,60 @@ func (r *taskRun) pickUpReview() (step, error) {
 	return stepReview, nil
 }
 
-// review reviews the PR head. Findings go back to the implementer; a clean review
-// hands over; anything else ends the run.
+// review reviews the current change: the implementer's self-review until a clean one
+// covers the head and description, then the competing review. Findings from either go
+// back to the implementer; a clean self-review goes on to the competing review; a
+// clean competing review hands over; anything else ends the run.
 func (r *taskRun) review() (step, error) {
 	a := r.a
-	// Every pass, including the first and one after a fix, reviews a PR that merges
-	// cleanly into its latest base.
-	rec, ready, err := a.resolveConflicts(r.ctx, r.final, r.rec, r.log)
-	if err != nil || !ready {
-		return stepDone, err
+	// Every change, including the first and one after a fix, is reviewed as a PR that
+	// merges cleanly into its latest base. The check runs once per change, before its
+	// self-review.
+	rec := r.rec
+	if !r.selfPassed {
+		var ready bool
+		var err error
+		if rec, ready, err = a.resolveConflicts(r.ctx, r.final, r.rec, r.log); err != nil || !ready {
+			return stepDone, err
+		}
+		r.rec = rec
 	}
-	r.rec = rec
-	review, reviewer, reviewErr := a.review(r.ctx, rec, r.log)
+	r.selfPassed = false
+	var err error
+	title, body, reviewErr := a.reviewDescription(r.ctx, rec)
+	// The PR description can change without a new head. Storing what the review reads
+	// makes an edited description need a new self-review, before and after a restart.
+	if digest := task.ProposalDigest(title, body); reviewErr == nil && !rec.LocalReview() && rec.Delegation.PRDigest != digest {
+		if rec, err = a.update(r.final, rec.Key, existing(func(cur *task.Record) { cur.Delegation.PRDigest = digest })); err != nil {
+			return stepDone, err
+		}
+		r.rec = rec
+	}
+	kind := rec.NextReview()
+	reviewer := rec.Delegation.Reviewer
+	if kind == task.SelfReview {
+		reviewer = rec.Delegation.Implementer.Agent
+	}
+	var review agent.ReviewOutcome
+	switch {
+	case reviewErr != nil:
+	case kind == task.SelfReview:
+		review, reviewErr = a.selfReview(r.ctx, rec, title, body, r.log)
+	default:
+		review, reviewer, reviewErr = a.review(r.ctx, rec, title, body, r.log)
+	}
 	if rec, err = a.update(r.final, rec.Key, existing(func(cur *task.Record) {
-		cur.Delegation.Reviewer = reviewer
-		applyReview(cur, review, reviewErr, a.Now())
+		if kind == task.CompetingReview {
+			cur.Delegation.Reviewer = reviewer
+		}
+		applyReview(cur, kind, reviewer, review, reviewErr, a.Now())
 		if reviewErr != nil {
 			applyStop(r.ctx, cur, "review", r.log, a.Now())
 		}
 		addUsage(&cur.Usage, review.Usage)
-		// Every fix is reviewed; the developer is asked only once fix_rounds fixes
-		// still leave findings. A local review keeps the task WORKING when clean.
+		// Every fix is reviewed; the developer is asked only once fix_rounds fixes,
+		// requested by either reviewer, still leave findings. A local review keeps the
+		// task WORKING when clean.
 		if reviewErr == nil && !review.Clean && cur.State == task.Working && cur.ChangeRequestsSinceDecision() > a.fixRounds() {
 			escalateReview(cur, a.fixRounds(), a.Now())
 		}
@@ -294,6 +330,9 @@ func (r *taskRun) review() (step, error) {
 	}
 	r.rec = rec
 	switch {
+	case kind == task.SelfReview && rec.SelfReviewPassed() && (rec.State == task.Working || rec.State == task.Reviewing):
+		r.selfPassed = true
+		return stepReview, nil
 	case rec.State == task.Working && rec.OpenPending():
 		return stepOpenPR, nil
 	case rec.State == task.Working:
@@ -529,9 +568,61 @@ func applyFeedbackTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runEr
 	}
 }
 
-// review runs a fresh, read-only session. When the competing agent is unavailable,
-// the implementer's agent reviews in a separate session.
-func (a App) review(ctx context.Context, rec *task.Record, log io.Writer) (agent.ReviewOutcome, task.Agent, error) {
+// reviewDescription is the description a review judges the change by: the PR's, or
+// the proposed one for a local commit. A review without one cannot pass.
+func (a App) reviewDescription(ctx context.Context, rec *task.Record) (title, body string, err error) {
+	d, target := rec.Delegation, reviewTarget(rec)
+	if rec.LocalReview() {
+		title, body = d.ProposedTitle, d.ProposedBody
+	} else {
+		pr, err := a.GitHub.GetPullRequest(ctx, task.Key{Repo: rec.Repo, Number: d.PR})
+		if err != nil {
+			return "", "", fmt.Errorf("review %s: %w", target, err)
+		}
+		title, body = pr.Title, pr.Body
+	}
+	if strings.TrimSpace(body) == "" {
+		return "", "", fmt.Errorf("review %s: the pull request description is empty", target)
+	}
+	return title, body, nil
+}
+
+// reviewTarget names the change under review for the log.
+func reviewTarget(rec *task.Record) string {
+	if rec.LocalReview() {
+		return "the local branch " + rec.Delegation.Branch
+	}
+	return fmt.Sprintf("PR #%d", rec.Delegation.PR)
+}
+
+// selfReview runs the implementing agent's review in a fresh, read-only session. It
+// reads the description and the code alone: not the implementer's session, the issue,
+// the plan, the PR comments, or earlier findings. It never falls back to another
+// agent, so an error stops the task instead of skipping to the competing review.
+func (a App) selfReview(ctx context.Context, rec *task.Record, title, body string, log io.Writer) (agent.ReviewOutcome, error) {
+	d := rec.Delegation
+	adapter, ok := a.Agents[d.Implementer.Agent]
+	if !ok {
+		return agent.ReviewOutcome{}, fmt.Errorf("agent %s is not configured", d.Implementer.Agent)
+	}
+	instructions, err := a.Stages.Resolve(d.Worktree, task.StageReview)
+	if err != nil {
+		return agent.ReviewOutcome{}, err
+	}
+	brief := agent.ReviewBrief{Key: rec.Key, PR: d.PR, PRTitle: title, PRBody: body, Branch: d.Branch, BaseBranch: strings.TrimPrefix(d.BaseRef, "origin/"),
+		StageInstructions: instructions.Content(), Passes: a.reviewRounds(), Proposed: rec.LocalReview(), Self: true}
+	if err := a.startAttempt(ctx, rec); err != nil {
+		return agent.ReviewOutcome{}, err
+	}
+	in := agent.StartInput{Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ReviewerBudgetUSD, Prompt: agent.ReviewPrompt(brief), Step: agent.StepReview}
+	fmt.Fprintf(log, "foreman: %s self-reviewing %s (round %d)\n", adapter.Name(), reviewTarget(rec), len(rec.Reviews)+1)
+	return adapter.Review(ctx, in)
+}
+
+// review runs the competing agent's fresh, read-only session. When the competing
+// agent is unavailable, the implementer's agent reviews in a separate session. It sees
+// only the competing rounds, never a self-review.
+func (a App) review(ctx context.Context, rec *task.Record, title, body string, log io.Writer) (agent.ReviewOutcome, task.Agent, error) {
 	d := rec.Delegation
 	chosen := d.Reviewer
 	if chosen != d.Implementer.Agent && a.Quota != nil {
@@ -548,28 +639,15 @@ func (a App) review(ctx context.Context, rec *task.Record, log io.Writer) (agent
 	if !ok {
 		return agent.ReviewOutcome{}, chosen, fmt.Errorf("reviewer %s is not configured", chosen)
 	}
-	// The PR description is the reviewer's only statement of requirements, so a review
-	// without one cannot pass. A local commit is reviewed with the proposed one.
-	local, target := rec.LocalReview(), fmt.Sprintf("PR #%d", d.PR)
-	var body string
-	if local {
-		target, body = "the local branch "+d.Branch, d.ProposedBody
-	} else {
-		pr, err := a.GitHub.GetPullRequest(ctx, task.Key{Repo: rec.Repo, Number: d.PR})
-		if err != nil {
-			return agent.ReviewOutcome{}, chosen, fmt.Errorf("review %s: %w", target, err)
-		}
-		body = pr.Body
-	}
-	if strings.TrimSpace(body) == "" {
-		return agent.ReviewOutcome{}, chosen, fmt.Errorf("review %s: the pull request description is empty", target)
-	}
+	// The PR description is the reviewer's only statement of requirements. A local
+	// commit is reviewed with the proposed one.
+	local, target := rec.LocalReview(), reviewTarget(rec)
 	instructions, err := a.Stages.Resolve(d.Worktree, task.StageReview)
 	if err != nil {
 		return agent.ReviewOutcome{}, chosen, err
 	}
-	brief := agent.ReviewBrief{Key: rec.Key, PR: d.PR, PRTitle: d.ProposedTitle, PRBody: body, Branch: d.Branch, BaseBranch: strings.TrimPrefix(d.BaseRef, "origin/"),
-		StageInstructions: instructions.Content(), Previous: rec.Reviews, Passes: a.reviewRounds(), Proposed: local}
+	brief := agent.ReviewBrief{Key: rec.Key, PR: d.PR, PRTitle: title, PRBody: body, Branch: d.Branch, BaseBranch: strings.TrimPrefix(d.BaseRef, "origin/"),
+		StageInstructions: instructions.Content(), Previous: rec.CompetingReviews(), Passes: a.reviewRounds(), Proposed: local}
 	// Comments are history, not requirements, so the review goes on without them. A
 	// local commit has no PR to read them from.
 	if !local {
@@ -959,18 +1037,23 @@ func short(sha string) string {
 
 // applyReview records a review round. Findings send the task back to WORKING for the
 // implementer; a clean review leaves it REVIEWING for the readiness gate (gate.go).
-func applyReview(rec *task.Record, r agent.ReviewOutcome, reviewErr error, now time.Time) {
+// A self-review's error fails the task too: it never falls through to the competing
+// review. The round records the head and description it read, which is what later
+// decides whether it still covers the change.
+func applyReview(rec *task.Record, kind task.ReviewKind, reviewer task.Agent, r agent.ReviewOutcome, reviewErr error, now time.Time) {
+	name := "review"
+	if kind == task.SelfReview {
+		name = "self-review"
+	}
 	if reviewErr != nil {
-		failTask(rec, fmt.Sprintf("%s review failed: %v", rec.Delegation.Reviewer, reviewErr), now)
+		failTask(rec, fmt.Sprintf("%s %s failed: %v", reviewer, name, reviewErr), now)
 		return
 	}
-	head, proposal := rec.Delegation.PRHead, ""
-	if rec.LocalReview() {
-		head, proposal = rec.Delegation.LocalHead, task.ProposalDigest(rec.Delegation.ProposedTitle, rec.Delegation.ProposedBody)
-	}
+	head, proposal := rec.CurrentChange()
 	rec.Reviews = append(rec.Reviews, task.Review{
 		Round:    len(rec.Reviews) + 1,
-		Reviewer: rec.Delegation.Reviewer,
+		Kind:     kind,
+		Reviewer: reviewer,
 		PR:       rec.Delegation.PR,
 		Head:     head,
 		Proposal: proposal,
@@ -980,7 +1063,11 @@ func applyReview(rec *task.Record, r agent.ReviewOutcome, reviewErr error, now t
 		At:       now,
 	})
 	if r.Clean {
-		rec.LastOutcome = &task.Outcome{Status: "review_clean", Summary: r.Summary, At: now}
+		status := "review_clean"
+		if kind == task.SelfReview {
+			status = "self_review_clean"
+		}
+		rec.LastOutcome = &task.Outcome{Status: status, Summary: r.Summary, At: now}
 		return
 	}
 	rec.State = task.Working

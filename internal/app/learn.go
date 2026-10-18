@@ -121,7 +121,7 @@ func (a App) LearningDue(rec *task.Record) (bool, error) {
 
 func cleanlyReviewed(rec *task.Record) bool {
 	for _, r := range rec.Reviews {
-		if r.Clean {
+		if r.Clean && r.Kind == task.CompetingReview {
 			return true
 		}
 	}
@@ -303,7 +303,7 @@ func (a App) learnAfterRun(rec *task.Record, log io.Writer) {
 	if !a.Learning || a.Knowledge == nil {
 		return
 	}
-	if r := rec.LatestReview(); r == nil || !r.Clean {
+	if r := rec.LatestCompeting(); r == nil || !r.Clean {
 		return
 	}
 	if due, err := a.LearningDue(rec); err != nil || !due {

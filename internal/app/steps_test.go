@@ -18,7 +18,9 @@ func TestPlanFixAndReviewTurnsCarryTheirSteps(t *testing.T) {
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{agent.StepPlan, agent.StepImplement, agent.StepImplement}; !slices.Equal(f.claude.steps, want) {
+	// The implementer's self-review of the PR comes before the competing review. The fix
+	// keeps the head, so its self-review still covers it.
+	if want := []string{agent.StepPlan, agent.StepImplement, agent.StepReview, agent.StepImplement}; !slices.Equal(f.claude.steps, want) {
 		t.Errorf("implementer steps = %q, want %q", f.claude.steps, want)
 	}
 	if want := []string{agent.StepReview, agent.StepReview}; !slices.Equal(f.codex.steps, want) {
@@ -44,8 +46,8 @@ func TestMergeGateTurnCarriesTheMergeStep(t *testing.T) {
 	f.wt.conflicts = [][]string{{"go.mod", "retry.go"}}
 	mergesTo(f, "merge01")
 	run(t, f, key)
-	// The first turn opens the PR; the merge turn follows it.
-	if len(f.claude.steps) != 2 || f.claude.steps[1] != agent.StepMerge {
+	// The first turn opens the PR; the merge turn follows it, then the self-review.
+	if len(f.claude.steps) != 3 || f.claude.steps[1] != agent.StepMerge {
 		t.Errorf("implementer steps = %q, want the second to be %q", f.claude.steps, agent.StepMerge)
 	}
 }
@@ -59,7 +61,7 @@ func TestConflictRepairFallbackGivesEachTurnTheMergeStep(t *testing.T) {
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{agent.StepMerge, agent.StepMerge}; !slices.Equal(f.claude.steps, want) {
+	if want := []string{agent.StepMerge, agent.StepMerge, agent.StepReview}; !slices.Equal(f.claude.steps, want) {
 		t.Errorf("implementer steps = %q, want the resume and the fresh turn both %q", f.claude.steps, want)
 	}
 }

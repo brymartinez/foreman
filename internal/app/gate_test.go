@@ -519,7 +519,7 @@ func TestGateReopenedPRReturnsToTheActiveList(t *testing.T) {
 	} {
 		f := newFixture()
 		key := reviewed(t, f)
-		tc.review(&f.store.recs[key].Reviews[0])
+		tc.review(f.store.recs[key].LatestCompeting())
 		setPR(f, "closed")
 		if _, _, err := f.app.Status(context.Background()); err != nil {
 			t.Fatal(err)
