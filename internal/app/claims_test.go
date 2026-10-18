@@ -369,28 +369,124 @@ func TestABlockingLimitationSendsTheChangeBackAndIsStored(t *testing.T) {
 	}
 }
 
-func TestALocalChangeIsReviewedWithItsClaimsAndOpensWithoutReplacingThem(t *testing.T) {
-	f := newFixture()
+// localClaimTask starts #825 with claim verification and review_before_pr, and queues
+// the plan and a review_ready turn of commit1 with retryClaims, then open.
+func localClaimTask(t *testing.T, f fixture, open ...agent.Turn) task.Key {
+	t.Helper()
 	f.app.ReviewBeforePR = true
 	key := claimTask(t, f)
 	delete(f.gh.prs, 912)
 	f.wt.checkpointHeads = []string{"commit1"}
 	ready := reviewReadyTurn("sid-2", proposedBody)
 	ready.Outcome.Claims = retryClaims
-	opened := claimedTurn("sid-2", []task.Claim{{Criteria: []string{"R1"}, Behavior: "something else", Evidence: "x.go", Check: "none"}})
-	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), ready, opened}
+	f.claude.turns = append([]agent.Turn{plannedTurn("sid-1"), ready}, open...)
+	return key
+}
+
+func TestALocalChangeIsReviewedWithItsClaimsAndOpensWithThem(t *testing.T) {
+	f := newFixture()
+	key := localClaimTask(t, f, claimedTurn("sid-2", retryClaims))
 	opensPR(t, f, "commit1", proposedTitle, proposedBody, 1)
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
 	if got.State != task.WaitingForCI || got.Delegation.PR != 912 || got.ReviewPending() {
-		t.Fatalf("state %s pr %d pending %t", got.State, got.Delegation.PR, got.ReviewPending())
+		t.Fatalf("state %s pr %d pending %t outcome %+v", got.State, got.Delegation.PR, got.ReviewPending(), got.LastOutcome)
+	}
+	if task.ClaimsDigest(got.Delegation.Claims) != task.ClaimsDigest(retryClaims) {
+		t.Fatalf("claims = %+v", got.Delegation.Claims)
+	}
+	if p := f.codex.reviewed[0]; !strings.Contains(p, "the client retries 5xx responses") || !strings.Contains(p, "## PRD") {
+		t.Errorf("the local review lacks the claims or the PRD:\n%s", p)
+	}
+	if open := f.claude.resumed[len(f.claude.resumed)-1]; !strings.Contains(open, `"claims"`) || !strings.Contains(open, "the client retries 5xx responses") {
+		t.Errorf("the open turn was not given the reviewed claims to return:\n%s", open)
+	}
+}
+
+func TestAnOpenTurnWithoutClaimsIsAskedForThemOnce(t *testing.T) {
+	f := newFixture()
+	key := localClaimTask(t, f, prTurn("sid-2"), claimedTurn("sid-2", retryClaims))
+	opensPR(t, f, "commit1", proposedTitle, proposedBody, 1)
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.WaitingForCI || got.Delegation.PR != 912 {
+		t.Fatalf("state %s pr %d outcome %+v", got.State, got.Delegation.PR, got.LastOutcome)
+	}
+	if last := f.claude.resumed[len(f.claude.resumed)-1]; !strings.Contains(last, "had no claims") {
+		t.Fatalf("resumed = %q, want a request for the claims", f.claude.resumed)
+	}
+}
+
+func TestAnOpenTurnWithOtherClaimsFailsTheTask(t *testing.T) {
+	f := newFixture()
+	other := []task.Claim{{Criteria: []string{"R1"}, Behavior: "something else", Evidence: "x.go", Check: "none"}}
+	key := localClaimTask(t, f, claimedTurn("sid-2", other))
+	opensPR(t, f, "commit1", proposedTitle, proposedBody, 1)
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Failed || !strings.Contains(got.LastOutcome.Summary, "not the reviewed claims") {
+		t.Fatalf("state %s outcome %+v", got.State, got.LastOutcome)
 	}
 	if task.ClaimsDigest(got.Delegation.Claims) != task.ClaimsDigest(retryClaims) {
 		t.Fatalf("claims = %+v; the open turn replaced the reviewed claims", got.Delegation.Claims)
 	}
-	if p := f.codex.reviewed[0]; !strings.Contains(p, "the client retries 5xx responses") || !strings.Contains(p, "## PRD") {
-		t.Errorf("the local review lacks the claims or the PRD:\n%s", p)
+}
+
+func TestAPRDEditedBeforeTheOpeningIsReviewedBeforeThePROpens(t *testing.T) {
+	f := newFixture()
+	key := localClaimTask(t, f, claimedTurn("sid-2", retryClaims))
+	opensPR(t, f, "commit1", proposedTitle, proposedBody, 2)
+	f.codex.onReview = func() {
+		if len(f.codex.reviewed) == 1 {
+			editPRD(t, f, "R1. Retry 5xx.\nR2. Never retry 4xx.")
+		}
+	}
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if kinds(got) != "self competing self competing" || got.State != task.WaitingForCI || got.Delegation.PR != 912 {
+		t.Fatalf("state %s pr %d reviews %s outcome %+v", got.State, got.Delegation.PR, kinds(got), got.LastOutcome)
+	}
+	if p := f.codex.reviewed[1]; !strings.Contains(p, "> R2. Never retry 4xx.") {
+		t.Errorf("the re-review did not read the edited PRD:\n%s", p)
+	}
+}
+
+func TestADeletedPRDStopsTheOpening(t *testing.T) {
+	f := newFixture()
+	key := localClaimTask(t, f, claimedTurn("sid-2", retryClaims))
+	opensPR(t, f, "commit1", proposedTitle, proposedBody, 1)
+	f.codex.onReview = func() { delete(f.gh.comments, prdComment(t, f).ID) }
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Failed || got.Delegation.PR != 0 || !strings.Contains(got.LastOutcome.Summary, "was deleted") {
+		t.Fatalf("state %s pr %d outcome %+v", got.State, got.Delegation.PR, got.LastOutcome)
+	}
+	if openTurns(f) != 0 {
+		t.Errorf("open turns = %d; the PR opened without its PRD", openTurns(f))
+	}
+}
+
+func TestAClaimsRetryThatAsksAQuestionInsteadFailsTheTask(t *testing.T) {
+	f := newFixture()
+	key := claimTask(t, f)
+	q := task.Question{Issue: "Retry 4xx?", Options: []task.Option{{Label: "A"}, {Label: "B"}}, Recommendation: "A"}
+	blocked := agent.Turn{Session: task.Session{Agent: task.Claude, ID: "sid-2"}, Outcome: agent.Outcome{Status: agent.Blocked, Summary: "?", Questions: []task.Question{q}}}
+	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2"), blocked}
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Failed || !strings.Contains(got.LastOutcome.Summary, "without the claim set") || len(got.Decisions) != 0 {
+		t.Fatalf("state %s outcome %+v decisions %d", got.State, got.LastOutcome, len(got.Decisions))
 	}
 }

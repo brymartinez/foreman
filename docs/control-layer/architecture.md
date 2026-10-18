@@ -705,11 +705,13 @@ the same commit. The commit message records why it changed.
   copied onto the delegation when a task that will plan starts (the CLI always enables
   it; a task that continues a PR has no PRD and starts without it). A restart keeps it,
   and a task file without it keeps the review workflow above. Its implementer returns,
-  with every `pr_opened` or `review_ready` except the turn that opens a reviewed PR, a
-  full claim set: per PRD acceptance criterion (criteria may share a claim), the
+  with every `pr_opened` or `review_ready`, a full claim set: per PRD acceptance criterion (criteria may share a claim), the
   behavior, the code and test evidence, and the check performed or why none was. A
-  turn without claims is resumed once to add them, then fails the task. The latest set
-  replaces the stored one. Claims stay in the task file: the prompts keep them out of
+  turn without claims is resumed once to add them; any answer but the same status with
+  claims fails the task. The latest set replaces the stored one. The turn that opens a
+  reviewed PR is given the reviewed claims and must return them unchanged, and before
+  it runs, or a matching PR is adopted, the PRD is read again: a changed PRD sends the
+  change back to review, and a missing one fails the task. Claims stay in the task file: the prompts keep them out of
   the PR, comments, commits, and worktree files, and Foreman never posts them. No agent
   call exists to verify them; both existing reviews do.
 - **Reviews test claims against the live PRD.** Before each review, the review step

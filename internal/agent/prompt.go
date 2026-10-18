@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -559,6 +560,9 @@ type OpenPRBrief struct {
 	Validation []task.Check
 	// Decisions are answers the implementer has not received yet.
 	Decisions []task.Decision
+	// Claims are the reviewed claims of a task with claim verification, which the
+	// turn returns unchanged.
+	Claims []task.Claim
 }
 
 // OpenPRPrompt has the implementer push the reviewed commit and open the PR. It is
@@ -589,6 +593,10 @@ Validation run on the reviewed commit:
 `, b.Head, b.Branch, b.Branch, b.BaseBranch, b.Branch, b.BodyFile, b.Title)
 	for _, c := range b.Validation {
 		fmt.Fprintf(&s, "- %s: passed %t\n", c.Command, c.Passed)
+	}
+	if len(b.Claims) > 0 {
+		claims, _ := json.Marshal(b.Claims)
+		fmt.Fprintf(&s, "\nWith \"pr_opened\", return these reviewed claims unchanged in \"claims\". Keep them out of the pull request and its comments.\n\n%s\n", claims)
 	}
 	return s.String()
 }

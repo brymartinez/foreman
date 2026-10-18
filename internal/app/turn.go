@@ -60,11 +60,13 @@ func (a App) runTurn(ctx context.Context, rec *task.Record, req turnRequest, che
 	}
 	turn, err := a.implement(ctx, rec, req, log)
 	turn, err = a.repairFailedCheckpoint(ctx, rec, req, turn, err, log)
-	if err == nil && req.openBodyFile != "" {
-		// The open turn pushes the reviewed change, whose claims are the reviewed ones.
-		turn.Outcome.Claims = nil
-	} else if err == nil {
+	if err == nil {
 		turn, err = a.requireClaims(ctx, rec, turn, log)
+	}
+	// The open turn pushes the reviewed change, so it returns the reviewed claims.
+	if d := rec.Delegation; err == nil && req.openBodyFile != "" && d.ClaimVerification && turn.Outcome.Status == agent.PROpened &&
+		task.ClaimsDigest(turn.Outcome.Claims) != task.ClaimsDigest(d.Claims) {
+		err = errors.New("the implementer opened the pull request with claims that are not the reviewed claims")
 	}
 	if err != nil {
 		return turnResult{turn: turn, err: err}
@@ -218,8 +220,9 @@ func (a App) requireClaims(ctx context.Context, rec *task.Record, turn agent.Tur
 		return turn, err
 	}
 	turn.Outcome = next.Outcome
-	if finishesChange(turn.Outcome.Status) && len(turn.Outcome.Claims) == 0 {
-		return turn, fmt.Errorf("%w, twice", missing)
+	// The resume asked for the claims alone, so any other answer fails the turn.
+	if turn.Outcome.Status != status || len(turn.Outcome.Claims) == 0 {
+		return turn, fmt.Errorf("%w, and its answer to the request for them was %s without claims", missing, turn.Outcome.Status)
 	}
 	return turn, nil
 }
