@@ -499,6 +499,9 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 	} else if findings != nil {
 		resume = agent.FindingsMessage(*findings)
 	}
+	if resume != "" && d.ClaimVerification && !planning {
+		resume += agent.ClaimsMessage
+	}
 	if resume != "" && d.Implementer.ID != "" {
 		if err := a.startAttempt(ctx, rec); err != nil {
 			return agent.Turn{}, err
@@ -521,6 +524,7 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 	}
 	brief.Merge = merge
 	brief.LocalReview = d.BeforePR()
+	brief.Claims = d.ClaimVerification
 	brief.PR, brief.Feedback, brief.Conflict = d.PR, feedbackItems(feedback), conflict
 	if d.PR == 0 && d.CheckpointNext != "" {
 		brief.CheckpointHead, brief.NextObjective = d.CheckpointHead, d.CheckpointNext
@@ -922,6 +926,10 @@ func applyTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error,
 		}
 	case agent.FailedRun:
 		rec.State = task.Failed
+	}
+	// A fix returns the full claim set, so it replaces the stored one whole.
+	if finishesChange(o.Status) && rec.Delegation.ClaimVerification && len(o.Claims) > 0 {
+		rec.Delegation.Claims = o.Claims
 	}
 }
 

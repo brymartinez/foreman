@@ -64,6 +64,9 @@ type TaskBrief struct {
 	// LocalReview is set for a task reviewed before its PR opens and with no PR yet.
 	// The turn commits and proposes the PR; foreman has it pushed after a clean review.
 	LocalReview bool
+	// Claims is set for a task with claim verification. A turn that finishes a change
+	// returns its claims for the reviewers.
+	Claims bool
 }
 
 // MergeBrief is the base branch a PR conflicts with and the files that conflict.
@@ -169,6 +172,9 @@ For a multi-part change, complete one coherent, testable part at a time. When th
 The next session receives the commit and nextObjective, not this transcript. Keep nextObjective under 500 characters; the committed code, issue, and posted plan hold the details.
 
 `, finish)
+	}
+	if b.Claims && !b.Planning {
+		claimsSection(&s)
 	}
 	if b.Key.Source == task.Linear {
 		s.WriteString("GitHub hosts the pull request. Put " + b.Identifier + " in the pull request title and " + b.URL + " in the pull request body. Do not add a GitHub Closes #N line. These issue link rules override conflicting developer PR instructions below.\n\n")

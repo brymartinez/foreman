@@ -60,6 +60,12 @@ func (a App) runTurn(ctx context.Context, rec *task.Record, req turnRequest, che
 	}
 	turn, err := a.implement(ctx, rec, req, log)
 	turn, err = a.repairFailedCheckpoint(ctx, rec, req, turn, err, log)
+	if err == nil && req.openBodyFile != "" {
+		// The open turn pushes the reviewed change, whose claims are the reviewed ones.
+		turn.Outcome.Claims = nil
+	} else if err == nil {
+		turn, err = a.requireClaims(ctx, rec, turn, log)
+	}
 	if err != nil {
 		return turnResult{turn: turn, err: err}
 	}
@@ -176,6 +182,46 @@ func (a App) repairFailedCheckpoint(ctx context.Context, rec *task.Record, req t
 		err = resumeErr
 	}
 	return turn, err
+}
+
+// finishesChange reports a status that hands a change to review.
+func finishesChange(s agent.Status) bool { return s == agent.PROpened || s == agent.ReviewReady }
+
+// requireClaims gives a turn of a task with claim verification that finished a change
+// without its claims one resume of the same session to add them. A second miss fails
+// the turn, because Foreman does not review a change without its claims.
+func (a App) requireClaims(ctx context.Context, rec *task.Record, turn agent.Turn, log io.Writer) (agent.Turn, error) {
+	d, status := rec.Delegation, turn.Outcome.Status
+	if !d.ClaimVerification || !finishesChange(status) || len(turn.Outcome.Claims) > 0 {
+		return turn, nil
+	}
+	missing := fmt.Errorf("the implementer returned %s without the claim set for the PRD acceptance criteria", status)
+	adapter := a.Agents[d.Implementer.Agent]
+	if adapter == nil || turn.Session.ID == "" {
+		return turn, missing
+	}
+	if err := a.checkAccount(ctx, rec); err != nil {
+		return turn, err
+	}
+	fmt.Fprintf(log, "foreman: %s returned %s without claims; resuming session %s for them\n", adapter.Name(), status, turn.Session.ID)
+	in := agent.StartInput{
+		Worktree: d.Worktree, Prompt: agent.MissingClaimsMessage(status),
+		Stage: task.StageImplement, Step: agent.StepImplement,
+		Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD, Profile: d.Profile,
+	}
+	next, err := adapter.Resume(ctx, turn.Session, in)
+	addUsage(&turn.Usage, next.Usage)
+	if next.Session.ID != "" {
+		turn.Session = next.Session
+	}
+	if err != nil {
+		return turn, err
+	}
+	turn.Outcome = next.Outcome
+	if finishesChange(turn.Outcome.Status) && len(turn.Outcome.Claims) == 0 {
+		return turn, fmt.Errorf("%w, twice", missing)
+	}
+	return turn, nil
 }
 
 // finishTurn writes a turn's result through final, so a cancelled run still records

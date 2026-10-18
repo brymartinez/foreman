@@ -285,3 +285,63 @@ func TestParseOutcomeReviewReadyNeedsAProposedPRAndPassingValidation(t *testing.
 		}
 	}
 }
+
+func TestParseOutcomeReturnsTheClaimsOfAChange(t *testing.T) {
+	const claims = `"claims":[{"criteria":["AC1","AC2"],"behavior":" retries 5xx ","evidence":"retry.go:40, retry_test.go","check":"go test ./..."}]`
+	for _, status := range []string{
+		`"status":"pr_opened","prNumber":912,"prUrl":"u"`,
+		`"status":"review_ready","prNumber":null,"prUrl":null,"prTitle":"feat: x","prBody":"Closes #7"`,
+	} {
+		got, err := ParseOutcome([]byte(`{` + status + `,"summary":"s","validation":[{"command":"go test ./...","passed":true}],"questions":[],` + claims + `}`))
+		if err != nil {
+			t.Fatalf("%s: %v", status, err)
+		}
+		want := []task.Claim{{Criteria: []string{"AC1", "AC2"}, Behavior: " retries 5xx ", Evidence: "retry.go:40, retry_test.go", Check: "go test ./..."}}
+		if task.ClaimsDigest(got.Claims) != task.ClaimsDigest(want) || len(got.Claims[0].Criteria) != 2 {
+			t.Errorf("%s: claims = %+v", status, got.Claims)
+		}
+	}
+}
+
+func TestParseOutcomeLeavesNullOrEmptyClaimsForTheRunnerToRequire(t *testing.T) {
+	for _, claims := range []string{`"claims":null`, `"claims":[]`, `"x":0`} {
+		got, err := ParseOutcome([]byte(`{"status":"pr_opened","summary":"s","prNumber":912,"prUrl":"u","validation":[{"command":"go test ./...","passed":true}],"questions":[],` + claims + `}`))
+		if err != nil || len(got.Claims) != 0 {
+			t.Errorf("%s: claims = %+v, %v", claims, got.Claims, err)
+		}
+	}
+}
+
+func TestParseOutcomeRejectsAnIncompleteClaim(t *testing.T) {
+	_, err := ParseOutcome([]byte(`{"status":"pr_opened","summary":"s","prNumber":912,"prUrl":"u","validation":[{"command":"go test ./...","passed":true}],"questions":[],
+"claims":[{"criteria":["AC1"],"behavior":"retries 5xx","evidence":"retry.go","check":"go test"},{"criteria":["AC2"],"behavior":"caps retries","evidence":" ","check":"go test"}]}`))
+	if err == nil || !strings.Contains(err.Error(), "claim 2") || !strings.Contains(err.Error(), "evidence") {
+		t.Fatalf("err = %v, want claim 2's missing evidence named", err)
+	}
+}
+
+func TestOutcomeSchemaRequiresANullableClaimsArray(t *testing.T) {
+	var schema struct {
+		Required   []string `json:"required"`
+		Properties map[string]struct {
+			Type  json.RawMessage `json:"type"`
+			Items struct {
+				Required []string `json:"required"`
+			} `json:"items"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal([]byte(OutcomeSchema), &schema); err != nil {
+		t.Fatal(err)
+	}
+	claims, ok := schema.Properties["claims"]
+	var types []string
+	_ = json.Unmarshal(claims.Type, &types)
+	if !ok || !slices.Contains(schema.Required, "claims") || !slices.Equal(types, []string{"array", "null"}) {
+		t.Fatalf("claims schema = %+v, required %v", claims, schema.Required)
+	}
+	for _, field := range []string{"criteria", "behavior", "evidence", "check"} {
+		if !slices.Contains(claims.Items.Required, field) {
+			t.Errorf("a claim does not require %s", field)
+		}
+	}
+}
