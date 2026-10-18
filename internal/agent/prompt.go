@@ -164,7 +164,7 @@ func ImplementationPrompt(b TaskBrief) string {
 	if !b.Planning && b.PR == 0 && b.Conflict == nil && b.Merge == nil {
 		finish := `open the pull request and report "pr_opened" instead. A small change may go directly to "pr_opened"`
 		if b.LocalReview {
-			finish = `commit it and report "review_ready" instead. A small change may go directly to "review_ready"`
+			finish = `report "review_ready" instead after validating the committed change. The accepted checkpoint commit may be the final commit; do not make an empty commit just to report "review_ready". A small change may go directly to "review_ready"`
 		}
 		fmt.Fprintf(&s, `## Implementation checkpoints
 

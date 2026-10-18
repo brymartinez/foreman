@@ -141,6 +141,9 @@ func TestCheckpointRequiresAnAdvancingCleanCommitOnTheTaskBranch(t *testing.T) {
 	if _, err := (Git{}).Checkpoint(context.Background(), wt, branch, head); err == nil || !strings.Contains(err.Error(), "no new commit") {
 		t.Fatalf("repeated head: %v", err)
 	}
+	if reviewed, err := (Git{}).ReviewHead(context.Background(), wt, branch, head); err != nil || reviewed != head {
+		t.Fatalf("review accepted checkpoint %q: %v", reviewed, err)
+	}
 }
 
 func TestRemove(t *testing.T) {

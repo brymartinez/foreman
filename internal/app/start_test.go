@@ -86,6 +86,14 @@ func (f *fakeWorktrees) Head(_ context.Context, _ string) (string, error) {
 }
 
 func (f *fakeWorktrees) Checkpoint(_ context.Context, _, _, prior string) (string, error) {
+	return f.committedHead(prior, false)
+}
+
+func (f *fakeWorktrees) ReviewHead(_ context.Context, _, _, prior string) (string, error) {
+	return f.committedHead(prior, true)
+}
+
+func (f *fakeWorktrees) committedHead(prior string, allowSame bool) (string, error) {
 	f.checkpointPrior = append(f.checkpointPrior, prior)
 	if f.checkpointErr != nil {
 		return "", f.checkpointErr
@@ -95,6 +103,9 @@ func (f *fakeWorktrees) Checkpoint(_ context.Context, _, _, prior string) (strin
 	}
 	head := f.checkpointHeads[0]
 	f.checkpointHeads = f.checkpointHeads[1:]
+	if head == prior && !allowSame {
+		return "", errors.New("checkpoint has no new commit")
+	}
 	return head, nil
 }
 

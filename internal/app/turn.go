@@ -105,9 +105,10 @@ func (a App) runTurn(ctx context.Context, rec *task.Record, req turnRequest, che
 
 // checkReviewReady verifies a review_ready turn: only a task reviewed before its PR
 // returns it, outside planning, and it must leave a clean worktree on the task branch
-// with commits after the last accepted checkpoint. Nothing is pushed yet, so the
-// commit need not extend the one reviewed before, and a fix turn that keeps the
-// commit is reviewed again like a PR whose head did not move.
+// with a commit at or after the last accepted checkpoint. An unchanged head is
+// allowed only after a checkpoint; an untouched initial branch still fails.
+// Nothing is pushed yet, so a fix turn that keeps the commit is reviewed again
+// like a PR whose head did not move.
 func (a App) checkReviewReady(ctx context.Context, rec *task.Record, req turnRequest, turn agent.Turn, log io.Writer) turnResult {
 	d := rec.Delegation
 	if req.openBodyFile != "" {
@@ -116,7 +117,13 @@ func (a App) checkReviewReady(ctx context.Context, rec *task.Record, req turnReq
 	if !d.BeforePR() || a.needsPlan(rec) {
 		return turnResult{turn: turn, err: errors.New("review_ready is only allowed for a task reviewed before its pull request, once the plan is posted")}
 	}
-	head, err := a.Worktrees.Checkpoint(ctx, d.Worktree, d.Branch, d.CheckpointHead)
+	var head string
+	var err error
+	if d.Checkpoints > 0 {
+		head, err = a.Worktrees.ReviewHead(ctx, d.Worktree, d.Branch, d.CheckpointHead)
+	} else {
+		head, err = a.Worktrees.Checkpoint(ctx, d.Worktree, d.Branch, d.CheckpointHead)
+	}
 	if err != nil {
 		return turnResult{turn: turn, err: fmt.Errorf("verify the change for review: %w", err)}
 	}

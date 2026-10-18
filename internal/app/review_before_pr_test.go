@@ -124,6 +124,37 @@ func TestReviewReadyTurnRecordsTheCommitAndItsProposalTogether(t *testing.T) {
 	}
 }
 
+func TestReviewReadyAcceptsTheLastAcceptedCheckpoint(t *testing.T) {
+	f := newFixture()
+	key := localTask(t, f)
+	rec := f.store.recs[key]
+	rec.Delegation.CheckpointHead = "commit1"
+	rec.Delegation.CheckpointNext = "Validate Terraform"
+	rec.Delegation.Checkpoints = 1
+	f.wt.checkpointHeads = []string{"commit1"}
+	f.claude.turn = reviewReadyTurn("sid-2", "Retry 5xx only.\n\nCloses #825")
+
+	res := f.app.runTurn(context.Background(), rec, turnRequest{}, f.app.verifiedPR(io.Discard), io.Discard)
+	if res.err != nil {
+		t.Fatal(res.err)
+	}
+	applyTurnResult(rec, res, now)
+	if rec.Delegation.LocalHead != "commit1" || rec.Delegation.CheckpointNext != "" || !rec.ReviewPending() {
+		t.Fatalf("checkpoint commit did not advance to review: %+v", rec.Delegation)
+	}
+}
+
+func TestReviewReadyStillRequiresAnInitialCommit(t *testing.T) {
+	f := newFixture()
+	key := localTask(t, f)
+	f.wt.checkpointHeads = []string{"basehead"}
+	f.claude.turn = reviewReadyTurn("sid-1", "Closes #825")
+	res := f.app.runTurn(context.Background(), f.store.recs[key], turnRequest{}, f.app.verifiedPR(io.Discard), io.Discard)
+	if res.err == nil || !strings.Contains(res.err.Error(), "no new commit") {
+		t.Fatalf("unchanged initial branch: %v", res.err)
+	}
+}
+
 func TestReviewReadyFailsWithoutAVerifiedCommit(t *testing.T) {
 	f := newFixture()
 	key := localTask(t, f)

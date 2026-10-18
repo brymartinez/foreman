@@ -111,7 +111,8 @@ runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR)
                                  context conflict adds which statement governs), exit
   with review_before_pr captured on the task and no PR yet, a finished turn returns
   review_ready instead of pr_opened (pr_opened there fails the task):
-    review_ready -> verify the branch, a clean worktree, and a new descendant commit,
+    review_ready -> verify the branch, a clean worktree, and a descendant commit
+                    (the last accepted checkpoint itself is allowed),
                     and that no PR is open and origin has no such branch (else FAILED);
                     save the commit with the proposed PR title and description
                     before every review: git fetch base, then
@@ -574,6 +575,8 @@ the same commit. The commit message records why it changed.
   If a checkpoint reports failed validation, Foreman resumes the same session
   with the failed commands and allows two repair turns. A passing checkpoint
   then follows the usual Git checks; repeated failed validation fails the task.
+  A later `review_ready` may use the accepted checkpoint commit without another
+  commit when validation shows that its work is complete.
 - **Models and effort are set per step:** `plan_model`, `model` (implementation, fixes,
   merges, PR creation), and `review_model`; Codex also takes reasoning effort
   per step. Each turn logs an `agent:model:step` line. A routed task's stored profile

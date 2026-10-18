@@ -28,6 +28,16 @@ func (Git) Head(ctx context.Context, dir string) (string, error) {
 // Checkpoint verifies the agent committed on the expected branch and left no
 // tracked or untracked work behind. Its new head must extend the previous one.
 func (g Git) Checkpoint(ctx context.Context, dir, branch, prior string) (string, error) {
+	return g.committedHead(ctx, dir, branch, prior, false)
+}
+
+// ReviewHead also accepts the last checkpoint itself: that commit may contain
+// the entire change, even if a later turn only validated it.
+func (g Git) ReviewHead(ctx context.Context, dir, branch, prior string) (string, error) {
+	return g.committedHead(ctx, dir, branch, prior, true)
+}
+
+func (g Git) committedHead(ctx context.Context, dir, branch, prior string, allowSame bool) (string, error) {
 	ref, err := git(ctx, dir, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if err != nil {
 		return "", fmt.Errorf("checkpoint branch: %w", err)
@@ -46,7 +56,7 @@ func (g Git) Checkpoint(ctx context.Context, dir, branch, prior string) (string,
 	if err != nil {
 		return "", err
 	}
-	if prior == "" || head == prior {
+	if prior == "" || (head == prior && !allowSame) {
 		return "", errors.New("checkpoint has no new commit")
 	}
 	cmd := exec.CommandContext(ctx, "git", "-C", dir, "merge-base", "--is-ancestor", prior, head)

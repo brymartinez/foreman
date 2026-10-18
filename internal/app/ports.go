@@ -233,6 +233,9 @@ type WorktreeManager interface {
 	Head(ctx context.Context, dir string) (string, error)
 	// Checkpoint accepts a clean worktree on branch whose HEAD advances from prior.
 	Checkpoint(ctx context.Context, dir, branch, prior string) (string, error)
+	// ReviewHead applies the same checks while allowing HEAD to equal the prior
+	// accepted checkpoint.
+	ReviewHead(ctx context.Context, dir, branch, prior string) (string, error)
 	// Remove deletes the worktree, and the branch if asked. It refuses a worktree with
 	// uncommitted or untracked changes unless Force is set. A path that no longer
 	// exists is already removed. A branch it could not delete after removing the
