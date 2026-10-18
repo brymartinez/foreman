@@ -494,3 +494,35 @@ func TestAClaimsRetryThatAsksAQuestionInsteadFailsTheTask(t *testing.T) {
 		t.Fatalf("state %s outcome %+v decisions %d", got.State, got.LastOutcome, len(got.Decisions))
 	}
 }
+
+func TestAWaitingTaskWhosePRDCannotBeReadFails(t *testing.T) {
+	for name, tc := range map[string]struct {
+		change func(t *testing.T, f fixture)
+		want   string
+	}{
+		"read error": {func(t *testing.T, f fixture) { f.gh.commentErr = errors.New("gh: HTTP 502") }, "HTTP 502"},
+		"deleted":    {func(t *testing.T, f fixture) { delete(f.gh.comments, prdComment(t, f).ID) }, "was deleted"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture()
+			key := claimTask(t, f)
+			f.claude.turns = []agent.Turn{plannedTurn("sid-1"), claimedTurn("sid-2", retryClaims)}
+			if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			f.store.recs[key].Delegation.RunnerPID = 0
+			setCI(f, task.CIStatus{State: task.CIPassing})
+			tc.change(t, f)
+			if _, _, err := f.app.Status(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			got := f.store.recs[key]
+			if got.State != task.Failed || !strings.Contains(got.LastOutcome.Summary, "PRD") || !strings.Contains(got.LastOutcome.Summary, tc.want) {
+				t.Fatalf("state %s outcome %+v", got.State, got.LastOutcome)
+			}
+			if len(f.runners.spawned) != 1 {
+				t.Errorf("spawned %d runners; a task without its PRD must not be reviewed again", len(f.runners.spawned))
+			}
+		})
+	}
+}

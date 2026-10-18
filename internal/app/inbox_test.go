@@ -197,6 +197,7 @@ type fakeGitHub struct {
 	baseHeadErr      error
 	issueComments    []IssueComment // the issue's conversation, for routing
 	issueCommentsErr error
+	commentErr       error // GetIssueComment fails with it
 	branchPRErr      error
 	mu               sync.Mutex
 }
@@ -253,6 +254,9 @@ func (f *fakeGitHub) PostIssueComment(_ context.Context, k task.Key, id int64, b
 }
 
 func (f *fakeGitHub) GetIssueComment(_ context.Context, _ task.Repo, id int64) (IssueComment, error) {
+	if f.commentErr != nil {
+		return IssueComment{}, f.commentErr
+	}
 	c, ok := f.comments[id]
 	if !ok {
 		return IssueComment{}, fmt.Errorf("%w: comment %d", ErrGone, id)

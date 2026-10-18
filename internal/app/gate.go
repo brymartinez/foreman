@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -87,22 +86,17 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			ci.CheckedAt = a.Now()
 		}
 		// The PRD is a review's acceptance criteria, so an edit to it while the task
-		// waits for CI needs new reviews, like an edited description.
+		// waits for CI needs new reviews, like an edited description. A PRD that cannot
+		// be loaded fails the task, as it would stop the review.
 		var prd string
+		var prdErr error
 		checkPRD := pr.State == "open" && r.State == task.WaitingForCI && r.Delegation.ClaimVerification
 		if checkPRD {
-			text, err := a.reviewPRD(ctx, r)
-			switch {
-			case errors.Is(err, errPRDMissing):
-				// The review that follows stops with the cause.
-			case err != nil:
-				if ctx.Err() != nil {
-					return nil, nil, nil, ctx.Err()
-				}
-				warnings = append(warnings, fmt.Errorf("refresh %s#%d PRD: %w", r.Repo, r.Number, err))
-				continue
-			default:
+			var text string
+			if text, prdErr = a.reviewPRD(ctx, r); prdErr == nil {
 				prd = task.Digest(text)
+			} else if ctx.Err() != nil {
+				return nil, nil, nil, ctx.Err()
 			}
 		}
 		var note, token string
@@ -117,6 +111,8 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 				note = advance(cur, pr, ci, a.Now())
 			case cur.State == task.PRClosed:
 				note = reopen(cur, pr, ci, a.Now())
+			case checkPRD && prdErr != nil && cur.State == task.WaitingForCI && gated(cur):
+				failTask(cur, fmt.Sprintf("PR #%d waited for CI, but its PRD could not be loaded: %v", cur.Delegation.PR, prdErr), a.Now())
 			case checkPRD && cur.State == task.WaitingForCI && gated(cur) && cur.Delegation.PRDDigest != prd:
 				note = restartForPRD(cur, prd, a.Now())
 			case gated(cur):
