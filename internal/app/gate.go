@@ -121,6 +121,16 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 				failTask(cur, note, a.Now())
 			case checkPRD && cur.State == task.WaitingForCI && gated(cur) && cur.Delegation.PRDDigest != prd:
 				note = restartForPRD(cur, prd, a.Now())
+			case !ciRead && checkPRD && prdErr != nil && cur.State == task.PRClosed:
+				note = fmt.Sprintf("PR #%d reopened, but its PRD could not be loaded: %v", cur.Delegation.PR, prdErr)
+				failTask(cur, note, a.Now())
+			case !ciRead && checkPRD && cur.State == task.PRClosed && cur.Delegation.PRDDigest != prd:
+				// The changed PRD needs new reviews whatever CI says, so the reopened PR
+				// goes to review without waiting for a CI result.
+				if pr.HeadSHA != "" {
+					cur.Delegation.PRHead = pr.HeadSHA
+				}
+				note = restartForPRD(cur, prd, a.Now())
 			case !ciRead:
 			case cur.State == task.PRClosed:
 				if checkPRD && prdErr == nil {
