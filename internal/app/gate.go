@@ -117,7 +117,8 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			case pr.State == "merged" && cur.Delegation.RunnerPID == 0:
 				note = advance(cur, pr, ci, a.Now())
 			case checkPRD && prdErr != nil && cur.State == task.WaitingForCI && gated(cur):
-				failTask(cur, fmt.Sprintf("PR #%d waited for CI, but its PRD could not be loaded: %v", cur.Delegation.PR, prdErr), a.Now())
+				note = fmt.Sprintf("PR #%d waited for CI, but its PRD could not be loaded: %v", cur.Delegation.PR, prdErr)
+				failTask(cur, note, a.Now())
 			case checkPRD && cur.State == task.WaitingForCI && gated(cur) && cur.Delegation.PRDDigest != prd:
 				note = restartForPRD(cur, prd, a.Now())
 			case !ciRead:

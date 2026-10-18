@@ -592,3 +592,22 @@ func TestAReopenedPRIsHandedOverOnlyWithAReviewOfTheCurrentPRD(t *testing.T) {
 		})
 	}
 }
+
+func TestTheGateReportsAWaitingTaskItFailsForItsPRD(t *testing.T) {
+	f := newFixture()
+	key := claimTask(t, f)
+	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), claimedTurn("sid-2", retryClaims)}
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	f.store.recs[key].Delegation.RunnerPID = 0
+	setCI(f, task.CIStatus{State: task.CIPassing})
+	delete(f.gh.comments, prdComment(t, f).ID)
+	notes, _, _, err := f.app.gate(context.Background(), []*task.Record{f.store.recs[key]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(notes[key], "\n"); !strings.Contains(got, "PRD could not be loaded") || !strings.Contains(got, "was deleted") {
+		t.Fatalf("notes = %q, want the failure and its cause", notes[key])
+	}
+}
