@@ -119,7 +119,7 @@ func TestARunnerWithoutTheLaunchTokenDoesNotTakeTheTask(t *testing.T) {
 				t.Fatalf("err = %v", err)
 			}
 			d := f.store.recs[rec.Key].Delegation
-			if d.RunnerPID != before.RunnerPID || d.Launch != before.Launch || f.store.recs[rec.Key].State != task.Working {
+			if d.RunnerPID != before.RunnerPID || d.Launch != before.Launch || f.store.recs[rec.Key].State != task.Planning {
 				t.Fatalf("the refused runner changed the task: pid %d, claim %+v", d.RunnerPID, d.Launch)
 			}
 			if f.claude.starts != 0 {

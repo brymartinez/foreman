@@ -27,7 +27,7 @@ func (a App) Respond(ctx context.Context, key task.Key, raw string) (*task.Recor
 		d.Answer, d.AnsweredAt = answer, now
 		cur.Body = appendDecisionNote(cur.Body, *d)
 		if cur.Pending() == nil {
-			cur.State = task.Working
+			cur.State = cur.NextStage()
 			if token, err = a.claimLaunch(cur); err != nil {
 				return nil, err
 			}

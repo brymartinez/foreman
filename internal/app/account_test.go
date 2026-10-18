@@ -39,7 +39,7 @@ func TestRestartKeepsThePinnedAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.State != task.Working || rec.Delegation.Account != "octo-work" || rec.Delegation.AccountEmail != workEmail {
+	if rec.State != task.Planning || rec.Delegation.Account != "octo-work" || rec.Delegation.AccountEmail != workEmail {
 		t.Fatalf("state %s account %q <%q>", rec.State, rec.Delegation.Account, rec.Delegation.AccountEmail)
 	}
 }
@@ -118,7 +118,7 @@ func TestStartWithANonSSHRemoteSkipsThePushCheck(t *testing.T) {
 	f := newFixture()
 	f.accts.ssh = nil
 	key := started(t, f, startReq(t))
-	if got := f.store.recs[key]; got.State != task.Working || got.Delegation.Account != "octo-work" {
+	if got := f.store.recs[key]; got.State != task.Planning || got.Delegation.Account != "octo-work" {
 		t.Fatalf("state %s account %q", got.State, got.Delegation.Account)
 	}
 }
@@ -155,7 +155,7 @@ func TestATaskStartedBeforePinningPinsTheActiveAccountAtItsNextLaunch(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.State != task.Working || rec.Delegation.Account != "octo-home" || rec.Delegation.AccountEmail != "7+octo-home@users.noreply.github.com" {
+	if rec.State != task.Planning || rec.Delegation.Account != "octo-home" || rec.Delegation.AccountEmail != "7+octo-home@users.noreply.github.com" {
 		t.Fatalf("state %s account %q <%q>", rec.State, rec.Delegation.Account, rec.Delegation.AccountEmail)
 	}
 }
@@ -164,7 +164,7 @@ func TestAccountMatchingIgnoresLoginCase(t *testing.T) {
 	f := newFixture()
 	f.accts.ssh = []SSHAccount{{Host: "git@github.com", Login: "Octo-Work"}}
 	key := started(t, f, startReq(t))
-	if got := f.store.recs[key]; got.State != task.Working {
+	if got := f.store.recs[key]; got.State != task.Planning {
 		t.Fatalf("state %s: %+v", got.State, got.LastOutcome)
 	}
 }

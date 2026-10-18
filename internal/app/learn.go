@@ -286,7 +286,7 @@ func (a App) startLearners(recs []*task.Record) {
 	}
 	started := map[task.Repo]bool{}
 	for _, r := range recs {
-		if r.State == task.Working || r.State == task.Reviewing || started[r.Repo] {
+		if r.State.Active() || started[r.Repo] {
 			continue
 		}
 		if due, err := a.LearningDue(r); err != nil || !due || a.holdLearning(r) || a.Knowledge.Busy(string(r.Repo)) {

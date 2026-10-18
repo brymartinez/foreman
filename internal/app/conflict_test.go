@@ -32,7 +32,7 @@ func repairing(t *testing.T, f fixture) task.Key {
 	key := ready(t, f)
 	conflicting(f, Conflicting, "ba5e001")
 	refresh(t, f)
-	if got := f.store.recs[key]; got.State != task.Working || !got.Delegation.ConflictPending {
+	if got := f.store.recs[key]; got.State != task.Implementing || !got.Delegation.ConflictPending {
 		t.Fatalf("setup: state %s pending %v", got.State, got.Delegation.ConflictPending)
 	}
 	return key
@@ -46,7 +46,7 @@ func TestGateStartsRepairOnConflict(t *testing.T) {
 	refresh(t, f)
 	got := f.store.recs[key]
 	d := got.Delegation
-	if got.State != task.Working || !d.ConflictPending || d.LastConflict() != (task.ConflictAttempt{Head: "c0ffee1", Base: "ba5e001"}) || got.CI != nil {
+	if got.State != task.Implementing || !d.ConflictPending || d.LastConflict() != (task.ConflictAttempt{Head: "c0ffee1", Base: "ba5e001"}) || got.CI != nil {
 		t.Fatalf("state %s delegation %+v ci %+v", got.State, d, got.CI)
 	}
 	if got.LastOutcome.Status != "conflict_repair" || got.LastOutcome.Summary != "PR #912 conflicts with main; claude is repairing it" {
@@ -86,7 +86,7 @@ func TestGateSkipsNonReadyStates(t *testing.T) {
 		"needs decision": func(f fixture, rec *task.Record) { rec.State = task.NeedsDecision },
 		"failed":         func(f fixture, rec *task.Record) { rec.State = task.Failed },
 		"ci pending": func(f fixture, rec *task.Record) {
-			rec.State = task.Reviewing
+			rec.State = task.WaitingForCI
 			setCI(f, task.CIStatus{State: task.CIPending})
 		},
 	}
@@ -98,7 +98,7 @@ func TestGateSkipsNonReadyStates(t *testing.T) {
 		setup(f, f.store.recs[key])
 		refresh(t, f)
 		got := f.store.recs[key]
-		if got.State == task.Working || got.Delegation.ConflictAttempts != nil || len(f.runners.spawned) != spawned {
+		if got.State == task.Implementing || got.Delegation.ConflictAttempts != nil || len(f.runners.spawned) != spawned {
 			t.Errorf("%s: state %s delegation %+v spawned %d", name, got.State, got.Delegation, len(f.runners.spawned)-spawned)
 		}
 	}
@@ -133,7 +133,7 @@ func TestGateDoesNotDoubleLaunch(t *testing.T) {
 	f.runners.alive[4242] = true
 	refresh(t, f)
 	refresh(t, f)
-	if got := f.store.recs[key]; got.State != task.Working || len(f.runners.spawned) != spawned {
+	if got := f.store.recs[key]; got.State != task.Implementing || len(f.runners.spawned) != spawned {
 		t.Errorf("state %s spawned %d more", got.State, len(f.runners.spawned)-spawned)
 	}
 }
@@ -157,7 +157,7 @@ func TestGateRepairsAgainAfterBaseMoves(t *testing.T) {
 	conflicting(f, Conflicting, "ba5e002")
 	refresh(t, f)
 	got := f.store.recs[key]
-	if got.State != task.Working || got.Delegation.LastConflict().Base != "ba5e002" || len(f.runners.spawned) != spawned+1 {
+	if got.State != task.Implementing || got.Delegation.LastConflict().Base != "ba5e002" || len(f.runners.spawned) != spawned+1 {
 		t.Fatalf("new base: state %s delegation %+v", got.State, got.Delegation)
 	}
 
@@ -165,7 +165,7 @@ func TestGateRepairsAgainAfterBaseMoves(t *testing.T) {
 	pushHead(f, "c0ffee2")
 	refresh(t, f)
 	got = f.store.recs[key]
-	if got.State != task.Working || got.Delegation.LastConflict().Head != "c0ffee2" || len(f.runners.spawned) != spawned+2 {
+	if got.State != task.Implementing || got.Delegation.LastConflict().Head != "c0ffee2" || len(f.runners.spawned) != spawned+2 {
 		t.Fatalf("new head: state %s delegation %+v", got.State, got.Delegation)
 	}
 }
@@ -232,7 +232,7 @@ func TestRepairFallsBackToFreshTurn(t *testing.T) {
 	if f.claude.starts != 2 || !strings.Contains(f.claude.prompt, "## Merge conflict") || !strings.Contains(f.claude.prompt, "git merge origin/main") {
 		t.Fatalf("starts %d prompt:\n%s", f.claude.starts, f.claude.prompt)
 	}
-	if got := f.store.recs[key]; got.State != task.Reviewing {
+	if got := f.store.recs[key]; got.State != task.WaitingForCI {
 		t.Errorf("state %s", got.State)
 	}
 }
@@ -252,7 +252,7 @@ func TestRepairSuccessGoesToReviewThenReady(t *testing.T) {
 	}
 	got := f.store.recs[key]
 	d := got.Delegation
-	if got.State != task.Reviewing || d.PRHead != "merged1" || d.ConflictPending || d.RunnerPID != 0 {
+	if got.State != task.WaitingForCI || d.PRHead != "merged1" || d.ConflictPending || d.RunnerPID != 0 {
 		t.Fatalf("state %s delegation %+v", got.State, d)
 	}
 	if len(contains) != 1 || contains[0] != d.Worktree+" ba5e001 merged1" {
@@ -379,7 +379,7 @@ func TestRepairAnsweredResumesWithTheDecision(t *testing.T) {
 	if !strings.Contains(last, "Decision: A. Merge origin/main") || strings.Contains(last, "now has merge conflicts") {
 		t.Errorf("resume message:\n%s", last)
 	}
-	if got := f.store.recs[key]; got.State != task.Reviewing || got.Delegation.PRHead != "merged1" {
+	if got := f.store.recs[key]; got.State != task.WaitingForCI || got.Delegation.PRHead != "merged1" {
 		t.Errorf("state %s head %s", got.State, got.Delegation.PRHead)
 	}
 }

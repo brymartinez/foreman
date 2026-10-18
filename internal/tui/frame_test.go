@@ -170,7 +170,7 @@ func TestFrameHidesLogUntilTaskEnterAndShowsBranch(t *testing.T) {
 func TestFrameColorsAndDividesThePanes(t *testing.T) {
 	m := model()
 	lines := Frame(m)
-	if !strings.Contains(lines[0], cyan) || !strings.Contains(lines[1], colored("│", cyan)) || !strings.Contains(lines[2], colored("WORKING", green)) {
+	if !strings.Contains(lines[0], cyan) || !strings.Contains(lines[1], colored("│", cyan)) || !strings.Contains(lines[2], colored("IMPLEMENTING", green)) {
 		t.Fatalf("frame lacks color or a pane divider:\n%s", strings.Join(lines[:3], "\n"))
 	}
 	m.Message = "! GitHub failed"
@@ -184,15 +184,15 @@ func TestRowTextKeepsTheTerminalForeground(t *testing.T) {
 	m.Tasks[0].Delegation.Branch = "feat/10-task"
 	// The second task is not under the cursor, so its row is drawn without selection.
 	row := taskRow(t, Frame(m), "a/b#11")
-	if !strings.Contains(row, colored("REVIEWING", green)) {
+	if !strings.Contains(row, colored("WAITING_FOR_CI", green)) {
 		t.Fatalf("the state is not the row's status cue: %q", row)
 	}
-	if rest := strings.ReplaceAll(row, colored("REVIEWING", green), "REVIEWING"); escapes.MatchString(rest) {
+	if rest := strings.ReplaceAll(row, colored("WAITING_FOR_CI", green), "WAITING_FOR_CI"); escapes.MatchString(rest) {
 		t.Errorf("row text carries color beyond the state: %q", rest)
 	}
 	// In a narrow pane the state wraps onto its own line, and the cue follows it.
 	m.Width = minWidth
-	if row := taskRow(t, Frame(m), "Claude · REVIEWING"); !strings.Contains(row, colored("REVIEWING", green)) {
+	if row := taskRow(t, Frame(m), "Claude · WAITING_FOR_CI"); !strings.Contains(row, colored("WAITING_FOR_CI", green)) {
 		t.Errorf("the wrapped state lost its color: %q", row)
 	}
 }
@@ -277,14 +277,14 @@ func TestFrameKeepsTheStateAtTheSmallestSupportedWidth(t *testing.T) {
 	m := model()
 	m.Width, m.Height = minWidth, 30
 	got := screen(m)
-	for _, want := range []string{"a/b#10", "Claude · WORKING"} {
+	for _, want := range []string{"a/b#10", "Claude · IMPLEMENTING"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("a %d-column frame is missing %q:\n%s", minWidth, want, got)
 		}
 	}
 	// A pane wide enough for the padded row keeps status's own layout.
 	m.Width = 200
-	if !strings.Contains(screen(m), "a/b#10                    Claude  WORKING") {
+	if !strings.Contains(screen(m), "a/b#10                    Claude  IMPLEMENTING") {
 		t.Errorf("a wide frame lost status's padded row:\n%s", screen(m))
 	}
 }
@@ -297,7 +297,7 @@ func TestFrameShowsPRAtTheSmallestSupportedSize(t *testing.T) {
 	m.Tasks[0].CI = &task.CIStatus{State: task.CIPassing}
 	m.Tasks[0].Reviews = []task.Review{{Round: 1, Clean: true}}
 	got := screen(m)
-	for _, want := range []string{"a/b#10", "Claude · WORKING", "Task", "PR #942", "Codex", "CI ✓", "review ✓"} {
+	for _, want := range []string{"a/b#10", "Claude · IMPLEMENTING", "Task", "PR #942", "Codex", "CI ✓", "review ✓"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("a %dx%d frame is missing %q:\n%s", m.Width, m.Height, want, got)
 		}
@@ -383,7 +383,7 @@ func TestFrameMessageLine(t *testing.T) {
 func TestFrameTruncatesLongText(t *testing.T) {
 	m := Model{Width: 60, Height: 12}
 	m.SetInbox([]app.InboxEntry{entry("acme/a-very-long-repository-name", 123456, strings.Repeat("title ", 40))})
-	m.SetTasks([]*task.Record{record(10, task.Working)})
+	m.SetTasks([]*task.Record{record(10, task.Implementing)})
 	m.Tasks[0].Title = strings.Repeat("long ", 40)
 	m.Log = []string{strings.Repeat("x", 500)}
 	for i, l := range plain(Frame(m)) {
@@ -398,7 +398,7 @@ func TestFrameKeepsWideTextInsideItsPane(t *testing.T) {
 	// its tail ran over the pane beside it.
 	m := Model{Width: minWidth, Height: 30}
 	m.SetInbox([]app.InboxEntry{entry("acme/widgets", 7, strings.Repeat("配車の再試行", 8))})
-	m.SetTasks([]*task.Record{record(10, task.Working)})
+	m.SetTasks([]*task.Record{record(10, task.Implementing)})
 	m.Tasks[0].Title = strings.Repeat("プロバイダ", 8)
 	m.Log = []string{strings.Repeat("ログ行", 40)}
 	for i, l := range plain(Frame(m)) {
@@ -466,7 +466,7 @@ func TestTaskPaneRowsFitThePaneTheyAreDrawnIn(t *testing.T) {
 	rec.CI.Failing = []task.CheckRun{{Name: "integration-tests"}, {Name: "lint"}, {Name: "typecheck"}}
 	rec.Decisions = []task.Decision{{Question: task.Question{Issue: "Should retries apply to 4xx responses too?"}}}
 	m := Model{Width: minWidth, Height: minHeight}
-	m.SetTasks([]*task.Record{rec, record(11, task.Working)})
+	m.SetTasks([]*task.Record{rec, record(11, task.Implementing)})
 	for _, width := range []int{20, 32, 60, 200} {
 		for _, body := range []int{taskRowLines, 6, 10, 40} {
 			for i, r := range taskPane(m, width, body).rows {
@@ -542,7 +542,7 @@ func showModel(width, height int) Model {
 }
 
 func TestShowPaneMatchesRender(t *testing.T) {
-	for _, state := range []task.State{task.Working, task.NeedsDecision, task.Failed, task.Reviewed, task.ReadyForHuman} {
+	for _, state := range []task.State{task.Implementing, task.NeedsDecision, task.Failed, task.Reviewed, task.ReadyForHuman} {
 		m := showModel(200, 200)
 		m.Selected().State = state
 		var b strings.Builder
@@ -808,6 +808,20 @@ func TestHintsDoNotOfferTheRemovedViewToggle(t *testing.T) {
 		m.Width = width
 		if got := footer(m); strings.Contains(got, "v view") || textWidth(got) > width {
 			t.Errorf("%d-column hints = %q; want no view toggle within the width", width, got)
+		}
+	}
+}
+
+func TestEachStageShowsInTheListAndTheShowPane(t *testing.T) {
+	for _, state := range []task.State{task.Planning, task.Implementing, task.SelfReviewing, task.AdversarialReviewing, task.OpeningPR, task.WaitingForCI} {
+		m := showModel(200, 60)
+		m.Selected().State = state
+		lines := Frame(m)
+		if row := escapes.ReplaceAllString(taskRow(t, lines, "a/b#10"), ""); !strings.Contains(row, "Claude  "+string(state)) || taskColor(state) != green {
+			t.Errorf("%s: the list row does not show the stage in the running color: %q", state, row)
+		}
+		if got := plain(lines); !slices.ContainsFunc(got, func(l string) bool { return strings.HasPrefix(l, "SHOW · a/b#10 · "+string(state)) }) {
+			t.Errorf("%s: the show pane heading does not name the stage:\n%s", state, strings.Join(got, "\n"))
 		}
 	}
 }

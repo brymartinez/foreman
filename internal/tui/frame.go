@@ -880,7 +880,7 @@ func taskColor(state task.State) string {
 		return yellow
 	case task.Failed:
 		return red
-	case task.Working, task.Reviewing:
+	case task.Planning, task.Implementing, task.SelfReviewing, task.AdversarialReviewing, task.OpeningPR, task.WaitingForCI:
 		return green
 	}
 	return ""

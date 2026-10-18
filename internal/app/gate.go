@@ -101,7 +101,9 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			case gated(cur):
 				note = advance(cur, pr, ci, a.Now())
 			}
-			if was != task.Working && cur.State == task.Working {
+			// Only advance sends a waiting task back to review. A reopened PR without a
+			// clean review shows the review it needs and waits for a start.
+			if was == task.WaitingForCI && cur.State.Runnable() {
 				var err error
 				if token, err = a.claimLaunch(cur); err != nil {
 					return nil, err
@@ -258,7 +260,13 @@ func reopen(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) s
 	rec.CI = &ci
 	latest := rec.LatestCompeting()
 	reviewed := latest != nil && latest.Clean && latest.PR == d.PR && latest.Head != "" && latest.Head == pr.HeadSHA && describedAsReviewed(rec, pr)
-	rec.State = task.Reviewing
+	// A clean review of the PR waits for CI, where the gate checks it covers the head
+	// and description. Without one, the task shows the stage it needs next and waits
+	// for a start, as no runner is launched here.
+	rec.State = rec.NextStage()
+	if latest != nil && latest.Clean && latest.PR == d.PR {
+		rec.State = task.WaitingForCI
+	}
 	if reviewed && ci.State != task.CIPending {
 		rec.State = task.ReadyForHuman
 	}
@@ -287,7 +295,7 @@ func gated(r *task.Record) bool {
 	switch r.State {
 	case task.ReadyForHuman, task.Reviewed:
 		return true
-	case task.Reviewing:
+	case task.WaitingForCI:
 		latest := r.LatestCompeting()
 		return latest != nil && latest.Clean && latest.PR == d.PR
 	}
@@ -312,17 +320,17 @@ func advance(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) 
 	if pr.HeadSHA != "" {
 		// A READY task's PR is the developer's; the checklist flags new commits.
 		d.PRHead = pr.HeadSHA
-		if rec.State == task.Reviewing && rec.CommitsSinceReview() {
+		if rec.State == task.WaitingForCI && rec.CommitsSinceReview() {
 			// Commits landed after the clean review: review them before handing over.
-			rec.State, rec.CI = task.Working, nil
+			rec.State, rec.CI = rec.NextStage(), nil
 			return outcome("re_review", fmt.Sprintf("PR #%d has new commits since its clean review; %s is reviewing them", d.PR, d.Reviewer))
 		}
 	}
-	if rec.State == task.Reviewing && !describedAsReviewed(rec, pr) {
+	if rec.State == task.WaitingForCI && !describedAsReviewed(rec, pr) {
 		// The description is the reviews' requirements, so an edit needs a new
 		// self-review and competing review before handing over.
 		d.PRDigest = task.ProposalDigest(pr.Title, pr.Body)
-		rec.State, rec.CI = task.Working, nil
+		rec.State, rec.CI = rec.NextStage(), nil
 		return outcome("re_review", fmt.Sprintf("PR #%d has a new description since its clean review; it is being reviewed again", d.PR))
 	}
 	prev := rec.CI

@@ -4,7 +4,7 @@ import "testing"
 
 func TestLocalReviewHelpersFollowTheStoredCommitAndItsReviews(t *testing.T) {
 	local := func(head string, reviews ...Review) *Record {
-		return &Record{State: Working, Delegation: &Delegation{ReviewBeforePR: true, LocalHead: head, ProposedTitle: "feat: x", ProposedBody: "Closes #7"}, Reviews: reviews}
+		return &Record{State: Implementing, Delegation: &Delegation{ReviewBeforePR: true, LocalHead: head, ProposedTitle: "feat: x", ProposedBody: "Closes #7"}, Reviews: reviews}
 	}
 	reviewed := ProposalDigest("feat: x", "Closes #7")
 	for name, tc := range map[string]struct {
@@ -12,7 +12,7 @@ func TestLocalReviewHelpersFollowTheStoredCommitAndItsReviews(t *testing.T) {
 		localReview, pending, open bool
 	}{
 		"setting off is never a local review": {
-			rec: &Record{State: Working, Delegation: &Delegation{LocalHead: "h1"}},
+			rec: &Record{State: Implementing, Delegation: &Delegation{LocalHead: "h1"}},
 		},
 		"no commit returned yet is not a local review": {
 			rec: local(""),
@@ -49,7 +49,7 @@ func TestLocalReviewHelpersFollowTheStoredCommitAndItsReviews(t *testing.T) {
 			}(), localReview: true,
 		},
 		"a task with a PR is not a local review": {
-			rec: &Record{State: Working, Delegation: &Delegation{ReviewBeforePR: true, LocalHead: "h1", PR: 7}},
+			rec: &Record{State: Implementing, Delegation: &Delegation{ReviewBeforePR: true, LocalHead: "h1", PR: 7}},
 		},
 	} {
 		if got := tc.rec.LocalReview(); got != tc.localReview {
@@ -61,12 +61,5 @@ func TestLocalReviewHelpersFollowTheStoredCommitAndItsReviews(t *testing.T) {
 		if got := tc.rec.OpenPending(); got != tc.open {
 			t.Errorf("%s: OpenPending() = %t", name, got)
 		}
-	}
-}
-
-func TestPhaseOfAWorkingLocalReviewIsReview(t *testing.T) {
-	rec := Record{State: Working, Delegation: &Delegation{ReviewBeforePR: true, LocalHead: "h1"}}
-	if got := rec.PhaseOf(); got != PhaseReview {
-		t.Fatalf("PhaseOf() = %q, want %q", got, PhaseReview)
 	}
 }

@@ -34,13 +34,13 @@ func seen(n int, state task.State, ghState string, updated time.Time, reasons ..
 
 func TestReconcile(t *testing.T) {
 	recs := []*task.Record{
-		seen(1, task.Discovered, "open", t0, task.Assigned),              // unchanged
-		seen(2, task.Discovered, "open", t0, task.Mentioned),             // new activity
-		seen(3, task.Discovered, "open", t0, task.Mentioned),             // now assigned
-		seen(4, task.Discovered, "open", t0, task.Assigned),              // closed -> DONE
-		seen(5, task.NeedsDecision, "open", t0, task.Assigned),           // changed but shown as decision
-		seen(6, task.ReadyForHuman, "open", t0, task.Assigned),           // unchanged, shown as ready
-		seen(7, task.Working, "open", t0, task.Assigned, task.Mentioned), // tracked fetch, unchanged
+		seen(1, task.Discovered, "open", t0, task.Assigned),                   // unchanged
+		seen(2, task.Discovered, "open", t0, task.Mentioned),                  // new activity
+		seen(3, task.Discovered, "open", t0, task.Mentioned),                  // now assigned
+		seen(4, task.Discovered, "open", t0, task.Assigned),                   // closed -> DONE
+		seen(5, task.NeedsDecision, "open", t0, task.Assigned),                // changed but shown as decision
+		seen(6, task.ReadyForHuman, "open", t0, task.Assigned),                // unchanged, shown as ready
+		seen(7, task.Implementing, "open", t0, task.Assigned, task.Mentioned), // tracked fetch, unchanged
 	}
 	items := []InboxItem{
 		item(1, "open", t0, task.Assigned),
@@ -97,13 +97,13 @@ func TestReconcile(t *testing.T) {
 }
 
 func TestReconcileTrackedFetchKeepsSearchReasons(t *testing.T) {
-	rec := seen(7, task.Working, "open", t0, task.Assigned)
+	rec := seen(7, task.Implementing, "open", t0, task.Assigned)
 	rec.Delegation = &task.Delegation{RunnerPID: 4242}
 	_, dirty := Reconcile([]InboxItem{item(7, "closed", t1, task.Tracked)}, []*task.Record{rec}, nil, false, now)
 	if len(dirty) != 1 || !slices.Equal(rec.GitHub.Reasons, []task.InboxReason{task.Assigned}) {
 		t.Fatalf("reasons = %v", rec.GitHub.Reasons)
 	}
-	if rec.State != task.Working {
+	if rec.State != task.Implementing {
 		t.Errorf("delegated task state changed to %s; Stage 1 must not touch delegated state", rec.State)
 	}
 }
@@ -344,7 +344,7 @@ func (f *fakeGitHub) GetItem(_ context.Context, k task.Key) (InboxItem, error) {
 }
 
 func TestInboxFetchesDelegatedTasksMissingFromSearch(t *testing.T) {
-	working := seen(7, task.Working, "open", t0, task.Assigned)
+	working := seen(7, task.Implementing, "open", t0, task.Assigned)
 	working.Delegation = &task.Delegation{Implementer: task.Session{Agent: task.Claude}}
 	done := seen(9, task.Done, "closed", t0)
 	done.Delegation = &task.Delegation{}
@@ -485,11 +485,11 @@ func TestHideMentionOnlyKeepsDelegatedWorkToResume(t *testing.T) {
 }
 
 func TestMergeObservedKeepsRunnerState(t *testing.T) {
-	cur := seen(7, task.Reviewing, "open", t0, task.Assigned)
+	cur := seen(7, task.WaitingForCI, "open", t0, task.Assigned)
 	cur.Delegation = &task.Delegation{PR: 912}
-	observed := seen(7, task.Working, "closed", t1, task.Assigned)
+	observed := seen(7, task.Implementing, "closed", t1, task.Assigned)
 	got := mergeObserved(cur, observed)
-	if got.State != task.Reviewing || got.Delegation.PR != 912 || got.GitHub.State != "closed" {
+	if got.State != task.WaitingForCI || got.Delegation.PR != 912 || got.GitHub.State != "closed" {
 		t.Fatalf("got %+v / %+v", got, got.GitHub)
 	}
 }
@@ -501,7 +501,7 @@ func TestStatusOrdersByAttention(t *testing.T) {
 		return r
 	}
 	store := &fakeStore{recs: map[task.Key]*task.Record{
-		key(1): mk(1, task.Working),
+		key(1): mk(1, task.Implementing),
 		key(2): mk(2, task.ReadyForHuman),
 		key(3): mk(3, task.NeedsDecision),
 		key(4): mk(4, task.Done),
@@ -535,12 +535,12 @@ func TestReconcileReportsALostReasonOnceWhenSearchesAreComplete(t *testing.T) {
 func TestReconcileTrustsATrackedFetchOnlyWhenSearchesAreComplete(t *testing.T) {
 	fetched := []InboxItem{item(7, "open", t0, task.Tracked)}
 
-	partial := seen(7, task.Working, "open", t0, task.Assigned)
+	partial := seen(7, task.Implementing, "open", t0, task.Assigned)
 	if report, _ := Reconcile(fetched, []*task.Record{partial}, nil, false, now); len(report.Changed) != 0 {
 		t.Errorf("a truncated search reported a lost reason: %+v", report.Changed)
 	}
 
-	complete := seen(7, task.Working, "open", t0, task.Assigned)
+	complete := seen(7, task.Implementing, "open", t0, task.Assigned)
 	report, _ := Reconcile(fetched, []*task.Record{complete}, nil, true, now)
 	if len(report.Changed) != 1 || !slices.Equal(report.Changed[0].Changes, []string{"no longer assigned to you"}) || len(complete.GitHub.Reasons) != 0 {
 		t.Fatalf("changed %+v reasons %v", report.Changed, complete.GitHub.Reasons)

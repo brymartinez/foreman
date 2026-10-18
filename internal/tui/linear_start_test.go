@@ -71,7 +71,7 @@ func TestAutoLinearDelegationKeepsSourceIdentity(t *testing.T) {
 	if len(reqs) != 1 || reqs[0].Key != k {
 		t.Fatalf("auto starts = %+v", reqs)
 	}
-	result := autoStart(context.Background(), stubSource{rec: &task.Record{Key: k, State: task.Working, Delegation: &task.Delegation{Branch: "feat/linear-web-42"}}}, reqs[0], nil)
+	result := autoStart(context.Background(), stubSource{rec: &task.Record{Key: k, State: task.Implementing, Delegation: &task.Delegation{Branch: "feat/linear-web-42"}}}, reqs[0], nil)
 	if result.key != k {
 		t.Fatalf("auto result key = %+v", result.key)
 	}

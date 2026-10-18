@@ -50,7 +50,7 @@ func TestRestartAfterAnInterruptedReviewSkipsImplementing(t *testing.T) {
 		t.Errorf("the implementer ran again (%d starts)", f.claude.starts-starts)
 	}
 	cr := got.CompetingReviews()
-	if got.State != task.Reviewing || got.Delegation.PR != 912 || len(cr) != 1 || !cr[0].Clean || cr[0].Head != "c0ffee1" || len(f.claude.reviewed) != 1 {
+	if got.State != task.WaitingForCI || got.Delegation.PR != 912 || len(cr) != 1 || !cr[0].Clean || cr[0].Head != "c0ffee1" || len(f.claude.reviewed) != 1 {
 		t.Fatalf("state %s pr %d reviews %+v", got.State, got.Delegation.PR, got.Reviews)
 	}
 }
@@ -66,7 +66,7 @@ func TestNewCommitsAfterACleanReviewAreReviewedBeforeHandover(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.Working || got.Delegation.PRHead != "beef002" || got.Delegation.RunnerPID != 4242 || len(f.runners.spawned) != 2 {
+	if got.State != task.SelfReviewing || got.Delegation.PRHead != "beef002" || got.Delegation.RunnerPID != 4242 || len(f.runners.spawned) != 2 {
 		t.Fatalf("state %s head %s pid %d spawned %d", got.State, got.Delegation.PRHead, got.Delegation.RunnerPID, len(f.runners.spawned))
 	}
 	if !strings.Contains(inboxText(report), "PR #912 has new commits since its clean review; codex is reviewing them") {
@@ -78,7 +78,7 @@ func TestNewCommitsAfterACleanReviewAreReviewedBeforeHandover(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = f.store.recs[key]
-	if f.claude.starts != starts || got.State != task.Reviewing || got.LatestReview().Head != "beef002" {
+	if f.claude.starts != starts || got.State != task.WaitingForCI || got.LatestReview().Head != "beef002" {
 		t.Fatalf("implementer starts %d state %s review head %s", f.claude.starts-starts, got.State, got.LatestReview().Head)
 	}
 	if _, _, err := f.app.Status(context.Background()); err != nil {
@@ -100,14 +100,14 @@ func TestAnEditedDescriptionAfterACleanReviewIsSelfReviewedAndReviewedBeforeHand
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.Working || got.Delegation.PRDigest != task.ProposalDigest(pr.Title, pr.Body) || len(f.runners.spawned) != 2 {
+	if got.State != task.SelfReviewing || got.Delegation.PRDigest != task.ProposalDigest(pr.Title, pr.Body) || len(f.runners.spawned) != 2 {
 		t.Fatalf("state %s digest %s spawned %d", got.State, got.Delegation.PRDigest, len(f.runners.spawned))
 	}
 	if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got = f.store.recs[key]
-	if kinds(got) != "self competing self competing" || got.State != task.Reviewing || f.claude.starts != 1 {
+	if kinds(got) != "self competing self competing" || got.State != task.WaitingForCI || f.claude.starts != 1 {
 		t.Fatalf("state %s reviews %s implementer starts %d", got.State, kinds(got), f.claude.starts)
 	}
 	if _, _, err := f.app.Status(context.Background()); err != nil {

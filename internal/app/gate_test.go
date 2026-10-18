@@ -21,7 +21,7 @@ func reviewed(t *testing.T, f fixture) task.Key {
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.store.recs[key]; got.State != task.Reviewing || got.Delegation.RunnerPID != 0 {
+	if got := f.store.recs[key]; got.State != task.WaitingForCI || got.Delegation.RunnerPID != 0 {
 		t.Fatalf("setup: state %s pid %d", got.State, got.Delegation.RunnerPID)
 	}
 	return key
@@ -58,7 +58,7 @@ func TestGatePendingWaits(t *testing.T) {
 	if _, _, err := f.app.Status(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.store.recs[key]; got.State != task.Reviewing || got.CI.State != task.CIPending || len(f.runners.spawned) != 1 {
+	if got := f.store.recs[key]; got.State != task.WaitingForCI || got.CI.State != task.CIPending || len(f.runners.spawned) != 1 {
 		t.Errorf("state %s ci %+v spawned %d", got.State, got.CI, len(f.runners.spawned))
 	}
 }
@@ -72,7 +72,7 @@ func TestGateSkipsTasksARunnerIsDriving(t *testing.T) {
 	if _, _, err := f.app.Status(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.store.recs[key]; got.State != task.Reviewing || got.CI != nil {
+	if got := f.store.recs[key]; got.State != task.WaitingForCI || got.CI != nil {
 		t.Errorf("state %s ci %+v", got.State, got.CI)
 	}
 }
@@ -313,7 +313,7 @@ func TestGateClosedPRWithADeadRunnerNeverReportsAFailure(t *testing.T) {
 	} {
 		f := newFixture()
 		key := reviewed(t, f)
-		f.store.recs[key].State = task.Working
+		f.store.recs[key].State = task.Implementing
 		f.store.recs[key].Delegation.RunnerPID = 77 // never added to f.runners.alive
 		setCI(f, task.CIStatus{State: task.CIPassing})
 		setPR(f, tc.pr)
@@ -321,7 +321,7 @@ func TestGateClosedPRWithADeadRunnerNeverReportsAFailure(t *testing.T) {
 		if _, err := f.app.Tasks(context.Background()); err != nil {
 			t.Fatal(err)
 		}
-		if got := f.store.recs[key]; got.State != task.Working {
+		if got := f.store.recs[key]; got.State != task.Implementing {
 			t.Fatalf("%s: local reread changed the state to %s before GitHub refresh", tc.name, got.State)
 		}
 		if _, _, err := f.app.Status(context.Background()); err != nil {
@@ -340,7 +340,7 @@ func TestGateClosedPRWithADeadRunnerNeverReportsAFailure(t *testing.T) {
 func TestGateUnreadablePRLeavesADeadRunnerAlone(t *testing.T) {
 	f := newFixture()
 	key := reviewed(t, f)
-	f.store.recs[key].State = task.Working
+	f.store.recs[key].State = task.Implementing
 	f.store.recs[key].Delegation.RunnerPID = 77 // never added to f.runners.alive
 	setCI(f, task.CIStatus{State: task.CIPassing})
 	closed := f.gh.prs[912]
@@ -359,7 +359,7 @@ func TestGateUnreadablePRLeavesADeadRunnerAlone(t *testing.T) {
 		t.Errorf("warnings = %v", warnings)
 	}
 	got := f.store.recs[key]
-	if got.State != task.Working || got.Delegation.RunnerPID != 77 {
+	if got.State != task.Implementing || got.Delegation.RunnerPID != 77 {
 		t.Fatalf("the refresh judged an unread PR: state %s pid %d", got.State, got.Delegation.RunnerPID)
 	}
 	if len(f.notes.sent) != 0 {
@@ -382,7 +382,7 @@ func TestGateUnreadablePRLeavesADeadRunnerAlone(t *testing.T) {
 func TestInboxUnreadablePRLeavesADeadRunnerAlone(t *testing.T) {
 	f := newFixture()
 	key := reviewed(t, f)
-	f.store.recs[key].State = task.Working
+	f.store.recs[key].State = task.Implementing
 	f.store.recs[key].Delegation.RunnerPID = 77
 	delete(f.gh.prs, 912)
 	f.gh.items = []InboxItem{item(825, "open", t0, task.Assigned)}
@@ -391,7 +391,7 @@ func TestInboxUnreadablePRLeavesADeadRunnerAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.Working || got.Delegation.RunnerPID != 77 {
+	if got.State != task.Implementing || got.Delegation.RunnerPID != 77 {
 		t.Errorf("state %s pid %d", got.State, got.Delegation.RunnerPID)
 	}
 	if len(f.notes.sent) != 0 {
@@ -402,7 +402,7 @@ func TestInboxUnreadablePRLeavesADeadRunnerAlone(t *testing.T) {
 func TestReapStillFailsADeadRunnerWithNoPR(t *testing.T) {
 	f := newFixture()
 	key := reviewed(t, f)
-	f.store.recs[key].State = task.Working
+	f.store.recs[key].State = task.Implementing
 	f.store.recs[key].Delegation.PR = 0 // nothing pushed yet, so nothing to read
 	f.store.recs[key].Delegation.RunnerPID = 77
 	f.notes.sent = nil
@@ -483,7 +483,7 @@ func TestGateClosedPRLeavesARestartedRunnerAlone(t *testing.T) {
 	// to stop, and its pid must survive.
 	f.runners.onStop = func(pid int) {
 		_, err := f.app.Store.Update(context.Background(), key, func(cur *task.Record) (*task.Record, error) {
-			cur.State, cur.Delegation.RunnerPID, cur.Delegation.PR = task.Working, 99, 0
+			cur.State, cur.Delegation.RunnerPID, cur.Delegation.PR = task.Implementing, 99, 0
 			return cur, nil
 		})
 		if err != nil {
@@ -496,7 +496,7 @@ func TestGateClosedPRLeavesARestartedRunnerAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.Delegation.RunnerPID != 99 || got.State != task.Working {
+	if got.Delegation.RunnerPID != 99 || got.State != task.Implementing {
 		t.Errorf("the restarted run lost its runner: state %s pid %d", got.State, got.Delegation.RunnerPID)
 	}
 	if !slices.Equal(f.runners.stopped, []int{77}) || !f.runners.alive[99] {
@@ -511,12 +511,12 @@ func TestGateReopenedPRReturnsToTheActiveList(t *testing.T) {
 		want   task.State
 	}{
 		{"clean review of the head GitHub reports", func(*task.Review) {}, task.ReadyForHuman},
-		{"review requested changes", func(r *task.Review) { r.Clean = false }, task.Reviewing},
-		{"clean review of an earlier head", func(r *task.Review) { r.Head = "older01" }, task.Reviewing},
+		{"review requested changes", func(r *task.Review) { r.Clean = false }, task.Implementing},
+		{"clean review of an earlier head", func(r *task.Review) { r.Head = "older01" }, task.WaitingForCI},
 		// A review from before heads were recorded cannot be shown to cover the
 		// reopened PR, so it must not hand the task to the developer.
-		{"clean review with no recorded head", func(r *task.Review) { r.Head = "" }, task.Reviewing},
-		{"clean review of an earlier description", func(r *task.Review) { r.Proposal = task.ProposalDigest("", "Retry everything.") }, task.Reviewing},
+		{"clean review with no recorded head", func(r *task.Review) { r.Head = "" }, task.WaitingForCI},
+		{"clean review of an earlier description", func(r *task.Review) { r.Proposal = task.ProposalDigest("", "Retry everything.") }, task.WaitingForCI},
 	} {
 		f := newFixture()
 		key := reviewed(t, f)
@@ -559,7 +559,7 @@ func TestGateClosedPRDoesNotStopARunStartedSinceItClosed(t *testing.T) {
 			t.Fatal(err)
 		}
 		if _, err := f.app.Store.Update(context.Background(), key, func(cur *task.Record) (*task.Record, error) {
-			cur.State, cur.Delegation.PR, cur.Delegation.RunnerPID = task.Working, 913, 99
+			cur.State, cur.Delegation.PR, cur.Delegation.RunnerPID = task.Implementing, 913, 99
 			return cur, nil
 		}); err != nil {
 			t.Fatal(err)
@@ -570,7 +570,7 @@ func TestGateClosedPRDoesNotStopARunStartedSinceItClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.Working || got.Delegation.PR != 913 || got.Delegation.RunnerPID != 99 {
+	if got.State != task.Implementing || got.Delegation.PR != 913 || got.Delegation.RunnerPID != 99 {
 		t.Errorf("the new run was ended by the old PR: state %s pr %d pid %d", got.State, got.Delegation.PR, got.Delegation.RunnerPID)
 	}
 	if len(f.runners.stopped) != 0 {
@@ -648,11 +648,11 @@ func TestInboxListsReadyWithoutAChangedEntry(t *testing.T) {
 
 func TestReconcileClosedIssueEndsIdleDelegatedTasks(t *testing.T) {
 	blocked := seen(7, task.NeedsDecision, "open", t0)
-	working := seen(8, task.Working, "open", t0)
+	working := seen(8, task.Implementing, "open", t0)
 	working.Delegation = &task.Delegation{RunnerPID: 4242}
 	items := []InboxItem{item(7, "closed", t1, task.Tracked), item(8, "closed", t1, task.Tracked)}
 	Reconcile(items, []*task.Record{blocked, working}, nil, true, now)
-	if blocked.State != task.Done || working.State != task.Working {
+	if blocked.State != task.Done || working.State != task.Implementing {
 		t.Errorf("blocked %s working %s", blocked.State, working.State)
 	}
 }

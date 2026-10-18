@@ -29,7 +29,7 @@ func TestResumeKeepsTheSessionWorktreeAndPR(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.State != task.Working {
+	if rec.State != task.Implementing {
 		t.Fatalf("state = %s", rec.State)
 	}
 	d := rec.Delegation

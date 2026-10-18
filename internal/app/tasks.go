@@ -14,8 +14,13 @@ var attention = map[task.State]int{
 	task.ReadyForHuman: 1,
 	task.Reviewed:      2,
 	task.Failed:        3,
-	task.Reviewing:     4,
-	task.Working:       5,
+	task.WaitingForCI:  4,
+	// The stages a runner is in.
+	task.AdversarialReviewing: 5,
+	task.SelfReviewing:        5,
+	task.OpeningPR:            5,
+	task.Implementing:         5,
+	task.Planning:             5,
 }
 
 // Status returns delegated work that is not finished, most urgent first.
@@ -173,8 +178,9 @@ func (a App) clearExited(ctx context.Context, recs []*task.Record) error {
 	return nil
 }
 
-// running states are the ones a runner drives: implementing, or reviewing and fixing.
-func running(s task.State) bool { return s == task.Working || s == task.Reviewing }
+// running states are the ones a runner drives: the stages, waiting for CI included,
+// because a run that answers comments after its review keeps its runner there.
+func running(s task.State) bool { return s.Active() }
 
 // liveRunner reports a task whose runner process is still going. That runner owns the
 // worktree and the task file until it exits, whatever state the task is in: a

@@ -191,7 +191,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			return nil, err
 		}
 		was := cur.State
-		cur.Kind, cur.Title, cur.URL, cur.State = task.Issue, issue.Title, issue.URL, task.Working
+		cur.Kind, cur.Title, cur.URL = task.Issue, issue.Title, issue.URL
 		cur.Identifier = issue.Identifier
 		if cur.GitHub == nil {
 			cur.GitHub = &task.Snapshot{UpdatedAt: issue.UpdatedAt, State: issue.State}
@@ -289,8 +289,11 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			summary = fmt.Sprintf("dispatched to %s with profile %s", req.Agent, p.Name)
 		}
 		cur.LastOutcome = &task.Outcome{Status: "started", Summary: summary, At: now}
-		// Claimed in the same write that makes the task WORKING, so no other start
-		// sees it WORKING without a launch.
+		// The run's first stage follows the delegation this write keeps: a kept PR or
+		// reviewed local commit picks up at its review or its opening.
+		cur.State = cur.NextStage()
+		// Claimed in the same write that makes the task a stage, so no other start
+		// sees it running without a launch.
 		if token, err = a.claimLaunch(cur); err != nil {
 			return nil, err
 		}
@@ -331,8 +334,8 @@ func (a App) sourceRepo(ctx context.Context, req *StartRequest) (RepoInfo, error
 }
 
 // launch spawns the runner for the launch claim token, taken with the update that
-// made the task WORKING, and records its log. If it can't, it marks the task FAILED
-// and releases the claim.
+// moved the task into a runnable stage, and records its log. If it can't, it marks
+// the task FAILED and releases the claim.
 func (a App) launch(ctx context.Context, key task.Key, token string) (*task.Record, error) {
 	var pid int
 	var logPath string
@@ -370,7 +373,7 @@ func (a App) launch(ctx context.Context, key task.Key, token string) (*task.Reco
 			failTask(cur, "could not launch runner: "+spawnErr.Error(), a.Now())
 			return cur, nil
 		}
-		if cur.State == task.Working {
+		if cur.State.Runnable() {
 			cur.Delegation.RunnerPID = pid
 		}
 		// The launch is over, though its runner still needs the token. A dashboard
@@ -478,7 +481,8 @@ func (a App) startableBy(rec *task.Record, owner string) error {
 		return fmt.Errorf("%s is being started by another command", ref)
 	}
 	switch rec.State {
-	case task.Discovered, task.Failed, task.PRClosed, task.Working, task.Reviewing:
+	case task.Discovered, task.Failed, task.PRClosed,
+		task.Planning, task.Implementing, task.SelfReviewing, task.AdversarialReviewing, task.OpeningPR, task.WaitingForCI:
 		// A second runner would share the worktree and the task file with the first,
 		// and the first stops being held off by its state the moment this start
 		// changes it.

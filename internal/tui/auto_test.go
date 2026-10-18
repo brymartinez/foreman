@@ -134,7 +134,7 @@ func TestAutoStartUsesConfiguredAgentAndNoContext(t *testing.T) {
 
 func TestAutoFillsOnlyFreeSlots(t *testing.T) {
 	m := autoModel(3, own(1, 0), own(2, 1), own(3, 2))
-	m.SetTasks([]*task.Record{record(10, task.Working), record(11, task.Failed)})
+	m.SetTasks([]*task.Record{record(10, task.Implementing), record(11, task.Failed)})
 	if got := startedKeys(m.AutoStarts()); !slices.Equal(got, []task.Key{ownKey(1), ownKey(2)}) {
 		t.Fatalf("with one run active auto started %v; want the two oldest", got)
 	}
@@ -145,11 +145,11 @@ func TestAutoFillsOnlyFreeSlots(t *testing.T) {
 	// Both starts land as WORKING, then the first run finishes.
 	m.Done(ownKey(1))
 	m.Done(ownKey(2))
-	m.SetTasks([]*task.Record{record(10, task.Working), ownRecord(1, task.Working), ownRecord(2, task.Working)})
+	m.SetTasks([]*task.Record{record(10, task.Implementing), ownRecord(1, task.Implementing), ownRecord(2, task.Implementing)})
 	if got := m.AutoStarts(); len(got) != 0 {
 		t.Fatalf("auto started %v with three runs active", got)
 	}
-	m.SetTasks([]*task.Record{record(10, task.Working), ownRecord(1, task.NeedsDecision), ownRecord(2, task.Working)})
+	m.SetTasks([]*task.Record{record(10, task.Implementing), ownRecord(1, task.NeedsDecision), ownRecord(2, task.Implementing)})
 	if got := startedKeys(m.AutoStarts()); !slices.Equal(got, []task.Key{ownKey(3)}) {
 		t.Fatalf("a freed slot started %v; want the next issue", got)
 	}
@@ -166,7 +166,7 @@ func TestAutoCountsManualAndInFlightStartsAgainstTheLimit(t *testing.T) {
 	}
 	// The manual start lands before the next local read: it still holds its slot.
 	m.Done(ownKey(3))
-	m.SetTasks([]*task.Record{ownRecord(3, task.Working)})
+	m.SetTasks([]*task.Record{ownRecord(3, task.Implementing)})
 	if got := m.AutoStarts(); len(got) != 0 {
 		t.Fatalf("auto started %v with a manual run and an auto start in flight", got)
 	}
@@ -174,7 +174,7 @@ func TestAutoCountsManualAndInFlightStartsAgainstTheLimit(t *testing.T) {
 
 func TestManualStartStillWorksWhenFull(t *testing.T) {
 	m := autoModel(1, assigned("a/b", 1, 0), assigned("a/b", 2, 1))
-	m.SetTasks([]*task.Record{record(10, task.Working)})
+	m.SetTasks([]*task.Record{record(10, task.Implementing)})
 	if got := m.AutoStarts(); len(got) != 0 {
 		t.Fatalf("auto started %v with the limit full", got)
 	}
@@ -249,7 +249,7 @@ func TestAKeyTogglesAutoAndReportsTheState(t *testing.T) {
 
 func TestHeaderShowsAutoStateAndSlots(t *testing.T) {
 	m := autoModel(3)
-	m.SetTasks([]*task.Record{record(10, task.Working), record(11, task.Failed)})
+	m.SetTasks([]*task.Record{record(10, task.Implementing), record(11, task.Failed)})
 	if got := plain(Frame(m))[0]; !strings.Contains(got, "auto on 1/3") {
 		t.Errorf("header = %q; want auto on 1/3", got)
 	}
@@ -343,7 +343,7 @@ func TestAutoStartsNothingInTheAllView(t *testing.T) {
 func TestAutoCountsHiddenSourcesRunsAgainstTheLimit(t *testing.T) {
 	m := autoModel(2, own(1, 0), own(2, 1))
 	m.IssueSource = task.GitHub
-	lin := record(10, task.Working)
+	lin := record(10, task.Implementing)
 	lin.Source = task.Linear
 	m.SetTasks([]*task.Record{lin})
 	if len(m.Tasks) != 0 {

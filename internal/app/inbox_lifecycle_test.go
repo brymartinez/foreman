@@ -35,7 +35,7 @@ func (g *refreshGitHub) GetItem(ctx context.Context, k task.Key) (InboxItem, err
 func TestInboxRefreshLifecycle(t *testing.T) {
 	old := seen(1, task.Discovered, "open", t0, task.Assigned)
 	dead := seen(2, task.Discovered, "open", t0, task.Assigned)
-	delegated := seen(3, task.Working, "open", t0)
+	delegated := seen(3, task.Implementing, "open", t0)
 	delegated.Delegation = &task.Delegation{}
 	store := &fakeStore{recs: map[task.Key]*task.Record{old.Key: old, dead.Key: dead, delegated.Key: delegated}}
 	gh := &refreshGitHub{fakeGitHub: &fakeGitHub{items: []InboxItem{item(4, "open", t0, task.Assigned)}}, calls: map[task.Key]int{}, errs: map[task.Key]error{dead.Key: errors.New("HTTP 404")}}
@@ -110,7 +110,7 @@ func TestInboxGateLookupFailuresAreWarnings(t *testing.T) {
 		if err != nil || len(report.Warnings) != 1 || len(report.Current) != 2 {
 			t.Fatalf("report %+v err %v", report, err)
 		}
-		if f.store.recs[k].State != task.Reviewing {
+		if f.store.recs[k].State != task.WaitingForCI {
 			t.Fatal("lookup failure advanced task")
 		}
 		if f.store.recs[healthy.Key].State != task.Done {

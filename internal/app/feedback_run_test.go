@@ -74,7 +74,7 @@ func TestDisabledPRFeedbackKeepsCIUnverifiedAfterFailedReply(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := f.store.recs[key]
-	if rec.State != task.Reviewing || len(rec.Feedback) != 0 || len(f.claude.resumed) != 0 {
+	if rec.State != task.WaitingForCI || len(rec.Feedback) != 0 || len(f.claude.resumed) != 0 {
 		t.Fatalf("state %s, feedback %+v, resumed turns %d", rec.State, rec.Feedback, len(f.claude.resumed))
 	}
 }
@@ -124,7 +124,7 @@ func TestFeedbackTurnWithCommitsIsReviewed(t *testing.T) {
 	if got := len(rec.CompetingReviews()); got != reviews+1 || !rec.SelfReviewPassed() {
 		t.Fatalf("%d competing review rounds, want %d after a self-review of the new head", got, reviews+1)
 	}
-	if rec.State != task.Reviewing || rec.CI != nil {
+	if rec.State != task.WaitingForCI || rec.CI != nil {
 		t.Fatalf("state = %s ci = %+v; the gate must check CI for the new head", rec.State, rec.CI)
 	}
 	if n := len(rec.UnhandledFeedback()); n != 0 {
@@ -244,7 +244,7 @@ func TestCommentsDuringARunAreAnsweredBeforeHandover(t *testing.T) {
 	if f.claude.starts != 1 {
 		t.Errorf("implementer started %d times", f.claude.starts)
 	}
-	if rec.State != task.Reviewing || len(rec.CompetingReviews()) != 1 {
+	if rec.State != task.WaitingForCI || len(rec.CompetingReviews()) != 1 {
 		t.Errorf("state = %s reviews = %d; the clean review still stands", rec.State, len(rec.CompetingReviews()))
 	}
 }

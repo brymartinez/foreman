@@ -472,15 +472,16 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 		}
 		rec.Decisions = append(rec.Decisions, dec)
 	}
+	rec.UpgradeState()
 	return rec, nil
 }
 
 func validState(s task.State) bool {
 	switch s {
-	case task.Discovered, task.Working, task.NeedsDecision, task.Reviewing, task.ReadyForHuman, task.Reviewed, task.Done, task.Failed, task.PRClosed:
+	case task.Discovered, task.NeedsDecision, task.ReadyForHuman, task.Reviewed, task.Done, task.Failed, task.PRClosed, task.LegacyWorking, task.LegacyReviewing:
 		return true
 	}
-	return false
+	return s.Active()
 }
 
 func fromRecord(rec *task.Record) frontmatter {

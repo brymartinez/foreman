@@ -414,13 +414,13 @@ func TestTheDetailShowsALogLineAtTheMinimumTerminalSize(t *testing.T) {
 	row, _ := historyLog(t, 30, 1, 30)
 	row.Phases = map[task.Phase]time.Duration{task.PhasePlanning: 12 * time.Minute, task.PhaseImplementation: 34 * time.Minute,
 		task.PhaseReview: 21 * time.Minute, task.PhaseCI: 15 * time.Minute, task.PhasePaused: 58 * time.Minute}
-	row.Total = 140 * time.Minute
+	row.Total, row.LegacyReview = 140*time.Minute, true
 	m := openHistory(t, []app.HistoryRow{row}, minHeight)
 	m.Width = minWidth
 	m.Key(Key{Kind: KeyEnter})
 	readLog(&m)
-	if n := len(m.phaseLines()); n != 6 {
-		t.Fatalf("setup: %d phase lines, want 6", n)
+	if n := len(m.phaseLines()); n != 7 {
+		t.Fatalf("setup: %d phase lines, want 7", n)
 	}
 	frame := Frame(m)
 	text := strings.Join(frame, "\n")
@@ -458,5 +458,46 @@ func TestANarrowListDropsTheTotalColumnAndKeepsTheTitle(t *testing.T) {
 	}
 	if text := strings.Join(Frame(m), "\n"); !strings.Contains(text, "total 1h02m") {
 		t.Errorf("timing pane is missing the total:\n%s", text)
+	}
+}
+
+func TestStagedTimingShowsEachStageAndTheTotal(t *testing.T) {
+	row := historyRows(1)[0]
+	row.Phases = map[task.Phase]time.Duration{task.PhasePlanning: 5 * time.Minute, task.PhaseImplementation: 20 * time.Minute,
+		task.PhaseSelfReview: 10 * time.Minute, task.PhaseAdversarialReview: 12 * time.Minute, task.PhaseOpeningPR: time.Minute,
+		task.PhaseCI: 14 * time.Minute}
+	want := []string{"planning 5m00s", "implementing 20m00s", "self-review 10m00s", "adversarial review 12m00s",
+		"opening PR 1m00s", "CI wait 14m00s", "paused 0s", "total 1h02m"}
+	if got := phaseParts(row); !slices.Equal(got, want) {
+		t.Fatalf("phase lines = %q\nwant %q", got, want)
+	}
+}
+
+func TestLegacyTimingShowsTheCombinedReviewAndMarksTheSplitUnavailable(t *testing.T) {
+	row := historyRows(1)[0]
+	row.LegacyReview = true
+	row.Phases = map[task.Phase]time.Duration{task.PhasePlanning: 5 * time.Minute, task.PhaseImplementation: 20 * time.Minute,
+		task.PhaseReview: 23 * time.Minute, task.PhaseCI: 14 * time.Minute}
+	want := []string{"planning 5m00s", "implementing 20m00s", "legacy review and fixes 23m00s", "separate reviews unavailable",
+		"CI wait 14m00s", "paused 0s", "total 1h02m"}
+	if got := phaseParts(row); !slices.Equal(got, want) {
+		t.Fatalf("phase lines = %q\nwant %q", got, want)
+	}
+}
+
+func TestAShortTimingPaneDropsEmptyStagesAndKeepsTheTotal(t *testing.T) {
+	row := historyRows(1)[0]
+	row.Phases = map[task.Phase]time.Duration{task.PhasePlanning: 5 * time.Minute, task.PhaseImplementation: 20 * time.Minute,
+		task.PhaseSelfReview: 10 * time.Minute, task.PhaseAdversarialReview: 12 * time.Minute, task.PhaseCI: 15 * time.Minute}
+	m := openHistory(t, []app.HistoryRow{row}, minHeight)
+	m.Width = minWidth
+	text := strings.Join(plain(Frame(m)), "\n")
+	for _, want := range []string{"planning 5m00s", "adversarial review", "CI wait 15m00s", "total 1h02m"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("frame is missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "opening PR") || strings.Contains(text, "paused") {
+		t.Errorf("a short pane kept an empty stage:\n%s", text)
 	}
 }

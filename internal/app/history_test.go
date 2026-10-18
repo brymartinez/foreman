@@ -256,3 +256,25 @@ func TestHistoryMeasuresAPRClosedBeforeHandoffToGitHubsCloseNotToWhenForemanSawI
 		t.Fatalf("row = %+v, want 40m to the close on GitHub with 30m of review", r)
 	}
 }
+
+func TestHistoryFlagsAnAttemptWithTheOldCombinedReviewTime(t *testing.T) {
+	a, store, gh := historyFixture(t)
+	addTask(store, "a/b", 1, measured(11, 0, 60))
+	addTask(store, "a/b", 2, task.Attempt{StartedAt: mins(0), PR: 12, HandoffAt: mins(60), Marks: []task.Mark{
+		{At: mins(0), Phase: task.PhasePlanning}, {At: mins(10), Phase: task.PhaseImplementation},
+		{At: mins(30), Phase: task.PhaseSelfReview}, {At: mins(40), Phase: task.PhaseAdversarialReview},
+		{At: mins(50), Phase: task.PhaseCI}, {At: mins(60), Phase: task.PhaseEnded},
+	}})
+	gh.prs[11] = closedPR("a/b", 11, "merged", mins(200))
+	gh.prs[12] = closedPR("a/b", 12, "merged", mins(300))
+	rows, _, err := a.History(context.Background(), false)
+	if err != nil || len(rows) != 2 {
+		t.Fatal(err, rows)
+	}
+	if staged, legacy := rows[0], rows[1]; staged.LegacyReview || !legacy.LegacyReview {
+		t.Fatalf("legacy review: staged %v, old %v; want only the old attempt flagged", staged.LegacyReview, legacy.LegacyReview)
+	}
+	if r := rows[0]; r.Phases[task.PhaseSelfReview] != 10*time.Minute || r.Phases[task.PhaseAdversarialReview] != 10*time.Minute {
+		t.Fatalf("phases = %v", r.Phases)
+	}
+}

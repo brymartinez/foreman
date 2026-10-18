@@ -131,7 +131,7 @@ foreman · 2 delegated · 3 in the inbox · auto on 1/3 · refreshed 10:01:22
     assigned to you                │   Cache fleet lookups
                                    │   PR #912 · reviewer: Claude · CI ✓ · review ✓
   testorg/example#351  Retry 5xx  │
-    mentions you                   │ > midsoln/foreman#2      Claude  WORKING
+    mentions you                   │ > midsoln/foreman#2      Claude  IMPLEMENTING
 ────────────────────────────────────────────────────────────────────────────────
 LOG · midsoln/foreman#2 · ~/.local/share/foreman/logs/2.log
 2026-09-29T10:01:04Z claude Bash go test ./internal/tui
@@ -206,7 +206,7 @@ task whose log is open switches to its question on its own when it needs a decis
 Auto mode is off until you turn it on with `a` or `-a`. While it is on, it starts open issues
 assigned to you that foreman has never delegated, from the selected source, oldest first, with `auto.agent` and
 no context file. It looks after the first refresh, after each successful refresh, and
-when a run leaves WORKING or REVIEWING. Only issues with the exact `triaged` label
+when a run ends. Only issues with the exact `triaged` label
 start automatically; you can start an unlabelled issue by hand. Mentions, FAILED
 tasks, and previously REVIEWED tasks never start on their own. At most `auto.max_concurrent`
 runs are active at once, and
@@ -448,8 +448,9 @@ The run did not fail, so there is no failure notification.
 
 Reopen the PR and the task comes back on the following refresh. Foreman reads the PR's
 CI and uses the review it already has: a clean review of the PR's current head with
-finished CI makes the task `READY_FOR_HUMAN`, and anything else makes it `REVIEWING`.
-No agent is started for you either way.
+finished CI makes the task `READY_FOR_HUMAN`. A clean review of the PR waits in
+`WAITING_FOR_CI`, and the next refresh reviews a head or description that changed since.
+Without a clean review, the task shows the stage it needs next and waits for a start.
 
 If the agent does not stop at once, the task is `PR_CLOSED` but keeps its runner, and
 every refresh tries again.
@@ -458,9 +459,13 @@ every refresh tries again.
 
 | State | Meaning | Your move |
 |---|---|---|
-| `WORKING` | The implementer is running | Wait, or `c` on the task to stop it |
+| `PLANNING` | The implementer writes the Analysis, PRD, Design, and Implementation plan, and foreman posts them | Wait, or `c` on the task to stop it |
+| `IMPLEMENTING` | The implementer changes the branch: code, review fixes, answers, or a merge | Wait, or `c` on the task to stop it |
+| `SELF_REVIEW` | The implementer reviews its own change in a fresh session | Wait, or `c` on the task to stop it |
+| `ADVERSARIAL_REVIEW` | The competing agent reviews the change | Wait, or `c` on the task to stop it |
+| `OPENING_PR` | With `review_before_pr`, the implementer pushes the reviewed commit and opens its PR | Wait, or `c` on the task to stop it |
+| `WAITING_FOR_CI` | The PR passed the adversarial review; foreman waits for CI | Wait |
 | `NEEDS_DECISION` | The agent asked a question | Enter on the task to answer |
-| `REVIEWING` | PR open; under review, or waiting on CI | Wait, or `c` on the task to stop a running review |
 | `READY_FOR_HUMAN` | Review clean, CI finished (✓ or ✗ shown) | Review and merge the PR |
 | `DONE` | PR merged or issue closed | Nothing |
 | `FAILED` | The agent failed, the run was cancelled, or the runner died | `s` on the task to see why, then Enter on it in the inbox to retry or `x` on the task to reset its local run |

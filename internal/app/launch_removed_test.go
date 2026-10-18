@@ -23,7 +23,7 @@ func TestLaunchWithRemovedTaskStopsBeforeSpawning(t *testing.T) {
 func TestLaunchWithTaskRemovedDuringWorktreeRestoreStopsBeforeSpawning(t *testing.T) {
 	f := newFixture()
 	key := task.Key{Repo: "testorg/example", Number: 825}
-	f.store.recs[key] = &task.Record{Key: key, State: task.Working, Delegation: &task.Delegation{
+	f.store.recs[key] = &task.Record{Key: key, State: task.Implementing, Delegation: &task.Delegation{
 		Branch: "fix/825", Worktree: "/wt/825", WorktreeRemovedAt: now,
 	}}
 	f.wt.onEnsure = func() { delete(f.store.recs, key) }
@@ -38,7 +38,7 @@ func TestLaunchWithTaskRemovedDuringWorktreeRestoreStopsBeforeSpawning(t *testin
 func TestLaunchWithTaskRemovedDuringSpawnStopsRunner(t *testing.T) {
 	f := newFixture()
 	key := task.Key{Repo: "testorg/example", Number: 825}
-	f.store.recs[key] = &task.Record{Key: key, State: task.Working, Delegation: &task.Delegation{}}
+	f.store.recs[key] = &task.Record{Key: key, State: task.Implementing, Delegation: &task.Delegation{}}
 	f.runners.onSpawn = func() {
 		f.runners.alive[4242] = true
 		delete(f.store.recs, key)
@@ -63,7 +63,7 @@ func TestLaunchWithTaskRemovedDuringSpawnReportsFailedStop(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture()
 			key := task.Key{Repo: "testorg/example", Number: 825}
-			f.store.recs[key] = &task.Record{Key: key, State: task.Working, Delegation: &task.Delegation{}}
+			f.store.recs[key] = &task.Record{Key: key, State: task.Implementing, Delegation: &task.Delegation{}}
 			f.runners.onSpawn = func() {
 				f.runners.alive[4242] = true
 				delete(f.store.recs, key)

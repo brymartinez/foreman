@@ -42,7 +42,7 @@ func TestSelfReviewRunsBeforeTheCompetingReviewOfAPR(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if kinds(got) != "self competing" || got.State != task.Reviewing {
+	if kinds(got) != "self competing" || got.State != task.WaitingForCI {
 		t.Fatalf("state %s reviews %s", got.State, kinds(got))
 	}
 	self := got.Reviews[0]
@@ -76,7 +76,7 @@ func TestSelfReviewFindingsGoToTheImplementerAndAFreshSelfReviewFollows(t *testi
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if kinds(got) != "self! self competing" || got.State != task.Reviewing {
+	if kinds(got) != "self! self competing" || got.State != task.WaitingForCI {
 		t.Fatalf("state %s reviews %s", got.State, kinds(got))
 	}
 	if len(f.claude.resumed) != 1 || !strings.Contains(f.claude.resumed[0], "no test covers the 4xx path") {
@@ -159,7 +159,7 @@ func TestRestartAfterACleanSelfReviewGoesStraightToTheCompetingReview(t *testing
 	}
 	// A runner that died after the self-review: the task is still under review.
 	rec := f.store.recs[key]
-	rec.State, rec.LastOutcome = task.Reviewing, nil
+	rec.State, rec.LastOutcome = task.WaitingForCI, nil
 	if kinds(rec) != "self" {
 		t.Fatalf("reviews %s", kinds(rec))
 	}
@@ -167,7 +167,7 @@ func TestRestartAfterACleanSelfReviewGoesStraightToTheCompetingReview(t *testing
 		t.Fatal("the gate would hand over a task with only a self-review")
 	}
 	f.codex.reviewErr = nil
-	rec.State = task.Working
+	rec.State = task.Implementing
 	if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestRestartSelfReviewsAgainWhenTheHeadOrDescriptionChanged(t *testing.T) {
 			t.Fatal(err)
 		}
 		rec := f.store.recs[key]
-		rec.State = task.Working
+		rec.State = task.Implementing
 		pr := f.gh.prs[912]
 		change(&pr)
 		f.gh.prs[912] = pr

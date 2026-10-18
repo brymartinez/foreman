@@ -26,8 +26,8 @@ const DefaultReviewRounds = 3
 // Every step's result is written to the task file before the next one starts.
 func (a App) RunTask(ctx context.Context, key task.Key, pid int, token string, log io.Writer) error {
 	rec, err := a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
-		if cur == nil || cur.Delegation == nil || cur.State != task.Working {
-			return nil, errors.New("task is not WORKING; nothing to run")
+		if cur == nil || cur.Delegation == nil || !cur.State.Runnable() {
+			return nil, errors.New("task is not in a stage a runner drives; nothing to run")
 		}
 		// Only the runner the task's launch spawned may work it. Any other would share
 		// the worktree and the task file with that one.
@@ -54,7 +54,7 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, token string, l
 	if rec.Delegation.ConflictPending {
 		// The gate found the handed-over PR conflicting with its base. A repair
 		// that worked leaves a new head to review; anything else is the developer's.
-		if rec, err = a.repairConflict(ctx, final, rec, log); err != nil || rec.State != task.Reviewing {
+		if rec, err = a.repairConflict(ctx, final, rec, log); err != nil || !rec.State.Reviewing() {
 			return err
 		}
 	}
@@ -75,7 +75,7 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, token string, l
 			// A task left by the old feedback flow already passed review. Hand it
 			// back without resuming the implementer on the same comments.
 			_, err = a.update(final, rec.Key, existing(func(cur *task.Record) {
-				cur.State = task.Reviewing
+				cur.State = task.WaitingForCI
 				if cur.CI != nil && cur.CI.State != task.CIPending {
 					cur.State = task.ReadyForHuman
 				}
@@ -187,15 +187,21 @@ func (r *taskRun) loop(next step) error {
 func (r *taskRun) implement() (step, error) {
 	a := r.a
 	if a.needsPlan(r.rec) {
+		if err := r.enter(task.Planning); err != nil {
+			return stepDone, err
+		}
 		if ok, err := r.reconcilePlan(); err != nil || !ok {
 			return stepDone, err
 		}
 	}
-	during := "implementation"
+	during, stage := "implementation", task.Implementing
 	req := turnRequest{findings: r.findings}
 	if a.needsPlan(r.rec) {
-		during = "planning"
+		during, stage = "planning", task.Planning
 		req.existingPlans = r.plan.texts()
+	}
+	if err := r.enter(stage); err != nil {
+		return stepDone, err
 	}
 	res := a.runTurn(r.ctx, r.rec, req, a.verifiedPR(r.log), r.log)
 	rec, err := a.finishTurn(r.ctx, r.final, r.rec.Key, during, res, func(cur *task.Record) {
@@ -213,7 +219,7 @@ func (r *taskRun) implement() (step, error) {
 	}
 	r.rec = rec
 	if res.err == nil && res.turn.Outcome.Status == agent.Planned {
-		if r.rec, err = a.postPlan(r.ctx, r.final, rec, res.turn.Outcome.Documents, r.plan, r.log); err != nil || r.rec.State != task.Working {
+		if r.rec, err = a.postPlan(r.ctx, r.final, rec, res.turn.Outcome.Documents, r.plan, r.log); err != nil || r.rec.State != task.Planning {
 			return stepDone, err
 		}
 		return stepImplement, nil
@@ -221,10 +227,10 @@ func (r *taskRun) implement() (step, error) {
 	if res.err == nil && res.turn.Outcome.Status == agent.Checkpoint {
 		return stepImplement, nil
 	}
-	if res.err == nil && res.turn.Outcome.Status == agent.ReviewReady && rec.State == task.Working {
+	if res.err == nil && res.turn.Outcome.Status == agent.ReviewReady && rec.State == task.Implementing {
 		return stepReview, nil
 	}
-	if rec.State != task.Reviewing {
+	if !rec.State.Reviewing() {
 		return stepDone, nil
 	}
 	return stepReview, nil
@@ -236,13 +242,16 @@ func (r *taskRun) answer() (step, error) {
 	r.rounds++
 	comments := r.feedback
 	r.feedback = nil
+	if err := r.enter(task.Implementing); err != nil {
+		return stepDone, err
+	}
 	rec, err := r.a.answerFeedback(r.ctx, r.final, r.rec, comments, r.log)
 	if err != nil {
 		return stepDone, err
 	}
 	r.rec = rec
 	switch {
-	case rec.State != task.Reviewing && rec.State != task.ReadyForHuman:
+	case !rec.State.Reviewing() && rec.State != task.WaitingForCI && rec.State != task.ReadyForHuman:
 		// Blocked, failed, or stopped. The comments stay unanswered, so the next run
 		// asks for them again.
 		return stepDone, nil
@@ -308,6 +317,10 @@ func (r *taskRun) review() (step, error) {
 	if kind == task.SelfReview {
 		reviewer = rec.Delegation.Implementer.Agent
 	}
+	if err := r.enter(rec.ReviewStage()); err != nil {
+		return stepDone, err
+	}
+	rec = r.rec
 	var review agent.ReviewOutcome
 	switch {
 	case reviewErr != nil:
@@ -338,8 +351,8 @@ func (r *taskRun) review() (step, error) {
 		}
 		addUsage(&cur.Usage, review.Usage)
 		addUsage(&cur.Usage, diagnosisUsage)
-		// A local review keeps the task WORKING when clean.
-		if atLimit && cur.State == task.Working && cur.ChangeRequestsSinceDecision() > a.fixRounds() {
+		// Findings put the task back to IMPLEMENTING; only they can reach the limit.
+		if atLimit && cur.State == task.Implementing && cur.ChangeRequestsSinceDecision() > a.fixRounds() {
 			if kind == task.SelfReview {
 				escalateSelfReview(cur, a.fixRounds(), *diagnosis, a.Now())
 			} else {
@@ -351,15 +364,15 @@ func (r *taskRun) review() (step, error) {
 	}
 	r.rec = rec
 	switch {
-	case kind == task.SelfReview && rec.SelfReviewPassed() && (rec.State == task.Working || rec.State == task.Reviewing):
+	case kind == task.SelfReview && rec.SelfReviewPassed() && rec.State == task.SelfReviewing:
 		r.selfPassed = true
 		return stepReview, nil
-	case rec.State == task.Working && rec.OpenPending():
+	case rec.State == task.OpeningPR && rec.OpenPending():
 		return stepOpenPR, nil
-	case rec.State == task.Working:
+	case rec.State == task.Implementing:
 		r.findings = rec.LatestReview()
 		return stepImplement, nil
-	case reviewErr == nil && review.Clean && rec.State == task.Reviewing && a.ReplyToPRFeedback:
+	case reviewErr == nil && review.Clean && rec.State == task.WaitingForCI && a.ReplyToPRFeedback:
 		return stepHandover, nil
 	}
 	return stepDone, nil
@@ -374,6 +387,20 @@ func (r *taskRun) handover() (step, error) {
 	}
 	r.rec, r.feedback = rec, feedback
 	return stepAnswer, nil
+}
+
+// enter records the stage the run is about to take its next turn in, before the turn
+// starts, so the task file and the dashboard show it while it runs and after a restart.
+func (r *taskRun) enter(stage task.State) error {
+	if r.rec.State == stage {
+		return nil
+	}
+	rec, err := r.a.update(r.final, r.rec.Key, existing(func(cur *task.Record) { cur.State = stage }))
+	if err != nil {
+		return err
+	}
+	r.rec = rec
+	return nil
 }
 
 // errTaskRemoved stops a runner whose task file was deleted while it ran.
@@ -581,8 +608,12 @@ func applyFeedbackTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runEr
 	rec.CI = ci
 	d := rec.Delegation
 	// The same bar the gate applies: a clean review of this head and CI that finished.
-	// Without both, the task stays under review and the gate hands it over.
-	if reviewCovers(rec, pr.HeadSHA, task.ProposalDigest(pr.Title, pr.Body)) && ci != nil && ci.State != task.CIPending {
+	// A clean review alone waits for CI, and the gate hands the task over.
+	if !reviewCovers(rec, pr.HeadSHA, task.ProposalDigest(pr.Title, pr.Body)) {
+		return
+	}
+	rec.State = task.WaitingForCI
+	if ci != nil && ci.State != task.CIPending {
 		rec.State = task.ReadyForHuman
 		rec.LastOutcome = &task.Outcome{Status: "feedback_answered",
 			Summary: fmt.Sprintf("answered %d %s on PR #%d; no change was needed", len(comments), plural(len(comments), "comment", "comments"), d.PR), At: now}
@@ -873,12 +904,13 @@ func applyTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error,
 	rec.LastOutcome = &task.Outcome{Status: string(o.Status), Summary: o.Summary, At: now}
 	switch o.Status {
 	case agent.PROpened:
-		rec.State = task.Reviewing
 		rec.Delegation.PR, rec.Delegation.PRURL, rec.Delegation.PRHead = pr.Key.Number, pr.URL, pr.HeadSHA
 		rec.Delegation.CheckpointNext = ""
 		rec.Validation = o.Validation
+		rec.State = rec.ReviewStage()
 	case agent.Checkpoint, agent.ReviewReady:
-		rec.State = task.Working
+		// The step that follows enters its own stage before its turn.
+		rec.State = task.Implementing
 	case agent.Blocked:
 		rec.State = task.NeedsDecision
 		for _, q := range o.Questions {
@@ -1044,9 +1076,9 @@ func planCommentBody(doc task.PlanDoc, fingerprint, text string) string {
 
 // applyPRHead records the PR head a resumed run is about to review.
 func applyPRHead(rec *task.Record, pr *PullRequest) {
-	rec.State = task.Reviewing
 	rec.CI = nil
 	rec.Delegation.PRHead = pr.HeadSHA
+	rec.State = rec.ReviewStage()
 }
 
 func short(sha string) string {
@@ -1056,8 +1088,10 @@ func short(sha string) string {
 	return sha
 }
 
-// applyReview records a review round. Findings send the task back to WORKING for the
-// implementer; a clean review leaves it REVIEWING for the readiness gate (gate.go).
+// applyReview records a review round. Findings send the task back to IMPLEMENTING. A
+// clean self-review leaves the next review to enter its stage. A clean competing review
+// of a local commit goes on to OPENING_PR, and of a PR waits for the readiness gate
+// (gate.go) in WAITING_FOR_CI.
 // A self-review's error fails the task too: it never falls through to the competing
 // review. The round records the head and description it read, which is what later
 // decides whether it still covers the change.
@@ -1089,9 +1123,16 @@ func applyReview(rec *task.Record, kind task.ReviewKind, reviewer task.Agent, r 
 			status = "self_review_clean"
 		}
 		rec.LastOutcome = &task.Outcome{Status: status, Summary: r.Summary, At: now}
+		switch {
+		case kind == task.SelfReview:
+		case rec.LocalReview():
+			rec.State = task.OpeningPR
+		default:
+			rec.State = task.WaitingForCI
+		}
 		return
 	}
-	rec.State = task.Working
+	rec.State = task.Implementing
 	rec.LastOutcome = &task.Outcome{Status: "changes_requested", Summary: fmt.Sprintf("%d findings: %s", len(r.Findings), r.Summary), At: now}
 }
 

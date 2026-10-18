@@ -153,7 +153,7 @@ func TestAnsweredContextDecisionReachesTheImplementerAndAFreshSelfReviewFollows(
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if kinds(got) != "self! self! self competing" || got.State != task.Reviewing {
+	if kinds(got) != "self! self! self competing" || got.State != task.WaitingForCI {
 		t.Fatalf("state %s reviews %s", got.State, kinds(got))
 	}
 	last := f.claude.resumed[len(f.claude.resumed)-1]

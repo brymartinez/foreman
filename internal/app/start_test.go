@@ -458,7 +458,7 @@ func TestStartDispatches(t *testing.T) {
 		t.Errorf("worktree = %+v", f.wt.reqs)
 	}
 	d := rec.Delegation
-	if rec.State != task.Working || d.Implementer.Agent != task.Claude || d.Reviewer != task.Codex ||
+	if rec.State != task.Planning || d.Implementer.Agent != task.Claude || d.Reviewer != task.Codex ||
 		d.Branch != wantWT.Branch || d.Worktree != wantWT.Path || d.ContextFile != req.ContextFile ||
 		d.RunnerPID != 4242 || d.RunnerLog == "" || d.StartedAt.IsZero() || rec.Title != "Provider retries" {
 		t.Errorf("record = %+v / %+v", rec, d)
@@ -474,7 +474,7 @@ func TestStartRefuses(t *testing.T) {
 		"closed issue":    func(f *fixture, r *StartRequest) { f.gh.issue.State = "closed" },
 		"missing context": func(f *fixture, r *StartRequest) { r.ContextFile = "/nope/825.md" },
 		"running": func(f *fixture, r *StartRequest) {
-			rec := seen(825, task.Working, "open", t0)
+			rec := seen(825, task.Implementing, "open", t0)
 			rec.Repo = "testorg/example"
 			rec.Key = task.Key{Repo: "testorg/example", Number: 825}
 			rec.Delegation = &task.Delegation{RunnerPID: 77}
@@ -520,7 +520,7 @@ func TestStartAcceptsPRClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.State != task.Working || len(f.runners.spawned) != 1 {
+	if rec.State != task.Planning || len(f.runners.spawned) != 1 {
 		t.Errorf("state %s spawned %d", rec.State, len(f.runners.spawned))
 	}
 	// Keeping the closed PR's number would have the gate end this run on its next
@@ -590,7 +590,7 @@ func TestRunTaskAppliesOutcome(t *testing.T) {
 		state task.State
 		check func(t *testing.T, r *task.Record)
 	}{
-		{"pr opened", agent.Turn{Outcome: agent.Outcome{Status: agent.PROpened, Summary: "done", PRNumber: 912, Validation: []task.Check{{Command: "go test ./...", Passed: true}}}}, nil, task.Reviewing,
+		{"pr opened", agent.Turn{Outcome: agent.Outcome{Status: agent.PROpened, Summary: "done", PRNumber: 912, Validation: []task.Check{{Command: "go test ./...", Passed: true}}}}, nil, task.WaitingForCI,
 			func(t *testing.T, r *task.Record) {
 				if r.Delegation.PR != 912 || r.Delegation.PRURL != "https://github.com/testorg/example/pull/912" || len(r.Validation) != 1 {
 					t.Errorf("pr = %d %q validation %v", r.Delegation.PR, r.Delegation.PRURL, r.Validation)
@@ -663,8 +663,8 @@ func TestStatusReapsDeadRunner(t *testing.T) {
 	}
 
 	f.runners.alive[4242] = true
-	f.store.recs[rec.Key].State, f.store.recs[rec.Key].Delegation.RunnerPID = task.Working, 4242
-	if recs, _, _ = f.app.Status(context.Background()); recs[0].State != task.Working {
+	f.store.recs[rec.Key].State, f.store.recs[rec.Key].Delegation.RunnerPID = task.Implementing, 4242
+	if recs, _, _ = f.app.Status(context.Background()); recs[0].State != task.Implementing {
 		t.Errorf("live runner reaped: %s", recs[0].State)
 	}
 }
@@ -681,8 +681,8 @@ func TestRunTaskVerifiesReportedPR(t *testing.T) {
 		wantPR   int
 		errPart  string
 	}{
-		{"number verified", 913, good, task.Reviewing, 913, ""},
-		{"no number, found by branch", 0, good, task.Reviewing, 913, ""},
+		{"number verified", 913, good, task.WaitingForCI, 913, ""},
+		{"no number, found by branch", 0, good, task.WaitingForCI, 913, ""},
 		{"unknown number", 404, good, task.Failed, 0, "could not be loaded"},
 		{"no PR for branch", 0, func() PullRequest { p := good(); p.HeadRefName = "other"; return p }, task.Failed, 0, "no open PR has head"},
 		{"closed", 913, func() PullRequest { p := good(); p.State = "closed"; return p }, task.Failed, 0, "not open"},
@@ -781,8 +781,8 @@ func TestStartNewOnlyStartsAnIssueNeverDelegated(t *testing.T) {
 	key := task.Key{Repo: "testorg/example", Number: 825}
 	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.Discovered}
 	rec, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Issue: 825, Agent: task.Claude, NewOnly: true})
-	if err != nil || rec.State != task.Working || len(f.runners.spawned) != 1 {
-		t.Fatalf("start = %+v, %v; want a WORKING run for a tracked issue with no delegation", rec, err)
+	if err != nil || rec.State != task.Planning || len(f.runners.spawned) != 1 {
+		t.Fatalf("start = %+v, %v; want a PLANNING run for a tracked issue with no delegation", rec, err)
 	}
 }
 

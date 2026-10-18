@@ -175,7 +175,7 @@ func (r *taskRun) reconcilePlan() (bool, error) {
 		return false, err
 	}
 	r.rec = rec
-	if rec.State != task.Working {
+	if rec.State != task.Planning {
 		return false, nil
 	}
 	if adopt {

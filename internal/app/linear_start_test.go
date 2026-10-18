@@ -220,7 +220,7 @@ func TestLinearTaskRefreshesAndResumesAfterGitHubOnlyLaunch(t *testing.T) {
 		t.Fatalf("delegated tasks = %+v, %v", tasks, err)
 	}
 	resumed, err := f.app.Resume(context.Background(), tasks[0].Key)
-	if err != nil || resumed.State != task.Working || len(f.runners.spawned) != 2 || f.runners.spawned[1] != key {
+	if err != nil || resumed.State != task.Implementing || len(f.runners.spawned) != 2 || f.runners.spawned[1] != key {
 		t.Fatalf("resume = %+v, %v; spawned %+v", resumed, err, f.runners.spawned)
 	}
 }
