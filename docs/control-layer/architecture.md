@@ -698,8 +698,9 @@ the same commit. The commit message records why it changed.
   options are another round or a stop. Before asking, one diagnosis turn of the
   implementer's agent, with the evaluator's tool-less restrictions and the reviewer
   budget, reads the open findings and the context the implementer was given: issue,
-  plan documents, context file, PR or proposed description, `AGENTS.md` and
-  `CLAUDE.md`, and the repository knowledge in its prompt. It answers `practice_gap`,
+  plan documents, context file, answered decisions, PR or proposed description,
+  `AGENTS.md` and `CLAUDE.md`, the implement stage instructions, and the repository
+  knowledge in its prompt. It answers `practice_gap`,
   `conflict`, or `none`. Go keeps a conflict only when every quoted statement appears
   in its named source (whitespace runs compare equal), and otherwise reports none, so
   a model cannot invent one. A verified conflict lists each statement with its source

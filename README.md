@@ -416,8 +416,9 @@ finding problems, foreman never offers to accept them. It first diagnoses why, t
 asks you to do another round or stop the task:
 
 - a missed generic practice: the findings also go to learning;
-- a conflict in what the implementer was told (issue, plan, context file, PR
-  description, `AGENTS.md` or `CLAUDE.md`, repository knowledge): each statement is
+- a conflict in what the implementer was told (issue, plan, context file, your
+  answered decisions, PR description, `AGENTS.md` or `CLAUDE.md`, the implement stage
+  file, repository knowledge): each statement is
   quoted with its source, and you pick which one governs. Foreman shows a conflict only
   when every quote is in its source;
 - no concrete conflict found: the question says so.

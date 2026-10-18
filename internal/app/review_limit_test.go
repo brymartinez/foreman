@@ -207,3 +207,31 @@ func TestLocalSelfReviewLimitOffersNoAcceptAndStopsWithoutAPR(t *testing.T) {
 		t.Fatalf("state %s outcome %+v", got.State, got.LastOutcome)
 	}
 }
+
+func TestLimitDiagnosisQuotesAnsweredDecisionsAndStageInstructions(t *testing.T) {
+	f := newFixture()
+	f.app.FixRounds = 1
+	diag := &fakeDiagnoser{raw: `{"kind": "conflict", "summary": "the decision and the description disagree", "conflicts": [
+		{"point": "whether 429 retries", "first": {"source": "decision 1", "quote": "Retry 429 responses too"}, "second": {"source": "pull request description", "quote": "Retry 5xx only."}}
+	]}`}
+	f.app.Diagnoser = diag
+	key := started(t, f, startReq(t))
+	f.store.recs[key].Decisions = []task.Decision{
+		{Question: task.Question{Issue: "Should 429 retry?"}, Answer: "A. Retry 429 responses too", AnsweredAt: t0, DeliveredAt: t0},
+	}
+	f.claude.turns = []agent.Turn{prTurn("sid-1"), prTurn("sid-1")}
+	f.claude.reviews = []agent.ReviewOutcome{selfFindings(), selfFindings()}
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	d := f.store.recs[key].Pending()
+	if d == nil || d.Diagnosis == nil || d.Diagnosis.Kind != task.DiagnosedConflict || !strings.Contains(d.Question.Context, `decision 1: "Retry 429 responses too"`) {
+		t.Fatalf("decision = %+v", d)
+	}
+	p := diag.inputs[0].Prompt
+	for _, want := range []string{`### Source "decision 1"`, "Should 429 retry?", `### Source "implement stage instructions"`, "implement instructions"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("diagnosis prompt lacks %q:\n%s", want, p)
+		}
+	}
+}

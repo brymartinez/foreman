@@ -44,8 +44,9 @@ func (a App) diagnoseLimit(ctx context.Context, rec *task.Record, title, body st
 
 // limitContext is the context the implementer was given, as named sources a quoted
 // statement must come from: the issue, its planning documents, the developer's context
-// file, the PR or proposed description, the repository instruction files, and the
-// repository knowledge in its prompt.
+// file, the answered decisions, the PR or proposed description, the repository
+// instruction files, the implement stage instructions, and the repository knowledge in
+// its prompt.
 func (a App) limitContext(ctx context.Context, rec *task.Record, title, body string, log io.Writer) ([]agent.DiagnosisSource, error) {
 	d := rec.Delegation
 	issue, err := a.issue(ctx, rec.Key)
@@ -69,6 +70,14 @@ func (a App) limitContext(ctx context.Context, rec *task.Record, title, body str
 		}
 		sources = append(sources, agent.DiagnosisSource{Name: "context file", Text: string(text)})
 	}
+	n := 0
+	for _, dec := range rec.Decisions {
+		if dec.Answer == "" {
+			continue
+		}
+		n++
+		sources = append(sources, agent.DiagnosisSource{Name: fmt.Sprintf("decision %d", n), Text: dec.Question.Issue + "\n\n" + dec.Answer})
+	}
 	name := "pull request description"
 	if rec.LocalReview() {
 		name = "proposed pull request description"
@@ -83,6 +92,13 @@ func (a App) limitContext(ctx context.Context, rec *task.Record, title, body str
 			return nil, err
 		}
 		sources = append(sources, agent.DiagnosisSource{Name: f, Text: string(text)})
+	}
+	stage, err := a.Stages.Resolve(d.Worktree, task.StageImplement)
+	if err != nil {
+		return nil, err
+	}
+	if text := stage.Content(); text != "" {
+		sources = append(sources, agent.DiagnosisSource{Name: "implement stage instructions", Text: text})
 	}
 	if k := a.repoKnowledge(rec.Repo, issue, log); strings.TrimSpace(k) != "" {
 		sources = append(sources, agent.DiagnosisSource{Name: "repository knowledge", Text: k})
