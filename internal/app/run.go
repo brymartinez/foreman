@@ -68,7 +68,7 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, token string, l
 		}
 	} else if len(rec.UnhandledFeedback()) > 0 && rec.Delegation.PR != 0 && reviewCovers(rec, rec.Delegation.PRHead, rec.Delegation.PRDigest) {
 		var current bool
-		if rec, current, err = a.currentDescription(ctx, final, rec); err != nil {
+		if rec, current, err = a.currentPR(ctx, final, rec); err != nil {
 			return err
 		}
 		if current && reviewCovers(rec, rec.Delegation.PRHead, rec.Delegation.PRDigest) {

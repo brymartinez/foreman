@@ -335,3 +335,28 @@ func TestFeedbackRestartDoesNotHandOverAnEditedDescriptionWithoutReviews(t *test
 		})
 	}
 }
+
+func TestFeedbackRestartDoesNotHandOverANewCommitWithoutReviews(t *testing.T) {
+	for _, replies := range []bool{false, true} {
+		f := newFixture()
+		key := waiting(t, f)
+		// A commit landed after the last refresh, so the stored head is the reviewed one.
+		movesHead(f, "c0ffee9")
+		f.store.recs[key].State = task.Failed
+		if replies {
+			f.gh.prComments = nil
+		}
+		reviews := len(f.store.recs[key].Reviews)
+		f.app.ReplyToPRFeedback = replies
+		if _, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Issue: key.Number, Agent: task.Claude}); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		got := f.store.recs[key]
+		if len(got.Reviews) != reviews+2 || !strings.HasSuffix(kinds(got), "self competing") || got.LatestCompeting().Head != "c0ffee9" {
+			t.Errorf("replies %v: state %s reviews %s; want a self-review and a competing review of the new commit", replies, got.State, kinds(got))
+		}
+	}
+}

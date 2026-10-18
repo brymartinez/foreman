@@ -154,7 +154,7 @@ func (a App) unanswered(ctx, final context.Context, rec *task.Record, log io.Wri
 	}
 	current := false
 	if reviewCovers(updated, d.PRHead, d.PRDigest) {
-		if updated, current, err = a.currentDescription(ctx, final, updated); err != nil {
+		if updated, current, err = a.currentPR(ctx, final, updated); err != nil {
 			return nil, updated, false, err
 		}
 	}
@@ -187,20 +187,22 @@ func (a App) unanswered(ctx, final context.Context, rec *task.Record, log io.Wri
 	return nil, updated, true, err
 }
 
-// currentDescription stores the digest of the description the PR has on GitHub now, so
-// a path that skips review judges coverage by that description, not one a refresh
-// stored earlier. current is false when the PR could not be read, and the run then
-// reviews instead of handing over.
-func (a App) currentDescription(ctx, final context.Context, rec *task.Record) (updated *task.Record, current bool, err error) {
+// currentPR stores the head and description digest the PR has on GitHub now, so a path
+// that skips review judges coverage by them, not by what a refresh stored earlier.
+// current is false when the PR could not be read, and the run then reviews instead of
+// handing over.
+func (a App) currentPR(ctx, final context.Context, rec *task.Record) (updated *task.Record, current bool, err error) {
 	pr, err := a.GitHub.GetPullRequest(ctx, task.Key{Repo: rec.Repo, Number: rec.Delegation.PR})
-	if err != nil {
+	if err != nil || pr.HeadSHA == "" {
 		return rec, false, nil
 	}
 	digest := task.ProposalDigest(pr.Title, pr.Body)
-	if digest == rec.Delegation.PRDigest {
+	if digest == rec.Delegation.PRDigest && pr.HeadSHA == rec.Delegation.PRHead {
 		return rec, true, nil
 	}
-	updated, err = a.update(final, rec.Key, existing(func(cur *task.Record) { cur.Delegation.PRDigest = digest }))
+	updated, err = a.update(final, rec.Key, existing(func(cur *task.Record) {
+		cur.Delegation.PRDigest, cur.Delegation.PRHead = digest, pr.HeadSHA
+	}))
 	return updated, err == nil, err
 }
 
