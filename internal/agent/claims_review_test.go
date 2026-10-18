@@ -74,3 +74,11 @@ func TestParseReviewRejectsAnIncompleteLimitation(t *testing.T) {
 		}
 	}
 }
+
+func TestParseReviewRejectsABlockingLimitationWithoutABlockingFinding(t *testing.T) {
+	_, err := ParseReview([]byte(`{"verdict":"changes_requested","summary":"s","findings":[{"severity":"should_fix","file":null,"line":null,"summary":"rename retry","detail":""}],
+"limitations":[{"behavior":"Linear PRD load","reason":"no token","blocking":true}]}`))
+	if err == nil || !strings.Contains(err.Error(), "blocking finding") {
+		t.Fatalf("err = %v, want a blocking limitation without a blocking finding rejected", err)
+	}
+}

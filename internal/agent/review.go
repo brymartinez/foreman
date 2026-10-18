@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/brymartinez/foreman/internal/task"
@@ -80,6 +81,11 @@ func ParseReview(raw []byte) (ReviewOutcome, error) {
 	case "changes_requested":
 		if len(out.Findings) == 0 {
 			return ReviewOutcome{}, errors.New("review requests changes but lists no findings")
+		}
+		// The implementer receives findings, not limitations, so a blocking limitation
+		// reaches it only through a blocking finding.
+		if blocked && !slices.ContainsFunc(out.Findings, func(f task.Finding) bool { return f.Severity == "blocking" }) {
+			return ReviewOutcome{}, errors.New("review lists a blocking limitation but no blocking finding")
 		}
 	default:
 		return ReviewOutcome{}, fmt.Errorf("unknown review verdict %q", w.Verdict)

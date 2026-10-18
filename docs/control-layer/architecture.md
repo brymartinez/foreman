@@ -721,7 +721,8 @@ the same commit. The commit message records why it changed.
   unproven. An unsupported material claim is a finding. A behavior the reviewer cannot
   check is a limitation; a blocking one (it prevents judging a criterion or hides a
   plausible serious defect) cannot come with a clean verdict, so `agent.ParseReview`
-  rejects that pair, and the reviewer adds a blocking finding. Limitations are stored on
+  rejects that pair. It also rejects a blocking limitation without a blocking finding,
+  because the implementer receives findings, not limitations. Limitations are stored on
   the round.
 - **`review_before_pr` reviews before the PR opens.** Repositories that review every new
   PR automatically would otherwise review code Foreman's fixes still change. The setting
