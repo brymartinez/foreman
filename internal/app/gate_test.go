@@ -516,6 +516,7 @@ func TestGateReopenedPRReturnsToTheActiveList(t *testing.T) {
 		// A review from before heads were recorded cannot be shown to cover the
 		// reopened PR, so it must not hand the task to the developer.
 		{"clean review with no recorded head", func(r *task.Review) { r.Head = "" }, task.Reviewing},
+		{"clean review of an earlier description", func(r *task.Review) { r.Proposal = task.ProposalDigest("", "Retry everything.") }, task.Reviewing},
 	} {
 		f := newFixture()
 		key := reviewed(t, f)

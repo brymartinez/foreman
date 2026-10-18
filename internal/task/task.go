@@ -690,16 +690,39 @@ func (r *Record) ReviewPending() bool {
 	if !r.LocalReview() && (d.PR == 0 || d.PRHead == "") {
 		return false
 	}
+	self := r.LatestSelf()
+	if r.selfCovers(self) && self.Clean && r.newer(self, r.LatestCompeting()) {
+		// The change passed its self-review after its last competing review, which a
+		// restart must not skip even when that review read the same head.
+		return true
+	}
 	if r.competingCovers(r.LatestCompeting()) {
 		return false
 	}
-	self := r.LatestSelf()
 	return !r.selfCovers(self) || self.Clean
 }
 
+// newer reports whether review a comes after review b in the record. Both point into
+// r.Reviews, as LatestSelf and LatestCompeting return; any review is newer than none.
+func (r *Record) newer(a, b *Review) bool {
+	if b == nil {
+		return a != nil
+	}
+	for i := range r.Reviews {
+		switch &r.Reviews[i] {
+		case a:
+			return false
+		case b:
+			return a != nil
+		}
+	}
+	return false
+}
+
 // competingCovers reports whether a competing review read the current change: the
-// local commit with its proposal, or the PR head. A PR's competing review covers its
-// head alone, as it did before self-reviews, so older tasks are not reviewed again.
+// local commit with its proposal, or the PR head with its description. A review or a
+// task from before descriptions were recorded has no digest, and covers its head
+// alone, so older tasks are not reviewed again.
 func (r *Record) competingCovers(review *Review) bool {
 	d := r.Delegation
 	if review == nil || review.Kind != CompetingReview {
@@ -708,7 +731,7 @@ func (r *Record) competingCovers(review *Review) bool {
 	if r.LocalReview() {
 		return r.coversLocal(review)
 	}
-	return review.PR == d.PR && review.Head == d.PRHead
+	return review.PR == d.PR && review.Head == d.PRHead && (review.Proposal == "" || d.PRDigest == "" || review.Proposal == d.PRDigest)
 }
 
 // BeforePR reports a task reviewed before its PR opens that has no PR yet. Its
@@ -742,7 +765,8 @@ func (r *Record) coversLocal(review *Review) bool {
 }
 
 // ProposalDigest identifies a proposed PR title and description, so a review records
-// which proposal it read.
+// which proposal it read. Line endings and surrounding space are ignored, because the
+// PR on GitHub can differ from the reviewed text in those alone.
 func ProposalDigest(title, body string) string {
-	return Digest(strings.TrimSpace(title) + "\n\n" + body)
+	return Digest(strings.TrimSpace(title) + "\n\n" + strings.TrimSpace(strings.ReplaceAll(body, "\r\n", "\n")))
 }

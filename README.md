@@ -311,8 +311,9 @@ part of the task.
    - A repo with no checks shows `✓ CI (no checks)`.
    - A merged PR marks the task DONE. A PR closed without merging marks it
      `PR_CLOSED` and stops the run.
-6. Every review records the commit it covered. If the PR gets new commits after a clean
-   review, the next refresh has the reviewer look at them before the task is
+6. Every review records the commit and description it covered. If the PR gets new
+   commits or a new description after a clean review, the next refresh has both
+   reviews look at it again before the task is
    `READY_FOR_HUMAN`. Once it is, the PR is yours: new commits are flagged but not taken
    back. A runner that crashes during a review picks up at the review when you start
    the `FAILED` task again from the inbox.

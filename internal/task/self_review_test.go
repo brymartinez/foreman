@@ -56,6 +56,7 @@ func TestReviewPendingWaitsForTheCompetingReviewOfTheCurrentChange(t *testing.T)
 	local := func(head string, reviews ...Review) *Record {
 		return &Record{State: Working, Delegation: &Delegation{ReviewBeforePR: true, LocalHead: head, ProposedTitle: "feat: x", ProposedBody: "Closes #7"}, Reviews: reviews}
 	}
+	other := ProposalDigest("feat: x", "Closes #7, retries 5xx")
 	selfClean := Review{Kind: SelfReview, PR: 7, Head: "h1", Proposal: desc, Clean: true}
 	for name, tc := range map[string]struct {
 		rec           *Record
@@ -72,6 +73,12 @@ func TestReviewPendingWaitsForTheCompetingReviewOfTheCurrentChange(t *testing.T)
 		},
 		"a clean competing review of the PR head is not pending": {
 			rec: onPR("h1", selfClean, Review{PR: 7, Head: "h1", Clean: true}),
+		},
+		"a competing review of an older description does not cover the head": {
+			rec: onPR("h1", Review{Kind: SelfReview, PR: 7, Head: "h1", Proposal: other}, Review{PR: 7, Head: "h1", Proposal: other}, selfClean), pending: true,
+		},
+		"a clean self-review newer than the competing review of the same change leaves it pending": {
+			rec: onPR("h1", Review{Round: 1, PR: 7, Head: "h1"}, Review{Round: 2, Kind: SelfReview, PR: 7, Head: "h1", Proposal: desc, Clean: true}), pending: true,
 		},
 		"an old record's clean review with no kind still covers its head": {
 			rec: onPR("h1", Review{PR: 7, Head: "h1", Clean: true}),
@@ -126,5 +133,16 @@ func TestPhaseOfAReviewingTaskWithOnlyASelfReviewIsReview(t *testing.T) {
 	rec := Record{State: Reviewing, Delegation: &Delegation{PR: 7, PRHead: "h1"}, Reviews: []Review{{Kind: SelfReview, PR: 7, Head: "h1", Clean: true}}}
 	if got := rec.PhaseOf(); got != PhaseReview {
 		t.Fatalf("PhaseOf() = %q, want %q", got, PhaseReview)
+	}
+}
+
+func TestProposalDigestIgnoresLineEndingsAndSurroundingSpace(t *testing.T) {
+	// GitHub may return a description with CRLF line endings or without the trailing
+	// newline the body file had; it is still the description the review read.
+	if ProposalDigest("feat: x", "Retry 5xx.\n\nCloses #7\n") != ProposalDigest(" feat: x", "Retry 5xx.\r\n\r\nCloses #7") {
+		t.Error("the same description digests differently")
+	}
+	if ProposalDigest("feat: x", "Retry 5xx.") == ProposalDigest("feat: x", "Retry 4xx.") {
+		t.Error("different descriptions digest the same")
 	}
 }

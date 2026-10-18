@@ -640,7 +640,11 @@ the same commit. The commit message records why it changed.
   the title and description it read. A clean self-review counts only while the stored
   head and description digest match, so a restart, a new commit, or a description-only
   edit needs a new self-review. The review step re-reads the PR description and stores
-  its digest before choosing. The gate, PR adoption, and reopening read competing
+  its digest before choosing. A competing review covers the head and description it
+  read; one from before descriptions were recorded covers its head alone. A clean
+  self-review newer than the latest competing review leaves the competing review
+  pending, so a restart finishes it. The digest ignores line endings and surrounding
+  space, which GitHub may change. The gate, PR adoption, and reopening read competing
   reviews only, so a clean self-review never hands a task over.
 - **The competing review stays independent.** Its prompt lists only earlier competing
   rounds; self-review rounds and findings never reach it.
@@ -674,8 +678,9 @@ the same commit. The commit message records why it changed.
   of the PR's head, so the gate goes straight to CI. Each local review records the
   commit and a digest of the title and description it read, and a restart resumes from the record:
   a commit or description without a review goes to review, a clean pair to the PR step.
-- **A review covers one PR head.** Each review records the head it read. A REVIEWING
-  task whose head moved is reviewed again; new commits on a READY_FOR_HUMAN PR are only
+- **A review covers one PR head and description.** Each review records the head and
+  description it read. A REVIEWING task whose head or description changed is reviewed
+  again, self-review first; new commits on a READY_FOR_HUMAN PR are only
   flagged, because that PR is the developer's now. A crash mid-review restarts at the
   review, not the implementation.
 - **Conflicts are checked before every review** with `git merge-tree` on

@@ -89,6 +89,35 @@ func TestNewCommitsAfterACleanReviewAreReviewedBeforeHandover(t *testing.T) {
 	}
 }
 
+func TestAnEditedDescriptionAfterACleanReviewIsSelfReviewedAndReviewedBeforeHandover(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	pr := f.gh.prs[912]
+	pr.Body = "Retry 5xx and 429.\n\nCloses #825"
+	f.gh.prs[912] = pr
+	setCI(f, task.CIStatus{State: task.CIPassing})
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Working || got.Delegation.PRDigest != task.ProposalDigest(pr.Title, pr.Body) || len(f.runners.spawned) != 2 {
+		t.Fatalf("state %s digest %s spawned %d", got.State, got.Delegation.PRDigest, len(f.runners.spawned))
+	}
+	if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got = f.store.recs[key]
+	if kinds(got) != "self competing self competing" || got.State != task.Reviewing || f.claude.starts != 1 {
+		t.Fatalf("state %s reviews %s implementer starts %d", got.State, kinds(got), f.claude.starts)
+	}
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got = f.store.recs[key]; got.State != task.ReadyForHuman {
+		t.Errorf("after the re-review: %s", got.State)
+	}
+}
+
 func TestNewCommitsOnAHandedOverPRAreFlaggedNotTakenBack(t *testing.T) {
 	f := newFixture()
 	key := reviewed(t, f)
