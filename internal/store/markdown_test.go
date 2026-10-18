@@ -74,6 +74,11 @@ func delegated() *task.Record {
 			Answer:      "A. 5xx only",
 			AnsweredAt:  synced,
 			DeliveredAt: synced,
+			Diagnosis: &task.Diagnosis{Kind: task.DiagnosedConflict, Summary: "the issue and the plan disagree", Conflicts: []task.ContextConflict{{
+				Point:  "which status codes retry",
+				First:  task.Statement{Source: "issue", Quote: "Retry failed requests."},
+				Second: task.Statement{Source: "plan: Design", Quote: "Retry 5xx only."},
+			}}},
 		}},
 		Body: "# #825 Provider retries\n\n## Decisions\n\n- Preserve existing retry behavior.\n",
 	}

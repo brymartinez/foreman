@@ -276,11 +276,12 @@ type snapshot struct {
 }
 
 type decisionFM struct {
-	AskedAt    time.Time     `yaml:"asked_at"`
-	Question   task.Question `yaml:"question"`
-	Answer     string        `yaml:"answer,omitempty"`
-	AnsweredAt *time.Time    `yaml:"answered_at,omitempty"`
-	Delivered  *time.Time    `yaml:"delivered_at,omitempty"`
+	AskedAt    time.Time       `yaml:"asked_at"`
+	Question   task.Question   `yaml:"question"`
+	Answer     string          `yaml:"answer,omitempty"`
+	AnsweredAt *time.Time      `yaml:"answered_at,omitempty"`
+	Delivered  *time.Time      `yaml:"delivered_at,omitempty"`
+	Diagnosis  *task.Diagnosis `yaml:"diagnosis,omitempty"`
 }
 
 // ownedKeys are the frontmatter keys foreman writes; every other key belongs to the user.
@@ -462,7 +463,7 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 	}
 	rec.Usage = task.Usage{ClaudeCostUSD: fm.Usage.ClaudeCostUSD, CodexInputTokens: fm.Usage.CodexInputTokens, CodexCachedTokens: fm.Usage.CodexCachedTokens, CodexOutputTokens: fm.Usage.CodexOutputTokens, CodexReasoningTokens: fm.Usage.CodexReasoningTokens, ClaudeTurns: fm.Usage.ClaudeTurns, CodexTurns: fm.Usage.CodexTurns, ToolCalls: fm.Usage.ToolCalls}
 	for _, d := range fm.Decisions {
-		dec := task.Decision{AskedAt: d.AskedAt, Question: d.Question, Answer: d.Answer}
+		dec := task.Decision{AskedAt: d.AskedAt, Question: d.Question, Answer: d.Answer, Diagnosis: d.Diagnosis}
 		if d.AnsweredAt != nil {
 			dec.AnsweredAt = *d.AnsweredAt
 		}
@@ -553,7 +554,7 @@ func fromRecord(rec *task.Record) frontmatter {
 	}
 	fm.Usage = usageFM{ClaudeCostUSD: rec.Usage.ClaudeCostUSD, CodexInputTokens: rec.Usage.CodexInputTokens, CodexCachedTokens: rec.Usage.CodexCachedTokens, CodexOutputTokens: rec.Usage.CodexOutputTokens, CodexReasoningTokens: rec.Usage.CodexReasoningTokens, ClaudeTurns: rec.Usage.ClaudeTurns, CodexTurns: rec.Usage.CodexTurns, ToolCalls: rec.Usage.ToolCalls}
 	for _, d := range rec.Decisions {
-		dec := decisionFM{AskedAt: d.AskedAt, Question: d.Question, Answer: d.Answer}
+		dec := decisionFM{AskedAt: d.AskedAt, Question: d.Question, Answer: d.Answer, Diagnosis: d.Diagnosis}
 		if !d.AnsweredAt.IsZero() {
 			t := d.AnsweredAt
 			dec.AnsweredAt = &t

@@ -78,9 +78,9 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, token string, l
 		}))
 		return err
 	}
-	if stoppedBeforePR(rec) {
+	if stoppedAtLimit(rec) {
 		_, err = a.update(final, rec.Key, existing(func(cur *task.Record) {
-			failTask(cur, "stopped by the maintainer; no PR opened", a.Now())
+			failTask(cur, stopSummary(cur), a.Now())
 			markDelivered(cur, a.Now())
 		}))
 		return err
@@ -310,6 +310,18 @@ func (r *taskRun) review() (step, error) {
 	default:
 		review, reviewer, reviewErr = a.review(r.ctx, rec, title, body, r.log)
 	}
+	// Every fix is reviewed; the developer is asked only once fix_rounds fixes, requested
+	// by either reviewer, still leave findings. A self-review at the limit is diagnosed
+	// first, and the review, the diagnosis, and the question are written together, so a
+	// restart reviews again rather than asking without a diagnosis.
+	atLimit := reviewErr == nil && !review.Clean && rec.ChangeRequestsSinceDecision()+1 > a.fixRounds()
+	var diagnosis *task.Diagnosis
+	var diagnosisUsage task.Usage
+	if atLimit && kind == task.SelfReview {
+		var d task.Diagnosis
+		d, diagnosisUsage = a.diagnoseLimit(r.ctx, rec, title, body, review.Findings, r.log)
+		diagnosis = &d
+	}
 	if rec, err = a.update(r.final, rec.Key, existing(func(cur *task.Record) {
 		if kind == task.CompetingReview {
 			cur.Delegation.Reviewer = reviewer
@@ -319,11 +331,14 @@ func (r *taskRun) review() (step, error) {
 			applyStop(r.ctx, cur, "review", r.log, a.Now())
 		}
 		addUsage(&cur.Usage, review.Usage)
-		// Every fix is reviewed; the developer is asked only once fix_rounds fixes,
-		// requested by either reviewer, still leave findings. A local review keeps the
-		// task WORKING when clean.
-		if reviewErr == nil && !review.Clean && cur.State == task.Working && cur.ChangeRequestsSinceDecision() > a.fixRounds() {
-			escalateReview(cur, a.fixRounds(), a.Now())
+		addUsage(&cur.Usage, diagnosisUsage)
+		// A local review keeps the task WORKING when clean.
+		if atLimit && cur.State == task.Working && cur.ChangeRequestsSinceDecision() > a.fixRounds() {
+			if kind == task.SelfReview {
+				escalateSelfReview(cur, a.fixRounds(), *diagnosis, a.Now())
+			} else {
+				escalateReview(cur, a.fixRounds(), a.Now())
+			}
 		}
 	})); err != nil {
 		return stepDone, err
@@ -1115,22 +1130,100 @@ func escalateReview(rec *task.Record, rounds int, now time.Time) {
 	}})
 }
 
+// escalateSelfReview asks the developer how to proceed when the implementer's own
+// review still has findings at the fix limit. An unclean self-review is never accepted,
+// so the choices are another round or a stop; a verified conflict in the implementer's
+// context adds a choice of which statement governs.
+func escalateSelfReview(rec *task.Record, rounds int, diag task.Diagnosis, now time.Time) {
+	subject := fmt.Sprintf("PR #%d", rec.Delegation.PR)
+	stop := stopAtLimitOption
+	if rec.LocalReview() {
+		subject, stop = "the local change", stopBeforePROption
+	}
+	implementer := rec.Delegation.Implementer.Agent
+	var ctx strings.Builder
+	fmt.Fprintf(&ctx, "%s self-reviewed %s after %s of fixes without a clean result. Latest findings, not yet addressed:", implementer, subject, roundsText(rounds))
+	for _, f := range rec.LatestReview().Findings {
+		fmt.Fprintf(&ctx, "\n- [%s] %s", f.Severity, f.Summary)
+	}
+	another := task.Option{Label: "A", Description: "Address the remaining findings in another round"}
+	options := []task.Option{another}
+	impact := "A spends more agent time on findings the implementer has not fixed; B ends the task with them unresolved."
+	switch diag.Kind {
+	case task.DiagnosedConflict:
+		ctx.WriteString("\n\nThe context given to the implementer contradicts itself:")
+		var first, second []string
+		for i, c := range diag.Conflicts {
+			fmt.Fprintf(&ctx, "\n%d. %s\n   - %s: %q\n   - %s: %q", i+1, c.Point, c.First.Source, c.First.Quote, c.Second.Source, c.Second.Quote)
+			first = append(first, fmt.Sprintf("%s: %q", c.First.Source, c.First.Quote))
+			second = append(second, fmt.Sprintf("%s: %q", c.Second.Source, c.Second.Quote))
+		}
+		options = []task.Option{
+			{Label: "A", Description: "Follow the first statement (" + strings.Join(first, "; ") + ") and reconcile the code, plan, and description with it"},
+			{Label: "B", Description: "Follow the second statement (" + strings.Join(second, "; ") + ") and reconcile the code, plan, and description with it"},
+			{Label: "C", Description: "Address the remaining findings in another round without choosing between the statements"},
+		}
+		impact = "A or B settles the conflict the wrong way if the other statement governs; C may stall again on the same conflict; D ends the task with the findings unresolved."
+	case task.DiagnosedPracticeGap:
+		ctx.WriteString("\n\nThe findings look like a missed generic practice, not a conflict in the implementer's context. They go to learning.")
+	default:
+		ctx.WriteString("\n\nNo concrete conflict was found in the context given to the implementer.")
+	}
+	if diag.Summary != "" {
+		ctx.WriteString(" " + diag.Summary)
+	}
+	if rec.LocalReview() {
+		ctx.WriteString("\nNo pull request is open. It opens only after a clean review.")
+	}
+	stop.Label = string(rune('A' + len(options)))
+	options = append(options, stop)
+	rec.State = task.NeedsDecision
+	rec.LastOutcome = &task.Outcome{Status: "blocked", Summary: "self-review not clean after " + roundsText(rounds), At: now}
+	rec.Decisions = append(rec.Decisions, task.Decision{AskedAt: now, Diagnosis: &diag, Question: task.Question{
+		Issue:          fmt.Sprintf("The implementer's own review still requests changes after %s of fixes. How should %s proceed?", roundsText(rounds), implementer),
+		Context:        ctx.String(),
+		Options:        options,
+		Recommendation: "A",
+		ImpactIfWrong:  impact,
+	}})
+}
+
 // stopBeforePROption ends a task reviewed before its PR that the developer does not
 // want fixed further. The next run fails the task, so no PR opens without a clean review.
 var stopBeforePROption = task.Option{Label: "B", Description: "Stop the task without opening a pull request"}
 
-// stoppedBeforePR reports a task reviewed before its PR whose developer chose to stop
-// it, in an answer the runner has not acted on yet.
-func stoppedBeforePR(rec *task.Record) bool {
-	if !rec.Delegation.BeforePR() {
-		return false
-	}
+// stopAtLimitOption ends a task with a PR whose own review is not clean. The PR and
+// branch stay, and the task is never handed over, since only a clean competing review
+// passes the gate.
+var stopAtLimitOption = task.Option{Label: "B", Description: "Stop the task. The pull request and branch stay as they are, and the task is not handed over."}
+
+// stoppedAtLimit reports a task whose developer chose to stop it at the fix limit, in
+// an answer the runner has not acted on yet.
+func stoppedAtLimit(rec *task.Record) bool {
 	for _, d := range rec.Undelivered() {
-		if d.Answer == optionText(stopBeforePROption) {
-			return true
+		for _, o := range d.Question.Options {
+			if (o.Description == stopBeforePROption.Description || o.Description == stopAtLimitOption.Description) && d.Answer == optionText(o) {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// stopSummary is the failure a stop at the limit records, with the findings left open.
+func stopSummary(rec *task.Record) string {
+	summary := "stopped by the maintainer at the fix limit"
+	if rec.Delegation.PR == 0 {
+		summary = "stopped by the maintainer; no PR opened"
+	}
+	if latest := rec.LatestReview(); latest != nil && !latest.Clean {
+		var open []string
+		for _, f := range latest.Findings {
+			open = append(open, f.Summary)
+		}
+		summary += "; unresolved findings: " + strings.Join(open, "; ")
+	}
+	return summary
 }
 
 func roundsText(n int) string {

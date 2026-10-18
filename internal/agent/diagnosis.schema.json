@@ -1,0 +1,71 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "summary",
+    "conflicts"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "practice_gap",
+        "conflict",
+        "none"
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "point",
+          "first",
+          "second"
+        ],
+        "properties": {
+          "point": {
+            "type": "string"
+          },
+          "first": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "quote"
+            ],
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "quote": {
+                "type": "string"
+              }
+            }
+          },
+          "second": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "quote"
+            ],
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "quote": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

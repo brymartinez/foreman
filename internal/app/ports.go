@@ -349,6 +349,12 @@ type Evaluator interface {
 	Evaluate(ctx context.Context, in agent.EvaluateInput) (agent.Evaluation, error)
 }
 
+// Diagnoser traces a self-review loop stalled at the fix limit to its cause in one
+// tool-less turn. A reported conflict survives only if its quotes are in sources.
+type Diagnoser interface {
+	Diagnose(ctx context.Context, in agent.EvaluateInput, sources []agent.DiagnosisSource) (agent.DiagnosisResult, error)
+}
+
 // Merger groups two machines' learnings about one repository in one tool-less turn.
 type Merger interface {
 	Merge(ctx context.Context, in agent.EvaluateInput, refs []string) (agent.MergeResult, error)

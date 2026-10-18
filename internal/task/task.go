@@ -340,6 +340,42 @@ type Decision struct {
 	AnsweredAt time.Time
 	// DeliveredAt is set once a runner has handed the answer to the agent.
 	DeliveredAt time.Time
+	// Diagnosis is why the self-review loop stalled at the fix limit, kept so a restart
+	// does not diagnose again. Nil on every other decision.
+	Diagnosis *Diagnosis
+}
+
+// DiagnosisKind is the cause a stalled self-review loop was traced to.
+type DiagnosisKind string
+
+const (
+	// DiagnosedPracticeGap means the implementer missed a generic practice, which
+	// learning may take up.
+	DiagnosedPracticeGap DiagnosisKind = "practice_gap"
+	// DiagnosedConflict means statements in the implementer's context contradict.
+	DiagnosedConflict DiagnosisKind = "conflict"
+	// DiagnosedNone means no concrete cause was found, or the diagnosis was unavailable.
+	DiagnosedNone DiagnosisKind = "none"
+)
+
+// Diagnosis is the outcome of the diagnosis turn at the self-review fix limit.
+type Diagnosis struct {
+	Kind      DiagnosisKind     `yaml:"kind"`
+	Summary   string            `yaml:"summary,omitempty"`
+	Conflicts []ContextConflict `yaml:"conflicts,omitempty"`
+}
+
+// ContextConflict is two statements given to the implementer that contradict each
+// other. Each quote was found verbatim in its named source.
+type ContextConflict struct {
+	Point  string    `yaml:"point"`
+	First  Statement `yaml:"first"`
+	Second Statement `yaml:"second"`
+}
+
+type Statement struct {
+	Source string `yaml:"source"`
+	Quote  string `yaml:"quote"`
 }
 
 // Pending is the oldest unanswered decision, if any. A blocked turn can ask several
