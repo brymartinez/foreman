@@ -3,6 +3,8 @@ package agent
 import (
 	"strings"
 	"testing"
+
+	"github.com/brymartinez/foreman/internal/task"
 )
 
 func TestImplementationPromptWithClaimsAsksForAClaimPerCriterionAndKeepsThemPrivate(t *testing.T) {
@@ -44,10 +46,23 @@ func TestClaimsMessageAsksForTheFullUpdatedSet(t *testing.T) {
 }
 
 func TestMissingClaimsMessageAsksForClaimsWithoutChangingTheWork(t *testing.T) {
-	p := MissingClaimsMessage(ReviewReady)
+	p := MissingClaimsMessage(ReviewReady, nil)
 	for _, want := range []string{`"claims"`, `"review_ready"`, "Do not change"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("message lacks %q:\n%s", want, p)
 		}
+	}
+}
+
+func TestMissingClaimsMessageOfTheOpenTurnAsksForTheReviewedClaimsUnchanged(t *testing.T) {
+	reviewed := []task.Claim{{Criteria: []string{"AC1"}, Behavior: "retries 5xx", Evidence: "retry.go", Check: "go test"}}
+	p := MissingClaimsMessage(PROpened, reviewed)
+	for _, want := range []string{`"pr_opened"`, "reviewed claims unchanged", `"behavior":"retries 5xx"`} {
+		if !strings.Contains(p, want) {
+			t.Errorf("message lacks %q:\n%s", want, p)
+		}
+	}
+	if strings.Contains(p, "full updated set") {
+		t.Errorf("the open turn is asked for a new claim set:\n%s", p)
 	}
 }

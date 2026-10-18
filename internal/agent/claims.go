@@ -1,8 +1,11 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/brymartinez/foreman/internal/task"
 )
 
 // claimRules tell the implementer what a claim set holds and that it stays private.
@@ -31,6 +34,12 @@ With "pr_opened" or "review_ready", return a full claim set in "claims", one cla
 const ClaimsMessage = "\nWith \"pr_opened\" or \"review_ready\", return the full updated set of claims in \"claims\", one per acceptance criterion in the PRD. Reviewers test each claim against the PRD, the code, and its evidence.\n\n" + claimRules
 
 // MissingClaimsMessage resumes a turn that finished a change without its claims.
-func MissingClaimsMessage(status Status) string {
+// reviewed is set for the turn that opens a reviewed PR, which returns the reviewed
+// claims as they are instead of writing a new set.
+func MissingClaimsMessage(status Status, reviewed []task.Claim) string {
+	if len(reviewed) > 0 {
+		claims, _ := json.Marshal(reviewed)
+		return fmt.Sprintf("Your %q outcome had no claims. Do not change the code, commit, push, or edit the pull request. End with the same %q outcome and the same other fields, and return these reviewed claims unchanged in \"claims\":\n\n%s\n", status, status, claims)
+	}
 	return fmt.Sprintf("Your %q outcome had no claims. Foreman does not review a change without them. Do not change the code, commit, push, or edit the pull request. End with the same %q outcome and the same other fields, and add the full claim set in \"claims\":\n\n%s", status, status, claimRules)
 }

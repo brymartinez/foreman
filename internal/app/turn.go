@@ -61,7 +61,7 @@ func (a App) runTurn(ctx context.Context, rec *task.Record, req turnRequest, che
 	turn, err := a.implement(ctx, rec, req, log)
 	turn, err = a.repairFailedCheckpoint(ctx, rec, req, turn, err, log)
 	if err == nil {
-		turn, err = a.requireClaims(ctx, rec, turn, log)
+		turn, err = a.requireClaims(ctx, rec, turn, req.openBodyFile != "", log)
 	}
 	// The open turn pushes the reviewed change, so it returns the reviewed claims.
 	if d := rec.Delegation; err == nil && req.openBodyFile != "" && d.ClaimVerification && turn.Outcome.Status == agent.PROpened &&
@@ -191,8 +191,9 @@ func finishesChange(s agent.Status) bool { return s == agent.PROpened || s == ag
 
 // requireClaims gives a turn of a task with claim verification that finished a change
 // without its claims one resume of the same session to add them. A second miss fails
-// the turn, because Foreman does not review a change without its claims.
-func (a App) requireClaims(ctx context.Context, rec *task.Record, turn agent.Turn, log io.Writer) (agent.Turn, error) {
+// the turn, because Foreman does not review a change without its claims. The turn
+// that opens a reviewed PR is asked for the reviewed claims, which it must return.
+func (a App) requireClaims(ctx context.Context, rec *task.Record, turn agent.Turn, opening bool, log io.Writer) (agent.Turn, error) {
 	d, status := rec.Delegation, turn.Outcome.Status
 	if !d.ClaimVerification || !finishesChange(status) || len(turn.Outcome.Claims) > 0 {
 		return turn, nil
@@ -206,8 +207,12 @@ func (a App) requireClaims(ctx context.Context, rec *task.Record, turn agent.Tur
 		return turn, err
 	}
 	fmt.Fprintf(log, "foreman: %s returned %s without claims; resuming session %s for them\n", adapter.Name(), status, turn.Session.ID)
+	var reviewed []task.Claim
+	if opening {
+		reviewed = d.Claims
+	}
 	in := agent.StartInput{
-		Worktree: d.Worktree, Prompt: agent.MissingClaimsMessage(status),
+		Worktree: d.Worktree, Prompt: agent.MissingClaimsMessage(status, reviewed),
 		Stage: task.StageImplement, Step: agent.StepImplement,
 		Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD, Profile: d.Profile,
 	}

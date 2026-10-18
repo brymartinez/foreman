@@ -416,8 +416,12 @@ func TestAnOpenTurnWithoutClaimsIsAskedForThemOnce(t *testing.T) {
 	if got.State != task.WaitingForCI || got.Delegation.PR != 912 {
 		t.Fatalf("state %s pr %d outcome %+v", got.State, got.Delegation.PR, got.LastOutcome)
 	}
-	if last := f.claude.resumed[len(f.claude.resumed)-1]; !strings.Contains(last, "had no claims") {
-		t.Fatalf("resumed = %q, want a request for the claims", f.claude.resumed)
+	last := f.claude.resumed[len(f.claude.resumed)-1]
+	if !strings.Contains(last, "had no claims") || !strings.Contains(last, "reviewed claims unchanged") || !strings.Contains(last, "the client retries 5xx responses") {
+		t.Fatalf("resumed = %q, want a request for the reviewed claims unchanged", f.claude.resumed)
+	}
+	if strings.Contains(last, "full updated set") {
+		t.Errorf("the open turn was asked to write a new claim set:\n%s", last)
 	}
 }
 
