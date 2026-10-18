@@ -403,8 +403,9 @@ the same commit. The commit message records why it changed.
   skip a step. Task files that hold the old WORKING or REVIEWING load as the stage
   the record needs (`Record.UpgradeState`), and the next write saves it. While the
   runner that wrote the old state still holds the task and the stage is unchanged,
-  the store writes the old name back (`keptLegacyState`): that runner runs the code
-  from before the upgrade, which rejects the new names. Rejected:
+  the store writes the old name back (`keptLegacyState`), and the attempt's stage
+  phases as the old combined review phase: that runner runs the code from before the
+  upgrade, which rejects the new names. Rejected:
   keeping WORKING and REVIEWING with a separate stage field, which could disagree.
 - **Attempts record where the time went.** An attempt is one run of work that produces
   one PR. `App.Start` opens one unless it keeps the PR or the current attempt has no PR

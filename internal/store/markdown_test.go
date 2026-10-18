@@ -807,3 +807,32 @@ func TestAnOldStateStaysWhileThePreUpgradeRunnerHoldsTheTask(t *testing.T) {
 		}
 	}
 }
+
+func TestAKeptOldStateAlsoKeepsOldPhaseNamesInTheMarks(t *testing.T) {
+	const old = "---\nrepo: a/b\nnumber: 3\nkind: issue\nstate: REVIEWING\nimplementation_agent: claude\nbranch: feat/3-x\nrunner_pid: 4100\npr: 4\npr_head: h1\nattempts:\n  - started_at: 2026-10-01T09:00:00Z\n    marks:\n      - at: 2026-10-01T09:00:00Z\n        phase: implementation\n      - at: 2026-10-01T09:10:00Z\n        phase: review\n---\n"
+	s := Markdown{Dir: t.TempDir()}
+	path := filepath.Join(s.Dir, "a-b-3.md")
+	if err := os.WriteFile(path, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	key := task.Key{Repo: "a/b", Number: 3}
+	got, err := s.Update(ctx, key, func(cur *task.Record) (*task.Record, error) {
+		cur.Track(time.Date(2026, 10, 1, 9, 20, 0, 0, time.UTC))
+		return cur, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if marks := got.CurrentAttempt().Marks; marks[len(marks)-1].Phase != task.PhaseSelfReview {
+		t.Fatalf("setup: marks = %+v, want a self-review mark in memory", marks)
+	}
+	raw, _ := os.ReadFile(path)
+	for _, p := range []string{"self_review", "adversarial_review", "opening_pr"} {
+		if strings.Contains(string(raw), p) {
+			t.Errorf("the file holds the new phase %q while the old runner holds the task:\n%s", p, raw)
+		}
+	}
+	if !strings.Contains(string(raw), "state: REVIEWING\n") {
+		t.Errorf("the file lost the old state:\n%s", raw)
+	}
+}
