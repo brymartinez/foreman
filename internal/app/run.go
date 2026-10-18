@@ -607,6 +607,10 @@ func applyFeedbackTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runEr
 	}
 	rec.CI = ci
 	d := rec.Delegation
+	// The turn's PR is the newest read of the description. Storing it makes an edit
+	// made while the agent answered need its reviews before the run hands over.
+	d.PRDigest = task.ProposalDigest(pr.Title, pr.Body)
+	rec.State = rec.ReviewStage()
 	// The same bar the gate applies: a clean review of this head and CI that finished.
 	// A clean review alone waits for CI, and the gate hands the task over.
 	if !reviewCovers(rec, pr.HeadSHA, task.ProposalDigest(pr.Title, pr.Body)) {

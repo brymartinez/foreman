@@ -360,3 +360,26 @@ func TestFeedbackRestartDoesNotHandOverANewCommitWithoutReviews(t *testing.T) {
 		}
 	}
 }
+
+func TestADescriptionEditedDuringAnAnswerIsReviewedInTheSameRun(t *testing.T) {
+	f := newFixture()
+	key := waiting(t, f)
+	reviews, starts := len(f.store.recs[key].Reviews), f.claude.starts
+	f.claude.turn = prTurn("sid-1")
+	edited := "Retry 5xx and 429.\n\nCloses #825"
+	// The developer edits the description while the agent answers the comment, so
+	// the run reads the edit only with the turn's PR.
+	f.claude.onResume = func() {
+		pr := f.gh.prs[912]
+		pr.Body = edited
+		f.gh.prs[912] = pr
+	}
+	rec := resumeRun(t, f, key)
+	pr := f.gh.prs[912]
+	if len(rec.Reviews) != reviews+2 || !strings.HasSuffix(kinds(rec), "self competing") || rec.LatestCompeting().Proposal != task.ProposalDigest(pr.Title, pr.Body) {
+		t.Fatalf("state %s reviews %s; want a self-review and a competing review of the edited description", rec.State, kinds(rec))
+	}
+	if rec.State.Reviewing() || len(f.claude.resumed) != 1 || f.claude.starts != starts {
+		t.Fatalf("state %s, resumed %d, fresh starts %d; want no further implementer turn", rec.State, len(f.claude.resumed), f.claude.starts-starts)
+	}
+}

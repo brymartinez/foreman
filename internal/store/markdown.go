@@ -68,13 +68,7 @@ func (m Markdown) Save(_ context.Context, rec *task.Record) error {
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	write := rec
-	if legacy, ok := keptLegacyState(existing, rec); ok {
-		c := *rec
-		c.State, c.Attempts = legacy, legacyMarks(rec.Attempts)
-		write = &c
-	}
-	out, err := encode(write, existing)
+	out, err := encode(rec, existing)
 	if err != nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}
@@ -91,50 +85,6 @@ func (m Markdown) Save(_ context.Context, rec *task.Record) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), path)
-}
-
-// keptLegacyState is the old state the file holds, when rec should keep it: the
-// runner that held the task under that state still holds it, and rec is still in the
-// stage the old state maps to. A runner started before the stages runs the old code,
-// which rejects the new names, so writing one would fail its next write. The new
-// name is written once the stage changes or another runner takes the task.
-func keptLegacyState(existing []byte, rec *task.Record) (task.State, bool) {
-	fmRaw, body, ok := split(existing)
-	if !ok || rec.Delegation == nil || rec.Delegation.RunnerPID == 0 {
-		return "", false
-	}
-	var fm frontmatter
-	if err := yaml.Unmarshal(fmRaw, &fm); err != nil || (fm.State != task.LegacyWorking && fm.State != task.LegacyReviewing) || fm.RunnerPID != rec.Delegation.RunnerPID {
-		return "", false
-	}
-	was, err := fm.toRecord(string(body))
-	if err != nil || was.State != rec.State {
-		return "", false
-	}
-	return fm.State, true
-}
-
-// legacyMarks copies attempts with each stage phase the old code does not know written
-// as its combined review phase, and the repeats that leaves merged, so a runner from
-// before the stages can still read the marks.
-func legacyMarks(attempts []task.Attempt) []task.Attempt {
-	out := make([]task.Attempt, len(attempts))
-	for i, a := range attempts {
-		var marks []task.Mark
-		for _, m := range a.Marks {
-			switch m.Phase {
-			case task.PhaseSelfReview, task.PhaseAdversarialReview, task.PhaseOpeningPR:
-				m.Phase = task.PhaseReview
-			}
-			if n := len(marks); n > 0 && marks[n-1].Phase == m.Phase {
-				continue
-			}
-			marks = append(marks, m)
-		}
-		a.Marks = marks
-		out[i] = a
-	}
-	return out
 }
 
 // Update serializes read-modify-write across processes with a lock file in Dir.

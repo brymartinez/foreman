@@ -100,8 +100,7 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			case gated(cur):
 				note = advance(cur, pr, ci, a.Now())
 			case rereview(cur):
-				note = fmt.Sprintf("PR #%d changed since its clean review; it is being reviewed again", cur.Delegation.PR)
-				cur.LastOutcome = &task.Outcome{Status: "re_review", Summary: note, At: a.Now()}
+				note = restartReview(cur, pr, a.Now())
 			}
 			// A PR that had a clean review is reviewed again by a runner the gate starts.
 			// One without a clean review shows the stage it needs and waits for a start.
@@ -319,6 +318,25 @@ func rereview(r *task.Record) bool {
 	}
 	latest := r.LatestCompeting()
 	return latest != nil && latest.Clean && latest.PR == d.PR
+}
+
+// restartReview stores the head and description the PR has now, so the runner the
+// gate starts reviews them instead of taking a turn on a stale record. A PR its clean
+// review covers after all waits for CI.
+func restartReview(rec *task.Record, pr PullRequest, now time.Time) string {
+	d := rec.Delegation
+	if pr.HeadSHA != "" {
+		d.PRHead = pr.HeadSHA
+	}
+	d.PRDigest, rec.CI = task.ProposalDigest(pr.Title, pr.Body), nil
+	if reviewCovers(rec, d.PRHead, d.PRDigest) {
+		rec.State = task.WaitingForCI
+		return ""
+	}
+	rec.State = rec.NextStage()
+	summary := fmt.Sprintf("PR #%d changed since its clean review; it is being reviewed again", d.PR)
+	rec.LastOutcome = &task.Outcome{Status: "re_review", Summary: summary, At: now}
+	return summary
 }
 
 // advance applies the PR state and CI result to a gated task, and returns the

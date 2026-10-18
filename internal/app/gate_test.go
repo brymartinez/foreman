@@ -680,3 +680,41 @@ func TestAReviewStageWithoutARunnerAfterACleanReviewIsReviewedAgain(t *testing.T
 		t.Fatalf("state %s pid %d spawned %d; want a runner for the self-review", got.State, got.Delegation.RunnerPID, len(f.runners.spawned))
 	}
 }
+
+func TestARestartedReviewReadsThePRsCurrentDescription(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	pr := f.gh.prs[912]
+	pr.Body = "Retry 5xx and 429.\n\nCloses #825"
+	f.gh.prs[912] = pr
+	setCI(f, task.CIStatus{State: task.CIPassing})
+	// A run ended in a review stage on the description the record still holds.
+	f.store.recs[key].State = task.AdversarialReviewing
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.Delegation.PRDigest != task.ProposalDigest(pr.Title, pr.Body) || got.State != task.SelfReviewing || len(f.runners.spawned) != 2 {
+		t.Fatalf("digest stored %t, state %s, spawned %d; want the edit stored and a self-review run", got.Delegation.PRDigest == task.ProposalDigest(pr.Title, pr.Body), got.State, len(f.runners.spawned))
+	}
+	starts := f.claude.starts
+	if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; f.claude.starts != starts || len(f.claude.resumed) != 0 || got.LatestCompeting().Proposal != got.Delegation.PRDigest {
+		t.Fatalf("implementer turns %d/%d, reviews %s; want only the reviews of the edited description", f.claude.starts-starts, len(f.claude.resumed), kinds(got))
+	}
+}
+
+func TestARestartedReviewThatTheCleanReviewCoversWaitsForCI(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	setCI(f, task.CIStatus{State: task.CIPending})
+	f.store.recs[key].State = task.AdversarialReviewing
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.WaitingForCI || len(f.runners.spawned) != 1 {
+		t.Fatalf("state %s spawned %d; want a CI wait without a runner", got.State, len(f.runners.spawned))
+	}
+}
