@@ -50,7 +50,7 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			recs[i] = updated
 			continue
 		}
-		if r.State != task.PRClosed && !(pr.State == "merged" && r.Delegation.RunnerPID == 0) && !gated(r) {
+		if r.State != task.PRClosed && !(pr.State == "merged" && r.Delegation.RunnerPID == 0) && !gated(r) && !rereview(r) {
 			// A running task keeps its state until the runner stops.
 			continue
 		}
@@ -90,7 +90,6 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			if cur.Delegation == nil || cur.Delegation.PR != r.Delegation.PR {
 				return cur, nil
 			}
-			was := cur.State
 			// The state is read again under the lock, so a runner that saved since the
 			// list is not overwritten by what this refresh expected to find.
 			switch {
@@ -100,10 +99,13 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 				note = reopen(cur, pr, ci, a.Now())
 			case gated(cur):
 				note = advance(cur, pr, ci, a.Now())
+			case rereview(cur):
+				note = fmt.Sprintf("PR #%d changed since its clean review; it is being reviewed again", cur.Delegation.PR)
+				cur.LastOutcome = &task.Outcome{Status: "re_review", Summary: note, At: a.Now()}
 			}
-			// Only advance sends a waiting task back to review. A reopened PR without a
-			// clean review shows the review it needs and waits for a start.
-			if was == task.WaitingForCI && cur.State.Runnable() {
+			// A PR that had a clean review is reviewed again by a runner the gate starts.
+			// One without a clean review shows the stage it needs and waits for a start.
+			if rereview(cur) {
 				var err error
 				if token, err = a.claimLaunch(cur); err != nil {
 					return nil, err
@@ -247,9 +249,11 @@ func closePR(rec *task.Record, now time.Time) string {
 }
 
 // reopen returns a PR_CLOSED task to delegated work once its PR is open again. The
-// review it already has decides where: a clean review of this head with finished CI
-// hands the task to the developer, and anything else leaves it under review, which is
-// where the gate picks it up again. The review must name the head GitHub reports now.
+// review it already has decides where: a clean review of this head and description
+// waits for CI, or hands the task to the developer once CI finished. Anything else is
+// the stage the change needs; with a clean review of an earlier head or description,
+// the gate starts a runner for that review. The review must name the head GitHub
+// reports now.
 // A review from before heads were recorded has none, and cannot be shown to
 // cover the reopened PR, so it does not hand anything over.
 func reopen(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) string {
@@ -260,11 +264,13 @@ func reopen(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) s
 	rec.CI = &ci
 	latest := rec.LatestCompeting()
 	reviewed := latest != nil && latest.Clean && latest.PR == d.PR && latest.Head != "" && latest.Head == pr.HeadSHA && describedAsReviewed(rec, pr)
-	// A clean review of the PR waits for CI, where the gate checks it covers the head
-	// and description. Without one, the task shows the stage it needs next and waits
-	// for a start, as no runner is launched here.
+	// The stage follows the PR as GitHub reports it now: a clean review of its head
+	// and description waits for CI, and anything else is the stage the change needs.
+	if !describedAsReviewed(rec, pr) {
+		d.PRDigest = task.ProposalDigest(pr.Title, pr.Body)
+	}
 	rec.State = rec.NextStage()
-	if latest != nil && latest.Clean && latest.PR == d.PR {
+	if reviewed {
 		rec.State = task.WaitingForCI
 	}
 	if reviewed && ci.State != task.CIPending {
@@ -300,6 +306,19 @@ func gated(r *task.Record) bool {
 		return latest != nil && latest.Clean && latest.PR == d.PR
 	}
 	return false
+}
+
+// rereview tasks are in a review stage with no runner, while their PR has a clean
+// competing review of an earlier head or description: a reopened PR, or a task file
+// from before the stages. The gate starts the runner that reviews the change, as it
+// does for new commits on a waiting PR.
+func rereview(r *task.Record) bool {
+	d := r.Delegation
+	if d == nil || d.PR == 0 || d.RunnerPID != 0 || launching(r) || !r.State.Reviewing() {
+		return false
+	}
+	latest := r.LatestCompeting()
+	return latest != nil && latest.Clean && latest.PR == d.PR
 }
 
 // advance applies the PR state and CI result to a gated task, and returns the

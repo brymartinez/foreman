@@ -831,16 +831,15 @@ func (r *Record) NextStage() State {
 }
 
 // UpgradeState maps a state from before the stages to the stage the record shows is
-// current. A REVIEWING task with a clean competing review of its PR waits for CI, as
-// the gate read it; the gate sends a head or description that changed since back to
-// review. The next write saves the new state.
+// current. A REVIEWING task whose clean competing review covers the recorded change
+// waits for CI. The next write saves the new state.
 func (r *Record) UpgradeState() {
 	switch r.State {
 	case LegacyWorking:
 		r.State = r.NextStage()
 	case LegacyReviewing:
 		r.State = r.NextStage()
-		if latest := r.LatestCompeting(); r.Delegation != nil && latest != nil && latest.Clean && r.Delegation.PR != 0 && latest.PR == r.Delegation.PR {
+		if latest := r.LatestCompeting(); r.Delegation != nil && r.Delegation.PR != 0 && r.competingCovers(latest) && latest.Clean {
 			r.State = WaitingForCI
 		}
 	}

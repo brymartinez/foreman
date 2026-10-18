@@ -448,9 +448,10 @@ The run did not fail, so there is no failure notification.
 
 Reopen the PR and the task comes back on the following refresh. Foreman reads the PR's
 CI and uses the review it already has: a clean review of the PR's current head with
-finished CI makes the task `READY_FOR_HUMAN`. A clean review of the PR waits in
-`WAITING_FOR_CI`, and the next refresh reviews a head or description that changed since.
-Without a clean review, the task shows the stage it needs next and waits for a start.
+finished CI makes the task `READY_FOR_HUMAN`, and with CI still running it waits in
+`WAITING_FOR_CI`. A clean review of an earlier head or description starts a run that
+reviews the PR again. Without a clean review, the task shows the stage it needs next and
+waits for a start.
 
 If the agent does not stop at once, the task is `PR_CLOSED` but keeps its runner, and
 every refresh tries again.

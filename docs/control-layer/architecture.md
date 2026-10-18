@@ -219,8 +219,11 @@ app.InboxView         -> runner pid dead in a stage -> FAILED
                          runner pid dead in any other state -> clear the pid
                          readiness gate (gate.go), per task with a PR:
                            PR closed  -> stop the runner, PR_CLOSED
-                           PR reopened -> READY_FOR_HUMAN, WAITING_FOR_CI with a clean
-                             review of the PR, or else the stage it needs, no runner
+                           PR reopened -> READY_FOR_HUMAN or WAITING_FOR_CI with a clean
+                             review of its head and description, else the stage it needs
+                           review stage, no runner, clean review of an earlier head or
+                             description (reopened, or a pre-stage file) -> spawn a
+                             runner that reviews it
                            PR_CLOSED leaving for any reason -> recreate a worktree
                              cleanup removed, from the kept branch in the managed
                              checkout; a failed restore warns, and the PR's state

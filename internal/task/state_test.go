@@ -83,9 +83,8 @@ func TestUpgradeStateMapsOldStatesToTheCurrentStage(t *testing.T) {
 		"a PR head with no review":                {LegacyWorking: SelfReviewing, LegacyReviewing: SelfReviewing},
 		"a PR head with a clean self-review":      {LegacyWorking: AdversarialReviewing, LegacyReviewing: AdversarialReviewing},
 		"a PR head with adversarial findings":     {LegacyWorking: Implementing},
-		// The gate reads a clean review of the PR, then sends a moved head back to review.
 		"a PR head with a clean review":         {LegacyReviewing: WaitingForCI},
-		"a PR head newer than its clean review": {LegacyReviewing: WaitingForCI},
+		"a PR head newer than its clean review": {LegacyReviewing: SelfReviewing},
 	}
 	for name := range want {
 		for old, stage := range want[name] {

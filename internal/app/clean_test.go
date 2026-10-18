@@ -316,12 +316,10 @@ func TestReopenedPRRecreatesACleanedWorktreeWhenWorkResumes(t *testing.T) {
 	setPR(f, "open")
 	setHead(f, "beef002")
 	ensured := len(f.wt.reqs)
-	// The first refresh reopens the task under review. The second finds commits since
-	// the clean review and launches a runner, which needs the worktree back.
-	for range 2 {
-		if _, err := f.app.Inbox(context.Background()); err != nil {
-			t.Fatal(err)
-		}
+	// The refresh reopens the task and, with commits since the clean review, launches
+	// a runner to review them, which needs the worktree back.
+	if _, err := f.app.Inbox(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 	got := f.store.recs[key]
 	if got.State != task.SelfReviewing || got.Delegation.RunnerPID == 0 {
