@@ -77,7 +77,7 @@ func (r *Record) PhaseOf() Phase {
 		}
 		return PhasePlanning
 	case Reviewing:
-		if latest := r.LatestReview(); latest != nil && latest.Clean && d.PR != 0 && latest.PR == d.PR && latest.Head != "" && latest.Head == d.PRHead {
+		if latest := r.LatestCompeting(); latest != nil && latest.Clean && d.PR != 0 && latest.PR == d.PR && latest.Head != "" && latest.Head == d.PRHead {
 			return PhaseCI
 		}
 		return PhaseReview

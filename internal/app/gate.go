@@ -256,7 +256,7 @@ func reopen(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) s
 		d.PRHead = pr.HeadSHA
 	}
 	rec.CI = &ci
-	latest := rec.LatestReview()
+	latest := rec.LatestCompeting()
 	reviewed := latest != nil && latest.Clean && latest.PR == d.PR && latest.Head != "" && latest.Head == pr.HeadSHA
 	rec.State = task.Reviewing
 	if reviewed && ci.State != task.CIPending {
@@ -280,7 +280,7 @@ func gated(r *task.Record) bool {
 	case task.ReadyForHuman, task.Reviewed:
 		return true
 	case task.Reviewing:
-		latest := r.LatestReview()
+		latest := r.LatestCompeting()
 		return latest != nil && latest.Clean && latest.PR == d.PR
 	}
 	return false

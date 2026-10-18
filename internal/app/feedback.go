@@ -181,10 +181,10 @@ func (a App) unanswered(ctx, final context.Context, rec *task.Record, log io.Wri
 	return nil, updated, true, err
 }
 
-// reviewCovers reports a clean review of head on the task's current PR, which is the
-// review bar the gate applies before it hands a task over.
+// reviewCovers reports a clean competing review of head on the task's current PR, which
+// is the review bar the gate applies before it hands a task over.
 func reviewCovers(rec *task.Record, head string) bool {
-	latest := rec.LatestReview()
+	latest := rec.LatestCompeting()
 	return latest != nil && latest.Clean && latest.PR == rec.Delegation.PR && head != "" && latest.Head == head
 }
 

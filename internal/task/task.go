@@ -164,6 +164,9 @@ type Delegation struct {
 	PriorPR int
 	// PRHead is the PR's head commit when foreman last read it. A review covers one head.
 	PRHead string
+	// PRDigest is the ProposalDigest of the PR title and description the review step
+	// last read. A self-review covers one head with one description.
+	PRDigest string
 	// CheckpointHead is the last accepted implementation commit, or the head when
 	// the worktree was prepared. The commit and CheckpointNext cross to a fresh session.
 	CheckpointHead string
@@ -486,8 +489,21 @@ type Finding struct {
 	Detail   string `json:"detail" yaml:"detail,omitempty"`
 }
 
+// ReviewKind tells the implementer's own review from the competing agent's.
+type ReviewKind string
+
+const (
+	// CompetingReview is the empty kind, so records from before self-reviews read as
+	// competing reviews and keep passing the gate.
+	CompetingReview ReviewKind = ""
+	// SelfReview is the implementing agent's review in a fresh, read-only session. It
+	// must be clean before the competing review runs, and it never passes the gate.
+	SelfReview ReviewKind = "self"
+)
+
 type Review struct {
 	Round    int
+	Kind     ReviewKind
 	Reviewer Agent
 	PR       int
 	Clean    bool
@@ -495,17 +511,81 @@ type Review struct {
 	Findings []Finding
 	At       time.Time
 	Head     string // the PR head commit reviewed; empty on records from before heads were recorded
-	// Proposal is the ProposalDigest of the proposed title and description a local
-	// review read with Head. A fix may keep the commit and change only those.
+	// Proposal is the ProposalDigest of the title and description the review read with
+	// Head: the proposed ones for a local review, the PR's for a self-review of a PR.
+	// A fix may keep the commit and change only those.
 	Proposal string
 }
 
-// LatestReview is the most recent review round, or nil.
+// LatestReview is the most recent review round of either kind, or nil. Its findings
+// are the ones the implementer fixes next.
 func (r *Record) LatestReview() *Review {
 	if len(r.Reviews) == 0 {
 		return nil
 	}
 	return &r.Reviews[len(r.Reviews)-1]
+}
+
+// LatestCompeting is the most recent competing review, or nil. Only it can pass the
+// gate or open a PR.
+func (r *Record) LatestCompeting() *Review { return r.latest(CompetingReview) }
+
+// LatestSelf is the most recent self-review, or nil.
+func (r *Record) LatestSelf() *Review { return r.latest(SelfReview) }
+
+func (r *Record) latest(kind ReviewKind) *Review {
+	for i := len(r.Reviews) - 1; i >= 0; i-- {
+		if r.Reviews[i].Kind == kind {
+			return &r.Reviews[i]
+		}
+	}
+	return nil
+}
+
+// CompetingReviews are the competing rounds alone, oldest first. The competing
+// reviewer sees only these, so self-review findings never reach it.
+func (r *Record) CompetingReviews() []Review {
+	var out []Review
+	for _, rv := range r.Reviews {
+		if rv.Kind == CompetingReview {
+			out = append(out, rv)
+		}
+	}
+	return out
+}
+
+// CurrentChange is the change a review now would read: the local commit with its
+// proposed title and description, or the PR head with the PR description the review
+// step last read.
+func (r *Record) CurrentChange() (head, proposal string) {
+	d := r.Delegation
+	if r.LocalReview() {
+		return d.LocalHead, ProposalDigest(d.ProposedTitle, d.ProposedBody)
+	}
+	return d.PRHead, d.PRDigest
+}
+
+// selfCovers reports whether a self-review read the current change and description.
+// Coverage is derived from the stored values alone, so a restart never treats a pass
+// of another head or description as current.
+func (r *Record) selfCovers(review *Review) bool {
+	head, proposal := r.CurrentChange()
+	return review != nil && review.Kind == SelfReview && head != "" && review.PR == r.Delegation.PR && review.Head == head && review.Proposal == proposal
+}
+
+// SelfReviewPassed reports a clean self-review of the current change and description.
+func (r *Record) SelfReviewPassed() bool {
+	latest := r.LatestSelf()
+	return r.selfCovers(latest) && latest.Clean
+}
+
+// NextReview is the review the current change needs next: the self-review until a
+// clean one covers it, then the competing review.
+func (r *Record) NextReview() ReviewKind {
+	if r.SelfReviewPassed() {
+		return CompetingReview
+	}
+	return SelfReview
 }
 
 // ChangeRequestsSinceDecision counts review rounds that requested changes since the
@@ -556,28 +636,43 @@ func (c *CIStatus) Green() bool {
 	return c != nil && (c.State == CIPassing || c.State == CINone)
 }
 
-// CommitsSinceReview reports whether the PR head moved after its latest review.
+// CommitsSinceReview reports whether the PR head moved after its latest competing review.
 func (r *Record) CommitsSinceReview() bool {
-	latest := r.LatestReview()
+	latest := r.LatestCompeting()
 	return r.Delegation != nil && latest != nil && latest.Head != "" && r.Delegation.PRHead != "" && latest.Head != r.Delegation.PRHead
 }
 
-// ReviewPending reports whether the verified PR head has not been reviewed, so a run
-// continues with the review instead of implementing again: after a crash during a
-// review, or after new commits on a PR that had a clean review.
+// ReviewPending reports whether the verified PR head or local commit has no competing
+// review, so a run continues with the review step instead of implementing again: after
+// a crash during a review, or after new commits on a PR that had a clean review. Open
+// findings from either reviewer on the current change go to the implementer instead.
 func (r *Record) ReviewPending() bool {
 	d := r.Delegation
 	if d == nil || len(r.Undelivered()) > 0 {
 		return false
 	}
-	latest := r.LatestReview()
-	if r.LocalReview() {
-		return !r.coversLocal(latest)
-	}
-	if d.PR == 0 || d.PRHead == "" {
+	if !r.LocalReview() && (d.PR == 0 || d.PRHead == "") {
 		return false
 	}
-	return latest == nil || latest.PR != d.PR || latest.Head != d.PRHead
+	if r.competingCovers(r.LatestCompeting()) {
+		return false
+	}
+	self := r.LatestSelf()
+	return !r.selfCovers(self) || self.Clean
+}
+
+// competingCovers reports whether a competing review read the current change: the
+// local commit with its proposal, or the PR head. A PR's competing review covers its
+// head alone, as it did before self-reviews, so older tasks are not reviewed again.
+func (r *Record) competingCovers(review *Review) bool {
+	d := r.Delegation
+	if review == nil || review.Kind != CompetingReview {
+		return false
+	}
+	if r.LocalReview() {
+		return r.coversLocal(review)
+	}
+	return review.PR == d.PR && review.Head == d.PRHead
 }
 
 // BeforePR reports a task reviewed before its PR opens that has no PR yet. Its
@@ -592,15 +687,15 @@ func (r *Record) LocalReview() bool {
 	return r.Delegation.BeforePR() && r.Delegation.LocalHead != ""
 }
 
-// OpenPending reports a local commit with a clean review and no PR yet, so the next
-// step pushes that commit and opens the PR with the reviewed description. Answers the
-// implementer has not received go to it with that step.
+// OpenPending reports a local commit with a clean competing review and no PR yet, so
+// the next step pushes that commit and opens the PR with the reviewed description.
+// Answers the implementer has not received go to it with that step.
 func (r *Record) OpenPending() bool {
 	if !r.LocalReview() {
 		return false
 	}
-	latest := r.LatestReview()
-	return r.coversLocal(latest) && latest.Clean
+	latest := r.LatestCompeting()
+	return r.competingCovers(latest) && latest.Clean
 }
 
 // coversLocal reports whether review read the stored local commit together with its
