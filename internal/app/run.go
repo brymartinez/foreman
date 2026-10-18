@@ -1097,8 +1097,9 @@ func short(sha string) string {
 // of a local commit goes on to OPENING_PR, and of a PR waits for the readiness gate
 // (gate.go) in WAITING_FOR_CI.
 // A self-review's error fails the task too: it never falls through to the competing
-// review. The round records the head and description it read, which is what later
-// decides whether it still covers the change.
+// review. The round records the head and description it read, and for a task with
+// claim verification the claim set and PRD, which is what later decides whether it
+// still covers the change.
 func applyReview(rec *task.Record, kind task.ReviewKind, reviewer task.Agent, r agent.ReviewOutcome, reviewErr error, now time.Time) {
 	name := "review"
 	if kind == task.SelfReview {
@@ -1109,7 +1110,7 @@ func applyReview(rec *task.Record, kind task.ReviewKind, reviewer task.Agent, r 
 		return
 	}
 	head, proposal := rec.CurrentChange()
-	rec.Reviews = append(rec.Reviews, task.Review{
+	review := task.Review{
 		Round:    len(rec.Reviews) + 1,
 		Kind:     kind,
 		Reviewer: reviewer,
@@ -1120,7 +1121,11 @@ func applyReview(rec *task.Record, kind task.ReviewKind, reviewer task.Agent, r 
 		Summary:  r.Summary,
 		Findings: r.Findings,
 		At:       now,
-	})
+	}
+	if d := rec.Delegation; d.ClaimVerification {
+		review.Claims, review.PRD = task.ClaimsDigest(d.Claims), d.PRDDigest
+	}
+	rec.Reviews = append(rec.Reviews, review)
 	if r.Clean {
 		status := "review_clean"
 		if kind == task.SelfReview {

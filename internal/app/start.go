@@ -212,11 +212,12 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			CheckpointHead: head,
 			ReviewBeforePR: a.ReviewBeforePR,
 		}
-		// A restart is the same task, so it keeps the review setting it started with,
+		// A restart is the same task, so it keeps the review settings it started with,
 		// and unreviewed local commits are never pushed by a PR-workflow turn. A reset
-		// discarded the run, so it starts with the current setting.
+		// discarded the run, so it starts with the current settings.
 		if prev != nil {
 			cur.Delegation.ReviewBeforePR = prev.ReviewBeforePR
+			cur.Delegation.ClaimVerification = prev.ClaimVerification
 		}
 		// The pin belongs to the task, not the agent, so every restart keeps it.
 		if prev != nil {
@@ -235,6 +236,11 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			}
 			cur.Reset = nil
 		}
+		// Claims answer the PRD, so only a task that plans can verify them. A task that
+		// continues a PR has no plan.
+		if prev == nil {
+			cur.Delegation.ClaimVerification = a.ClaimVerification && cur.Delegation.PR == 0
+		}
 		// The same branch has the same PR, so a restart can pick up at its review.
 		// Another implementer starts over: its reviewer wrote the existing PR. A
 		// PR_CLOSED task's PR cannot be picked up, and keeping its number would have
@@ -252,6 +258,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		// proposal, so the review or the PR opening picks up where the run stopped.
 		if sameAgent && prev.Branch == wt.Branch && prev.ReviewBeforePR && prev.PR == 0 && prev.LocalHead == head {
 			cur.Delegation.LocalHead, cur.Delegation.ProposedTitle, cur.Delegation.ProposedBody = prev.LocalHead, prev.ProposedTitle, prev.ProposedBody
+			cur.Delegation.Claims, cur.Delegation.PRDDigest = prev.Claims, prev.PRDDigest
 		}
 		// A retry with the same agent keeps its route. Choosing another agent drops it.
 		if req.Profile == nil && sameAgent && prev.Profile != nil {
@@ -262,6 +269,8 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			// The description digest goes with the head: without it, a review of an
 			// earlier description would cover the kept PR.
 			cur.Delegation.PRDigest = prev.PRDigest
+			// So do the claims returned with the head and the PRD its review last read.
+			cur.Delegation.Claims, cur.Delegation.PRDDigest = prev.Claims, prev.PRDDigest
 			// The same PR keeps its conflict repair: a spent one is not repeated, and one a
 			// dead runner left pending is finished by this run.
 			cur.Delegation.ConflictAttempts, cur.Delegation.ConflictPending = prev.ConflictAttempts, prev.ConflictPending

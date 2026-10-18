@@ -209,11 +209,12 @@ func (a App) currentPR(ctx, final context.Context, rec *task.Record) (updated *t
 // reviewCovers reports a clean competing review of head and of the description with
 // digest on the task's current PR, which is the review bar the gate applies before it
 // hands a task over. A review or digest from before descriptions were recorded is
-// empty, and the review then covers its head alone.
+// empty, and the review then covers its head alone. A task with claim verification
+// also needs the review of its current claims and PRD.
 func reviewCovers(rec *task.Record, head, digest string) bool {
 	latest := rec.LatestCompeting()
 	described := latest != nil && (latest.Proposal == "" || digest == "" || latest.Proposal == digest)
-	return described && latest.Clean && latest.PR == rec.Delegation.PR && head != "" && latest.Head == head
+	return described && rec.ClaimsCovered(latest) && latest.Clean && latest.PR == rec.Delegation.PR && head != "" && latest.Head == head
 }
 
 // beforeHandover answers comments that arrived while the run worked, so the developer

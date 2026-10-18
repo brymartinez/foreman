@@ -262,7 +262,7 @@ func reopen(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) s
 	}
 	rec.CI = &ci
 	latest := rec.LatestCompeting()
-	reviewed := latest != nil && latest.Clean && latest.PR == d.PR && latest.Head != "" && latest.Head == pr.HeadSHA && describedAsReviewed(rec, pr)
+	reviewed := latest != nil && latest.Clean && latest.PR == d.PR && latest.Head != "" && latest.Head == pr.HeadSHA && describedAsReviewed(rec, pr) && rec.ClaimsCovered(latest)
 	// The stage follows the PR as GitHub reports it now: a clean review of its head
 	// and description waits for CI, and anything else is the stage the change needs.
 	if !describedAsReviewed(rec, pr) {
