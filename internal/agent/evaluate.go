@@ -236,9 +236,11 @@ type EvidenceDecision struct {
 }
 
 // EvidenceReview is one review round. HeadAdvanced says whether commits followed a
-// round that requested changes.
+// round that requested changes. Kind tells the implementer's own review from the
+// competing one.
 type EvidenceReview struct {
 	Round        int
+	Kind         task.ReviewKind
 	Clean        bool
 	Findings     []string
 	HeadAdvanced bool
@@ -273,6 +275,8 @@ Read the evidence below and answer with the JSON the schema asks for:
   - Prefer supporting an existing learning over proposing a near duplicate.
 - revisions: changes to current learnings this task contradicts. action revise rewrites the text; retire removes it. Give the learning's id, a reason, a source, and cites as for proposals. Use null text for retire.
 
+Rounds marked as the implementer's own review are the implementing agent checking its own change before the competing review. Their findings are not the developer's word. Propose a reusable learning from them only when it is generic guidance any later task in this repository should follow; a mistake specific to this task is one_off.
+
 Time and cost are context, not a score. A long or expensive task is not a failure by itself. CI results are not evidence and are left out. Propose nothing when the evidence shows nothing reusable.
 
 ## Task
@@ -298,15 +302,19 @@ PR outcome: %s
 		s.WriteString("None.\n")
 	}
 	for _, r := range b.Reviews {
+		label := ""
+		if r.Kind == task.SelfReview {
+			label = " (the implementer's own review)"
+		}
 		if r.Clean {
-			fmt.Fprintf(&s, "Round %d: clean.\n", r.Round)
+			fmt.Fprintf(&s, "Round %d%s: clean.\n", r.Round, label)
 			continue
 		}
 		followed := "no commits followed"
 		if r.HeadAdvanced {
 			followed = "commits followed"
 		}
-		fmt.Fprintf(&s, "Round %d: changes requested, %s.\n", r.Round, followed)
+		fmt.Fprintf(&s, "Round %d%s: changes requested, %s.\n", r.Round, label, followed)
 		for _, f := range r.Findings {
 			fmt.Fprintf(&s, "- %s\n", f)
 		}

@@ -1200,11 +1200,14 @@ var stopAtLimitOption = task.Option{Label: "B", Description: "Stop the task. The
 // stoppedAtLimit reports a task whose developer chose to stop it at the fix limit, in
 // an answer the runner has not acted on yet.
 func stoppedAtLimit(rec *task.Record) bool {
-	for _, d := range rec.Undelivered() {
-		for _, o := range d.Question.Options {
-			if (o.Description == stopBeforePROption.Description || o.Description == stopAtLimitOption.Description) && d.Answer == optionText(o) {
-				return true
-			}
+	return slices.ContainsFunc(rec.Undelivered(), stopAnswer)
+}
+
+// stopAnswer reports a decision answered with a stop at the fix limit.
+func stopAnswer(d task.Decision) bool {
+	for _, o := range d.Question.Options {
+		if (o.Description == stopBeforePROption.Description || o.Description == stopAtLimitOption.Description) && d.Answer == optionText(o) {
+			return true
 		}
 	}
 	return false

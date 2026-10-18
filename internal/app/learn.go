@@ -48,8 +48,8 @@ func (a App) Learn(ctx context.Context, key task.Key, log io.Writer) error {
 	if rec == nil || rec.Delegation == nil {
 		return fmt.Errorf("%s#%d: no delegated task", key.Repo, key.Number)
 	}
-	if !cleanlyReviewed(rec) {
-		return fmt.Errorf("%s#%d: no clean review to learn from", key.Repo, key.Number)
+	if !learnable(rec) {
+		return fmt.Errorf("%s#%d: no clean review or stalled self-review to learn from", key.Repo, key.Number)
 	}
 	repo, id := string(rec.Repo), learnTaskID(rec.Key)
 	unlock, err := a.Knowledge.Lock(repo)
@@ -106,10 +106,10 @@ func (a App) Learn(ctx context.Context, key task.Key, log io.Writer) error {
 	return nil
 }
 
-// LearningDue reports whether a cleanly reviewed task has evidence its stored
-// evaluation did not see: a first evaluation, or a changed fingerprint.
+// LearningDue reports whether a learnable task has evidence its stored evaluation did
+// not see: a first evaluation, or a changed fingerprint.
 func (a App) LearningDue(rec *task.Record) (bool, error) {
-	if a.Knowledge == nil || rec == nil || rec.Delegation == nil || !cleanlyReviewed(rec) {
+	if a.Knowledge == nil || rec == nil || rec.Delegation == nil || !learnable(rec) {
 		return false, nil
 	}
 	ev, err := a.Knowledge.Evaluation(string(rec.Repo), learnTaskID(rec.Key))
@@ -119,13 +119,29 @@ func (a App) LearningDue(rec *task.Record) (bool, error) {
 	return ev == nil || ev.Fingerprint != fingerprint(rec), nil
 }
 
-func cleanlyReviewed(rec *task.Record) bool {
+// learnable reports a task with evidence to learn from: a clean competing review, or
+// a self-review loop stalled on a missed practice.
+func learnable(rec *task.Record) bool {
 	for _, r := range rec.Reviews {
 		if r.Clean && r.Kind == task.CompetingReview {
 			return true
 		}
 	}
-	return false
+	return stalledOnPractice(rec)
+}
+
+// stalledOnPractice reports a task whose latest decision is a self-review fix limit
+// diagnosed as a missed generic practice, still waiting or answered with a stop. An
+// answer that goes on leaves the task to finish its review loop first.
+func stalledOnPractice(rec *task.Record) bool {
+	if len(rec.Decisions) == 0 {
+		return false
+	}
+	d := rec.Decisions[len(rec.Decisions)-1]
+	if d.Diagnosis == nil || d.Diagnosis.Kind != task.DiagnosedPracticeGap {
+		return false
+	}
+	return rec.State == task.NeedsDecision && d.Answer == "" || rec.State == task.Failed && stopAnswer(d)
 }
 
 // learnTaskID names a task's evaluation file. A Linear task has no number.
@@ -184,7 +200,9 @@ func prOutcome(rec *task.Record) string {
 func evidence(rec *task.Record, now time.Time) agent.EvaluationBrief {
 	b := agent.EvaluationBrief{Repo: rec.Repo, Title: rec.Title, Usage: rec.Usage, Outcome: prOutcome(rec)}
 	for _, d := range rec.Decisions {
-		if d.Answer == "" {
+		// A limit decision without a conflict only offers another round or a stop, so
+		// its answer says nothing a learning could cite as the developer's word.
+		if d.Answer == "" || d.Diagnosis != nil && d.Diagnosis.Kind != task.DiagnosedConflict {
 			continue
 		}
 		q := d.Question
@@ -200,7 +218,7 @@ func evidence(rec *task.Record, now time.Time) agent.EvaluationBrief {
 		b.Decisions = append(b.Decisions, ed)
 	}
 	for i, r := range rec.Reviews {
-		er := agent.EvidenceReview{Round: r.Round, Clean: r.Clean}
+		er := agent.EvidenceReview{Round: r.Round, Kind: r.Kind, Clean: r.Clean}
 		for _, f := range r.Findings {
 			er.Findings = append(er.Findings, knowledge.Redact(f.Summary))
 		}
@@ -296,14 +314,14 @@ func (a App) holdLearning(rec *task.Record) bool {
 	return at.Fingerprint == fingerprint(rec) && a.Now().Sub(at.At) < learnRetryAfter
 }
 
-// learnAfterRun starts the task's evaluation when its run ends on a clean review.
-// Learning is a side job: a learner that fails to start is noted in the task log,
-// and the refresh starts it later.
+// learnAfterRun starts the task's evaluation when its run ends on a clean review, or
+// at a self-review fix limit diagnosed as a missed practice. Learning is a side job: a
+// learner that fails to start is noted in the task log, and the refresh starts it later.
 func (a App) learnAfterRun(rec *task.Record, log io.Writer) {
 	if !a.Learning || a.Knowledge == nil {
 		return
 	}
-	if r := rec.LatestCompeting(); r == nil || !r.Clean {
+	if r := rec.LatestCompeting(); (r == nil || !r.Clean) && !stalledOnPractice(rec) {
 		return
 	}
 	if due, err := a.LearningDue(rec); err != nil || !due {
