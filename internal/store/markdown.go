@@ -198,6 +198,9 @@ type frontmatter struct {
 	LocalHead           string                 `yaml:"local_head,omitempty"`
 	ProposedTitle       string                 `yaml:"proposed_title,omitempty"`
 	ProposedBody        string                 `yaml:"proposed_body,omitempty"`
+	ClaimVerification   bool                   `yaml:"claim_verification,omitempty"`
+	Claims              []task.Claim           `yaml:"claims,omitempty"`
+	PRDDigest           string                 `yaml:"prd_digest,omitempty"`
 	GitHub              *snapshot              `yaml:"github,omitempty"`
 	LastGitHubSync      *time.Time             `yaml:"last_github_sync,omitempty"`
 	Decisions           []decisionFM           `yaml:"decisions,omitempty"`
@@ -250,6 +253,10 @@ type reviewFM struct {
 	At       time.Time       `yaml:"at"`
 	Head     string          `yaml:"head,omitempty"`
 	Proposal string          `yaml:"proposal,omitempty"`
+	Claims   string          `yaml:"claims,omitempty"`
+	PRD      string          `yaml:"prd,omitempty"`
+	// Limitations are what the reviewer could not check.
+	Limitations []task.Limitation `yaml:"limitations,omitempty"`
 }
 
 type outcomeFM struct {
@@ -363,35 +370,38 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 			return nil, fmt.Errorf("implementation_agent: %w", err)
 		}
 		rec.Delegation = &task.Delegation{
-			Implementer:      task.Session{Agent: impl, ID: fm.SessionID},
-			Profile:          fm.Profile,
-			RouteReason:      fm.RouteReason,
-			RouteLogged:      fm.RouteLogged,
-			Reviewer:         impl.Reviewer(),
-			Account:          fm.Account,
-			AccountEmail:     fm.AccountEmail,
-			Branch:           fm.Branch,
-			BaseRef:          fm.BaseRef,
-			RepoDir:          fm.RepoDir,
-			Worktree:         fm.Worktree,
-			ContextFile:      fm.ContextFile,
-			Launch:           fm.Launch,
-			RunnerPID:        fm.RunnerPID,
-			RunnerLog:        fm.RunnerLog,
-			PR:               fm.PR,
-			PRURL:            fm.PRURL,
-			PriorPR:          fm.PriorPR,
-			PRHead:           fm.PRHead,
-			PRDigest:         fm.PRDigest,
-			CheckpointHead:   fm.CheckpointHead,
-			CheckpointNext:   fm.CheckpointNext,
-			Checkpoints:      fm.Checkpoints,
-			ConflictAttempts: fm.ConflictAttempts,
-			ConflictPending:  fm.ConflictPending,
-			ReviewBeforePR:   fm.ReviewBeforePR,
-			LocalHead:        fm.LocalHead,
-			ProposedTitle:    fm.ProposedTitle,
-			ProposedBody:     fm.ProposedBody,
+			Implementer:       task.Session{Agent: impl, ID: fm.SessionID},
+			Profile:           fm.Profile,
+			RouteReason:       fm.RouteReason,
+			RouteLogged:       fm.RouteLogged,
+			Reviewer:          impl.Reviewer(),
+			Account:           fm.Account,
+			AccountEmail:      fm.AccountEmail,
+			Branch:            fm.Branch,
+			BaseRef:           fm.BaseRef,
+			RepoDir:           fm.RepoDir,
+			Worktree:          fm.Worktree,
+			ContextFile:       fm.ContextFile,
+			Launch:            fm.Launch,
+			RunnerPID:         fm.RunnerPID,
+			RunnerLog:         fm.RunnerLog,
+			PR:                fm.PR,
+			PRURL:             fm.PRURL,
+			PriorPR:           fm.PriorPR,
+			PRHead:            fm.PRHead,
+			PRDigest:          fm.PRDigest,
+			CheckpointHead:    fm.CheckpointHead,
+			CheckpointNext:    fm.CheckpointNext,
+			Checkpoints:       fm.Checkpoints,
+			ConflictAttempts:  fm.ConflictAttempts,
+			ConflictPending:   fm.ConflictPending,
+			ReviewBeforePR:    fm.ReviewBeforePR,
+			LocalHead:         fm.LocalHead,
+			ProposedTitle:     fm.ProposedTitle,
+			ProposedBody:      fm.ProposedBody,
+			ClaimVerification: fm.ClaimVerification,
+			Claims:            fm.Claims,
+			PRDDigest:         fm.PRDDigest,
 		}
 		if fm.StartedAt != nil {
 			rec.Delegation.StartedAt = *fm.StartedAt
@@ -437,7 +447,8 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 		if r.Kind != task.CompetingReview && r.Kind != task.SelfReview {
 			return nil, fmt.Errorf("review round %d has unknown kind %q", r.Round, r.Kind)
 		}
-		rec.Reviews = append(rec.Reviews, task.Review{Round: r.Round, Kind: r.Kind, Reviewer: r.Reviewer, PR: r.PR, Clean: r.Verdict == "clean", Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head, Proposal: r.Proposal})
+		rec.Reviews = append(rec.Reviews, task.Review{Round: r.Round, Kind: r.Kind, Reviewer: r.Reviewer, PR: r.PR, Clean: r.Verdict == "clean", Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head, Proposal: r.Proposal,
+			Claims: r.Claims, PRD: r.PRD, Limitations: r.Limitations})
 	}
 	if c := fm.CI; c != nil {
 		switch c.State {
@@ -518,6 +529,7 @@ func fromRecord(rec *task.Record) frontmatter {
 		fm.CheckpointHead, fm.CheckpointNext, fm.Checkpoints = d.CheckpointHead, d.CheckpointNext, d.Checkpoints
 		fm.ConflictAttempts, fm.ConflictPending = d.ConflictAttempts, d.ConflictPending
 		fm.ReviewBeforePR, fm.LocalHead, fm.ProposedTitle, fm.ProposedBody = d.ReviewBeforePR, d.LocalHead, d.ProposedTitle, d.ProposedBody
+		fm.ClaimVerification, fm.Claims, fm.PRDDigest = d.ClaimVerification, d.Claims, d.PRDDigest
 	}
 	if s := rec.GitHub; s != nil {
 		fm.GitHub = &snapshot{UpdatedAt: s.UpdatedAt, State: s.State, Reasons: s.Reasons}
@@ -545,7 +557,8 @@ func fromRecord(rec *task.Record) frontmatter {
 		if r.Clean {
 			verdict = "clean"
 		}
-		fm.Reviews = append(fm.Reviews, reviewFM{Round: r.Round, Kind: r.Kind, Reviewer: r.Reviewer, PR: r.PR, Verdict: verdict, Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head, Proposal: r.Proposal})
+		fm.Reviews = append(fm.Reviews, reviewFM{Round: r.Round, Kind: r.Kind, Reviewer: r.Reviewer, PR: r.PR, Verdict: verdict, Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head, Proposal: r.Proposal,
+			Claims: r.Claims, PRD: r.PRD, Limitations: r.Limitations})
 	}
 	if c := rec.CI; c != nil {
 		fm.CI = &ciFM{State: c.State, Failing: c.Failing, CheckedAt: c.CheckedAt}

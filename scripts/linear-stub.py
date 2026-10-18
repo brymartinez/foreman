@@ -39,7 +39,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 comment.write(body)
             data = {"commentCreate": {"success": True, "comment": {"id": f"comment-{number}", "body": body, "url": issue_url + f"#comment-{number}"}}}
         elif "comment(id:" in query:
-            data = {"comment": {"id": variables["id"], "body": "", "url": issue_url}}
+            # A comment this stand-in posted reads back with its body.
+            path = os.path.join(state, "linear-" + variables["id"])
+            body = open(path).read() if os.path.exists(path) else ""
+            data = {"comment": {"id": variables["id"], "body": body, "url": issue_url}}
         else:
             data = {"commentUpdate": {"success": True, "comment": {"id": variables.get("id", ""), "body": variables.get("body", ""), "url": issue_url}}}
         body = json.dumps({"data": data}).encode()

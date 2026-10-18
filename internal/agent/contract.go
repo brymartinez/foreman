@@ -51,6 +51,9 @@ type Outcome struct {
 	// PRTitle and PRBody are the pull request a review_ready turn proposes.
 	PRTitle string
 	PRBody  string
+	// Claims tie a pr_opened or review_ready change to the PRD acceptance criteria.
+	// The runner decides whether the task needs them.
+	Claims []task.Claim
 }
 
 // CheckpointValidationError keeps the failed commands available for a repair turn.
@@ -82,6 +85,7 @@ type wireOutcome struct {
 	Uncertain     *bool           `json:"uncertain"`
 	PRTitle       *string         `json:"prTitle"`
 	PRBody        *string         `json:"prBody"`
+	Claims        []task.Claim    `json:"claims"`
 }
 
 func ParseOutcome(raw []byte) (Outcome, error) {
@@ -93,6 +97,7 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 		return Outcome{}, errors.New("agent outcome has no summary")
 	}
 	out := Outcome{Status: w.Status, Summary: w.Summary}
+	var err error
 	switch w.Status {
 	case BranchProposed:
 		if w.BranchName == nil || strings.TrimSpace(*w.BranchName) == "" || w.Uncertain == nil {
@@ -118,6 +123,9 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 			out.PRURL = *w.PRURL
 		}
 		out.Validation = w.Validation
+		if out.Claims, err = parseClaims(w.Claims); err != nil {
+			return Outcome{}, err
+		}
 	case ReviewReady:
 		if w.PRNumber != nil || w.PRURL != nil || len(w.Questions) > 0 || w.Documents != nil {
 			return Outcome{}, errors.New("review_ready outcome includes unrelated fields")
@@ -135,6 +143,9 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 		}
 		out.PRTitle, out.PRBody = strings.TrimSpace(*w.PRTitle), strings.TrimSpace(*w.PRBody)
 		out.Validation = w.Validation
+		if out.Claims, err = parseClaims(w.Claims); err != nil {
+			return Outcome{}, err
+		}
 	case Checkpoint:
 		if w.PRNumber != nil || w.PRURL != nil || len(w.Questions) > 0 || w.Documents != nil {
 			return Outcome{}, errors.New("checkpoint outcome includes unrelated fields")
@@ -174,4 +185,15 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 		return Outcome{}, fmt.Errorf("unknown outcome status %q", w.Status)
 	}
 	return out, nil
+}
+
+// parseClaims checks each claim's shape. Whether a turn must return claims depends on
+// the task, so an empty set is left for the runner to judge.
+func parseClaims(claims []task.Claim) ([]task.Claim, error) {
+	for i, c := range claims {
+		if err := c.Validate(); err != nil {
+			return nil, fmt.Errorf("claim %d: %w", i+1, err)
+		}
+	}
+	return claims, nil
 }

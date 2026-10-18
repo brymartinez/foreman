@@ -251,6 +251,7 @@ type fakeAgent struct {
 	reviewed      []string
 	during        func() // runs inside Start, while the turn is in progress
 	onResume      func() // the same, inside Resume
+	onReview      func() // the same, inside Review
 }
 
 func (f *fakeAgent) next() (agent.Turn, error) {
@@ -271,6 +272,9 @@ func (f *fakeAgent) Review(_ context.Context, in agent.StartInput) (agent.Review
 	f.reviewed = append(f.reviewed, in.Prompt)
 	f.reviewBudgets = append(f.reviewBudgets, in.MaxBudgetUSD)
 	f.steps = append(f.steps, in.Step)
+	if f.onReview != nil {
+		f.onReview()
+	}
 	if f.reviewErr != nil {
 		return agent.ReviewOutcome{}, f.reviewErr
 	}

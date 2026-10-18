@@ -216,6 +216,16 @@ type Delegation struct {
 	LocalHead     string
 	ProposedTitle string
 	ProposedBody  string
+	// ClaimVerification is set when a task that plans starts. Its implementer then
+	// returns Claims with each change, and both reviews check them against the PRD.
+	// Tasks started without it keep the review workflow they started with.
+	ClaimVerification bool
+	// Claims is the latest full claim set the implementer returned. It stays in the
+	// task file and is never published.
+	Claims []Claim
+	// PRDDigest is the Digest of the PRD text the review step last loaded from the
+	// issue. A review covers one PRD.
+	PRDDigest string
 }
 
 // Launch is taken under the task lock before a runner is spawned, by the foreman
@@ -581,6 +591,12 @@ type Review struct {
 	// Head: the proposed ones for a local review, the PR's for a self-review of a PR.
 	// A fix may keep the commit and change only those.
 	Proposal string
+	// Claims and PRD are the ClaimsDigest and the PRD digest the review read, for a
+	// task with claim verification.
+	Claims string
+	PRD    string
+	// Limitations are the behaviors the reviewer could not check.
+	Limitations []Limitation
 }
 
 // LatestReview is the most recent review round of either kind, or nil. Its findings
@@ -636,7 +652,7 @@ func (r *Record) CurrentChange() (head, proposal string) {
 // of another head or description as current.
 func (r *Record) selfCovers(review *Review) bool {
 	head, proposal := r.CurrentChange()
-	return review != nil && review.Kind == SelfReview && review.PR == r.Delegation.PR && review.Head == head && review.Proposal == proposal
+	return review != nil && review.Kind == SelfReview && review.PR == r.Delegation.PR && review.Head == head && review.Proposal == proposal && r.ClaimsCovered(review)
 }
 
 // SelfReviewPassed reports a clean self-review of the current change and description.
@@ -756,6 +772,9 @@ func (r *Record) newer(a, b *Review) bool {
 func (r *Record) competingCovers(review *Review) bool {
 	d := r.Delegation
 	if review == nil || review.Kind != CompetingReview {
+		return false
+	}
+	if !r.ClaimsCovered(review) {
 		return false
 	}
 	if r.LocalReview() {

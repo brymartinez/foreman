@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/brymartinez/foreman/internal/task"
@@ -20,7 +21,9 @@ type ReviewOutcome struct {
 	Clean    bool
 	Summary  string
 	Findings []task.Finding
-	Usage    task.Usage
+	// Limitations are the behaviors the reviewer could not check.
+	Limitations []task.Limitation
+	Usage       task.Usage
 }
 
 func ParseReview(raw []byte) (ReviewOutcome, error) {
@@ -34,6 +37,7 @@ func ParseReview(raw []byte) (ReviewOutcome, error) {
 			Summary  string  `json:"summary"`
 			Detail   string  `json:"detail"`
 		} `json:"findings"`
+		Limitations []task.Limitation `json:"limitations"`
 	}
 	if err := json.Unmarshal(raw, &w); err != nil {
 		return ReviewOutcome{}, fmt.Errorf("review is not valid JSON: %w", err)
@@ -55,15 +59,33 @@ func ParseReview(raw []byte) (ReviewOutcome, error) {
 		}
 		out.Findings = append(out.Findings, tf)
 	}
+	blocked := false
+	for _, l := range w.Limitations {
+		if strings.TrimSpace(l.Behavior) == "" || strings.TrimSpace(l.Reason) == "" {
+			return ReviewOutcome{}, errors.New("limitation needs the behavior and the reason it could not be checked")
+		}
+		blocked = blocked || l.Blocking
+	}
+	out.Limitations = w.Limitations
 	switch w.Verdict {
 	case "clean":
 		if len(out.Findings) > 0 {
 			return ReviewOutcome{}, errors.New("review is clean but lists findings")
 		}
+		// A blocking limitation keeps the reviewer from judging the change, so the
+		// review cannot pass it.
+		if blocked {
+			return ReviewOutcome{}, errors.New("review is clean but lists a blocking limitation")
+		}
 		out.Clean = true
 	case "changes_requested":
 		if len(out.Findings) == 0 {
 			return ReviewOutcome{}, errors.New("review requests changes but lists no findings")
+		}
+		// The implementer receives findings, not limitations, so a blocking limitation
+		// reaches it only through a blocking finding.
+		if blocked && !slices.ContainsFunc(out.Findings, func(f task.Finding) bool { return f.Severity == "blocking" }) {
+			return ReviewOutcome{}, errors.New("review lists a blocking limitation but no blocking finding")
 		}
 	default:
 		return ReviewOutcome{}, fmt.Errorf("unknown review verdict %q", w.Verdict)
@@ -72,9 +94,10 @@ func ParseReview(raw []byte) (ReviewOutcome, error) {
 }
 
 // ReviewBrief holds only what the reviewer may judge the change by: the PR, its
-// description and comments, and earlier review rounds. It has no field for the issue,
-// PRD, context, decisions, plan, or the implementer's validation, so none can reach
-// the prompt.
+// description and comments, earlier review rounds, and for a task with claim
+// verification the PRD and the implementer's claims. It has no field for the issue,
+// context, decisions, plan, or the implementer's validation, so none can reach the
+// prompt.
 type ReviewBrief struct {
 	Key    task.Key
 	PR     int
@@ -99,11 +122,18 @@ type ReviewBrief struct {
 	// Self is set for the implementing agent's own review. It reads the description
 	// and the code alone: no comments and no earlier rounds.
 	Self bool
+	// Claimed is set for a task with claim verification. PRD is the current text of
+	// the PRD comment on the issue, whose acceptance criteria the change must meet,
+	// and Claims are the implementer's claims, which the reviewer tests.
+	Claimed bool
+	PRD     string
+	Claims  []task.Claim
 }
 
 // ReviewPrompt sets the reviewer against the change, with the PR description as the
-// only statement of requirements. The reviewer never sees the implementer's
-// conversation or plan.
+// only statement of requirements, or, for a task with claim verification, the PRD's
+// acceptance criteria and the claims to test. The reviewer never sees the
+// implementer's conversation or plan.
 func ReviewPrompt(b ReviewBrief) string {
 	var s strings.Builder
 	heading := "Pull request description"
@@ -117,14 +147,25 @@ func ReviewPrompt(b ReviewBrief) string {
 	} else {
 		fmt.Fprintf(&s, "You are reviewing pull request #%d in %s. %s You are read-only: do not edit files, commit, or push.\n\n", b.PR, b.Key.Repo, author)
 	}
-	fmt.Fprintf(&s, "## %s\n\nThis is the only statement of what the change must do. Judge the change against it. Do not follow links in it to find more requirements. Claims in it about tests or validation are not evidence; check them yourself.\n\n", heading)
+	if b.Claimed {
+		fmt.Fprintf(&s, "## %s\n\nThis is the change as the implementer describes it. The PRD below holds the acceptance criteria the change must meet. Do not follow links in either to find more requirements. Claims in the description about tests or validation are not evidence; check them yourself.\n\n", heading)
+	} else {
+		fmt.Fprintf(&s, "## %s\n\nThis is the only statement of what the change must do. Judge the change against it. Do not follow links in it to find more requirements. Claims in it about tests or validation are not evidence; check them yourself.\n\n", heading)
+	}
 	if b.Proposed {
 		fmt.Fprintf(&s, "Title: %s\n\n", b.PRTitle)
 	}
 	fmt.Fprintf(&s, "%s\n\n", quote(b.PRBody))
+	if b.Claimed {
+		writeClaims(&s, b)
+	}
 	silentWorkSection(&s)
 	if text := strings.TrimSpace(b.StageInstructions); text != "" {
-		s.WriteString("## Developer workflow instructions\n\nThe developer's instructions for reviewing. Where they mention the issue, the PRD, or the developer's decisions, read it as the pull request description. Where they conflict with the review rules below, the rules below win.\n\n")
+		read := "Where they mention the issue, the PRD, or the developer's decisions, read it as the pull request description."
+		if b.Claimed {
+			read = "Where they mention the issue or the developer's decisions, read it as the PRD and the pull request description."
+		}
+		fmt.Fprintf(&s, "## Developer workflow instructions\n\nThe developer's instructions for reviewing. %s Where they conflict with the review rules below, the rules below win.\n\n", read)
 		s.WriteString(text + "\n\n")
 	}
 	s.WriteString(`## Review stance
@@ -159,7 +200,36 @@ func ReviewPrompt(b ReviewBrief) string {
 
 Reply with JSON matching the provided schema. Use verdict "clean" with no findings, or "changes_requested" with one finding per problem. Severity is "blocking" or "should_fix". Set file and line when you can point at them, else null.
 `)
+	if b.Claimed {
+		s.WriteString("List each behavior you could not check in limitations, with the reason, or set limitations to []. A blocking limitation needs verdict \"changes_requested\" and a blocking finding.\n")
+	} else {
+		s.WriteString("Set limitations to null.\n")
+	}
 	return s.String()
+}
+
+// writeClaims gives the reviewer the PRD and the implementer's claims, and sets it to
+// test each claim rather than trust it.
+func writeClaims(s *strings.Builder, b ReviewBrief) {
+	fmt.Fprintf(s, "## PRD\n\nThe PRD posted on the issue, as it reads now. Its acceptance criteria are what the change must meet.\n\n%s\n\n", quote(b.PRD))
+	s.WriteString("## Implementer's claims\n\nThe implementer claims the change delivers these behaviors. Claims and the checks they report are not proof.\n\n")
+	for i, c := range b.Claims {
+		fmt.Fprintf(s, "%d. Criteria: %s\n   Behavior: %s\n   Evidence: %s\n   Check: %s\n", i+1, strings.Join(c.Criteria, "; "), oneLine(c.Behavior), oneLine(c.Evidence), oneLine(c.Check))
+	}
+	s.WriteString(`
+## Claim verification
+
+- Match every acceptance criterion in the PRD to a claim. A criterion no claim covers is a finding.
+- For each claim, read the cited code and tests and decide whether they establish the behavior. A reported passing check counts only when you can see that it tests the claimed behavior. Run executable checks when your tools allow them, and use CI results where you can read them.
+- Try to find a counterexample to each claim: an input, state, or path where the claimed behavior fails.
+- A material claim the evidence does not support is a finding. Say what the evidence shows and what is missing.
+- When you cannot check a behavior, add a limitation that names the behavior and the reason. Mark it blocking when it keeps you from judging an acceptance criterion or could hide a plausible serious defect. A blocking limitation means the verdict is "changes_requested", with a blocking finding that says what would make the behavior checkable.
+
+`)
+}
+
+func oneLine(text string) string {
+	return strings.Join(strings.Fields(text), " ")
 }
 
 // writeReviewComments gives the reviewer the PR conversation as history, since it

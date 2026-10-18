@@ -74,14 +74,35 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 				warnings = append(warnings, fmt.Errorf("restore the worktree of %s#%d as PR #%d leaves PR_CLOSED: %w", r.Repo, r.Number, r.Delegation.PR, err))
 			}
 		}
+		// The PRD is a review's acceptance criteria, so an edit to it while the task
+		// waits for CI, or while its PR was closed, needs new reviews, like an edited
+		// description. A PRD that cannot
+		// be loaded fails the task, as it would stop the review. Neither needs CI, so the
+		// PRD is read first.
+		var prd string
+		var prdErr error
+		checkPRD := pr.State == "open" && (r.State == task.WaitingForCI || r.State == task.PRClosed) && r.Delegation.ClaimVerification
+		if checkPRD {
+			var text string
+			if text, prdErr = a.reviewPRD(ctx, r); prdErr == nil {
+				prd = task.Digest(text)
+			} else if ctx.Err() != nil {
+				return nil, nil, nil, ctx.Err()
+			}
+		}
 		var ci task.CIStatus
+		ciRead := true
 		if pr.State == "open" {
 			if ci, err = a.GitHub.CIStatus(ctx, pr.Key); err != nil {
 				if ctx.Err() != nil {
 					return nil, nil, nil, ctx.Err()
 				}
 				warnings = append(warnings, fmt.Errorf("refresh %s#%d CI: %w", r.Repo, r.Number, err))
-				continue
+				if !checkPRD || (prdErr == nil && prd == r.Delegation.PRDDigest) {
+					continue
+				}
+				// The PRD still decides the task; nothing that needs CI runs.
+				ciRead = false
 			}
 			ci.CheckedAt = a.Now()
 		}
@@ -95,8 +116,32 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			switch {
 			case pr.State == "merged" && cur.Delegation.RunnerPID == 0:
 				note = advance(cur, pr, ci, a.Now())
+			case checkPRD && prdErr != nil && cur.State == task.WaitingForCI && gated(cur):
+				note = fmt.Sprintf("PR #%d waited for CI, but its PRD could not be loaded: %v", cur.Delegation.PR, prdErr)
+				failTask(cur, note, a.Now())
+			case checkPRD && cur.State == task.WaitingForCI && gated(cur) && cur.Delegation.PRDDigest != prd:
+				note = restartForPRD(cur, prd, a.Now())
+			case !ciRead && checkPRD && prdErr != nil && cur.State == task.PRClosed:
+				note = fmt.Sprintf("PR #%d reopened, but its PRD could not be loaded: %v", cur.Delegation.PR, prdErr)
+				failTask(cur, note, a.Now())
+			case !ciRead && checkPRD && cur.State == task.PRClosed && cur.Delegation.PRDDigest != prd:
+				// The changed PRD needs new reviews whatever CI says, so the reopened PR
+				// goes to review without waiting for a CI result.
+				if pr.HeadSHA != "" {
+					cur.Delegation.PRHead = pr.HeadSHA
+				}
+				note = restartForPRD(cur, prd, a.Now())
+			case !ciRead:
 			case cur.State == task.PRClosed:
+				if checkPRD && prdErr == nil {
+					// The stored digest decides whether the clean review still covers the PR.
+					cur.Delegation.PRDDigest = prd
+				}
 				note = reopen(cur, pr, ci, a.Now())
+				if checkPRD && prdErr != nil {
+					note = fmt.Sprintf("PR #%d reopened, but its PRD could not be loaded: %v", cur.Delegation.PR, prdErr)
+					failTask(cur, note, a.Now())
+				}
 			case gated(cur):
 				note = advance(cur, pr, ci, a.Now())
 			case rereview(cur):
@@ -262,7 +307,7 @@ func reopen(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) s
 	}
 	rec.CI = &ci
 	latest := rec.LatestCompeting()
-	reviewed := latest != nil && latest.Clean && latest.PR == d.PR && latest.Head != "" && latest.Head == pr.HeadSHA && describedAsReviewed(rec, pr)
+	reviewed := latest != nil && latest.Clean && latest.PR == d.PR && latest.Head != "" && latest.Head == pr.HeadSHA && describedAsReviewed(rec, pr) && rec.ClaimsCovered(latest)
 	// The stage follows the PR as GitHub reports it now: a clean review of its head
 	// and description waits for CI, and anything else is the stage the change needs.
 	if !describedAsReviewed(rec, pr) {
@@ -335,6 +380,17 @@ func restartReview(rec *task.Record, pr PullRequest, now time.Time) string {
 	}
 	rec.State = rec.NextStage()
 	summary := fmt.Sprintf("PR #%d changed since its clean review; it is being reviewed again", d.PR)
+	rec.LastOutcome = &task.Outcome{Status: "re_review", Summary: summary, At: now}
+	return summary
+}
+
+// restartForPRD stores the digest of the PRD the issue holds now, so the runner the
+// gate starts reviews the change against it.
+func restartForPRD(rec *task.Record, prd string, now time.Time) string {
+	d := rec.Delegation
+	d.PRDDigest = prd
+	rec.State, rec.CI = rec.NextStage(), nil
+	summary := fmt.Sprintf("the PRD on the issue changed since PR #%d's clean review; it is being reviewed again", d.PR)
 	rec.LastOutcome = &task.Outcome{Status: "re_review", Summary: summary, At: now}
 	return summary
 }

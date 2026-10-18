@@ -86,15 +86,20 @@ runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR)
                       conflict -> implementer.Resume(session, merge the base, never
                                   rebase or force-push, push); recheck; after two
                                   turns still conflicting -> NEEDS_DECISION, exit
-                    read the PR description and store its digest beside the head
+                    read the PR description and store its digest beside the head;
+                      with claim verification, also require the stored claims and
+                      read the PRD comment, storing its digest (gone, unmarked, or
+                      empty PRD -> FAILED)
                     SELF_REVIEW: self = implementer.Review(disposable read-only session,
-                                              PR description + git diff), until a clean
-                                              one covers this head and description
+                                              PR description + git diff [+ PRD + claims]),
+                                              until a clean one covers this head and
+                                              description [and claims and PRD]
                     self error -> FAILED, exit (never falls back to the competing review)
                     self clean -> the competing review of the same change, in this run
                     ADVERSARIAL_REVIEW: review = reviewer.Review(disposable read-only
                                              session, PR description + PR comments +
-                                             git diff + earlier competing rounds)
+                                             git diff + earlier competing rounds
+                                             [+ PRD + claims])
                     clean    -> record review and the head it covered; WAITING_FOR_CI, exit
                     findings (either review) -> IMPLEMENTING; implementer.Resume(session,
                                 findings); agent pushes fixes and reports pr_opened
@@ -511,8 +516,9 @@ the same commit. The commit message records why it changed.
   implementer and the other as the initial reviewer. An unavailable reviewer can be
   replaced by a fresh review session with the implementer's agent.
 - **Headless turns with a structured outcome.** Each turn ends in a final message that
-  matches `internal/agent/outcome.schema.json`: `planned`, `checkpoint`, `pr_opened`, `blocked` with
-  questions, or `failed`. `agent.ParseOutcome` is the only way an implementer's output
+  matches `internal/agent/outcome.schema.json`: `planned`, `checkpoint`, `pr_opened`,
+  `review_ready`, `blocked` with questions, or `failed`. `pr_opened` and `review_ready`
+  may carry `claims`. `agent.ParseOutcome` is the only way an implementer's output
   enters the program, and it rejects questions with fewer than two options or duplicate
   labels. The reviewer, the routing selector, the evaluator, and the limit diagnosis have
   their own schemas and parsers, `agent.ParseReview`, `agent.ParseSelection`,
@@ -677,7 +683,8 @@ the same commit. The commit message records why it changed.
   of the current head and description only, so a clean self-review or a review of an
   earlier description never hands a task over.
 - **The competing review stays independent.** Its prompt lists only earlier competing
-  rounds; self-review rounds and findings never reach it.
+  rounds; self-review rounds and findings never reach it. Claims and the PRD reach it
+  as statements to test, never as findings or verdicts.
 - **The reviewer starts as the competing agent** in a disposable session
   (`--no-session-persistence` / `--ephemeral`) that never sees the implementer's
   session. Before each review, a fresh `quota-axi` report can move the review to
@@ -688,10 +695,37 @@ the same commit. The commit message records why it changed.
   strictly read-only:
   Claude gets only `Read, Grep, Glob` and read-only git, and Codex the read-only
   sandbox. Letting it run tests was rejected, because Claude's Bash has no sandbox.
-- **The PR description is the only requirements.** The prompt carries the description,
-  the PR comments, `git diff origin/<base>...HEAD`, and earlier rounds, but not the
-  issue, PRD, decisions, or validation claims, so the review stays independent. A blank
-  description stops the review.
+- **The PR description is the only requirements, unless the task verifies claims.** The
+  prompt carries the description, the PR comments, `git diff origin/<base>...HEAD`, and
+  earlier rounds, but not the issue, decisions, or validation, so the review stays
+  independent. A blank description stops the review. A task with claim verification
+  adds the PRD as the acceptance criteria and the implementer's claims; the description
+  is then the change as the implementer describes it.
+- **Claim verification is set when a planning task starts.** `claim_verification` is
+  copied onto the delegation when a task that will plan starts (the CLI always enables
+  it; a task that continues a PR has no PRD and starts without it). A restart keeps it,
+  and a task file without it keeps the review workflow above. Its implementer returns,
+  with every `pr_opened` or `review_ready`, a full claim set: per PRD acceptance criterion (criteria may share a claim), the
+  behavior, the code and test evidence, and the check performed or why none was. A
+  turn without claims is resumed once to add them; any answer but the same status with
+  claims fails the task, on every turn path, a gate-started conflict repair included. The latest set replaces the stored one. The turn that opens a
+  reviewed PR is given the reviewed claims and must return them unchanged, and before
+  it runs, or a matching PR is adopted, the PRD is read again: a changed PRD sends the
+  change back to review, and a missing one fails the task. Claims stay in the task file: the prompts keep them out of
+  the PR, comments, commits, and worktree files, and Foreman never posts them. No agent
+  call exists to verify them; both existing reviews do.
+- **Reviews test claims against the live PRD.** Before each review, the review step
+  reads the PRD comment the task recorded, strips its marker and heading, and stores
+  its digest; Linear and GitHub read alike. A missing, unmarked, or empty PRD fails the
+  task with the cause, and an unreadable one fails it with the error, before any review
+  runs. Reviewers map each acceptance criterion to a claim, check that cited evidence
+  establishes it, look for counterexamples, and treat claims and reported checks as
+  unproven. An unsupported material claim is a finding. A behavior the reviewer cannot
+  check is a limitation; a blocking one (it prevents judging a criterion or hides a
+  plausible serious defect) cannot come with a clean verdict, so `agent.ParseReview`
+  rejects that pair. It also rejects a blocking limitation without a blocking finding,
+  because the implementer receives findings, not limitations. Limitations are stored on
+  the round.
 - **`review_before_pr` reviews before the PR opens.** Repositories that review every new
   PR automatically would otherwise review code Foreman's fixes still change. The setting
   is copied into the task when it starts, and a restart keeps it, so a config change never
@@ -709,8 +743,12 @@ the same commit. The commit message records why it changed.
   commit and a digest of the title and description it read, and a restart resumes from the record:
   a commit or description without a review goes to review, a clean pair to the PR step.
 - **A review covers one PR head and description.** Each review records the head and
-  description it read. A WAITING_FOR_CI task whose head or description changed is
-  reviewed again, self-review first; new commits on a READY_FOR_HUMAN PR are only
+  description it read, and with claim verification the claim set and PRD digests too;
+  a review of other claims or another PRD does not cover the change. A WAITING_FOR_CI
+  task whose head, description, or PRD changed is reviewed again, self-review first
+  (the gate reads the PRD of such a task, and of a claim-verified PR it finds
+  reopened, on each refresh before CI, and fails the task when it cannot load it; paths
+  that answer comments leave a claim-verified task in WAITING_FOR_CI for that check); new commits on a READY_FOR_HUMAN PR are only
   flagged, because that PR is the developer's now. A crash mid-review restarts at the
   review, not the implementation.
 - **Conflicts are checked before every review** with `git merge-tree` on

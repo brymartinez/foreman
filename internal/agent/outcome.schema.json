@@ -11,7 +11,8 @@
     "questions",
     "documents",
     "prTitle",
-    "prBody"
+    "prBody",
+    "claims"
   ],
   "properties": {
     "status": {
@@ -150,6 +151,39 @@
         "string",
         "null"
       ]
+    },
+    "claims": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "criteria",
+          "behavior",
+          "evidence",
+          "check"
+        ],
+        "properties": {
+          "criteria": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "behavior": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "check": {
+            "type": "string"
+          }
+        }
+      }
     }
   }
 }

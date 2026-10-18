@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -64,6 +65,9 @@ type TaskBrief struct {
 	// LocalReview is set for a task reviewed before its PR opens and with no PR yet.
 	// The turn commits and proposes the PR; foreman has it pushed after a clean review.
 	LocalReview bool
+	// Claims is set for a task with claim verification. A turn that finishes a change
+	// returns its claims for the reviewers.
+	Claims bool
 }
 
 // MergeBrief is the base branch a PR conflicts with and the files that conflict.
@@ -169,6 +173,9 @@ For a multi-part change, complete one coherent, testable part at a time. When th
 The next session receives the commit and nextObjective, not this transcript. Keep nextObjective under 500 characters; the committed code, issue, and posted plan hold the details.
 
 `, finish)
+	}
+	if b.Claims && !b.Planning {
+		claimsSection(&s)
 	}
 	if b.Key.Source == task.Linear {
 		s.WriteString("GitHub hosts the pull request. Put " + b.Identifier + " in the pull request title and " + b.URL + " in the pull request body. Do not add a GitHub Closes #N line. These issue link rules override conflicting developer PR instructions below.\n\n")
@@ -553,6 +560,9 @@ type OpenPRBrief struct {
 	Validation []task.Check
 	// Decisions are answers the implementer has not received yet.
 	Decisions []task.Decision
+	// Claims are the reviewed claims of a task with claim verification, which the
+	// turn returns unchanged.
+	Claims []task.Claim
 }
 
 // OpenPRPrompt has the implementer push the reviewed commit and open the PR. It is
@@ -583,6 +593,10 @@ Validation run on the reviewed commit:
 `, b.Head, b.Branch, b.Branch, b.BaseBranch, b.Branch, b.BodyFile, b.Title)
 	for _, c := range b.Validation {
 		fmt.Fprintf(&s, "- %s: passed %t\n", c.Command, c.Passed)
+	}
+	if len(b.Claims) > 0 {
+		claims, _ := json.Marshal(b.Claims)
+		fmt.Fprintf(&s, "\nWith \"pr_opened\", return these reviewed claims unchanged in \"claims\". Keep them out of the pull request and its comments.\n\n%s\n", claims)
 	}
 	return s.String()
 }

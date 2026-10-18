@@ -179,7 +179,7 @@ func (a App) unanswered(ctx, final context.Context, rec *task.Record, log io.Wri
 	fmt.Fprintf(log, "foreman: PR #%d has no comments left to answer\n", d.PR)
 	updated, err = a.update(final, rec.Key, existing(func(cur *task.Record) {
 		cur.State = task.WaitingForCI
-		if cur.CI != nil && cur.CI.State != task.CIPending {
+		if handsOverNow(cur, cur.CI) {
 			cur.State = task.ReadyForHuman
 		}
 		cur.LastOutcome = &task.Outcome{Status: "feedback_answered", Summary: fmt.Sprintf("every comment on PR #%d is answered", cur.Delegation.PR), At: a.Now()}
@@ -206,14 +206,22 @@ func (a App) currentPR(ctx, final context.Context, rec *task.Record) (updated *t
 	return updated, err == nil, err
 }
 
+// handsOverNow reports whether a task whose clean review covers its PR goes straight
+// to the developer once its comments are answered: CI has finished. A task with claim
+// verification waits for the gate instead, which reads the PRD before handing it over.
+func handsOverNow(rec *task.Record, ci *task.CIStatus) bool {
+	return ci != nil && ci.State != task.CIPending && !rec.Delegation.ClaimVerification
+}
+
 // reviewCovers reports a clean competing review of head and of the description with
 // digest on the task's current PR, which is the review bar the gate applies before it
 // hands a task over. A review or digest from before descriptions were recorded is
-// empty, and the review then covers its head alone.
+// empty, and the review then covers its head alone. A task with claim verification
+// also needs the review of its current claims and PRD.
 func reviewCovers(rec *task.Record, head, digest string) bool {
 	latest := rec.LatestCompeting()
 	described := latest != nil && (latest.Proposal == "" || digest == "" || latest.Proposal == digest)
-	return described && latest.Clean && latest.PR == rec.Delegation.PR && head != "" && latest.Head == head
+	return described && rec.ClaimsCovered(latest) && latest.Clean && latest.PR == rec.Delegation.PR && head != "" && latest.Head == head
 }
 
 // beforeHandover answers comments that arrived while the run worked, so the developer

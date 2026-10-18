@@ -60,6 +60,14 @@ func (a App) runTurn(ctx context.Context, rec *task.Record, req turnRequest, che
 	}
 	turn, err := a.implement(ctx, rec, req, log)
 	turn, err = a.repairFailedCheckpoint(ctx, rec, req, turn, err, log)
+	if err == nil {
+		turn, err = a.requireClaims(ctx, rec, turn, req.openBodyFile != "", log)
+	}
+	// The open turn pushes the reviewed change, so it returns the reviewed claims.
+	if d := rec.Delegation; err == nil && req.openBodyFile != "" && d.ClaimVerification && turn.Outcome.Status == agent.PROpened &&
+		task.ClaimsDigest(turn.Outcome.Claims) != task.ClaimsDigest(d.Claims) {
+		err = errors.New("the implementer opened the pull request with claims that are not the reviewed claims")
+	}
 	if err != nil {
 		return turnResult{turn: turn, err: err}
 	}
@@ -176,6 +184,58 @@ func (a App) repairFailedCheckpoint(ctx context.Context, rec *task.Record, req t
 		err = resumeErr
 	}
 	return turn, err
+}
+
+// missingClaimsError fails a turn that did not supply its claims after one request.
+// Every path fails the task on it, whatever else the turn did.
+type missingClaimsError struct{ msg string }
+
+func (e *missingClaimsError) Error() string { return e.msg }
+
+// finishesChange reports a status that hands a change to review.
+func finishesChange(s agent.Status) bool { return s == agent.PROpened || s == agent.ReviewReady }
+
+// requireClaims gives a turn of a task with claim verification that finished a change
+// without its claims one resume of the same session to add them. A second miss fails
+// the turn, because Foreman does not review a change without its claims. The turn
+// that opens a reviewed PR is asked for the reviewed claims, which it must return.
+func (a App) requireClaims(ctx context.Context, rec *task.Record, turn agent.Turn, opening bool, log io.Writer) (agent.Turn, error) {
+	d, status := rec.Delegation, turn.Outcome.Status
+	if !d.ClaimVerification || !finishesChange(status) || len(turn.Outcome.Claims) > 0 {
+		return turn, nil
+	}
+	missing := fmt.Sprintf("the implementer returned %s without the claim set for the PRD acceptance criteria", status)
+	adapter := a.Agents[d.Implementer.Agent]
+	if adapter == nil || turn.Session.ID == "" {
+		return turn, &missingClaimsError{missing}
+	}
+	if err := a.checkAccount(ctx, rec); err != nil {
+		return turn, err
+	}
+	fmt.Fprintf(log, "foreman: %s returned %s without claims; resuming session %s for them\n", adapter.Name(), status, turn.Session.ID)
+	var reviewed []task.Claim
+	if opening {
+		reviewed = d.Claims
+	}
+	in := agent.StartInput{
+		Worktree: d.Worktree, Prompt: agent.MissingClaimsMessage(status, reviewed),
+		Stage: task.StageImplement, Step: agent.StepImplement,
+		Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD, Profile: d.Profile,
+	}
+	next, err := adapter.Resume(ctx, turn.Session, in)
+	addUsage(&turn.Usage, next.Usage)
+	if next.Session.ID != "" {
+		turn.Session = next.Session
+	}
+	if err != nil {
+		return turn, err
+	}
+	turn.Outcome = next.Outcome
+	// The resume asked for the claims alone, so any other answer fails the turn.
+	if turn.Outcome.Status != status || len(turn.Outcome.Claims) == 0 {
+		return turn, &missingClaimsError{fmt.Sprintf("%s, and its answer to the request for them was %s without claims", missing, turn.Outcome.Status)}
+	}
+	return turn, nil
 }
 
 // finishTurn writes a turn's result through final, so a cancelled run still records

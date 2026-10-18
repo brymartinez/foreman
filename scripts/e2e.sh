@@ -258,7 +258,7 @@ if [[ " $* " == *" --resume "* ]]; then
 			echo "claude local-fix" >>"$E2E_STATE/agents.log"
 			echo "// retry 429" >>widgets.go
 			git commit -qam "fix: retry 429"
-			echo '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"review_ready","summary":"retried 429","nextObjective":null,"prNumber":null,"prUrl":null,"validation":[{"command":"go test ./...","passed":true}],"questions":[],"documents":null,"prTitle":"feat: add retries","prBody":"Retry 5xx and 429.\n\nCloses #42"}}'
+			echo '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"review_ready","summary":"retried 429","nextObjective":null,"prNumber":null,"prUrl":null,"validation":[{"command":"go test ./...","passed":true}],"questions":[],"documents":null,"prTitle":"feat: add retries","prBody":"Retry 5xx and 429.\n\nCloses #42","claims":[{"criteria":["R1. Retry 5xx responses."],"behavior":"the client retries 5xx responses","evidence":"widgets.go","check":"go test ./... passed"}]}}'
 			exit 0
 		fi
 		if [[ "$2" == *"Push it and open the pull request now"* ]]; then
@@ -269,7 +269,7 @@ if [[ " $* " == *" --resume "* ]]; then
 			file=$(printf '%s' "$2" | sed -n 's/.*--body-file \([^`]*\)`.*/\1/p' | head -n 1)
 			body=$(sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' "$file" | awk '{printf "%s\\n", $0}')
 			printf '{"number":%s,"url":"https://github.com/acme/widgets/pull/%s","state":"OPEN","headRefName":"%s","headRefOid":"%s","baseRefName":"main","isCrossRepository":false,"title":"feat: add retries","body":"%s"}\n' "$pr" "$pr" "$b" "$(git rev-parse HEAD)" "$body" >"$E2E_STATE/pr-$pr.json"
-			printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"pr_opened","summary":"opened the PR","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s","validation":[{"command":"go test ./...","passed":true}],"questions":[]}}\n' "$pr" "$pr"
+			printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"pr_opened","summary":"opened the PR","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s","validation":[{"command":"go test ./...","passed":true}],"questions":[],"claims":[{"criteria":["R1. Retry 5xx responses."],"behavior":"the client retries 5xx responses","evidence":"widgets.go","check":"go test ./... passed"}]}}\n' "$pr" "$pr"
 			exit 0
 		fi
 		# A merge conflict: merge main, keep both sides, push, and report the PR.
@@ -284,7 +284,7 @@ if [[ " $* " == *" --resume "* ]]; then
 			git -c user.email=e2e@example.com -c user.name=e2e commit -q --no-edit
 			git push -q origin "$b"
 			printf '{"number":%s,"url":"https://github.com/acme/widgets/pull/%s","state":"OPEN","headRefName":"%s","headRefOid":"%s","baseRefName":"main","isCrossRepository":false,"body":"Retry 5xx only.\\n\\nCloses #42"}\n' "$pr" "$pr" "$b" "$(git rev-parse HEAD)" >"$E2E_STATE/pr-$pr.json"
-			printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"pr_opened","summary":"merged main","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s","validation":[{"command":"go test ./...","passed":true}],"questions":[]}}\n' "$pr" "$pr"
+			printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"pr_opened","summary":"merged main","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s","validation":[{"command":"go test ./...","passed":true}],"questions":[],"claims":[{"criteria":["R1. Retry 5xx responses."],"behavior":"the client retries 5xx responses","evidence":"widgets.go","check":"go test ./... passed"}]}}\n' "$pr" "$pr"
 			exit 0
 		fi
 		# Repairing a merge conflict: merge the base, or fail when told to.
@@ -299,7 +299,7 @@ if [[ " $* " == *" --resume "* ]]; then
 			b=$(git branch --show-current); i=${b#*/}; pr=$((900 + ${i%%-*}))
 			git push -q origin "$b"
 			printf '{"number":%s,"url":"https://github.com/acme/widgets/pull/%s","state":"OPEN","headRefName":"%s","headRefOid":"%s","baseRefName":"main","isCrossRepository":false,"mergeable":"MERGEABLE","body":"Retry 5xx only.\\n\\nCloses #42"}\n' "$pr" "$pr" "$b" "$(git rev-parse HEAD)" >"$E2E_STATE/pr-$pr.json"
-			printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"pr_opened","summary":"merged main","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s","validation":[{"command":"go test ./...","passed":true}],"questions":[]}}\n' "$pr" "$pr"
+			printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"pr_opened","summary":"merged main","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s","validation":[{"command":"go test ./...","passed":true}],"questions":[],"claims":[{"criteria":["R1. Retry 5xx responses."],"behavior":"the client retries 5xx responses","evidence":"widgets.go","check":"go test ./... passed"}]}}\n' "$pr" "$pr"
 			exit 0
 		fi
 		# Answering PR feedback: reply where the comment is and change no code.
@@ -308,7 +308,7 @@ if [[ " $* " == *" --resume "* ]]; then
 			printf '%s' "$2" >>"$E2E_STATE/feedback-prompt.txt"
 			b=$(git branch --show-current); i=${b#*/}; pr=$((900 + ${i%%-*}))
 			gh api --method POST "repos/acme/widgets/issues/$pr/comments" -f body="<!-- foreman:reply --> Capped at three." >/dev/null
-			printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"pr_opened","summary":"answered the comment","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s","validation":[{"command":"go test ./...","passed":true}],"questions":[]}}\n' "$pr" "$pr"
+			printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"pr_opened","summary":"answered the comment","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s","validation":[{"command":"go test ./...","passed":true}],"questions":[],"claims":[{"criteria":["R1. Retry 5xx responses."],"behavior":"the client retries 5xx responses","evidence":"widgets.go","check":"go test ./... passed"}]}}\n' "$pr" "$pr"
 			exit 0
 		fi
 	fi
@@ -341,7 +341,7 @@ git commit -qam "feat: retries"
 # review_before_pr: commit only, and propose the PR for review.
 if [[ "$*" == *"## Proposing the pull request"* ]]; then
 	echo "claude review-ready" >>"$E2E_STATE/agents.log"
-	echo '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.25,"structured_output":{"status":"review_ready","summary":"added retries","nextObjective":null,"prNumber":null,"prUrl":null,"validation":[{"command":"go test ./...","passed":true}],"questions":[],"documents":null,"prTitle":"feat: add retries","prBody":"Retry 5xx only.\n\nCloses #42"}}'
+	echo '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.25,"structured_output":{"status":"review_ready","summary":"added retries","nextObjective":null,"prNumber":null,"prUrl":null,"validation":[{"command":"go test ./...","passed":true}],"questions":[],"documents":null,"prTitle":"feat: add retries","prBody":"Retry 5xx only.\n\nCloses #42","claims":[{"criteria":["R1. Retry 5xx responses."],"behavior":"the client retries 5xx responses","evidence":"widgets.go","check":"go test ./... passed"}]}}'
 	exit 0
 fi
 git push -q origin "$branch"
@@ -367,7 +367,7 @@ printf '{"number":%s,"url":"https://github.com/%s/pull/%s","state":"OPEN","headR
 echo "claude stderr progress" >&2
 echo '{"type":"system","subtype":"init","session_id":"s1"}'
 echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"go test ./...","description":"Run the tests"}}]}}'
-printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.25,"structured_output":{"status":"pr_opened","summary":"added retries","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s","validation":[{"command":"go test ./...","passed":true}],"questions":[]}}\n' "$pr" "$pr"
+printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.25,"structured_output":{"status":"pr_opened","summary":"added retries","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s","validation":[{"command":"go test ./...","passed":true}],"questions":[],"claims":[{"criteria":["R1. Retry 5xx responses."],"behavior":"the client retries 5xx responses","evidence":"widgets.go","check":"go test ./... passed"}]}}\n' "$pr" "$pr"
 EOF
 
 	# Reviewer on the codex JSONL protocol.
@@ -486,7 +486,11 @@ scenario_runner() {
 	check "the review carries the PR description" contains "$state/review-prompt.txt" "> Retry 5xx only."
 	check "the implementer self-reviews before the competing review" bash -c "grep -E '^(claude|codex) review' '$state/agents.log' | head -2 | tr '\n' ' ' | grep -qx 'claude review codex review '"
 	check "the review leaves out the issue body" bash -c "! grep -qF 'do it' '$state/review-prompt.txt'"
-	check "the review leaves out the PRD" bash -c "! grep -qF 'R1. Retry 5xx responses.' '$state/review-prompt.txt'"
+	check "the review carries the PRD" contains "$state/review-prompt.txt" "> R1. Retry 5xx responses."
+	check "the review carries the claims to test" contains "$state/review-prompt.txt" "the client retries 5xx responses"
+	check "the task file holds the claims" contains "$sandbox/tasks/acme-widgets-42.md" "the client retries 5xx responses"
+	check "no claim reaches GitHub" bash -c "! grep -rqF 'the client retries 5xx responses' '$state/gh.log' '$state'/comment-*.md '$state'/pr-*.json"
+	check "no claim reaches git" bash -c "! git --git-dir='$sandbox/origin.git' log --all -p | grep -qF 'the client retries 5xx responses'"
 	task 42 sd >"$sandbox/show.txt"
 	check "the show pane lists the plan" contains "$sandbox/show.txt" "Analysis https://github.com/acme/widgets/issues/42#issuecomment-3001"
 	rm "$sandbox/stages/pr.md"
@@ -518,10 +522,13 @@ scenario_review_before_pr() {
 scenario_plan_reuse() {
 	echo "plan_reuse: a task whose record lost its plan adopts the plan on the issue"
 	setup plan_reuse
-	local comments='' i=0 doc title
+	local comments='' entry i=0 doc title
 	for doc in analysis:Analysis prd:PRD design:Design "plan:Implementation plan"; do
 		i=$((i + 1)); title=${doc#*:}
-		comments="$comments${comments:+,}$(printf '{"id":%s,"html_url":"https://github.com/acme/widgets/issues/42#issuecomment-%s","body":"<!-- foreman:%s -->\\n## %s\\n\\nPosted earlier.","updated_at":"2026-09-20T10:00:00Z","user":{"login":"brymartinez"}}' "$((2000 + i))" "$((2000 + i))" "${doc%%:*}" "$title")"
+		entry=$(printf '{"id":%s,"html_url":"https://github.com/acme/widgets/issues/42#issuecomment-%s","body":"<!-- foreman:%s -->\\n## %s\\n\\nPosted earlier.","updated_at":"2026-09-20T10:00:00Z","user":{"login":"brymartinez"}}' "$((2000 + i))" "$((2000 + i))" "${doc%%:*}" "$title")
+		comments="$comments${comments:+,}$entry"
+		# The review reads the PRD comment by its ID.
+		printf '%s\n' "$entry" >"$state/api-$((2000 + i)).json"
 	done
 	printf '[[{"id":1999,"html_url":"https://github.com/acme/widgets/issues/42#issuecomment-1999","body":"Thanks, looking.","updated_at":"2026-09-20T09:00:00Z","user":{"login":"brymartinez"}},%s]]\n' "$comments" >"$state/conv-repos-acme-widgets-issues-42-comments.json"
 	check "the dashboard delegates #42" start 42

@@ -22,6 +22,9 @@ func (r *taskRun) openPR() (step, error) {
 	if err := r.enter(task.OpeningPR); err != nil {
 		return stepDone, err
 	}
+	if next, err := r.checkPRDBeforeOpening(); err != nil || next != stepOpenPR {
+		return next, err
+	}
 	d := r.rec.Delegation
 	found, err := a.GitHub.OpenPullRequestForBranch(r.ctx, r.rec.Repo, d.Branch)
 	if err == nil && found != nil {
@@ -59,6 +62,33 @@ func (r *taskRun) openPR() (step, error) {
 	return stepDone, err
 }
 
+// checkPRDBeforeOpening reads the PRD again for a task with claim verification, because
+// it may have changed since the clean review, even across a restart. A changed PRD
+// sends the change back to review, and a PRD the review could not load stops the task.
+func (r *taskRun) checkPRDBeforeOpening() (step, error) {
+	a := r.a
+	if !r.rec.Delegation.ClaimVerification {
+		return stepOpenPR, nil
+	}
+	prd, err := a.reviewPRD(r.ctx, r.rec)
+	if err != nil {
+		r.rec, err = a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
+			failTask(cur, fmt.Sprintf("open the reviewed pull request: %v", err), a.Now())
+			applyStop(r.ctx, cur, "opening the pull request", r.log, a.Now())
+		}))
+		return stepDone, err
+	}
+	if task.Digest(prd) == r.rec.Delegation.PRDDigest {
+		return stepOpenPR, nil
+	}
+	fmt.Fprintf(r.log, "foreman: the PRD changed since the clean review of %s; reviewing again\n", short(r.rec.Delegation.LocalHead))
+	r.rec, err = a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
+		cur.Delegation.PRDDigest = task.Digest(prd)
+		cur.State = cur.ReviewStage()
+	}))
+	return stepReview, err
+}
+
 // openTurn runs the turn that pushes the reviewed commit and opens its PR. Its prompt
 // stands alone, so a session that is gone is replaced by a fresh one with the same
 // prompt.
@@ -67,6 +97,7 @@ func (a App) openTurn(ctx context.Context, rec *task.Record, adapter AgentAdapte
 	in.Prompt = agent.OpenPRPrompt(agent.OpenPRBrief{
 		Branch: d.Branch, BaseBranch: strings.TrimPrefix(d.BaseRef, "origin/"), Head: d.LocalHead,
 		Title: d.ProposedTitle, BodyFile: bodyFile, Validation: rec.Validation, Decisions: rec.Undelivered(),
+		Claims: d.Claims,
 	})
 	if err := a.startAttempt(ctx, rec); err != nil {
 		return agent.Turn{}, err

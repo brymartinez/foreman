@@ -664,6 +664,56 @@ func TestOldFileLoadsWithReviewBeforePROffAndSavesNone(t *testing.T) {
 	}
 }
 
+func TestStoreRoundTripsClaimsAndTheirReviewDigests(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	want := delegated()
+	want.Delegation.ClaimVerification = true
+	want.Delegation.Claims = []task.Claim{{Criteria: []string{"AC1", "AC2"}, Behavior: "retries 5xx", Evidence: "client.go:40, client_test.go", Check: "go test ./..."}}
+	want.Delegation.PRDDigest = task.Digest("the PRD")
+	want.Reviews[1].Claims = task.ClaimsDigest(want.Delegation.Claims)
+	want.Reviews[1].PRD = want.Delegation.PRDDigest
+	want.Reviews[1].Limitations = []task.Limitation{{Behavior: "retry under load", Reason: "no load test harness"}, {Behavior: "Linear PRD read", Reason: "no Linear token", Blocking: true}}
+	if err := s.Save(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, want.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := got.Delegation
+	if !d.ClaimVerification || !reflect.DeepEqual(d.Claims, want.Delegation.Claims) || d.PRDDigest != want.Delegation.PRDDigest {
+		t.Fatalf("delegation = %+v", d)
+	}
+	r := got.Reviews[1]
+	if r.Claims != want.Reviews[1].Claims || r.PRD != want.Reviews[1].PRD || !reflect.DeepEqual(r.Limitations, want.Reviews[1].Limitations) {
+		t.Fatalf("review = %+v", r)
+	}
+}
+
+func TestOldFileLoadsWithClaimVerificationOffAndSavesNone(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	old := "---\nrepo: a/b\nnumber: 3\nkind: issue\nstate: WORKING\nimplementation_agent: claude\nbranch: feat/3-x\nreviews:\n  - round: 1\n    reviewer: codex\n    pr: 4\n    verdict: clean\n    summary: ok\n    at: 2026-09-24T18:00:00Z\n---\n"
+	if err := os.WriteFile(filepath.Join(s.Dir, "a-b-3.md"), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, task.Key{Repo: "a/b", Number: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Delegation.ClaimVerification || got.Delegation.Claims != nil || got.Delegation.PRDDigest != "" {
+		t.Fatalf("delegation = %+v", got.Delegation)
+	}
+	if err := s.Save(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(s.Dir, "a-b-3.md"))
+	for _, key := range []string{"claim_verification", "claims", "prd_digest", "prd:", "limitations"} {
+		if strings.Contains(string(raw), key) {
+			t.Errorf("saved empty %s:\n%s", key, raw)
+		}
+	}
+}
+
 func TestStoreRoundTripsTheReviewedProposal(t *testing.T) {
 	s := Markdown{Dir: t.TempDir()}
 	want := delegated()
