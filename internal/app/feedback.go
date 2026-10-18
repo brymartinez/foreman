@@ -152,7 +152,13 @@ func (a App) unanswered(ctx, final context.Context, rec *task.Record, log io.Wri
 	if len(waiting) > 0 {
 		return waiting, updated, false, nil
 	}
-	if !reviewCovers(updated, d.PRHead, d.PRDigest) {
+	current := false
+	if reviewCovers(updated, d.PRHead, d.PRDigest) {
+		if updated, current, err = a.currentDescription(ctx, final, updated); err != nil {
+			return nil, updated, false, err
+		}
+	}
+	if !current || !reviewCovers(updated, updated.Delegation.PRHead, updated.Delegation.PRDigest) {
 		// Open findings or an unreviewed head: the run has that work to do anyway, and
 		// the comments are picked up before it hands over.
 		if readErr != nil {
@@ -179,6 +185,23 @@ func (a App) unanswered(ctx, final context.Context, rec *task.Record, log io.Wri
 		cur.LastOutcome = &task.Outcome{Status: "feedback_answered", Summary: fmt.Sprintf("every comment on PR #%d is answered", cur.Delegation.PR), At: a.Now()}
 	}))
 	return nil, updated, true, err
+}
+
+// currentDescription stores the digest of the description the PR has on GitHub now, so
+// a path that skips review judges coverage by that description, not one a refresh
+// stored earlier. current is false when the PR could not be read, and the run then
+// reviews instead of handing over.
+func (a App) currentDescription(ctx, final context.Context, rec *task.Record) (updated *task.Record, current bool, err error) {
+	pr, err := a.GitHub.GetPullRequest(ctx, task.Key{Repo: rec.Repo, Number: rec.Delegation.PR})
+	if err != nil {
+		return rec, false, nil
+	}
+	digest := task.ProposalDigest(pr.Title, pr.Body)
+	if digest == rec.Delegation.PRDigest {
+		return rec, true, nil
+	}
+	updated, err = a.update(final, rec.Key, existing(func(cur *task.Record) { cur.Delegation.PRDigest = digest }))
+	return updated, err == nil, err
 }
 
 // reviewCovers reports a clean competing review of head and of the description with

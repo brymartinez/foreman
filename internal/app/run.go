@@ -67,16 +67,22 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, token string, l
 			return err
 		}
 	} else if len(rec.UnhandledFeedback()) > 0 && rec.Delegation.PR != 0 && reviewCovers(rec, rec.Delegation.PRHead, rec.Delegation.PRDigest) {
-		// A task left by the old feedback flow already passed review. Hand it
-		// back without resuming the implementer on the same comments.
-		_, err = a.update(final, rec.Key, existing(func(cur *task.Record) {
-			cur.State = task.Reviewing
-			if cur.CI != nil && cur.CI.State != task.CIPending {
-				cur.State = task.ReadyForHuman
-			}
-			cur.Feedback = nil
-		}))
-		return err
+		var current bool
+		if rec, current, err = a.currentDescription(ctx, final, rec); err != nil {
+			return err
+		}
+		if current && reviewCovers(rec, rec.Delegation.PRHead, rec.Delegation.PRDigest) {
+			// A task left by the old feedback flow already passed review. Hand it
+			// back without resuming the implementer on the same comments.
+			_, err = a.update(final, rec.Key, existing(func(cur *task.Record) {
+				cur.State = task.Reviewing
+				if cur.CI != nil && cur.CI.State != task.CIPending {
+					cur.State = task.ReadyForHuman
+				}
+				cur.Feedback = nil
+			}))
+			return err
+		}
 	}
 	if stoppedAtLimit(rec) {
 		_, err = a.update(final, rec.Key, existing(func(cur *task.Record) {

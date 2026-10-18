@@ -644,8 +644,9 @@ the same commit. The commit message records why it changed.
   read; one from before descriptions were recorded covers its head alone. A clean
   self-review newer than the latest competing review leaves the competing review
   pending, so a restart finishes it. The digest ignores line endings and surrounding
-  space, which GitHub may change. A restart keeps the digest with the PR. The gate, PR
-  adoption, reopening, and the feedback paths that skip review read competing reviews
+  space, which GitHub may change. A restart keeps the digest with the PR, and a
+  feedback path that would skip review reads the PR's description from GitHub first.
+  The gate, PR adoption, reopening, and those feedback paths read competing reviews
   of the current head and description only, so a clean self-review or a review of an
   earlier description never hands a task over.
 - **The competing review stays independent.** Its prompt lists only earlier competing
