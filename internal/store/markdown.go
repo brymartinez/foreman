@@ -68,7 +68,13 @@ func (m Markdown) Save(_ context.Context, rec *task.Record) error {
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	out, err := encode(rec, existing)
+	write := rec
+	if legacy, ok := keptLegacyState(existing, rec); ok {
+		c := *rec
+		c.State = legacy
+		write = &c
+	}
+	out, err := encode(write, existing)
 	if err != nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}
@@ -85,6 +91,27 @@ func (m Markdown) Save(_ context.Context, rec *task.Record) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), path)
+}
+
+// keptLegacyState is the old state the file holds, when rec should keep it: the
+// runner that held the task under that state still holds it, and rec is still in the
+// stage the old state maps to. A runner started before the stages runs the old code,
+// which rejects the new names, so writing one would fail its next write. The new
+// name is written once the stage changes or another runner takes the task.
+func keptLegacyState(existing []byte, rec *task.Record) (task.State, bool) {
+	fmRaw, body, ok := split(existing)
+	if !ok || rec.Delegation == nil || rec.Delegation.RunnerPID == 0 {
+		return "", false
+	}
+	var fm frontmatter
+	if err := yaml.Unmarshal(fmRaw, &fm); err != nil || (fm.State != task.LegacyWorking && fm.State != task.LegacyReviewing) || fm.RunnerPID != rec.Delegation.RunnerPID {
+		return "", false
+	}
+	was, err := fm.toRecord(string(body))
+	if err != nil || was.State != rec.State {
+		return "", false
+	}
+	return fm.State, true
 }
 
 // Update serializes read-modify-write across processes with a lock file in Dir.

@@ -323,7 +323,8 @@ var phaseNames = map[task.Phase]string{
 
 // phaseParts are the detail's phase values: each measured phase, then the total. An
 // attempt from before the stages shows its combined review time in place of the
-// review stages and opening PR, which it has no separate time for.
+// review stages and opening PR, which it has no separate time for. Time it spent in
+// those stages after the upgrade still shows, so the parts add up to the total.
 func phaseParts(r app.HistoryRow) []string {
 	return timingParts(r, false)
 }
@@ -339,7 +340,9 @@ func timingParts(r app.HistoryRow, compact bool) []string {
 			if p == task.PhaseSelfReview {
 				parts = append(parts, "legacy review and fixes "+duration(r.Phases[task.PhaseReview]), "separate reviews unavailable")
 			}
-			continue
+			if r.Phases[p] == 0 {
+				continue
+			}
 		}
 		if compact && r.Phases[p] == 0 {
 			continue

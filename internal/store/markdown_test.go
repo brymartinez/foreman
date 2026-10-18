@@ -770,3 +770,40 @@ func TestOldReviewPhaseMarksStillLoad(t *testing.T) {
 		t.Fatalf("attempts = %+v, want the legacy review mark", got.Attempts)
 	}
 }
+
+func TestAnOldStateStaysWhileThePreUpgradeRunnerHoldsTheTask(t *testing.T) {
+	const old = "---\nrepo: a/b\nnumber: 3\nkind: issue\nstate: REVIEWING\nimplementation_agent: claude\nbranch: feat/3-x\nrunner_pid: 4100\npr: 4\npr_head: h1\n---\n"
+	key := task.Key{Repo: "a/b", Number: 3}
+	for name, tc := range map[string]struct {
+		change func(*task.Record)
+		want   string
+	}{
+		"a write that keeps the stage and the runner keeps the old name": {func(r *task.Record) { r.Title = "refreshed" }, "state: REVIEWING\n"},
+		"a new stage is written by its new name":                         {func(r *task.Record) { r.State = task.ReadyForHuman }, "state: READY_FOR_HUMAN\n"},
+		"a new runner gets the new name":                                 {func(r *task.Record) { r.Delegation.RunnerPID = 4200 }, "state: SELF_REVIEW\n"},
+		"a released runner gets the new name":                            {func(r *task.Record) { r.Delegation.RunnerPID = 0 }, "state: SELF_REVIEW\n"},
+	} {
+		s := Markdown{Dir: t.TempDir()}
+		path := filepath.Join(s.Dir, "a-b-3.md")
+		if err := os.WriteFile(path, []byte(old), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.Update(ctx, key, func(cur *task.Record) (*task.Record, error) {
+			if cur.State != task.SelfReviewing {
+				t.Fatalf("%s: loaded %s, want SELF_REVIEW", name, cur.State)
+			}
+			tc.change(cur)
+			return cur, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := os.ReadFile(path)
+		if !strings.Contains(string(raw), tc.want) {
+			t.Errorf("%s: file lacks %q:\n%s", name, tc.want, raw)
+		}
+		if reread, _ := s.Get(ctx, key); reread.State != got.State {
+			t.Errorf("%s: reloaded %s, want %s", name, reread.State, got.State)
+		}
+	}
+}

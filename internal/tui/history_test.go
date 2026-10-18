@@ -501,3 +501,15 @@ func TestAShortTimingPaneDropsEmptyStagesAndKeepsTheTotal(t *testing.T) {
 		t.Errorf("a short pane kept an empty stage:\n%s", text)
 	}
 }
+
+func TestAnAttemptSpanningTheUpgradeShowsItsStageTimeBesideTheLegacyReview(t *testing.T) {
+	row := historyRows(1)[0]
+	row.LegacyReview = true
+	row.Phases = map[task.Phase]time.Duration{task.PhaseImplementation: 20 * time.Minute, task.PhaseReview: 10 * time.Minute,
+		task.PhaseSelfReview: 5 * time.Minute, task.PhaseAdversarialReview: 5 * time.Minute, task.PhaseCI: 22 * time.Minute}
+	want := []string{"planning 0s", "implementing 20m00s", "legacy review and fixes 10m00s", "separate reviews unavailable",
+		"self-review 5m00s", "adversarial review 5m00s", "CI wait 22m00s", "paused 0s", "total 1h02m"}
+	if got := phaseParts(row); !slices.Equal(got, want) {
+		t.Fatalf("phase lines = %q\nwant %q", got, want)
+	}
+}

@@ -401,7 +401,10 @@ the same commit. The commit message records why it changed.
   the adversarial review. Which step runs next still comes from the record
   (`firstStep`, `Record.NextStage`), never from the state, so a stale state cannot
   skip a step. Task files that hold the old WORKING or REVIEWING load as the stage
-  the record needs (`Record.UpgradeState`), and the next write saves it. Rejected:
+  the record needs (`Record.UpgradeState`), and the next write saves it. While the
+  runner that wrote the old state still holds the task and the stage is unchanged,
+  the store writes the old name back (`keptLegacyState`): that runner runs the code
+  from before the upgrade, which rejects the new names. Rejected:
   keeping WORKING and REVIEWING with a separate stage field, which could disagree.
 - **Attempts record where the time went.** An attempt is one run of work that produces
   one PR. `App.Start` opens one unless it keeps the PR or the current attempt has no PR
@@ -412,7 +415,8 @@ the same commit. The commit message records why it changed.
   wait, paused, ended) and adds a mark when it changes, so the runner and the
   dashboard refresh both record boundaries. Attempts recorded before the stages have
   a `review` phase that holds review rounds and fixes together; history shows it as
-  "legacy review and fixes" and the separate reviews as unavailable. Track also
+  "legacy review and fixes" and the separate reviews as unavailable, with any stage
+  time the attempt recorded after the upgrade beside it. Track also
   stamps the first READY_FOR_HUMAN as the handoff and the merge or close as the end.
   The marks tile the time, so the phase totals add up to the first turn to the first
   handoff. Rejected: a timestamp at each of the forty-odd state assignments, where one
