@@ -526,3 +526,32 @@ func TestAWaitingTaskWhosePRDCannotBeReadFails(t *testing.T) {
 		})
 	}
 }
+
+func TestAWaitingTaskChecksItsPRDWhenCICannotBeRead(t *testing.T) {
+	for name, tc := range map[string]struct {
+		change func(t *testing.T, f fixture)
+		want   task.State
+	}{
+		"deleted PRD": {func(t *testing.T, f fixture) { delete(f.gh.comments, prdComment(t, f).ID) }, task.Failed},
+		"edited PRD":  {func(t *testing.T, f fixture) { editPRD(t, f, "R1. Retry 5xx.\nR2. Never retry 4xx.") }, task.SelfReviewing},
+		"same PRD":    {func(t *testing.T, f fixture) {}, task.WaitingForCI},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture()
+			key := claimTask(t, f)
+			f.claude.turns = []agent.Turn{plannedTurn("sid-1"), claimedTurn("sid-2", retryClaims)}
+			if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			f.store.recs[key].Delegation.RunnerPID = 0
+			f.gh.ci = nil // every CI lookup fails
+			tc.change(t, f)
+			if _, _, err := f.app.Status(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if got := f.store.recs[key]; got.State != tc.want {
+				t.Fatalf("state %s, want %s; outcome %+v", got.State, tc.want, got.LastOutcome)
+			}
+		})
+	}
+}

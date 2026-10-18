@@ -74,20 +74,10 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 				warnings = append(warnings, fmt.Errorf("restore the worktree of %s#%d as PR #%d leaves PR_CLOSED: %w", r.Repo, r.Number, r.Delegation.PR, err))
 			}
 		}
-		var ci task.CIStatus
-		if pr.State == "open" {
-			if ci, err = a.GitHub.CIStatus(ctx, pr.Key); err != nil {
-				if ctx.Err() != nil {
-					return nil, nil, nil, ctx.Err()
-				}
-				warnings = append(warnings, fmt.Errorf("refresh %s#%d CI: %w", r.Repo, r.Number, err))
-				continue
-			}
-			ci.CheckedAt = a.Now()
-		}
 		// The PRD is a review's acceptance criteria, so an edit to it while the task
 		// waits for CI needs new reviews, like an edited description. A PRD that cannot
-		// be loaded fails the task, as it would stop the review.
+		// be loaded fails the task, as it would stop the review. Neither needs CI, so the
+		// PRD is read first.
 		var prd string
 		var prdErr error
 		checkPRD := pr.State == "open" && r.State == task.WaitingForCI && r.Delegation.ClaimVerification
@@ -99,6 +89,22 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 				return nil, nil, nil, ctx.Err()
 			}
 		}
+		var ci task.CIStatus
+		ciRead := true
+		if pr.State == "open" {
+			if ci, err = a.GitHub.CIStatus(ctx, pr.Key); err != nil {
+				if ctx.Err() != nil {
+					return nil, nil, nil, ctx.Err()
+				}
+				warnings = append(warnings, fmt.Errorf("refresh %s#%d CI: %w", r.Repo, r.Number, err))
+				if !checkPRD || (prdErr == nil && prd == r.Delegation.PRDDigest) {
+					continue
+				}
+				// The PRD still decides the task; nothing that needs CI runs.
+				ciRead = false
+			}
+			ci.CheckedAt = a.Now()
+		}
 		var note, token string
 		updated, err := a.update(ctx, r.Key, func(cur *task.Record) (*task.Record, error) {
 			if cur.Delegation == nil || cur.Delegation.PR != r.Delegation.PR {
@@ -109,12 +115,13 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			switch {
 			case pr.State == "merged" && cur.Delegation.RunnerPID == 0:
 				note = advance(cur, pr, ci, a.Now())
-			case cur.State == task.PRClosed:
-				note = reopen(cur, pr, ci, a.Now())
 			case checkPRD && prdErr != nil && cur.State == task.WaitingForCI && gated(cur):
 				failTask(cur, fmt.Sprintf("PR #%d waited for CI, but its PRD could not be loaded: %v", cur.Delegation.PR, prdErr), a.Now())
 			case checkPRD && cur.State == task.WaitingForCI && gated(cur) && cur.Delegation.PRDDigest != prd:
 				note = restartForPRD(cur, prd, a.Now())
+			case !ciRead:
+			case cur.State == task.PRClosed:
+				note = reopen(cur, pr, ci, a.Now())
 			case gated(cur):
 				note = advance(cur, pr, ci, a.Now())
 			case rereview(cur):
