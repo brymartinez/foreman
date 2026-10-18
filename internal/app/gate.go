@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -85,6 +86,25 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			}
 			ci.CheckedAt = a.Now()
 		}
+		// The PRD is a review's acceptance criteria, so an edit to it while the task
+		// waits for CI needs new reviews, like an edited description.
+		var prd string
+		checkPRD := pr.State == "open" && r.State == task.WaitingForCI && r.Delegation.ClaimVerification
+		if checkPRD {
+			text, err := a.reviewPRD(ctx, r)
+			switch {
+			case errors.Is(err, errPRDMissing):
+				// The review that follows stops with the cause.
+			case err != nil:
+				if ctx.Err() != nil {
+					return nil, nil, nil, ctx.Err()
+				}
+				warnings = append(warnings, fmt.Errorf("refresh %s#%d PRD: %w", r.Repo, r.Number, err))
+				continue
+			default:
+				prd = task.Digest(text)
+			}
+		}
 		var note, token string
 		updated, err := a.update(ctx, r.Key, func(cur *task.Record) (*task.Record, error) {
 			if cur.Delegation == nil || cur.Delegation.PR != r.Delegation.PR {
@@ -97,6 +117,8 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 				note = advance(cur, pr, ci, a.Now())
 			case cur.State == task.PRClosed:
 				note = reopen(cur, pr, ci, a.Now())
+			case checkPRD && cur.State == task.WaitingForCI && gated(cur) && cur.Delegation.PRDDigest != prd:
+				note = restartForPRD(cur, prd, a.Now())
 			case gated(cur):
 				note = advance(cur, pr, ci, a.Now())
 			case rereview(cur):
@@ -335,6 +357,17 @@ func restartReview(rec *task.Record, pr PullRequest, now time.Time) string {
 	}
 	rec.State = rec.NextStage()
 	summary := fmt.Sprintf("PR #%d changed since its clean review; it is being reviewed again", d.PR)
+	rec.LastOutcome = &task.Outcome{Status: "re_review", Summary: summary, At: now}
+	return summary
+}
+
+// restartForPRD stores the digest of the PRD the issue holds now, so the runner the
+// gate starts reviews the change against it.
+func restartForPRD(rec *task.Record, prd string, now time.Time) string {
+	d := rec.Delegation
+	d.PRDDigest = prd
+	rec.State, rec.CI = rec.NextStage(), nil
+	summary := fmt.Sprintf("the PRD on the issue changed since PR #%d's clean review; it is being reviewed again", d.PR)
 	rec.LastOutcome = &task.Outcome{Status: "re_review", Summary: summary, At: now}
 	return summary
 }

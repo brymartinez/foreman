@@ -1,7 +1,7 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["verdict", "summary", "findings"],
+  "required": ["verdict", "summary", "findings", "limitations"],
   "properties": {
     "verdict": { "type": "string", "enum": ["clean", "changes_requested"] },
     "summary": { "type": "string" },
@@ -17,6 +17,19 @@
           "line": { "type": ["integer", "null"] },
           "summary": { "type": "string" },
           "detail": { "type": "string" }
+        }
+      }
+    },
+    "limitations": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["behavior", "reason", "blocking"],
+        "properties": {
+          "behavior": { "type": "string" },
+          "reason": { "type": "string" },
+          "blocking": { "type": "boolean" }
         }
       }
     }

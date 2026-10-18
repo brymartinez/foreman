@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -169,5 +170,227 @@ func TestATaskWithoutClaimVerificationIgnoresClaims(t *testing.T) {
 	got := f.store.recs[key]
 	if got.State != task.WaitingForCI || got.Delegation.Claims != nil || len(f.claude.resumed) != 0 || strings.Contains(f.claude.prompts[1], "## Claims") {
 		t.Fatalf("state %s claims %+v resumed %q", got.State, got.Delegation.Claims, f.claude.resumed)
+	}
+}
+
+// prdComment finds the PRD comment the planning turn posted on the fixture's issue.
+func prdComment(t *testing.T, f fixture) IssueComment {
+	t.Helper()
+	for _, c := range f.gh.comments {
+		if doc, _, ok := task.ParsePlanMarker(c.Body); ok && doc == task.PRD {
+			return c
+		}
+	}
+	t.Fatal("no PRD comment on the issue")
+	return IssueComment{}
+}
+
+// editPRD replaces the PRD comment's text, keeping its marker and heading.
+func editPRD(t *testing.T, f fixture, text string) {
+	t.Helper()
+	c := prdComment(t, f)
+	marker, _, _ := strings.Cut(c.Body, "\n")
+	c.Body = marker + "\n## PRD\n\n" + text
+	f.gh.comments[c.ID] = c
+}
+
+func TestBothReviewsReadThePRDAndTheClaims(t *testing.T) {
+	f := newFixture()
+	key := claimTask(t, f)
+	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), claimedTurn("sid-2", retryClaims)}
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if kinds(got) != "self competing" || got.State != task.WaitingForCI {
+		t.Fatalf("state %s reviews %s", got.State, kinds(got))
+	}
+	for name, p := range map[string]string{"self-review": f.claude.reviewed[0], "competing review": f.codex.reviewed[0]} {
+		for _, want := range []string{"## PRD", "> R1. Retry 5xx.", "## Implementer's claims", "the client retries 5xx responses", "retry.go:40, retry_test.go TestRetry5xx", "counterexample", "> Retry 5xx only."} {
+			if !strings.Contains(p, want) {
+				t.Errorf("%s prompt lacks %q:\n%s", name, want, p)
+			}
+		}
+		if strings.Contains(p, "foreman:prd") {
+			t.Errorf("%s prompt carries the PRD comment's marker", name)
+		}
+	}
+	prd, cd := task.Digest("R1. Retry 5xx."), task.ClaimsDigest(retryClaims)
+	if got.Delegation.PRDDigest != prd {
+		t.Errorf("PRD digest = %q, want the digest of the PRD text", got.Delegation.PRDDigest)
+	}
+	for _, r := range got.Reviews {
+		if r.Claims != cd || r.PRD != prd {
+			t.Errorf("review round %d covers claims %q PRD %q", r.Round, r.Claims, r.PRD)
+		}
+	}
+}
+
+func TestTheCompetingReviewOfClaimsDoesNotSeeSelfReviewRounds(t *testing.T) {
+	f := newFixture()
+	key := claimTask(t, f)
+	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), claimedTurn("sid-2", retryClaims), claimedTurn("sid-2", retryClaims)}
+	f.claude.reviews = []agent.ReviewOutcome{selfFindings()}
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.codex.reviewed) != 1 || strings.Contains(f.codex.reviewed[0], "no test covers the 4xx path") {
+		t.Fatalf("competing reviews %d; a self-review finding reached the competing review", len(f.codex.reviewed))
+	}
+}
+
+func TestAReviewStopsWhenThePRDCannotBeRead(t *testing.T) {
+	for name, tc := range map[string]struct {
+		change func(t *testing.T, f fixture)
+		want   string
+	}{
+		"deleted": {func(t *testing.T, f fixture) { delete(f.gh.comments, prdComment(t, f).ID) }, "was deleted"},
+		"emptied": {func(t *testing.T, f fixture) { editPRD(t, f, "  ") }, "is empty"},
+		"unmarked": {func(t *testing.T, f fixture) {
+			c := prdComment(t, f)
+			c.Body = "Our requirements are elsewhere now."
+			f.gh.comments[c.ID] = c
+		}, "no longer marked as the PRD"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture()
+			key := claimTask(t, f)
+			f.claude.turns = []agent.Turn{plannedTurn("sid-1"), claimedTurn("sid-2", retryClaims)}
+			starts := 0
+			f.claude.during = func() {
+				if starts++; starts == 2 {
+					tc.change(t, f)
+				}
+			}
+			if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			got := f.store.recs[key]
+			if got.State != task.Failed || !strings.Contains(got.LastOutcome.Summary, "no PRD to review against") || !strings.Contains(got.LastOutcome.Summary, tc.want) {
+				t.Fatalf("state %s outcome %+v", got.State, got.LastOutcome)
+			}
+			if len(f.claude.reviewed)+len(f.codex.reviewed) != 0 || len(got.Reviews) != 0 {
+				t.Errorf("a review ran without the PRD")
+			}
+		})
+	}
+}
+
+func TestReviewPRDReadsTheCurrentTextFromEitherSource(t *testing.T) {
+	f := newFixture()
+	body := task.PlanMarker(task.PRD, "0123456789ab") + "\n## PRD\n\nR1. Retry 5xx.\r\n"
+	f.gh.comments = map[int64]IssueComment{77: {ID: 77, URL: "https://x/77", Body: body}}
+	gh := &task.Record{Key: task.Key{Repo: "testorg/example", Number: 825}, Plan: []task.PlanComment{{Doc: task.PRD, CommentID: 77, URL: "https://x/77"}}}
+	if got, err := f.app.reviewPRD(context.Background(), gh); err != nil || got != "R1. Retry 5xx." {
+		t.Fatalf("GitHub PRD = %q, %v", got, err)
+	}
+	tracker := &lifecycleTracker{comments: []TrackerComment{{ID: "c-1", URL: "https://linear.app/comment/c-1", Body: body}}, missing: map[string]bool{}}
+	f.app.Linear = tracker
+	lin := &task.Record{Key: task.Key{Repo: "testorg/example", Source: task.Linear, ExternalID: "uuid-42"}, Identifier: "WEB-42",
+		Plan: []task.PlanComment{{Doc: task.PRD, ExternalCommentID: "c-1", URL: "https://linear.app/comment/c-1"}}}
+	if got, err := f.app.reviewPRD(context.Background(), lin); err != nil || got != "R1. Retry 5xx." {
+		t.Fatalf("Linear PRD = %q, %v", got, err)
+	}
+	tracker.missing["c-1"] = true
+	if _, err := f.app.reviewPRD(context.Background(), lin); !errors.Is(err, errPRDMissing) {
+		t.Fatalf("deleted Linear PRD err = %v", err)
+	}
+	if _, err := f.app.reviewPRD(context.Background(), &task.Record{Key: gh.Key}); !errors.Is(err, errPRDMissing) || !strings.Contains(err.Error(), "no PRD comment on #825") {
+		t.Fatalf("no recorded PRD err = %v", err)
+	}
+}
+
+func TestAnEditedPRDIsReviewedAgainBeforeHandover(t *testing.T) {
+	f := newFixture()
+	key := claimTask(t, f)
+	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), claimedTurn("sid-2", retryClaims)}
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	f.store.recs[key].Delegation.RunnerPID = 0
+	setCI(f, task.CIStatus{State: task.CIPassing})
+	editPRD(t, f, "R1. Retry 5xx.\nR2. Never retry 4xx.")
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.SelfReviewing || got.Delegation.PRDDigest != task.Digest("R1. Retry 5xx.\nR2. Never retry 4xx.") || len(f.runners.spawned) != 2 {
+		t.Fatalf("state %s prd %q spawned %d; an edited PRD must start the reviews again", got.State, got.Delegation.PRDDigest, len(f.runners.spawned))
+	}
+	got.Delegation.Launch.PID = 0
+	if err := f.run(context.Background(), key, 4343, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got = f.store.recs[key]
+	if kinds(got) != "self competing self competing" || got.State != task.WaitingForCI {
+		t.Fatalf("state %s reviews %s", got.State, kinds(got))
+	}
+	if p := f.codex.reviewed[1]; !strings.Contains(p, "> R2. Never retry 4xx.") {
+		t.Errorf("the re-review did not read the edited PRD:\n%s", p)
+	}
+}
+
+func TestAWaitingTaskWithTheSamePRDIsHandedOver(t *testing.T) {
+	f := newFixture()
+	key := claimTask(t, f)
+	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), claimedTurn("sid-2", retryClaims)}
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	f.store.recs[key].Delegation.RunnerPID = 0
+	setCI(f, task.CIStatus{State: task.CIPassing})
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.ReadyForHuman {
+		t.Fatalf("state %s outcome %+v", got.State, got.LastOutcome)
+	}
+}
+
+func TestABlockingLimitationSendsTheChangeBackAndIsStored(t *testing.T) {
+	f := newFixture()
+	key := claimTask(t, f)
+	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), claimedTurn("sid-2", retryClaims), claimedTurn("sid-2", retryClaims)}
+	blocked := findings("blocking")
+	blocked.Limitations = []task.Limitation{{Behavior: "retry under a real 503", Reason: "no network in review", Blocking: true}}
+	f.claude.reviews = []agent.ReviewOutcome{blocked, {Clean: true, Summary: "ok", Limitations: []task.Limitation{{Behavior: "retry timing", Reason: "no clock control"}}}}
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if kinds(got) != "self! self competing" {
+		t.Fatalf("reviews %s", kinds(got))
+	}
+	if l := got.Reviews[0].Limitations; len(l) != 1 || !l[0].Blocking {
+		t.Errorf("round 1 limitations = %+v", l)
+	}
+	if l := got.Reviews[1].Limitations; len(l) != 1 || l[0].Blocking || l[0].Reason != "no clock control" {
+		t.Errorf("round 2 limitations = %+v", l)
+	}
+}
+
+func TestALocalChangeIsReviewedWithItsClaimsAndOpensWithoutReplacingThem(t *testing.T) {
+	f := newFixture()
+	f.app.ReviewBeforePR = true
+	key := claimTask(t, f)
+	delete(f.gh.prs, 912)
+	f.wt.checkpointHeads = []string{"commit1"}
+	ready := reviewReadyTurn("sid-2", proposedBody)
+	ready.Outcome.Claims = retryClaims
+	opened := claimedTurn("sid-2", []task.Claim{{Criteria: []string{"R1"}, Behavior: "something else", Evidence: "x.go", Check: "none"}})
+	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), ready, opened}
+	opensPR(t, f, "commit1", proposedTitle, proposedBody, 1)
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.WaitingForCI || got.Delegation.PR != 912 || got.ReviewPending() {
+		t.Fatalf("state %s pr %d pending %t", got.State, got.Delegation.PR, got.ReviewPending())
+	}
+	if task.ClaimsDigest(got.Delegation.Claims) != task.ClaimsDigest(retryClaims) {
+		t.Fatalf("claims = %+v; the open turn replaced the reviewed claims", got.Delegation.Claims)
+	}
+	if p := f.codex.reviewed[0]; !strings.Contains(p, "the client retries 5xx responses") || !strings.Contains(p, "## PRD") {
+		t.Errorf("the local review lacks the claims or the PRD:\n%s", p)
 	}
 }
