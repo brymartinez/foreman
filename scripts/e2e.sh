@@ -484,6 +484,7 @@ scenario_runner() {
 	check "review uses its Codex model" contains "$state/models.log" "codex model=gpt-6-sol"
 	check "review uses medium Codex effort" contains "$state/models.log" 'codex model_reasoning_effort="medium"'
 	check "the review carries the PR description" contains "$state/review-prompt.txt" "> Retry 5xx only."
+	check "the implementer self-reviews before the competing review" bash -c "grep -E '^(claude|codex) review' '$state/agents.log' | head -2 | tr '\n' ' ' | grep -qx 'claude review codex review '"
 	check "the review leaves out the issue body" bash -c "! grep -qF 'do it' '$state/review-prompt.txt'"
 	check "the review leaves out the PRD" bash -c "! grep -qF 'R1. Retry 5xx responses.' '$state/review-prompt.txt'"
 	task 42 sd >"$sandbox/show.txt"
@@ -600,7 +601,7 @@ scenario_logs() {
 	check "R marks the pane raw" contains "$sandbox/raw.txt" "LOG · raw · acme/widgets#42"
 	check "raw keeps Codex JSON" contains "$sandbox/raw.txt" '"type":"turn.completed"'
 	task 42 sd >"$sandbox/show.txt"
-	check "the show pane reports usage" contains "$sandbox/show.txt" 'Claude $0.27 (2 turns) · Codex 125 tokens (1 turn)'
+	check "the show pane reports usage" contains "$sandbox/show.txt" 'Claude $0.32 (3 turns) · Codex 125 tokens (1 turn)'
 
 	# Far more than one bounded read of the log, so g must load older chunks.
 	local log first

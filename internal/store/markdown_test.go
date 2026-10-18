@@ -74,6 +74,11 @@ func delegated() *task.Record {
 			Answer:      "A. 5xx only",
 			AnsweredAt:  synced,
 			DeliveredAt: synced,
+			Diagnosis: &task.Diagnosis{Kind: task.DiagnosedConflict, Summary: "the issue and the plan disagree", Conflicts: []task.ContextConflict{{
+				Point:  "which status codes retry",
+				First:  task.Statement{Source: "issue", Quote: "Retry failed requests."},
+				Second: task.Statement{Source: "plan: Design", Quote: "Retry 5xx only."},
+			}}},
 		}},
 		Body: "# #825 Provider retries\n\n## Decisions\n\n- Preserve existing retry behavior.\n",
 	}
@@ -669,5 +674,38 @@ func TestStoreRoundTripsTheReviewedProposal(t *testing.T) {
 	got, err := s.Get(ctx, want.Key)
 	if err != nil || got.Reviews[1].Proposal != want.Reviews[1].Proposal || got.Reviews[0].Proposal != "" {
 		t.Fatalf("reviews = %+v, %v", got.Reviews, err)
+	}
+}
+
+func TestStoreRoundTripsTheSelfReviewKindAndThePRDigest(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	want := delegated()
+	want.Delegation.PRDigest = task.ProposalDigest("feat: retry", "Closes #825")
+	want.Reviews[0].Kind = task.SelfReview
+	want.Reviews[0].Proposal = want.Delegation.PRDigest
+	if err := s.Save(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, want.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Delegation.PRDigest != want.Delegation.PRDigest || got.Reviews[0].Kind != task.SelfReview || got.Reviews[1].Kind != task.CompetingReview {
+		t.Fatalf("pr digest = %q, reviews = %+v", got.Delegation.PRDigest, got.Reviews)
+	}
+	raw, _ := os.ReadFile(filepath.Join(s.Dir, "testorg-example-825.md"))
+	if strings.Count(string(raw), "kind: self") != 1 {
+		t.Errorf("want one review saved with kind self, and the competing one without a kind:\n%s", raw)
+	}
+}
+
+func TestStoreRejectsAReviewOfUnknownKind(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	old := "---\nrepo: a/b\nnumber: 3\nkind: issue\nstate: WORKING\nimplementation_agent: claude\nbranch: feat/3-x\nreviews:\n  - round: 1\n    kind: peer\n    reviewer: codex\n    pr: 4\n    verdict: clean\n    summary: ok\n    at: 2026-09-24T18:00:00Z\n---\n"
+	if err := os.WriteFile(filepath.Join(s.Dir, "a-b-3.md"), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Get(ctx, task.Key{Repo: "a/b", Number: 3}); err == nil || !strings.Contains(err.Error(), "unknown kind") {
+		t.Fatalf("Get() error = %v, want an unknown kind error", err)
 	}
 }

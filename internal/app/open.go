@@ -131,11 +131,11 @@ func adoptOpenedPR(rec *task.Record, pr *PullRequest, now time.Time) {
 	coverOpenedPR(rec)
 }
 
-// coverOpenedPR makes the clean local review the review of the new PR's head, so the
-// task goes on to CI without a second review, and clears the local proposal.
+// coverOpenedPR makes the clean local competing review the review of the new PR's
+// head, so the task goes on to CI without a second review, and clears the local proposal.
 func coverOpenedPR(rec *task.Record) {
 	d := rec.Delegation
-	if latest := rec.LatestReview(); latest != nil && latest.Clean && latest.PR == 0 && latest.Head == d.PRHead {
+	if latest := rec.LatestCompeting(); latest != nil && latest.Clean && latest.PR == 0 && latest.Head == d.PRHead {
 		latest.PR = d.PR
 	}
 	d.LocalHead, d.ProposedTitle, d.ProposedBody = "", "", ""

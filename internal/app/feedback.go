@@ -152,7 +152,13 @@ func (a App) unanswered(ctx, final context.Context, rec *task.Record, log io.Wri
 	if len(waiting) > 0 {
 		return waiting, updated, false, nil
 	}
-	if !reviewCovers(updated, d.PRHead) {
+	current := false
+	if reviewCovers(updated, d.PRHead, d.PRDigest) {
+		if updated, current, err = a.currentPR(ctx, final, updated); err != nil {
+			return nil, updated, false, err
+		}
+	}
+	if !current || !reviewCovers(updated, updated.Delegation.PRHead, updated.Delegation.PRDigest) {
 		// Open findings or an unreviewed head: the run has that work to do anyway, and
 		// the comments are picked up before it hands over.
 		if readErr != nil {
@@ -181,11 +187,33 @@ func (a App) unanswered(ctx, final context.Context, rec *task.Record, log io.Wri
 	return nil, updated, true, err
 }
 
-// reviewCovers reports a clean review of head on the task's current PR, which is the
-// review bar the gate applies before it hands a task over.
-func reviewCovers(rec *task.Record, head string) bool {
-	latest := rec.LatestReview()
-	return latest != nil && latest.Clean && latest.PR == rec.Delegation.PR && head != "" && latest.Head == head
+// currentPR stores the head and description digest the PR has on GitHub now, so a path
+// that skips review judges coverage by them, not by what a refresh stored earlier.
+// current is false when the PR could not be read, and the run then reviews instead of
+// handing over.
+func (a App) currentPR(ctx, final context.Context, rec *task.Record) (updated *task.Record, current bool, err error) {
+	pr, err := a.GitHub.GetPullRequest(ctx, task.Key{Repo: rec.Repo, Number: rec.Delegation.PR})
+	if err != nil || pr.HeadSHA == "" {
+		return rec, false, nil
+	}
+	digest := task.ProposalDigest(pr.Title, pr.Body)
+	if digest == rec.Delegation.PRDigest && pr.HeadSHA == rec.Delegation.PRHead {
+		return rec, true, nil
+	}
+	updated, err = a.update(final, rec.Key, existing(func(cur *task.Record) {
+		cur.Delegation.PRDigest, cur.Delegation.PRHead = digest, pr.HeadSHA
+	}))
+	return updated, err == nil, err
+}
+
+// reviewCovers reports a clean competing review of head and of the description with
+// digest on the task's current PR, which is the review bar the gate applies before it
+// hands a task over. A review or digest from before descriptions were recorded is
+// empty, and the review then covers its head alone.
+func reviewCovers(rec *task.Record, head, digest string) bool {
+	latest := rec.LatestCompeting()
+	described := latest != nil && (latest.Proposal == "" || digest == "" || latest.Proposal == digest)
+	return described && latest.Clean && latest.PR == rec.Delegation.PR && head != "" && latest.Head == head
 }
 
 // beforeHandover answers comments that arrived while the run worked, so the developer

@@ -39,10 +39,12 @@ func TestReviewLoopCleanFirstRound(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.Reviewing || len(got.Reviews) != 1 || !got.Reviews[0].Clean || got.Reviews[0].Reviewer != task.Codex || got.Reviews[0].PR != 912 {
+	cr := got.CompetingReviews()
+	if got.State != task.Reviewing || len(cr) != 1 || !cr[0].Clean || cr[0].Reviewer != task.Codex || cr[0].PR != 912 {
 		t.Fatalf("state %s reviews %+v", got.State, got.Reviews)
 	}
-	if len(f.codex.reviewed) != 1 || len(f.claude.reviewed) != 0 {
+	// Claude's one review is its own self-review.
+	if len(f.codex.reviewed) != 1 || len(f.claude.reviewed) != 1 {
 		t.Fatalf("wrong reviewer: codex %d claude %d", len(f.codex.reviewed), len(f.claude.reviewed))
 	}
 	p := f.codex.reviewed[0]
@@ -63,13 +65,15 @@ func TestReviewLoopFixesFindingsThenReReviews(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.Reviewing || len(got.Reviews) != 2 || got.Reviews[0].Clean || !got.Reviews[1].Clean || got.Reviews[1].Round != 2 {
+	// Round 1 is the self-review. The fix keeps the head, so it still covers the change.
+	cr := got.CompetingReviews()
+	if got.State != task.Reviewing || len(cr) != 2 || cr[0].Clean || !cr[1].Clean || cr[1].Round != 3 {
 		t.Fatalf("state %s reviews %+v", got.State, got.Reviews)
 	}
-	if len(f.claude.resumed) != 1 || !strings.Contains(f.claude.resumed[0], "sid-1: Review round 1 of PR #912") || !strings.Contains(f.claude.resumed[0], "retry.go:40") {
+	if len(f.claude.resumed) != 1 || !strings.Contains(f.claude.resumed[0], "sid-1: Review round 2 of PR #912") || !strings.Contains(f.claude.resumed[0], "retry.go:40") {
 		t.Errorf("implementer not resumed with findings: %q", f.claude.resumed)
 	}
-	if !strings.Contains(f.codex.reviewed[1], "Round 1 (one problem)") {
+	if !strings.Contains(f.codex.reviewed[1], "Round 2 (one problem)") {
 		t.Errorf("re-review lacks earlier round:\n%s", f.codex.reviewed[1])
 	}
 	if !strings.Contains(f.codex.reviewed[0], "review_rounds to 3. This is the first review") || !strings.Contains(f.codex.reviewed[1], "This is a re-review") {
@@ -87,8 +91,9 @@ func TestReviewLoopEscalatesAfterRoundCapAndResumesOnAnswer(t *testing.T) {
 	}
 	got := f.store.recs[key]
 	q := got.Pending()
-	// Implement, then 3 fixes, each reviewed: 4 reviews, and the 4th's findings are unaddressed.
-	if got.State != task.NeedsDecision || len(got.Reviews) != 4 || q == nil || !strings.Contains(q.Question.Issue, "after 3 rounds of fixes") {
+	// Implement, then 3 fixes, each reviewed: 4 competing reviews after one clean
+	// self-review, and the 4th's findings are unaddressed.
+	if got.State != task.NeedsDecision || len(got.CompetingReviews()) != 4 || q == nil || !strings.Contains(q.Question.Issue, "after 3 rounds of fixes") {
 		t.Fatalf("state %s reviews %d pending %+v", got.State, len(got.Reviews), q)
 	}
 	if len(f.claude.resumed) != 3 {
@@ -109,10 +114,10 @@ func TestReviewLoopEscalatesAfterRoundCapAndResumesOnAnswer(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = f.store.recs[key]
-	if got.State != task.Reviewing || !got.LatestReview().Clean || len(got.Reviews) != 5 {
+	if got.State != task.Reviewing || !got.LatestReview().Clean || len(got.CompetingReviews()) != 5 {
 		t.Fatalf("after answer: state %s reviews %d", got.State, len(got.Reviews))
 	}
-	if !strings.Contains(f.claude.resumed[resumedBefore], "Decision: B. Leave the code as is") || !strings.Contains(f.claude.resumed[resumedBefore], "Review round 4 of PR #912 requested these changes") {
+	if !strings.Contains(f.claude.resumed[resumedBefore], "Decision: B. Leave the code as is") || !strings.Contains(f.claude.resumed[resumedBefore], "Review round 5 of PR #912 requested these changes") {
 		t.Errorf("answer not delivered: %q", f.claude.resumed[resumedBefore:])
 	}
 	// The reviewer judges the change by the PR description alone, not the developer's
@@ -132,7 +137,7 @@ func TestFixRoundsCapsTheLoopApartFromReviewRounds(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.NeedsDecision || len(got.Reviews) != 2 || len(f.claude.resumed) != 1 || !strings.Contains(got.Pending().Question.Issue, "after 1 round of fixes") {
+	if got.State != task.NeedsDecision || len(got.CompetingReviews()) != 2 || len(f.claude.resumed) != 1 || !strings.Contains(got.Pending().Question.Issue, "after 1 round of fixes") {
 		t.Fatalf("state %s reviews %d", got.State, len(got.Reviews))
 	}
 	if !strings.Contains(f.codex.reviewed[0], "review_rounds to 5.") {
@@ -147,7 +152,7 @@ func TestReviewLoopStopsWhenImplementerBlocksDuringFix(t *testing.T) {
 	f.claude.turns = []agent.Turn{prTurn("sid-1"), {Session: task.Session{Agent: task.Claude, ID: "sid-1"}, Outcome: agent.Outcome{Status: agent.Blocked, Summary: "?", Questions: []task.Question{q}}}}
 	f.codex.reviews = []agent.ReviewOutcome{findings("blocking")}
 	f.run(context.Background(), key, 4242, io.Discard)
-	if got := f.store.recs[key]; got.State != task.NeedsDecision || len(got.Reviews) != 1 {
+	if got := f.store.recs[key]; got.State != task.NeedsDecision || len(got.CompetingReviews()) != 1 {
 		t.Fatalf("state %s reviews %d", got.State, len(got.Reviews))
 	}
 }
@@ -172,7 +177,8 @@ func TestCodexImplementationIsReviewedByClaude(t *testing.T) {
 	f.codex.turn = agent.Turn{Session: task.Session{Agent: task.Codex, ID: "th-1"}, Outcome: prTurn("").Outcome}
 	f.run(context.Background(), key, 4242, io.Discard)
 	got := f.store.recs[key]
-	if got.State != task.Reviewing || len(f.claude.reviewed) != 1 || len(f.codex.reviewed) != 0 || got.Reviews[0].Reviewer != task.Claude {
+	// Codex's one review is its own self-review.
+	if got.State != task.Reviewing || len(f.claude.reviewed) != 1 || len(f.codex.reviewed) != 1 || got.LatestCompeting().Reviewer != task.Claude {
 		t.Fatalf("state %s claude reviews %d codex reviews %d", got.State, len(f.claude.reviewed), len(f.codex.reviewed))
 	}
 }
@@ -186,7 +192,8 @@ func TestCodexPRUsesCodexReviewWhenAxiConfirmsClaudeNotSetUp(t *testing.T) {
 	f.codex.turn = agent.Turn{Session: task.Session{Agent: task.Codex, ID: "th-1"}, Outcome: prTurn("").Outcome}
 	f.run(context.Background(), key, 4242, io.Discard)
 	got := f.store.recs[key]
-	if got.State != task.Reviewing || len(f.codex.reviewed) != 1 || len(f.claude.reviewed) != 0 || got.Reviews[0].Reviewer != task.Codex || got.Delegation.Reviewer != task.Codex {
+	// Codex self-reviews, then reviews again in a separate session in Claude's place.
+	if got.State != task.Reviewing || len(f.codex.reviewed) != 2 || len(f.claude.reviewed) != 0 || got.LatestCompeting().Reviewer != task.Codex || got.Delegation.Reviewer != task.Codex {
 		t.Fatalf("state %s reviewer %s reviews %+v; codex %d claude %d", got.State, got.Delegation.Reviewer, got.Reviews, len(f.codex.reviewed), len(f.claude.reviewed))
 	}
 }
@@ -200,7 +207,7 @@ func TestCodexPRFallsBackToCodexReviewWhenClaudeAuthenticationFails(t *testing.T
 	f.claude.reviewErr = fmt.Errorf("OAuth session expired: %w", agent.ErrUnavailable)
 	f.run(context.Background(), key, 4242, io.Discard)
 	got := f.store.recs[key]
-	if got.State != task.Reviewing || len(f.claude.reviewed) != 1 || len(f.codex.reviewed) != 1 || got.Reviews[0].Reviewer != task.Codex || got.Delegation.Reviewer != task.Codex {
+	if got.State != task.Reviewing || len(f.claude.reviewed) != 1 || len(f.codex.reviewed) != 2 || got.LatestCompeting().Reviewer != task.Codex || got.Delegation.Reviewer != task.Codex {
 		t.Fatalf("state %s reviewer %s reviews %+v; codex %d claude %d", got.State, got.Delegation.Reviewer, got.Reviews, len(f.codex.reviewed), len(f.claude.reviewed))
 	}
 	got.State = task.Failed
@@ -276,8 +283,8 @@ func TestReviewPromptGetsOnlyReviewInstructions(t *testing.T) {
 	if strings.Contains(p, "implement instructions") || strings.Contains(p, "pr instructions") {
 		t.Errorf("review prompt carries another stage's instructions:\n%s", p)
 	}
-	if got := f.stages.calls; len(got) != 4 || got[2] != "/wt/testorg-example/feat/825-provider-retries plan" || got[3] != "/wt/testorg-example/feat/825-provider-retries review" {
-		t.Errorf("lookups %q; want implement, pr, plan, then review, all at the worktree root", got)
+	if got := f.stages.calls; len(got) != 5 || got[2] != "/wt/testorg-example/feat/825-provider-retries plan" || got[3] != "/wt/testorg-example/feat/825-provider-retries review" || got[4] != got[3] {
+		t.Errorf("lookups %q; want implement, pr, plan, then review for the self-review and the competing review, all at the worktree root", got)
 	}
 }
 
@@ -326,7 +333,7 @@ func TestReviewStopsWhenPRCannotBeRead(t *testing.T) {
 	d := *rec.Delegation
 	d.PR, d.Reviewer = 913, task.Codex
 	rec.Delegation = &d
-	_, _, err := f.app.review(context.Background(), &rec, io.Discard)
+	_, _, err := f.app.reviewDescription(context.Background(), &rec)
 	if err == nil || !strings.Contains(err.Error(), "no pull requests found") || len(f.codex.reviewed) != 0 {
 		t.Errorf("err %v reviews %d", err, len(f.codex.reviewed))
 	}
@@ -521,7 +528,7 @@ func TestReviewFindingsResumeImplementationSessionAfterPlan(t *testing.T) {
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if f.claude.starts != 2 || len(f.claude.resumed) != 1 || !strings.HasPrefix(f.claude.resumed[0], "sid-2: Review round 1 of PR #912") {
+	if f.claude.starts != 2 || len(f.claude.resumed) != 1 || !strings.HasPrefix(f.claude.resumed[0], "sid-2: Review round 2 of PR #912") {
 		t.Errorf("review findings must resume the implementation session: starts %d resumed %q", f.claude.starts, f.claude.resumed)
 	}
 	if !slices.Equal(f.claude.stages, []task.Stage{task.StagePlan, task.StageImplement, task.StageImplement}) {

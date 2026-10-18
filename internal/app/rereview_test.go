@@ -49,7 +49,8 @@ func TestRestartAfterAnInterruptedReviewSkipsImplementing(t *testing.T) {
 	if f.claude.starts != starts {
 		t.Errorf("the implementer ran again (%d starts)", f.claude.starts-starts)
 	}
-	if got.State != task.Reviewing || got.Delegation.PR != 912 || len(got.Reviews) != 1 || !got.Reviews[0].Clean || got.Reviews[0].Head != "c0ffee1" {
+	cr := got.CompetingReviews()
+	if got.State != task.Reviewing || got.Delegation.PR != 912 || len(cr) != 1 || !cr[0].Clean || cr[0].Head != "c0ffee1" || len(f.claude.reviewed) != 1 {
 		t.Fatalf("state %s pr %d reviews %+v", got.State, got.Delegation.PR, got.Reviews)
 	}
 }
@@ -79,6 +80,35 @@ func TestNewCommitsAfterACleanReviewAreReviewedBeforeHandover(t *testing.T) {
 	got = f.store.recs[key]
 	if f.claude.starts != starts || got.State != task.Reviewing || got.LatestReview().Head != "beef002" {
 		t.Fatalf("implementer starts %d state %s review head %s", f.claude.starts-starts, got.State, got.LatestReview().Head)
+	}
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got = f.store.recs[key]; got.State != task.ReadyForHuman {
+		t.Errorf("after the re-review: %s", got.State)
+	}
+}
+
+func TestAnEditedDescriptionAfterACleanReviewIsSelfReviewedAndReviewedBeforeHandover(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	pr := f.gh.prs[912]
+	pr.Body = "Retry 5xx and 429.\n\nCloses #825"
+	f.gh.prs[912] = pr
+	setCI(f, task.CIStatus{State: task.CIPassing})
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Working || got.Delegation.PRDigest != task.ProposalDigest(pr.Title, pr.Body) || len(f.runners.spawned) != 2 {
+		t.Fatalf("state %s digest %s spawned %d", got.State, got.Delegation.PRDigest, len(f.runners.spawned))
+	}
+	if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got = f.store.recs[key]
+	if kinds(got) != "self competing self competing" || got.State != task.Reviewing || f.claude.starts != 1 {
+		t.Fatalf("state %s reviews %s implementer starts %d", got.State, kinds(got), f.claude.starts)
 	}
 	if _, _, err := f.app.Status(context.Background()); err != nil {
 		t.Fatal(err)

@@ -164,6 +164,9 @@ type Delegation struct {
 	PriorPR int
 	// PRHead is the PR's head commit when foreman last read it. A review covers one head.
 	PRHead string
+	// PRDigest is the ProposalDigest of the PR title and description the review step
+	// last read. A self-review covers one head with one description.
+	PRDigest string
 	// CheckpointHead is the last accepted implementation commit, or the head when
 	// the worktree was prepared. The commit and CheckpointNext cross to a fresh session.
 	CheckpointHead string
@@ -337,6 +340,42 @@ type Decision struct {
 	AnsweredAt time.Time
 	// DeliveredAt is set once a runner has handed the answer to the agent.
 	DeliveredAt time.Time
+	// Diagnosis is why the self-review loop stalled at the fix limit, kept so a restart
+	// does not diagnose again. Nil on every other decision.
+	Diagnosis *Diagnosis
+}
+
+// DiagnosisKind is the cause a stalled self-review loop was traced to.
+type DiagnosisKind string
+
+const (
+	// DiagnosedPracticeGap means the implementer missed a generic practice, which
+	// learning may take up.
+	DiagnosedPracticeGap DiagnosisKind = "practice_gap"
+	// DiagnosedConflict means statements in the implementer's context contradict.
+	DiagnosedConflict DiagnosisKind = "conflict"
+	// DiagnosedNone means no concrete cause was found, or the diagnosis was unavailable.
+	DiagnosedNone DiagnosisKind = "none"
+)
+
+// Diagnosis is the outcome of the diagnosis turn at the self-review fix limit.
+type Diagnosis struct {
+	Kind      DiagnosisKind     `yaml:"kind"`
+	Summary   string            `yaml:"summary,omitempty"`
+	Conflicts []ContextConflict `yaml:"conflicts,omitempty"`
+}
+
+// ContextConflict is two statements given to the implementer that contradict each
+// other. Each quote was found verbatim in its named source.
+type ContextConflict struct {
+	Point  string    `yaml:"point"`
+	First  Statement `yaml:"first"`
+	Second Statement `yaml:"second"`
+}
+
+type Statement struct {
+	Source string `yaml:"source"`
+	Quote  string `yaml:"quote"`
 }
 
 // Pending is the oldest unanswered decision, if any. A blocked turn can ask several
@@ -486,8 +525,21 @@ type Finding struct {
 	Detail   string `json:"detail" yaml:"detail,omitempty"`
 }
 
+// ReviewKind tells the implementer's own review from the competing agent's.
+type ReviewKind string
+
+const (
+	// CompetingReview is the empty kind, so records from before self-reviews read as
+	// competing reviews and keep passing the gate.
+	CompetingReview ReviewKind = ""
+	// SelfReview is the implementing agent's review in a fresh, read-only session. It
+	// must be clean before the competing review runs, and it never passes the gate.
+	SelfReview ReviewKind = "self"
+)
+
 type Review struct {
 	Round    int
+	Kind     ReviewKind
 	Reviewer Agent
 	PR       int
 	Clean    bool
@@ -495,17 +547,81 @@ type Review struct {
 	Findings []Finding
 	At       time.Time
 	Head     string // the PR head commit reviewed; empty on records from before heads were recorded
-	// Proposal is the ProposalDigest of the proposed title and description a local
-	// review read with Head. A fix may keep the commit and change only those.
+	// Proposal is the ProposalDigest of the title and description the review read with
+	// Head: the proposed ones for a local review, the PR's for a self-review of a PR.
+	// A fix may keep the commit and change only those.
 	Proposal string
 }
 
-// LatestReview is the most recent review round, or nil.
+// LatestReview is the most recent review round of either kind, or nil. Its findings
+// are the ones the implementer fixes next.
 func (r *Record) LatestReview() *Review {
 	if len(r.Reviews) == 0 {
 		return nil
 	}
 	return &r.Reviews[len(r.Reviews)-1]
+}
+
+// LatestCompeting is the most recent competing review, or nil. Only it can pass the
+// gate or open a PR.
+func (r *Record) LatestCompeting() *Review { return r.latest(CompetingReview) }
+
+// LatestSelf is the most recent self-review, or nil.
+func (r *Record) LatestSelf() *Review { return r.latest(SelfReview) }
+
+func (r *Record) latest(kind ReviewKind) *Review {
+	for i := len(r.Reviews) - 1; i >= 0; i-- {
+		if r.Reviews[i].Kind == kind {
+			return &r.Reviews[i]
+		}
+	}
+	return nil
+}
+
+// CompetingReviews are the competing rounds alone, oldest first. The competing
+// reviewer sees only these, so self-review findings never reach it.
+func (r *Record) CompetingReviews() []Review {
+	var out []Review
+	for _, rv := range r.Reviews {
+		if rv.Kind == CompetingReview {
+			out = append(out, rv)
+		}
+	}
+	return out
+}
+
+// CurrentChange is the change a review now would read: the local commit with its
+// proposed title and description, or the PR head with the PR description the review
+// step last read.
+func (r *Record) CurrentChange() (head, proposal string) {
+	d := r.Delegation
+	if r.LocalReview() {
+		return d.LocalHead, ProposalDigest(d.ProposedTitle, d.ProposedBody)
+	}
+	return d.PRHead, d.PRDigest
+}
+
+// selfCovers reports whether a self-review read the current change and description.
+// Coverage is derived from the stored values alone, so a restart never treats a pass
+// of another head or description as current.
+func (r *Record) selfCovers(review *Review) bool {
+	head, proposal := r.CurrentChange()
+	return review != nil && review.Kind == SelfReview && review.PR == r.Delegation.PR && review.Head == head && review.Proposal == proposal
+}
+
+// SelfReviewPassed reports a clean self-review of the current change and description.
+func (r *Record) SelfReviewPassed() bool {
+	latest := r.LatestSelf()
+	return r.selfCovers(latest) && latest.Clean
+}
+
+// NextReview is the review the current change needs next: the self-review until a
+// clean one covers it, then the competing review.
+func (r *Record) NextReview() ReviewKind {
+	if r.SelfReviewPassed() {
+		return CompetingReview
+	}
+	return SelfReview
 }
 
 // ChangeRequestsSinceDecision counts review rounds that requested changes since the
@@ -556,28 +672,66 @@ func (c *CIStatus) Green() bool {
 	return c != nil && (c.State == CIPassing || c.State == CINone)
 }
 
-// CommitsSinceReview reports whether the PR head moved after its latest review.
+// CommitsSinceReview reports whether the PR head moved after its latest competing review.
 func (r *Record) CommitsSinceReview() bool {
-	latest := r.LatestReview()
+	latest := r.LatestCompeting()
 	return r.Delegation != nil && latest != nil && latest.Head != "" && r.Delegation.PRHead != "" && latest.Head != r.Delegation.PRHead
 }
 
-// ReviewPending reports whether the verified PR head has not been reviewed, so a run
-// continues with the review instead of implementing again: after a crash during a
-// review, or after new commits on a PR that had a clean review.
+// ReviewPending reports whether the verified PR head or local commit has no competing
+// review, so a run continues with the review step instead of implementing again: after
+// a crash during a review, or after new commits on a PR that had a clean review. Open
+// findings from either reviewer on the current change go to the implementer instead.
 func (r *Record) ReviewPending() bool {
 	d := r.Delegation
 	if d == nil || len(r.Undelivered()) > 0 {
 		return false
 	}
-	latest := r.LatestReview()
-	if r.LocalReview() {
-		return !r.coversLocal(latest)
-	}
-	if d.PR == 0 || d.PRHead == "" {
+	if !r.LocalReview() && (d.PR == 0 || d.PRHead == "") {
 		return false
 	}
-	return latest == nil || latest.PR != d.PR || latest.Head != d.PRHead
+	self := r.LatestSelf()
+	if r.selfCovers(self) && self.Clean && r.newer(self, r.LatestCompeting()) {
+		// The change passed its self-review after its last competing review, which a
+		// restart must not skip even when that review read the same head.
+		return true
+	}
+	if r.competingCovers(r.LatestCompeting()) {
+		return false
+	}
+	return !r.selfCovers(self) || self.Clean
+}
+
+// newer reports whether review a comes after review b in the record. Both point into
+// r.Reviews, as LatestSelf and LatestCompeting return; any review is newer than none.
+func (r *Record) newer(a, b *Review) bool {
+	if b == nil {
+		return a != nil
+	}
+	for i := range r.Reviews {
+		switch &r.Reviews[i] {
+		case a:
+			return false
+		case b:
+			return a != nil
+		}
+	}
+	return false
+}
+
+// competingCovers reports whether a competing review read the current change: the
+// local commit with its proposal, or the PR head with its description. A review or a
+// task from before descriptions were recorded has no digest, and covers its head
+// alone, so older tasks are not reviewed again.
+func (r *Record) competingCovers(review *Review) bool {
+	d := r.Delegation
+	if review == nil || review.Kind != CompetingReview {
+		return false
+	}
+	if r.LocalReview() {
+		return r.coversLocal(review)
+	}
+	return review.PR == d.PR && review.Head == d.PRHead && (review.Proposal == "" || d.PRDigest == "" || review.Proposal == d.PRDigest)
 }
 
 // BeforePR reports a task reviewed before its PR opens that has no PR yet. Its
@@ -592,15 +746,15 @@ func (r *Record) LocalReview() bool {
 	return r.Delegation.BeforePR() && r.Delegation.LocalHead != ""
 }
 
-// OpenPending reports a local commit with a clean review and no PR yet, so the next
-// step pushes that commit and opens the PR with the reviewed description. Answers the
-// implementer has not received go to it with that step.
+// OpenPending reports a local commit with a clean competing review and no PR yet, so
+// the next step pushes that commit and opens the PR with the reviewed description.
+// Answers the implementer has not received go to it with that step.
 func (r *Record) OpenPending() bool {
 	if !r.LocalReview() {
 		return false
 	}
-	latest := r.LatestReview()
-	return r.coversLocal(latest) && latest.Clean
+	latest := r.LatestCompeting()
+	return r.competingCovers(latest) && latest.Clean
 }
 
 // coversLocal reports whether review read the stored local commit together with its
@@ -611,7 +765,8 @@ func (r *Record) coversLocal(review *Review) bool {
 }
 
 // ProposalDigest identifies a proposed PR title and description, so a review records
-// which proposal it read.
+// which proposal it read. Line endings and surrounding space are ignored, because the
+// PR on GitHub can differ from the reviewed text in those alone.
 func ProposalDigest(title, body string) string {
-	return Digest(strings.TrimSpace(title) + "\n\n" + body)
+	return Digest(strings.TrimSpace(title) + "\n\n" + strings.TrimSpace(strings.ReplaceAll(body, "\r\n", "\n")))
 }

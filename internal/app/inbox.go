@@ -89,6 +89,8 @@ type App struct {
 	// evaluations; off, prompts still read the knowledge already stored.
 	Knowledge KnowledgeStore
 	Evaluator Evaluator
+	// Diagnoser explains a self-review loop that reached the fix limit.
+	Diagnoser Diagnoser
 	// Merger groups learnings when an ingest meets a repository with knowledge.
 	Merger            Merger
 	Learning          bool

@@ -256,8 +256,8 @@ func reopen(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) s
 		d.PRHead = pr.HeadSHA
 	}
 	rec.CI = &ci
-	latest := rec.LatestReview()
-	reviewed := latest != nil && latest.Clean && latest.PR == d.PR && latest.Head != "" && latest.Head == pr.HeadSHA
+	latest := rec.LatestCompeting()
+	reviewed := latest != nil && latest.Clean && latest.PR == d.PR && latest.Head != "" && latest.Head == pr.HeadSHA && describedAsReviewed(rec, pr)
 	rec.State = task.Reviewing
 	if reviewed && ci.State != task.CIPending {
 		rec.State = task.ReadyForHuman
@@ -270,6 +270,14 @@ func reopen(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) s
 	return summary
 }
 
+// describedAsReviewed reports whether the PR's title and description are the ones its
+// latest competing review read. A review from before descriptions were recorded has
+// no digest and covers its head alone.
+func describedAsReviewed(rec *task.Record, pr PullRequest) bool {
+	latest := rec.LatestCompeting()
+	return latest == nil || latest.Proposal == "" || latest.Proposal == task.ProposalDigest(pr.Title, pr.Body)
+}
+
 // gated tasks wait on GitHub alone: the review is clean, or the developer has the PR.
 func gated(r *task.Record) bool {
 	d := r.Delegation
@@ -280,7 +288,7 @@ func gated(r *task.Record) bool {
 	case task.ReadyForHuman, task.Reviewed:
 		return true
 	case task.Reviewing:
-		latest := r.LatestReview()
+		latest := r.LatestCompeting()
 		return latest != nil && latest.Clean && latest.PR == d.PR
 	}
 	return false
@@ -309,6 +317,13 @@ func advance(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) 
 			rec.State, rec.CI = task.Working, nil
 			return outcome("re_review", fmt.Sprintf("PR #%d has new commits since its clean review; %s is reviewing them", d.PR, d.Reviewer))
 		}
+	}
+	if rec.State == task.Reviewing && !describedAsReviewed(rec, pr) {
+		// The description is the reviews' requirements, so an edit needs a new
+		// self-review and competing review before handing over.
+		d.PRDigest = task.ProposalDigest(pr.Title, pr.Body)
+		rec.State, rec.CI = task.Working, nil
+		return outcome("re_review", fmt.Sprintf("PR #%d has a new description since its clean review; it is being reviewed again", d.PR))
 	}
 	prev := rec.CI
 	rec.CI = &ci

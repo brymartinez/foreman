@@ -231,24 +231,26 @@ func (f *fakeRunners) Stop(_ task.Key, pid int) (bool, error) {
 }
 
 type fakeAgent struct {
-	name      task.Agent
-	turn      agent.Turn
-	turns     []agent.Turn // consumed before turn, one per Start/Resume
-	turnErrs  []error      // consumed with turns
-	err       error
-	prompt    string
-	prompts   []string
-	starts    int
-	resumed   []string
-	stages    []task.Stage
-	profiles  []*task.Profile // StartInput.Profile of each Start and Resume
-	steps     []string        // StartInput.Step of each Start, Resume, and Review
-	resumeErr error
-	reviews   []agent.ReviewOutcome // consumed in order; clean once empty
-	reviewErr error
-	reviewed  []string
-	during    func() // runs inside Start, while the turn is in progress
-	onResume  func() // the same, inside Resume
+	name     task.Agent
+	turn     agent.Turn
+	turns    []agent.Turn // consumed before turn, one per Start/Resume
+	turnErrs []error      // consumed with turns
+	err      error
+	prompt   string
+	prompts  []string
+	starts   int
+	resumed  []string
+	stages   []task.Stage
+	profiles []*task.Profile // StartInput.Profile of each Start and Resume
+	steps    []string        // StartInput.Step of each Start, Resume, and Review
+	// reviewBudgets is StartInput.MaxBudgetUSD of each Review.
+	reviewBudgets []float64
+	resumeErr     error
+	reviews       []agent.ReviewOutcome // consumed in order; clean once empty
+	reviewErr     error
+	reviewed      []string
+	during        func() // runs inside Start, while the turn is in progress
+	onResume      func() // the same, inside Resume
 }
 
 func (f *fakeAgent) next() (agent.Turn, error) {
@@ -267,6 +269,7 @@ func (f *fakeAgent) next() (agent.Turn, error) {
 
 func (f *fakeAgent) Review(_ context.Context, in agent.StartInput) (agent.ReviewOutcome, error) {
 	f.reviewed = append(f.reviewed, in.Prompt)
+	f.reviewBudgets = append(f.reviewBudgets, in.MaxBudgetUSD)
 	f.steps = append(f.steps, in.Step)
 	if f.reviewErr != nil {
 		return agent.ReviewOutcome{}, f.reviewErr

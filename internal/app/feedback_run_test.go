@@ -116,13 +116,13 @@ func TestFeedbackTurnWithoutCommitsReturnsReady(t *testing.T) {
 func TestFeedbackTurnWithCommitsIsReviewed(t *testing.T) {
 	f := newFixture()
 	key := waiting(t, f)
-	reviews := len(f.store.recs[key].Reviews)
+	reviews := len(f.store.recs[key].CompetingReviews())
 	f.claude.turn = prTurn("sid-1")
 	movesHead(f, "d00d002")
 
 	rec := resumeRun(t, f, key)
-	if len(rec.Reviews) != reviews+1 {
-		t.Fatalf("%d review rounds, want %d", len(rec.Reviews), reviews+1)
+	if got := len(rec.CompetingReviews()); got != reviews+1 || !rec.SelfReviewPassed() {
+		t.Fatalf("%d competing review rounds, want %d after a self-review of the new head", got, reviews+1)
 	}
 	if rec.State != task.Reviewing || rec.CI != nil {
 		t.Fatalf("state = %s ci = %+v; the gate must check CI for the new head", rec.State, rec.CI)
@@ -244,8 +244,8 @@ func TestCommentsDuringARunAreAnsweredBeforeHandover(t *testing.T) {
 	if f.claude.starts != 1 {
 		t.Errorf("implementer started %d times", f.claude.starts)
 	}
-	if rec.State != task.Reviewing || len(rec.Reviews) != 1 {
-		t.Errorf("state = %s reviews = %d; the clean review still stands", rec.State, len(rec.Reviews))
+	if rec.State != task.Reviewing || len(rec.CompetingReviews()) != 1 {
+		t.Errorf("state = %s reviews = %d; the clean review still stands", rec.State, len(rec.CompetingReviews()))
 	}
 }
 
@@ -291,5 +291,72 @@ func TestCancelledFeedbackTurnIsRecordedAsCancelled(t *testing.T) {
 	}
 	if !strings.Contains(log.String(), "foreman: stopped during answering PR feedback: terminated signal received") {
 		t.Errorf("log = %q", log.String())
+	}
+}
+
+func TestFeedbackRestartDoesNotHandOverAnEditedDescriptionWithoutReviews(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		replies bool
+		// gateSaw is set when a refresh stored the edited description's digest before
+		// the restart; otherwise the edit came after the last refresh.
+		gateSaw bool
+	}{
+		{"replies off, digest stored by the gate", false, true},
+		{"replies off, edited after the last refresh", false, false},
+		{"replies on, comment gone, edited after the last refresh", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture()
+			key := waiting(t, f)
+			pr := f.gh.prs[912]
+			pr.Body = "Retry 5xx and 429.\n\nCloses #825"
+			f.gh.prs[912] = pr
+			rec := f.store.recs[key]
+			rec.State = task.Failed
+			if tc.gateSaw {
+				rec.Delegation.PRDigest = task.ProposalDigest(pr.Title, pr.Body)
+			}
+			if tc.replies {
+				f.gh.prComments = nil
+			}
+			reviews := len(rec.Reviews)
+			f.app.ReplyToPRFeedback = tc.replies
+			if _, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Issue: key.Number, Agent: task.Claude}); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			got := f.store.recs[key]
+			if len(got.Reviews) != reviews+2 || !strings.HasSuffix(kinds(got), "self competing") || got.LatestCompeting().Proposal != task.ProposalDigest(pr.Title, pr.Body) {
+				t.Fatalf("state %s reviews %s; want a self-review and a competing review of the new description", got.State, kinds(got))
+			}
+		})
+	}
+}
+
+func TestFeedbackRestartDoesNotHandOverANewCommitWithoutReviews(t *testing.T) {
+	for _, replies := range []bool{false, true} {
+		f := newFixture()
+		key := waiting(t, f)
+		// A commit landed after the last refresh, so the stored head is the reviewed one.
+		movesHead(f, "c0ffee9")
+		f.store.recs[key].State = task.Failed
+		if replies {
+			f.gh.prComments = nil
+		}
+		reviews := len(f.store.recs[key].Reviews)
+		f.app.ReplyToPRFeedback = replies
+		if _, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Issue: key.Number, Agent: task.Claude}); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		got := f.store.recs[key]
+		if len(got.Reviews) != reviews+2 || !strings.HasSuffix(kinds(got), "self competing") || got.LatestCompeting().Head != "c0ffee9" {
+			t.Errorf("replies %v: state %s reviews %s; want a self-review and a competing review of the new commit", replies, got.State, kinds(got))
+		}
 	}
 }

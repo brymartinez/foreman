@@ -128,6 +128,7 @@ func run(argv []string) int {
 		Selector:             agent.Selectors{Claude: claude, Codex: codex},
 		Knowledge:            knowledge.Store{Dir: cfg.KnowledgeDir},
 		Evaluator:            agent.Evaluators{Claude: claude, Codex: codex},
+		Diagnoser:            agent.Diagnosers{Claude: claude, Codex: codex},
 		Learning:             cfg.Learning.Enabled,
 		LearningBudgetUSD:    cfg.Learning.BudgetUSD,
 		Quota:                quota.Axi{Command: "quota-axi", Exec: agent.RunCommand},

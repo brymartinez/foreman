@@ -290,8 +290,14 @@ part of the task.
 3. The runner has the agent implement the issue, run validation, push, and open a PR
    with `gh pr create`. Foreman then checks with GitHub that the PR exists and targets
    the right branch.
-4. The other agent reviews the PR in a read-only, throwaway session. Findings go back
-   to the implementer's session, and the loop repeats until the review is clean.
+4. The implementing agent first reviews its own PR in a fresh, read-only, throwaway
+   session that sees only the PR description and the code. Its findings go back to the
+   implementer's session, and the self-review repeats until it is clean for the
+   current commit and description. Then the other agent reviews the PR in its own
+   read-only, throwaway session, without the self-review's findings. Its findings go
+   back to the implementer too, and each fix gets a new self-review before the next
+   competing review. The loop repeats until the competing review is clean. A
+   self-review that errors fails the task.
    Foreman has no `wait_for_pr` flag or config key: the first push and PR happen
    before this review. Fixes found during review are committed and pushed to the
    same PR before the next review pass.
@@ -305,8 +311,9 @@ part of the task.
    - A repo with no checks shows `✓ CI (no checks)`.
    - A merged PR marks the task DONE. A PR closed without merging marks it
      `PR_CLOSED` and stops the run.
-6. Every review records the commit it covered. If the PR gets new commits after a clean
-   review, the next refresh has the reviewer look at them before the task is
+6. Every review records the commit and description it covered. If the PR gets new
+   commits or a new description after a clean review, the next refresh has both
+   reviews look at it again before the task is
    `READY_FOR_HUMAN`. Once it is, the PR is yours: new commits are flagged but not taken
    back. A runner that crashes during a review picks up at the review when you start
    the `FAILED` task again from the inbox.
@@ -338,7 +345,7 @@ Foreman never reads or changes those files.
 |---|---|---|---|
 | `plan` | the implementer, for the four planning documents | `~/.config/foreman/stages/plan.md` | `.foreman/plan.md` |
 | `implement` | the implementer | `~/.config/foreman/stages/implement.md` | `.foreman/implement.md` |
-| `review` | the competing reviewer | `~/.config/foreman/stages/review.md` | `.foreman/review.md` |
+| `review` | the self-review and the competing reviewer | `~/.config/foreman/stages/review.md` | `.foreman/review.md` |
 | `pr` | the implementer, for the PR description | `~/.config/foreman/stages/pr.md` | `.foreman/pr.md` |
 
 - The four global files are required. The dashboard won't open when one is missing,
@@ -401,14 +408,28 @@ and, once all are answered, resumes
 the same agent session with them. If that session is gone, it starts a fresh turn that includes every
 decision so far. The answer also appears in the PR description.
 
-The implementer and reviewer take turns: every fix is reviewed again. If the review
-after the third fix (`fix_rounds`) still has findings, foreman asks the same way: do
-another round, or accept the remaining findings. The implementer gets those findings
-along with your answer.
+The implementer and reviewers take turns: every fix is reviewed again. Fixes asked
+for by the self-review and the competing review share one limit (`fix_rounds`). If the
+competing review after the third fix still has findings, foreman asks the same way: do
+another round, or accept the remaining findings. If the self-review is the one still
+finding problems, foreman never offers to accept them. It first diagnoses why, then
+asks you to do another round or stop the task:
+
+- a missed generic practice: the findings also go to learning;
+- a conflict in what the implementer was told (issue, plan, context file, your
+  answered decisions, PR description, `AGENTS.md` or `CLAUDE.md`, the implement stage
+  file, repository knowledge): each statement is
+  quoted with its source, and you pick which one governs. Foreman shows a conflict only
+  when every quote is in its source;
+- no concrete conflict found: the question says so.
+
+The implementer gets the findings along with your answer, and the next change gets a
+fresh self-review. Stopping fails the task with the open findings and leaves the PR
+and branch as they are.
 
 With `review_before_pr: true`, a new task is reviewed before its PR opens, so
 automated reviews that run on new PRs see the finished change. The implementer
-commits locally and proposes a PR title and description. The reviewer reads that
+commits locally and proposes a PR title and description. Both reviews read that
 description and the local diff, and fixes stay local. After a clean review, the
 implementer pushes the reviewed commit and opens the PR with the reviewed description,
 and foreman checks that the PR matches. If the fix limit is reached first, you choose
@@ -469,7 +490,8 @@ Each task then appears as a note, and the frontmatter shows up as properties.
 
 ## Learning
 
-Foreman evaluates each task once it has a clean review, and again when new evidence
+Foreman evaluates each task once it has a clean review, or once its self-review
+reaches the fix limit on a missed generic practice, and again when new evidence
 arrives: a later review, an answered decision, a PR comment, a new PR head, or the PR
 merging or closing. CI results are not evidence. The evaluation is one turn with the
 task's implementer agent, with no tools, run by a detached `foreman __learn` process.
@@ -569,8 +591,8 @@ worktrees_dir: ~/.local/share/foreman/worktrees
 repositories_dir: ~/.local/share/foreman/repositories # source checkouts for delegated work
 log_dir: ~/.local/share/foreman/logs
 knowledge_dir: ~/.local/share/foreman/knowledge # what foreman learns, per repository
-review_rounds: 3                     # reviewer passes over the whole PR per review
-fix_rounds: 3                        # fix and re-review cycles before foreman asks you
+review_rounds: 3                     # passes over the whole PR per self-review and per review
+fix_rounds: 3                        # fixes asked by either review before foreman asks you
 review_before_pr: false              # review and fix locally; open the PR after a clean review
 mentions: true                       # show items found only because they mention you
 default_source: github               # dashboard issue source: github, linear, or all
@@ -580,7 +602,7 @@ auto:                                # on/off is not here; press a or launch wit
   max_concurrent: 3                  # active runs, manual ones included
 budgets:                             # Claude only: Codex reports no cost, so it has no cap
   implementer_usd: 3.00              # Claude maximum per implementation turn
-  reviewer_usd: 1.00                 # Claude maximum per review turn
+  reviewer_usd: 1.00                 # Claude maximum per review, self-review, or diagnosis turn
 learning:
   enabled: true                      # evaluate finished tasks; off keeps existing knowledge in prompts
   budget_usd: 0.50                   # Claude maximum per evaluation; 0 sets no cap; Codex has none

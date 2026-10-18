@@ -188,6 +188,7 @@ type frontmatter struct {
 	PRURL               string                 `yaml:"pr_url,omitempty"`
 	PriorPR             int                    `yaml:"prior_pr,omitempty"`
 	PRHead              string                 `yaml:"pr_head,omitempty"`
+	PRDigest            string                 `yaml:"pr_digest,omitempty"`
 	CheckpointHead      string                 `yaml:"checkpoint_head,omitempty"`
 	CheckpointNext      string                 `yaml:"checkpoint_next,omitempty"`
 	Checkpoints         int                    `yaml:"checkpoints,omitempty"`
@@ -239,15 +240,16 @@ type ciFM struct {
 }
 
 type reviewFM struct {
-	Round    int            `yaml:"round"`
-	Reviewer task.Agent     `yaml:"reviewer"`
-	PR       int            `yaml:"pr"`
-	Verdict  string         `yaml:"verdict"`
-	Summary  string         `yaml:"summary"`
-	Findings []task.Finding `yaml:"findings,omitempty"`
-	At       time.Time      `yaml:"at"`
-	Head     string         `yaml:"head,omitempty"`
-	Proposal string         `yaml:"proposal,omitempty"`
+	Round    int             `yaml:"round"`
+	Kind     task.ReviewKind `yaml:"kind,omitempty"`
+	Reviewer task.Agent      `yaml:"reviewer"`
+	PR       int             `yaml:"pr"`
+	Verdict  string          `yaml:"verdict"`
+	Summary  string          `yaml:"summary"`
+	Findings []task.Finding  `yaml:"findings,omitempty"`
+	At       time.Time       `yaml:"at"`
+	Head     string          `yaml:"head,omitempty"`
+	Proposal string          `yaml:"proposal,omitempty"`
 }
 
 type outcomeFM struct {
@@ -274,11 +276,12 @@ type snapshot struct {
 }
 
 type decisionFM struct {
-	AskedAt    time.Time     `yaml:"asked_at"`
-	Question   task.Question `yaml:"question"`
-	Answer     string        `yaml:"answer,omitempty"`
-	AnsweredAt *time.Time    `yaml:"answered_at,omitempty"`
-	Delivered  *time.Time    `yaml:"delivered_at,omitempty"`
+	AskedAt    time.Time       `yaml:"asked_at"`
+	Question   task.Question   `yaml:"question"`
+	Answer     string          `yaml:"answer,omitempty"`
+	AnsweredAt *time.Time      `yaml:"answered_at,omitempty"`
+	Delivered  *time.Time      `yaml:"delivered_at,omitempty"`
+	Diagnosis  *task.Diagnosis `yaml:"diagnosis,omitempty"`
 }
 
 // ownedKeys are the frontmatter keys foreman writes; every other key belongs to the user.
@@ -379,6 +382,7 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 			PRURL:            fm.PRURL,
 			PriorPR:          fm.PriorPR,
 			PRHead:           fm.PRHead,
+			PRDigest:         fm.PRDigest,
 			CheckpointHead:   fm.CheckpointHead,
 			CheckpointNext:   fm.CheckpointNext,
 			Checkpoints:      fm.Checkpoints,
@@ -429,7 +433,11 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 		if r.Verdict != "clean" && r.Verdict != "changes_requested" {
 			return nil, fmt.Errorf("review round %d has unknown verdict %q", r.Round, r.Verdict)
 		}
-		rec.Reviews = append(rec.Reviews, task.Review{Round: r.Round, Reviewer: r.Reviewer, PR: r.PR, Clean: r.Verdict == "clean", Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head, Proposal: r.Proposal})
+		// An unknown kind is refused rather than read as competing, which could pass the gate.
+		if r.Kind != task.CompetingReview && r.Kind != task.SelfReview {
+			return nil, fmt.Errorf("review round %d has unknown kind %q", r.Round, r.Kind)
+		}
+		rec.Reviews = append(rec.Reviews, task.Review{Round: r.Round, Kind: r.Kind, Reviewer: r.Reviewer, PR: r.PR, Clean: r.Verdict == "clean", Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head, Proposal: r.Proposal})
 	}
 	if c := fm.CI; c != nil {
 		switch c.State {
@@ -455,7 +463,7 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 	}
 	rec.Usage = task.Usage{ClaudeCostUSD: fm.Usage.ClaudeCostUSD, CodexInputTokens: fm.Usage.CodexInputTokens, CodexCachedTokens: fm.Usage.CodexCachedTokens, CodexOutputTokens: fm.Usage.CodexOutputTokens, CodexReasoningTokens: fm.Usage.CodexReasoningTokens, ClaudeTurns: fm.Usage.ClaudeTurns, CodexTurns: fm.Usage.CodexTurns, ToolCalls: fm.Usage.ToolCalls}
 	for _, d := range fm.Decisions {
-		dec := task.Decision{AskedAt: d.AskedAt, Question: d.Question, Answer: d.Answer}
+		dec := task.Decision{AskedAt: d.AskedAt, Question: d.Question, Answer: d.Answer, Diagnosis: d.Diagnosis}
 		if d.AnsweredAt != nil {
 			dec.AnsweredAt = *d.AnsweredAt
 		}
@@ -505,7 +513,7 @@ func fromRecord(rec *task.Record) frontmatter {
 		}
 		fm.Launch = d.Launch
 		fm.RunnerPID, fm.RunnerLog, fm.PR, fm.PRURL, fm.PRHead = d.RunnerPID, d.RunnerLog, d.PR, d.PRURL, d.PRHead
-		fm.PriorPR = d.PriorPR
+		fm.PriorPR, fm.PRDigest = d.PriorPR, d.PRDigest
 		fm.CheckpointHead, fm.CheckpointNext, fm.Checkpoints = d.CheckpointHead, d.CheckpointNext, d.Checkpoints
 		fm.ConflictAttempts, fm.ConflictPending = d.ConflictAttempts, d.ConflictPending
 		fm.ReviewBeforePR, fm.LocalHead, fm.ProposedTitle, fm.ProposedBody = d.ReviewBeforePR, d.LocalHead, d.ProposedTitle, d.ProposedBody
@@ -536,7 +544,7 @@ func fromRecord(rec *task.Record) frontmatter {
 		if r.Clean {
 			verdict = "clean"
 		}
-		fm.Reviews = append(fm.Reviews, reviewFM{Round: r.Round, Reviewer: r.Reviewer, PR: r.PR, Verdict: verdict, Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head, Proposal: r.Proposal})
+		fm.Reviews = append(fm.Reviews, reviewFM{Round: r.Round, Kind: r.Kind, Reviewer: r.Reviewer, PR: r.PR, Verdict: verdict, Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head, Proposal: r.Proposal})
 	}
 	if c := rec.CI; c != nil {
 		fm.CI = &ciFM{State: c.State, Failing: c.Failing, CheckedAt: c.CheckedAt}
@@ -546,7 +554,7 @@ func fromRecord(rec *task.Record) frontmatter {
 	}
 	fm.Usage = usageFM{ClaudeCostUSD: rec.Usage.ClaudeCostUSD, CodexInputTokens: rec.Usage.CodexInputTokens, CodexCachedTokens: rec.Usage.CodexCachedTokens, CodexOutputTokens: rec.Usage.CodexOutputTokens, CodexReasoningTokens: rec.Usage.CodexReasoningTokens, ClaudeTurns: rec.Usage.ClaudeTurns, CodexTurns: rec.Usage.CodexTurns, ToolCalls: rec.Usage.ToolCalls}
 	for _, d := range rec.Decisions {
-		dec := decisionFM{AskedAt: d.AskedAt, Question: d.Question, Answer: d.Answer}
+		dec := decisionFM{AskedAt: d.AskedAt, Question: d.Question, Answer: d.Answer, Diagnosis: d.Diagnosis}
 		if !d.AnsweredAt.IsZero() {
 			t := d.AnsweredAt
 			dec.AnsweredAt = &t
