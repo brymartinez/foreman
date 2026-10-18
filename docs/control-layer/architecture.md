@@ -708,7 +708,7 @@ the same commit. The commit message records why it changed.
   with every `pr_opened` or `review_ready`, a full claim set: per PRD acceptance criterion (criteria may share a claim), the
   behavior, the code and test evidence, and the check performed or why none was. A
   turn without claims is resumed once to add them; any answer but the same status with
-  claims fails the task. The latest set replaces the stored one. The turn that opens a
+  claims fails the task, on every turn path, a gate-started conflict repair included. The latest set replaces the stored one. The turn that opens a
   reviewed PR is given the reviewed claims and must return them unchanged, and before
   it runs, or a matching PR is adopted, the PRD is read again: a changed PRD sends the
   change back to review, and a missing one fails the task. Claims stay in the task file: the prompts keep them out of
@@ -747,7 +747,8 @@ the same commit. The commit message records why it changed.
   a review of other claims or another PRD does not cover the change. A WAITING_FOR_CI
   task whose head, description, or PRD changed is reviewed again, self-review first
   (the gate reads the PRD of such a task, and of a claim-verified PR it finds
-  reopened, on each refresh before CI, and fails the task when it cannot load it); new commits on a READY_FOR_HUMAN PR are only
+  reopened, on each refresh before CI, and fails the task when it cannot load it; paths
+  that answer comments leave a claim-verified task in WAITING_FOR_CI for that check); new commits on a READY_FOR_HUMAN PR are only
   flagged, because that PR is the developer's now. A crash mid-review restarts at the
   review, not the implementation.
 - **Conflicts are checked before every review** with `git merge-tree` on

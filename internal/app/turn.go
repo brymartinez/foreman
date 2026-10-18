@@ -186,6 +186,12 @@ func (a App) repairFailedCheckpoint(ctx context.Context, rec *task.Record, req t
 	return turn, err
 }
 
+// missingClaimsError fails a turn that did not supply its claims after one request.
+// Every path fails the task on it, whatever else the turn did.
+type missingClaimsError struct{ msg string }
+
+func (e *missingClaimsError) Error() string { return e.msg }
+
 // finishesChange reports a status that hands a change to review.
 func finishesChange(s agent.Status) bool { return s == agent.PROpened || s == agent.ReviewReady }
 
@@ -198,10 +204,10 @@ func (a App) requireClaims(ctx context.Context, rec *task.Record, turn agent.Tur
 	if !d.ClaimVerification || !finishesChange(status) || len(turn.Outcome.Claims) > 0 {
 		return turn, nil
 	}
-	missing := fmt.Errorf("the implementer returned %s without the claim set for the PRD acceptance criteria", status)
+	missing := fmt.Sprintf("the implementer returned %s without the claim set for the PRD acceptance criteria", status)
 	adapter := a.Agents[d.Implementer.Agent]
 	if adapter == nil || turn.Session.ID == "" {
-		return turn, missing
+		return turn, &missingClaimsError{missing}
 	}
 	if err := a.checkAccount(ctx, rec); err != nil {
 		return turn, err
@@ -227,7 +233,7 @@ func (a App) requireClaims(ctx context.Context, rec *task.Record, turn agent.Tur
 	turn.Outcome = next.Outcome
 	// The resume asked for the claims alone, so any other answer fails the turn.
 	if turn.Outcome.Status != status || len(turn.Outcome.Claims) == 0 {
-		return turn, fmt.Errorf("%w, and its answer to the request for them was %s without claims", missing, turn.Outcome.Status)
+		return turn, &missingClaimsError{fmt.Sprintf("%s, and its answer to the request for them was %s without claims", missing, turn.Outcome.Status)}
 	}
 	return turn, nil
 }

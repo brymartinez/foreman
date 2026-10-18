@@ -76,7 +76,7 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, token string, l
 			// back without resuming the implementer on the same comments.
 			_, err = a.update(final, rec.Key, existing(func(cur *task.Record) {
 				cur.State = task.WaitingForCI
-				if cur.CI != nil && cur.CI.State != task.CIPending {
+				if handsOverNow(cur, cur.CI) {
 					cur.State = task.ReadyForHuman
 				}
 				cur.Feedback = nil
@@ -640,7 +640,7 @@ func applyFeedbackTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runEr
 		return
 	}
 	rec.State = task.WaitingForCI
-	if ci != nil && ci.State != task.CIPending {
+	if handsOverNow(rec, ci) {
 		rec.State = task.ReadyForHuman
 		rec.LastOutcome = &task.Outcome{Status: "feedback_answered",
 			Summary: fmt.Sprintf("answered %d %s on PR #%d; no change was needed", len(comments), plural(len(comments), "comment", "comments"), d.PR), At: now}

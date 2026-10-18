@@ -611,3 +611,42 @@ func TestTheGateReportsAWaitingTaskItFailsForItsPRD(t *testing.T) {
 		t.Fatalf("notes = %q, want the failure and its cause", notes[key])
 	}
 }
+
+func TestAConflictRepairStillWithoutClaimsFailsTheTask(t *testing.T) {
+	f := newFixture()
+	key := repairing(t, f)
+	d := f.store.recs[key].Delegation
+	d.ClaimVerification, d.Claims = true, retryClaims
+	f.claude.turns = []agent.Turn{prTurn("sid-1"), prTurn("sid-1")}
+	f.claude.onResume = func() { pushHead(f, "merged1") }
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Failed || !strings.Contains(got.LastOutcome.Summary, "without the claim set") || got.Pending() != nil {
+		t.Fatalf("state %s outcome %+v pending %+v", got.State, got.LastOutcome, got.Pending())
+	}
+	if got.Delegation.ConflictPending {
+		t.Error("the repair is still pending")
+	}
+}
+
+func TestAnAnsweredCommentLeavesAClaimVerifiedTaskForTheGatesPRDCheck(t *testing.T) {
+	pr := newFixture().gh.prs[912]
+	digest := task.ProposalDigest(pr.Title, pr.Body)
+	for _, flag := range []bool{false, true} {
+		rec := &task.Record{State: task.Implementing, CI: &task.CIStatus{State: task.CIPassing},
+			Delegation: &task.Delegation{PR: 912, PRHead: pr.HeadSHA, PRDigest: digest, ClaimVerification: flag, Claims: retryClaims, PRDDigest: task.Digest("the PRD")},
+			Reviews: []task.Review{{Kind: task.SelfReview, PR: 912, Head: pr.HeadSHA, Proposal: digest, Claims: task.ClaimsDigest(retryClaims), PRD: task.Digest("the PRD"), Clean: true},
+				{PR: 912, Head: pr.HeadSHA, Proposal: digest, Claims: task.ClaimsDigest(retryClaims), PRD: task.Digest("the PRD"), Clean: true}}}
+		turn := claimedTurn("sid-1", retryClaims)
+		applyFeedbackTurn(rec, turn, &pr, nil, nil, pr.HeadSHA, now)
+		want := task.ReadyForHuman
+		if flag {
+			want = task.WaitingForCI
+		}
+		if rec.State != want {
+			t.Errorf("claim verification %t: state %s, want %s", flag, rec.State, want)
+		}
+	}
+}

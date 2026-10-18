@@ -179,7 +179,7 @@ func (a App) unanswered(ctx, final context.Context, rec *task.Record, log io.Wri
 	fmt.Fprintf(log, "foreman: PR #%d has no comments left to answer\n", d.PR)
 	updated, err = a.update(final, rec.Key, existing(func(cur *task.Record) {
 		cur.State = task.WaitingForCI
-		if cur.CI != nil && cur.CI.State != task.CIPending {
+		if handsOverNow(cur, cur.CI) {
 			cur.State = task.ReadyForHuman
 		}
 		cur.LastOutcome = &task.Outcome{Status: "feedback_answered", Summary: fmt.Sprintf("every comment on PR #%d is answered", cur.Delegation.PR), At: a.Now()}
@@ -204,6 +204,13 @@ func (a App) currentPR(ctx, final context.Context, rec *task.Record) (updated *t
 		cur.Delegation.PRDigest, cur.Delegation.PRHead = digest, pr.HeadSHA
 	}))
 	return updated, err == nil, err
+}
+
+// handsOverNow reports whether a task whose clean review covers its PR goes straight
+// to the developer once its comments are answered: CI has finished. A task with claim
+// verification waits for the gate instead, which reads the PRD before handing it over.
+func handsOverNow(rec *task.Record, ci *task.CIStatus) bool {
+	return ci != nil && ci.State != task.CIPending && !rec.Delegation.ClaimVerification
 }
 
 // reviewCovers reports a clean competing review of head and of the description with
