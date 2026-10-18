@@ -61,7 +61,7 @@ func TestALearnerThatFailsToStartLeavesTheRunAndTaskAlone(t *testing.T) {
 	if err := f.run(context.Background(), key, 4242, &log); err != nil {
 		t.Fatalf("RunTask = %v; a learner error must not fail the run", err)
 	}
-	if got := f.store.recs[key]; got.State != task.Reviewing {
+	if got := f.store.recs[key]; got.State != task.WaitingForCI {
 		t.Fatalf("state = %s; want REVIEWING", got.State)
 	}
 	if !strings.Contains(log.String(), "learning not started: no executable") {
@@ -109,7 +109,7 @@ func TestRefreshStartsNoLearnerWhileTheRepositoryIsLocked(t *testing.T) {
 }
 
 func TestRefreshStartsNoLearnerForARunningTask(t *testing.T) {
-	for _, state := range []task.State{task.Working, task.Reviewing} {
+	for _, state := range []task.State{task.Implementing, task.WaitingForCI} {
 		f, _, _ := learnFixture(t)
 		f.app.Learning = true
 		f.store.recs[learnKey].State = state

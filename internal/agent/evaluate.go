@@ -329,7 +329,8 @@ PR outcome: %s
 	}
 
 	s.WriteString("\n## Time and cost (context, not a score)\n\n")
-	for _, p := range task.MeasuredPhases {
+	// An attempt from before the stages has its review and fix time as one phase.
+	for _, p := range append(slices.Clone(task.MeasuredPhases), task.PhaseReview) {
 		if d, ok := b.Phases[p]; ok {
 			fmt.Fprintf(&s, "- %s: %dm\n", p, int(d.Round(time.Minute).Minutes()))
 		}

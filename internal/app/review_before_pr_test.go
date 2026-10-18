@@ -112,7 +112,7 @@ func TestReviewReadyTurnRecordsTheCommitAndItsProposalTogether(t *testing.T) {
 	}
 	applyTurnResult(rec, res, now)
 	d := rec.Delegation
-	if rec.State != task.Working || d.LocalHead != "commit1" || d.ProposedTitle != "feat: retry 5xx" || d.ProposedBody != "Retry 5xx only.\n\nCloses #825" || d.PR != 0 {
+	if rec.State != task.Implementing || d.LocalHead != "commit1" || d.ProposedTitle != "feat: retry 5xx" || d.ProposedBody != "Retry 5xx only.\n\nCloses #825" || d.PR != 0 {
 		t.Fatalf("state %s delegation %+v", rec.State, d)
 	}
 	if len(rec.Validation) != 1 || !rec.ReviewPending() {
@@ -217,7 +217,7 @@ func TestReviewBeforePRReviewsTheLocalCommitThenOpensThePR(t *testing.T) {
 		t.Fatalf("open turns = %d, want 1", openTurns(f))
 	}
 	d := got.Delegation
-	if got.State != task.Reviewing || d.PR != 912 || d.PRHead != "commit1" || d.LocalHead != "" || d.ProposedBody != "" {
+	if got.State != task.WaitingForCI || d.PR != 912 || d.PRHead != "commit1" || d.LocalHead != "" || d.ProposedBody != "" {
 		t.Fatalf("state %s delegation %+v", got.State, d)
 	}
 	if r := got.LatestReview(); r == nil || !r.Clean || r.PR != 912 || r.Head != "commit1" || len(got.CompetingReviews()) != 1 {
@@ -247,7 +247,7 @@ func TestReviewBeforePRFixesFindingsLocallyAndOpensWithTheUpdatedDescription(t *
 	if len(f.codex.reviewed) != 2 || !strings.Contains(f.codex.reviewed[1], "never 4xx") {
 		t.Fatalf("the fix was not reviewed with its description: %q", f.codex.reviewed)
 	}
-	if got.State != task.Reviewing || got.Delegation.PR != 912 || got.Delegation.PRHead != "commit2" || openTurns(f) != 1 {
+	if got.State != task.WaitingForCI || got.Delegation.PR != 912 || got.Delegation.PRHead != "commit2" || openTurns(f) != 1 {
 		t.Fatalf("state %s delegation %+v open turns %d", got.State, got.Delegation, openTurns(f))
 	}
 	if cr := got.CompetingReviews(); cr[0].Head != "commit1" || cr[0].PR != 0 || cr[1].Head != "commit2" || cr[1].PR != 912 {
@@ -288,7 +288,7 @@ func answer(f fixture, key task.Key, text string) {
 	rec := f.store.recs[key]
 	p := rec.Pending()
 	p.Answer, p.AnsweredAt = text, now
-	rec.State = task.Working
+	rec.State = task.Implementing
 }
 
 func TestReviewBeforePRPausesAtTheFixLimitWithoutOpeningAPR(t *testing.T) {
@@ -307,7 +307,7 @@ func TestReviewBeforePRAnotherRoundResetsTheLimitAndContinues(t *testing.T) {
 	if !strings.Contains(f.claude.resumed[1], "Decision: A.") || !strings.Contains(f.claude.resumed[1], "review_ready") {
 		t.Fatalf("answer turn = %q", f.claude.resumed[1])
 	}
-	if got.State != task.Reviewing || got.Delegation.PR != 912 || got.Delegation.PRHead != "commit3" || openTurns(f) != 1 {
+	if got.State != task.WaitingForCI || got.Delegation.PR != 912 || got.Delegation.PRHead != "commit3" || openTurns(f) != 1 {
 		t.Fatalf("state %s delegation %+v", got.State, got.Delegation)
 	}
 }
@@ -363,7 +363,7 @@ func TestReviewBeforePRMergesTheBaseLocallyBeforeReview(t *testing.T) {
 		t.Fatalf("merge turn = %q", merge)
 	}
 	got := f.store.recs[key]
-	if len(f.codex.reviewed) != 1 || got.Delegation.PRHead != "commit2" || got.State != task.Reviewing {
+	if len(f.codex.reviewed) != 1 || got.Delegation.PRHead != "commit2" || got.State != task.WaitingForCI {
 		t.Fatalf("reviews %d state %s delegation %+v", len(f.codex.reviewed), got.State, got.Delegation)
 	}
 }
@@ -404,7 +404,7 @@ func TestReviewBeforePRResumesAStoredCommitAtItsReview(t *testing.T) {
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.store.recs[key]; got.State != task.Reviewing || got.Delegation.PR != 912 || len(f.codex.reviewed) != 1 {
+	if got := f.store.recs[key]; got.State != task.WaitingForCI || got.Delegation.PR != 912 || len(f.codex.reviewed) != 1 {
 		t.Fatalf("state %s pr %d reviews %d", got.State, got.Delegation.PR, len(f.codex.reviewed))
 	}
 }
@@ -422,7 +422,7 @@ func TestReviewBeforePRResumesACleanCommitAtThePROpening(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.Reviewing || got.Delegation.PR != 912 || len(f.codex.reviewed) != 0 || openTurns(f) != 1 {
+	if got.State != task.WaitingForCI || got.Delegation.PR != 912 || len(f.codex.reviewed) != 0 || openTurns(f) != 1 {
 		t.Fatalf("state %s pr %d reviews %d open turns %d", got.State, got.Delegation.PR, len(f.codex.reviewed), openTurns(f))
 	}
 	if got.LatestReview().PR != 912 || got.PhaseOf() != task.PhaseCI {
@@ -443,7 +443,7 @@ func TestReviewBeforePRAdoptsAMatchingPRWithoutAnotherTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.Reviewing || got.Delegation.PR != 912 || f.claude.starts != 0 || len(f.claude.resumed) != 0 {
+	if got.State != task.WaitingForCI || got.Delegation.PR != 912 || f.claude.starts != 0 || len(f.claude.resumed) != 0 {
 		t.Fatalf("state %s pr %d starts %d resumes %d", got.State, got.Delegation.PR, f.claude.starts, len(f.claude.resumed))
 	}
 }
@@ -500,7 +500,7 @@ func TestATaskKeepsItsWorkflowWhenTheSettingChanges(t *testing.T) {
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(f.claude.prompts[0], "review_ready") || f.store.recs[key].State != task.Reviewing {
+	if strings.Contains(f.claude.prompts[0], "review_ready") || f.store.recs[key].State != task.WaitingForCI {
 		t.Fatal("a task started without review_before_pr picked it up from config")
 	}
 }

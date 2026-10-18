@@ -20,7 +20,7 @@ func openLog(t *testing.T, log string) (Model, string) {
 	if err := os.WriteFile(path, []byte(log), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	rec := record(10, task.Working)
+	rec := record(10, task.Implementing)
 	rec.Delegation.RunnerLog = path
 	m := Model{Width: 100, Height: 30, Focus: TaskPane}
 	readLocal(context.Background(), stubSource{recs: []*task.Record{rec}}, &m)

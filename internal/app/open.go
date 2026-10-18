@@ -19,6 +19,9 @@ import (
 // against the review. Either way the run ends there and the gate takes over.
 func (r *taskRun) openPR() (step, error) {
 	a := r.a
+	if err := r.enter(task.OpeningPR); err != nil {
+		return stepDone, err
+	}
 	d := r.rec.Delegation
 	found, err := a.GitHub.OpenPullRequestForBranch(r.ctx, r.rec.Repo, d.Branch)
 	if err == nil && found != nil {
@@ -50,6 +53,7 @@ func (r *taskRun) openPR() (step, error) {
 		applyTurnResult(cur, res, a.Now())
 		if res.err == nil && res.turn.Outcome.Status == agent.PROpened {
 			coverOpenedPR(cur)
+			cur.State = task.WaitingForCI
 		}
 	}, r.log)
 	return stepDone, err
@@ -123,7 +127,7 @@ func normalizeBody(s string) string {
 // adoptOpenedPR records a PR that already holds the reviewed commit, as a pr_opened
 // turn would.
 func adoptOpenedPR(rec *task.Record, pr *PullRequest, now time.Time) {
-	rec.State = task.Reviewing
+	rec.State = task.WaitingForCI
 	rec.CI = nil
 	rec.Delegation.PR, rec.Delegation.PRURL, rec.Delegation.PRHead = pr.Key.Number, pr.URL, pr.HeadSHA
 	rec.Delegation.CheckpointNext = ""

@@ -19,7 +19,7 @@ func TestTasksSkipsTheGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(recs) != 1 || recs[0].State != task.Reviewing {
+	if len(recs) != 1 || recs[0].State != task.WaitingForCI {
 		t.Fatalf("Tasks = %+v; want one REVIEWING task", recs)
 	}
 	if got := f.store.recs[k]; got.CI != nil {
@@ -42,7 +42,7 @@ func TestTasksOrdersByAttentionAndDropsFinishedWork(t *testing.T) {
 	}
 	undelegated := seen(4, task.Discovered, "open", t0)
 	store := &fakeStore{recs: map[task.Key]*task.Record{
-		key(1): delegated(1, task.Working),
+		key(1): delegated(1, task.Implementing),
 		key(2): delegated(2, task.NeedsDecision),
 		key(3): delegated(3, task.Done),
 		key(4): undelegated,
@@ -63,7 +63,7 @@ func TestTasksOrdersByAttentionAndDropsFinishedWork(t *testing.T) {
 }
 
 func TestTasksReapsADeadRunner(t *testing.T) {
-	rec := seen(1, task.Working, "open", t0)
+	rec := seen(1, task.Implementing, "open", t0)
 	rec.Delegation = &task.Delegation{Implementer: task.Session{Agent: task.Claude}, RunnerPID: 999, RunnerLog: "/logs/1.log"}
 	store := &fakeStore{recs: map[task.Key]*task.Record{key(1): rec}}
 	a := App{Store: store, Runners: &fakeRunners{alive: map[int]bool{}}, Now: func() time.Time { return now }}

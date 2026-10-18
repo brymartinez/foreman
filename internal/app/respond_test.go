@@ -45,7 +45,7 @@ func TestRespondRecordsAnswerAndResumesSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := rec.Decisions[0]
-	if rec.State != task.Working || d.Answer != "A. 5xx only" || !d.AnsweredAt.Equal(now) || !d.DeliveredAt.IsZero() {
+	if rec.State != task.Planning || d.Answer != "A. 5xx only" || !d.AnsweredAt.Equal(now) || !d.DeliveredAt.IsZero() {
 		t.Fatalf("after respond: state %s decision %+v", rec.State, d)
 	}
 	if len(f.runners.spawned) != 1 {
@@ -67,7 +67,7 @@ func TestRespondRecordsAnswerAndResumesSession(t *testing.T) {
 		t.Error("started a fresh turn although the session resumed")
 	}
 	got := f.store.recs[key]
-	if got.State != task.Reviewing || got.Decisions[0].DeliveredAt.IsZero() {
+	if got.State != task.WaitingForCI || got.Decisions[0].DeliveredAt.IsZero() {
 		t.Errorf("after resume: %s %+v", got.State, got.Decisions[0])
 	}
 }
@@ -171,7 +171,7 @@ func TestRespondWaitsForEveryQuestionThenResumesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.State != task.Working || len(f.runners.spawned) != 1 {
+	if second.State != task.Planning || len(f.runners.spawned) != 1 {
 		t.Fatalf("after both answers: state %s spawned %d", second.State, len(f.runners.spawned))
 	}
 

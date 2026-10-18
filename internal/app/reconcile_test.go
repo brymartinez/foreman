@@ -74,7 +74,7 @@ func TestAFullPlanOnTheGitHubIssueIsAdoptedWithoutPosting(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.Reviewing || !got.PlanPosted() || len(f.gh.comments) != posted || f.gh.edits != 0 {
+	if got.State != task.WaitingForCI || !got.PlanPosted() || len(f.gh.comments) != posted || f.gh.edits != 0 {
 		t.Fatalf("state %s plan %+v comments %d edits %d", got.State, got.Plan, len(f.gh.comments), f.gh.edits)
 	}
 	for i, doc := range task.PlanDocs {
@@ -205,7 +205,7 @@ func answerPlanConflict(t *testing.T, f fixture, key task.Key, answer task.Optio
 		t.Fatalf("state %s, want a decision", rec.State)
 	}
 	rec.Pending().Answer = optionText(answer)
-	rec.State = task.Working
+	rec.State = task.Implementing
 }
 
 func TestKeepingAConflictingPlanAdoptsItWithoutPosting(t *testing.T) {
@@ -218,7 +218,7 @@ func TestKeepingAConflictingPlanAdoptsItWithoutPosting(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.Reviewing || !got.PlanPosted() || len(f.gh.comments) != 4 || f.gh.edits != 0 || !slices.Equal(f.claude.stages, []task.Stage{task.StageImplement}) {
+	if got.State != task.WaitingForCI || !got.PlanPosted() || len(f.gh.comments) != 4 || f.gh.edits != 0 || !slices.Equal(f.claude.stages, []task.Stage{task.StageImplement}) {
 		t.Fatalf("state %s plan %+v comments %d edits %d stages %v", got.State, got.Plan, len(f.gh.comments), f.gh.edits, f.claude.stages)
 	}
 }

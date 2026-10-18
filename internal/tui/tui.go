@@ -116,8 +116,8 @@ func Run(ctx context.Context, o Options) (err error) {
 	go readKeys(ctx, o.In, keys, escapeWait)
 	results := make(chan result, 8)
 	// pending counts Start, Cancel, and Respond calls in flight. Quitting waits for
-	// them: App.Start records WORKING before it spawns the runner, so exiting in that
-	// window would leave a task with no runner that nothing reaps.
+	// them: App.Start records the first stage before it spawns the runner, so exiting
+	// in that window would leave a task with no runner that nothing reaps.
 	pending := 0
 
 	resize := make(chan os.Signal, 1)
@@ -158,7 +158,7 @@ func Run(ctx context.Context, o Options) (err error) {
 			screen.resize()
 		case <-local.C:
 			readLocal(ctx, o.Source, &m)
-			// A run that left WORKING frees its slot here, without waiting for GitHub.
+			// A run that left its stages frees its slot here, without waiting for GitHub.
 			pending += launchAuto(ctx, o.Source, &m, results)
 		case <-remote.C:
 			refresh()
@@ -266,7 +266,7 @@ func (p *painter) paint(m Model) {
 }
 
 // finish waits for a Start or Cancel to come back before Run returns, so the process
-// never exits between App.Start persisting WORKING and the runner being spawned.
+// never exits between App.Start persisting the first stage and the runner being spawned.
 func finish(ctx context.Context, out io.Writer, m *Model, results <-chan result, pending int) error {
 	for pending > 0 {
 		m.Message = "Finishing the last command…"
@@ -489,8 +489,8 @@ func recordRef(rec *task.Record) string {
 }
 
 // resume puts a REVIEWED task back to work on the comments on its pull request. Like
-// start, it is counted as pending, because App.Resume records WORKING before it spawns
-// the runner.
+// start, it is counted as pending, because App.Resume records IMPLEMENTING before it
+// spawns the runner.
 func resume(ctx context.Context, s Source, key task.Key) result {
 	r := resumeResult(ctx, s, key)
 	r.key = key
@@ -510,7 +510,7 @@ func resumeResult(ctx context.Context, s Source, key task.Key) result {
 
 // respond records an answer typed in the dashboard through App.Respond, so it is
 // resolved by the same rules as every answer. It is counted as pending, because
-// the last answer records WORKING before App.Respond spawns the runner.
+// the last answer records the next stage before App.Respond spawns the runner.
 func respond(ctx context.Context, s Source, key task.Key, raw string) result {
 	r := respondResult(ctx, s, key, raw)
 	r.key, r.respond, r.finished = key, true, true

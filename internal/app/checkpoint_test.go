@@ -37,7 +37,7 @@ func TestCheckpointStartsFreshImplementationSessionWithOnlyDurableHandoff(t *tes
 	if f.claude.starts != 2 || len(f.claude.resumed) != 0 {
 		t.Fatalf("starts %d resumes %d, want two fresh sessions", f.claude.starts, len(f.claude.resumed))
 	}
-	if got.State != task.Reviewing || got.Delegation.Checkpoints != 1 || got.Delegation.CheckpointHead != "commit1" || got.Delegation.CheckpointNext != "" {
+	if got.State != task.WaitingForCI || got.Delegation.Checkpoints != 1 || got.Delegation.CheckpointHead != "commit1" || got.Delegation.CheckpointNext != "" {
 		t.Fatalf("checkpoint and PR state = %+v", got.Delegation)
 	}
 	if got.Usage.ClaudeCostUSD != 1.25 || got.Usage.ClaudeTurns != 1 {
@@ -69,7 +69,7 @@ func TestFailedCheckpointValidationResumesSameSessionForRepair(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.Reviewing || got.Delegation.Checkpoints != 1 || f.claude.starts != 2 || len(f.claude.resumed) != 1 {
+	if got.State != task.WaitingForCI || got.Delegation.Checkpoints != 1 || f.claude.starts != 2 || len(f.claude.resumed) != 1 {
 		t.Fatalf("state %s checkpoints %d starts %d resumes %v", got.State, got.Delegation.Checkpoints, f.claude.starts, f.claude.resumed)
 	}
 	if !strings.Contains(f.claude.resumed[0], "first-session") || !strings.Contains(f.claude.resumed[0], "pnpm lint") {

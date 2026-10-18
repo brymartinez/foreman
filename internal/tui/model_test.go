@@ -25,13 +25,13 @@ func record(n int, state task.State) *task.Record {
 func model() Model {
 	m := Model{Width: 100, Height: 30}
 	m.SetInbox([]app.InboxEntry{entry("a/b", 1, "First"), entry("a/b", 2, "Second")})
-	m.SetTasks([]*task.Record{record(10, task.Working), record(11, task.Reviewing), record(12, task.Failed)})
+	m.SetTasks([]*task.Record{record(10, task.Implementing), record(11, task.WaitingForCI), record(12, task.Failed)})
 	return m
 }
 
 func TestLogFollowsMostRecentDelegationUntilTaskIsPicked(t *testing.T) {
 	older := record(10, task.NeedsDecision)
-	newer := record(11, task.Working)
+	newer := record(11, task.Implementing)
 	older.Delegation.StartedAt = time.Date(2026, 9, 29, 9, 0, 0, 0, time.UTC)
 	newer.Delegation.StartedAt = older.Delegation.StartedAt.Add(time.Hour)
 	m := Model{Width: 100, Height: 30}
@@ -40,7 +40,7 @@ func TestLogFollowsMostRecentDelegationUntilTaskIsPicked(t *testing.T) {
 		t.Fatalf("log follows %v; want the newest delegation %v", m.Selected().Key, newer.Key)
 	}
 	// A new delegation takes over while the user has not picked a task.
-	latest := record(12, task.Working)
+	latest := record(12, task.Implementing)
 	latest.Delegation.StartedAt = newer.Delegation.StartedAt.Add(time.Hour)
 	m.SetTasks([]*task.Record{older, newer, latest})
 	if m.Selected().Key != latest.Key {
@@ -353,7 +353,7 @@ func answered(rec *task.Record, answer string) *task.Record {
 		}
 	}
 	if next.Pending() == nil {
-		next.State = task.Working
+		next.State = task.Implementing
 	}
 	return &next
 }
@@ -475,7 +475,7 @@ func TestAnsweredLastAnswerShowsLog(t *testing.T) {
 	if m.Mode != Browsing || !m.LogOpen || m.ShowOpen || m.LogOffset != 0 {
 		t.Fatalf("mode %v log %t show %t offset %d; want the log following its tail", m.Mode, m.LogOpen, m.ShowOpen, m.LogOffset)
 	}
-	if m.Selected().State != task.Working {
+	if m.Selected().State != task.Implementing {
 		t.Errorf("the task list still shows %s", m.Selected().State)
 	}
 }
@@ -513,7 +513,7 @@ func TestSetTasksSwitchesOpenLogToPrompt(t *testing.T) {
 	m.Focus = TaskPane
 	press(&m, Key{Kind: KeyEnter}, rune_('s'))
 	rec := asking(m.Selected().Number)
-	m.SetTasks([]*task.Record{rec, record(11, task.Reviewing), record(12, task.Failed)})
+	m.SetTasks([]*task.Record{rec, record(11, task.WaitingForCI), record(12, task.Failed)})
 	if m.Mode != AnsweringDecision || !m.LogOpen || m.ShowOpen {
 		t.Fatalf("mode %v log %t show %t; want the prompt in place of the open pane", m.Mode, m.LogOpen, m.ShowOpen)
 	}
@@ -534,7 +534,7 @@ func TestSetTasksWaitsWhileCollectingInput(t *testing.T) {
 	if m.Mode != TypingContext {
 		t.Fatalf("setup left mode %v", m.Mode)
 	}
-	recs := []*task.Record{asking(m.Selected().Number), record(11, task.Reviewing), record(12, task.Failed)}
+	recs := []*task.Record{asking(m.Selected().Number), record(11, task.WaitingForCI), record(12, task.Failed)}
 	m.SetTasks(recs)
 	if m.Mode != TypingContext {
 		t.Fatalf("a decision took over the footer while it collected a context file: %v", m.Mode)
@@ -549,7 +549,7 @@ func TestSetTasksWaitsWhileCollectingInput(t *testing.T) {
 func TestSetTasksClosesPromptWhenTaskNoLongerWaiting(t *testing.T) {
 	m := prompting()
 	press(&m, rune_('x'))
-	m.SetTasks([]*task.Record{record(10, task.Working)})
+	m.SetTasks([]*task.Record{record(10, task.Implementing)})
 	if m.Mode != Browsing || !m.LogOpen || m.Input != "" {
 		t.Fatalf("mode %v log %t input %q; want the log for the task answered elsewhere", m.Mode, m.LogOpen, m.Input)
 	}
@@ -557,7 +557,7 @@ func TestSetTasksClosesPromptWhenTaskNoLongerWaiting(t *testing.T) {
 
 func TestPromptKeepsItsTaskWhenANewerDelegationArrives(t *testing.T) {
 	m := prompting()
-	newer := record(11, task.Working)
+	newer := record(11, task.Implementing)
 	newer.Delegation.StartedAt = time.Now()
 	m.SetTasks([]*task.Record{m.Selected(), newer})
 	if m.Mode != AnsweringDecision || m.Selected().Number != 10 {
@@ -602,7 +602,7 @@ func TestCancelConfirmationKeepsItsOriginalTask(t *testing.T) {
 	m := model()
 	m.Focus = TaskPane
 	press(&m, rune_('c')) // confirm a/b#10
-	m.SetTasks([]*task.Record{record(11, task.Working)})
+	m.SetTasks([]*task.Record{record(11, task.Implementing)})
 	if got := footer(m); !strings.Contains(got, "a/b#10") || strings.Contains(got, "a/b#11") {
 		t.Fatalf("confirmation changed target after refresh: %q", got)
 	}
@@ -620,7 +620,7 @@ func TestCancelStopsTheTaskItAskedAboutAfterAReorder(t *testing.T) {
 	press(&m, Key{Kind: KeyDown}) // a/b#11
 	press(&m, rune_('c'))
 	// The gate reordered the list while the prompt was up.
-	m.SetTasks([]*task.Record{record(12, task.Failed), record(11, task.Working), record(10, task.Working)})
+	m.SetTasks([]*task.Record{record(12, task.Failed), record(11, task.Implementing), record(10, task.Implementing)})
 	got := press(&m, rune_('y'))
 	if got.Kind != ActionCancel || got.Cancel == nil || got.Cancel.Number != 11 {
 		t.Fatalf("action = %+v; want the task the prompt named", got)
@@ -632,7 +632,7 @@ func TestARefreshThatMovesTheCursorFollowsTheNewTail(t *testing.T) {
 	m.Focus = TaskPane
 	m.Log = make([]string, 200)
 	press(&m, Key{Kind: KeyPageUp})
-	m.SetTasks([]*task.Record{record(11, task.Reviewing), record(12, task.Failed)})
+	m.SetTasks([]*task.Record{record(11, task.WaitingForCI), record(12, task.Failed)})
 	if m.LogOffset != 0 {
 		t.Errorf("offset = %d; the task the cursor was on is gone", m.LogOffset)
 	}

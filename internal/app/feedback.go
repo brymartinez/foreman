@@ -178,7 +178,7 @@ func (a App) unanswered(ctx, final context.Context, rec *task.Record, log io.Wri
 	}
 	fmt.Fprintf(log, "foreman: PR #%d has no comments left to answer\n", d.PR)
 	updated, err = a.update(final, rec.Key, existing(func(cur *task.Record) {
-		cur.State = task.Reviewing
+		cur.State = task.WaitingForCI
 		if cur.CI != nil && cur.CI.State != task.CIPending {
 			cur.State = task.ReadyForHuman
 		}

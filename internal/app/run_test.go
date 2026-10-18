@@ -40,7 +40,7 @@ func TestReviewLoopCleanFirstRound(t *testing.T) {
 	}
 	got := f.store.recs[key]
 	cr := got.CompetingReviews()
-	if got.State != task.Reviewing || len(cr) != 1 || !cr[0].Clean || cr[0].Reviewer != task.Codex || cr[0].PR != 912 {
+	if got.State != task.WaitingForCI || len(cr) != 1 || !cr[0].Clean || cr[0].Reviewer != task.Codex || cr[0].PR != 912 {
 		t.Fatalf("state %s reviews %+v", got.State, got.Reviews)
 	}
 	// Claude's one review is its own self-review.
@@ -67,7 +67,7 @@ func TestReviewLoopFixesFindingsThenReReviews(t *testing.T) {
 	got := f.store.recs[key]
 	// Round 1 is the self-review. The fix keeps the head, so it still covers the change.
 	cr := got.CompetingReviews()
-	if got.State != task.Reviewing || len(cr) != 2 || cr[0].Clean || !cr[1].Clean || cr[1].Round != 3 {
+	if got.State != task.WaitingForCI || len(cr) != 2 || cr[0].Clean || !cr[1].Clean || cr[1].Round != 3 {
 		t.Fatalf("state %s reviews %+v", got.State, got.Reviews)
 	}
 	if len(f.claude.resumed) != 1 || !strings.Contains(f.claude.resumed[0], "sid-1: Review round 2 of PR #912") || !strings.Contains(f.claude.resumed[0], "retry.go:40") {
@@ -114,7 +114,7 @@ func TestReviewLoopEscalatesAfterRoundCapAndResumesOnAnswer(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = f.store.recs[key]
-	if got.State != task.Reviewing || !got.LatestReview().Clean || len(got.CompetingReviews()) != 5 {
+	if got.State != task.WaitingForCI || !got.LatestReview().Clean || len(got.CompetingReviews()) != 5 {
 		t.Fatalf("after answer: state %s reviews %d", got.State, len(got.Reviews))
 	}
 	if !strings.Contains(f.claude.resumed[resumedBefore], "Decision: B. Leave the code as is") || !strings.Contains(f.claude.resumed[resumedBefore], "Review round 5 of PR #912 requested these changes") {
@@ -178,7 +178,7 @@ func TestCodexImplementationIsReviewedByClaude(t *testing.T) {
 	f.run(context.Background(), key, 4242, io.Discard)
 	got := f.store.recs[key]
 	// Codex's one review is its own self-review.
-	if got.State != task.Reviewing || len(f.claude.reviewed) != 1 || len(f.codex.reviewed) != 1 || got.LatestCompeting().Reviewer != task.Claude {
+	if got.State != task.WaitingForCI || len(f.claude.reviewed) != 1 || len(f.codex.reviewed) != 1 || got.LatestCompeting().Reviewer != task.Claude {
 		t.Fatalf("state %s claude reviews %d codex reviews %d", got.State, len(f.claude.reviewed), len(f.codex.reviewed))
 	}
 }
@@ -193,7 +193,7 @@ func TestCodexPRUsesCodexReviewWhenAxiConfirmsClaudeNotSetUp(t *testing.T) {
 	f.run(context.Background(), key, 4242, io.Discard)
 	got := f.store.recs[key]
 	// Codex self-reviews, then reviews again in a separate session in Claude's place.
-	if got.State != task.Reviewing || len(f.codex.reviewed) != 2 || len(f.claude.reviewed) != 0 || got.LatestCompeting().Reviewer != task.Codex || got.Delegation.Reviewer != task.Codex {
+	if got.State != task.WaitingForCI || len(f.codex.reviewed) != 2 || len(f.claude.reviewed) != 0 || got.LatestCompeting().Reviewer != task.Codex || got.Delegation.Reviewer != task.Codex {
 		t.Fatalf("state %s reviewer %s reviews %+v; codex %d claude %d", got.State, got.Delegation.Reviewer, got.Reviews, len(f.codex.reviewed), len(f.claude.reviewed))
 	}
 }
@@ -207,7 +207,7 @@ func TestCodexPRFallsBackToCodexReviewWhenClaudeAuthenticationFails(t *testing.T
 	f.claude.reviewErr = fmt.Errorf("OAuth session expired: %w", agent.ErrUnavailable)
 	f.run(context.Background(), key, 4242, io.Discard)
 	got := f.store.recs[key]
-	if got.State != task.Reviewing || len(f.claude.reviewed) != 1 || len(f.codex.reviewed) != 2 || got.LatestCompeting().Reviewer != task.Codex || got.Delegation.Reviewer != task.Codex {
+	if got.State != task.WaitingForCI || len(f.claude.reviewed) != 1 || len(f.codex.reviewed) != 2 || got.LatestCompeting().Reviewer != task.Codex || got.Delegation.Reviewer != task.Codex {
 		t.Fatalf("state %s reviewer %s reviews %+v; codex %d claude %d", got.State, got.Delegation.Reviewer, got.Reviews, len(f.codex.reviewed), len(f.claude.reviewed))
 	}
 	got.State = task.Failed
@@ -227,7 +227,7 @@ func TestFreshTurnCarriesOpenFindingsWhenSessionIsGone(t *testing.T) {
 	if !strings.Contains(f.claude.prompt, "## Outstanding review findings") || !strings.Contains(f.claude.prompt, "[blocking] 4xx retried (retry.go)") {
 		t.Errorf("fresh prompt lacks findings:\n%s", f.claude.prompt)
 	}
-	if got := f.store.recs[key]; got.State != task.Reviewing || !got.LatestReview().Clean {
+	if got := f.store.recs[key]; got.State != task.WaitingForCI || !got.LatestReview().Clean {
 		t.Errorf("state %s", got.State)
 	}
 }
@@ -493,7 +493,7 @@ func TestPlanIsPostedThenAFreshSessionImplementsIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.Reviewing || !got.PlanPosted() || len(got.Plan) != 4 {
+	if got.State != task.WaitingForCI || !got.PlanPosted() || len(got.Plan) != 4 {
 		t.Fatalf("state %s plan %+v", got.State, got.Plan)
 	}
 	for i, doc := range task.PlanDocs {
@@ -614,7 +614,7 @@ func TestCodexPlansAndClaudeReviewsWithoutThePRD(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.Reviewing || !got.PlanPosted() {
+	if got.State != task.WaitingForCI || !got.PlanPosted() {
 		t.Fatalf("state %s plan %+v", got.State, got.Plan)
 	}
 	if len(f.codex.prompts) != 2 || !strings.Contains(f.codex.prompts[0], "## Plan first") || !strings.Contains(f.codex.prompt, "- Implementation plan: https://github.com/") || len(f.codex.resumed) != 0 || got.Delegation.Implementer.ID != "th-2" {

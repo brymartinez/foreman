@@ -48,14 +48,14 @@ func eligible(e app.InboxEntry) bool {
 	return autoCandidate(e) && slices.Contains(e.Item.Labels, "triaged")
 }
 
-// active counts the slots in use: runs in WORKING or REVIEWING plus starts still in
+// active counts the slots in use: runs in a stage plus starts still in
 // flight. A start that has landed but is not yet read from disk stays in starting
 // until its result comes back, so it is never missed. Runs from a hidden source count
 // too, because the limit covers every run.
 func (m *Model) active() int {
 	n := len(m.starting)
 	for _, rec := range slices.Concat(m.Tasks, m.hidden) {
-		if (rec.State == task.Working || rec.State == task.Reviewing) && !m.starting[rec.Key] {
+		if rec.State.Active() && !m.starting[rec.Key] {
 			n++
 		}
 	}

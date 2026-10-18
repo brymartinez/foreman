@@ -966,7 +966,7 @@ func (m *Model) confirmCancel(k Key) Action {
 			if rec.Key != key {
 				continue
 			}
-			if (rec.State == task.Working || rec.State == task.Reviewing) && rec.Delegation != nil && rec.Delegation.RunnerPID != 0 {
+			if rec.State.Active() && rec.Delegation != nil && rec.Delegation.RunnerPID != 0 {
 				m.Message = fmt.Sprintf("Cancelling %s#%d…", rec.Repo, rec.Number)
 				return Action{Kind: ActionCancel, Cancel: rec}
 			}

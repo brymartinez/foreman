@@ -137,7 +137,7 @@ func TestGateSkipsFeedbackWhileARunnerWorks(t *testing.T) {
 	// The run's own hand-over check already read the conversation; count the gate's.
 	f.gh.prCommentReads = 0
 	refresh(t, f)
-	if got := f.store.recs[key]; got.State != task.Reviewing || f.gh.prCommentReads != 0 {
+	if got := f.store.recs[key]; got.State != task.WaitingForCI || f.gh.prCommentReads != 0 {
 		t.Fatalf("state = %s comment reads = %d", got.State, f.gh.prCommentReads)
 	}
 }

@@ -312,20 +312,41 @@ func duration(d time.Duration) string {
 }
 
 var phaseNames = map[task.Phase]string{
-	task.PhasePlanning:       "planning",
-	task.PhaseImplementation: "implementation",
-	task.PhaseReview:         "review and fixes",
-	task.PhaseCI:             "CI wait",
-	task.PhasePaused:         "paused",
+	task.PhasePlanning:          "planning",
+	task.PhaseImplementation:    "implementing",
+	task.PhaseSelfReview:        "self-review",
+	task.PhaseAdversarialReview: "adversarial review",
+	task.PhaseOpeningPR:         "opening PR",
+	task.PhaseCI:                "CI wait",
+	task.PhasePaused:            "paused",
 }
 
-// phaseParts are the detail's phase values: each measured phase, then the total.
+// phaseParts are the detail's phase values: each measured phase, then the total. An
+// attempt from before the stages shows its combined review time in place of the
+// review stages and opening PR, which it has no separate time for. Time it spent in
+// those stages after the upgrade still shows, so the parts add up to the total.
 func phaseParts(r app.HistoryRow) []string {
+	return timingParts(r, false)
+}
+
+// timingParts is phaseParts, without the stages that took no time when compact.
+func timingParts(r app.HistoryRow, compact bool) []string {
 	if r.Timing == app.TimingUnavailable || r.Phases == nil {
 		return []string{"phase times unavailable"}
 	}
 	var parts []string
 	for _, p := range task.MeasuredPhases {
+		if r.LegacyReview && (p == task.PhaseSelfReview || p == task.PhaseAdversarialReview || p == task.PhaseOpeningPR) {
+			if p == task.PhaseSelfReview {
+				parts = append(parts, "legacy review and fixes "+duration(r.Phases[task.PhaseReview]), "separate reviews unavailable")
+			}
+			if r.Phases[p] == 0 {
+				continue
+			}
+		}
+		if compact && r.Phases[p] == 0 {
+			continue
+		}
 		parts = append(parts, phaseNames[p]+" "+duration(r.Phases[p]))
 	}
 	if r.Timing == app.TimingNoHandoff {
@@ -343,13 +364,20 @@ func (m *Model) phaseLines() []string {
 	return phaseParts(*r)
 }
 
-// historyTiming renders the selected row's phase lines beside the list. The heading
-// is dropped first when the pane is too short for every line.
+// historyTiming renders the selected row's phase lines beside the list. When the pane
+// is too short for every line, the heading goes first, then the stages that took no
+// time, and then the last stages before the total, which always stays.
 func historyTiming(m Model, width, height int) []string {
 	var out []string
 	r := m.selectedHistory()
 	if r != nil {
 		parts := m.phaseLines()
+		if len(parts) > height {
+			parts = timingParts(*r, true)
+		}
+		if len(parts) > height {
+			parts = append(parts[:height-1], parts[len(parts)-1])
+		}
 		if height > len(parts) {
 			out = append(out, colored(pad("TIMING", width), cyan))
 		}

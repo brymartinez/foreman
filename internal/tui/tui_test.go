@@ -147,7 +147,7 @@ func TestApplyDropsAReportFetchedForTheOtherView(t *testing.T) {
 }
 
 func TestStartReportsTheBranchAndAFailure(t *testing.T) {
-	started := &task.Record{Key: task.Key{Repo: "a/b", Number: 1}, State: task.Working,
+	started := &task.Record{Key: task.Key{Repo: "a/b", Number: 1}, State: task.Implementing,
 		Delegation: &task.Delegation{Branch: "feat/1-add-a-dashboard"}}
 	got := start(context.Background(), stubSource{rec: started}, app.StartRequest{Repo: "a/b", Issue: 1}, false)
 	if got.err != nil || !strings.Contains(got.message, "feat/1-add-a-dashboard") {
@@ -184,7 +184,7 @@ func TestReadLocalTailsTheSelectedTasksLog(t *testing.T) {
 	if err := os.WriteFile(path, []byte("2026-09-29T10:00:00Z foreman: runner 42 started\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	rec := record(10, task.Working)
+	rec := record(10, task.Implementing)
 	rec.Delegation.RunnerLog = path
 	m := Model{Width: 100, Height: 30}
 	readLocal(context.Background(), stubSource{recs: []*task.Record{rec}}, &m)
@@ -210,7 +210,7 @@ func TestReadLogOpensOnlyAfterEnter(t *testing.T) {
 		if err := os.WriteFile(path, []byte("2026-09-29T10:00:00Z foreman: "+text+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		rec := record(10+i, task.Working)
+		rec := record(10+i, task.Implementing)
 		rec.Delegation.RunnerLog = path
 		recs = append(recs, rec)
 	}
@@ -246,7 +246,7 @@ func TestAScrolledBackLogHoldsItsLinesAsTheLogGrows(t *testing.T) {
 	if err := os.WriteFile(path, []byte(log.String()), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	rec := record(10, task.Working)
+	rec := record(10, task.Implementing)
 	rec.Delegation.RunnerLog = path
 	m := Model{Width: 100, Height: 30, Focus: TaskPane}
 	s := stubSource{recs: []*task.Record{rec}}
@@ -293,7 +293,7 @@ func visibleLog(m *Model) []string {
 
 func TestStartMakesTheContextFileAbsolute(t *testing.T) {
 	var got app.StartRequest
-	s := recordingSource{rec: &task.Record{Key: task.Key{Repo: "a/b", Number: 1}, State: task.Working,
+	s := recordingSource{rec: &task.Record{Key: task.Key{Repo: "a/b", Number: 1}, State: task.Implementing,
 		Delegation: &task.Delegation{Branch: "feat/1"}}, seen: &got}
 	start(context.Background(), s, app.StartRequest{Repo: "a/b", Issue: 1, ContextFile: "notes/825.md"}, false)
 	if !filepath.IsAbs(got.ContextFile) || !strings.HasSuffix(got.ContextFile, "notes/825.md") {
@@ -317,7 +317,7 @@ func (r recordingSource) Start(_ context.Context, req app.StartRequest) (*task.R
 }
 
 func TestFinishWaitsForAStartInFlight(t *testing.T) {
-	// App.Start records WORKING before it spawns the runner, so quitting in that
+	// App.Start records IMPLEMENTING before it spawns the runner, so quitting in that
 	// window must not return until the call comes back.
 	results := make(chan result, 1)
 	m := Model{Width: 100, Height: 30}
@@ -401,7 +401,7 @@ func (s autoSource) Start(_ context.Context, req app.StartRequest) (*task.Record
 	if s.fail[req.Issue] {
 		return nil, errors.New("clone failed")
 	}
-	return &task.Record{Key: task.Key{Repo: req.Repo, Number: req.Issue}, State: task.Working,
+	return &task.Record{Key: task.Key{Repo: req.Repo, Number: req.Issue}, State: task.Implementing,
 		Delegation: &task.Delegation{Branch: fmt.Sprintf("feat/%d", req.Issue)}}, nil
 }
 
@@ -478,7 +478,7 @@ func TestAutoStartWaitsWhenTheTaskReadFails(t *testing.T) {
 	}
 	broken := autoSource{stubSource: stubSource{err: errors.New("tasks dir unreadable")}}
 	if n := settle(context.Background(), broken, &m, receive(t, results), results); n != 0 {
-		t.Fatalf("launched %d after the task read failed; the first run may still be WORKING", n)
+		t.Fatalf("launched %d after the task read failed; the first run may still be IMPLEMENTING", n)
 	}
 	if n := launchAuto(context.Background(), broken, &m, results); n != 0 {
 		t.Fatalf("a local tick launched %d with the task read still failing", n)
@@ -489,7 +489,7 @@ func TestAutoStartAfterARefreshCountsARunStartedElsewhere(t *testing.T) {
 	m := Model{Width: 100, Height: 30, Refreshing: true}
 	m.SetAuto(Auto{Enabled: true, Agent: task.Claude, Max: 1})
 	// Another foreman command started a/b#10 while the refresh ran.
-	src := autoSource{stubSource: stubSource{recs: []*task.Record{record(10, task.Working)}}}
+	src := autoSource{stubSource: stubSource{recs: []*task.Record{record(10, task.Implementing)}}}
 	results := make(chan result, 8)
 	if n := settle(context.Background(), src, &m, refreshed(assigned("c/d", 1, 0)), results); n != 0 {
 		t.Fatalf("a refresh launched %d with the only slot taken by a run the dashboard had not read", n)
@@ -500,7 +500,7 @@ func TestTurningAutoOnCountsARunStartedElsewhere(t *testing.T) {
 	m := Model{Width: 100, Height: 30}
 	m.SetAuto(Auto{Max: 1})
 	m.SetInbox([]app.InboxEntry{assigned("c/d", 1, 0)})
-	src := autoSource{stubSource: stubSource{recs: []*task.Record{record(10, task.Working)}}}
+	src := autoSource{stubSource: stubSource{recs: []*task.Record{record(10, task.Implementing)}}}
 	m.Key(rune_('a'))
 	if n := launchAutoFresh(context.Background(), src, &m, make(chan result, 8)); n != 0 {
 		t.Fatalf("turning auto on launched %d with the only slot taken by a run the dashboard had not read", n)
@@ -588,7 +588,7 @@ func TestSettleAfterAFailedAnswerKeepsThePrompt(t *testing.T) {
 }
 
 func TestFinishWaitsForAnAnswerInFlight(t *testing.T) {
-	// The last answer records WORKING before App.Respond spawns the runner.
+	// The last answer records IMPLEMENTING before App.Respond spawns the runner.
 	results := make(chan result, 1)
 	m := prompting()
 	press(&m, Key{Kind: KeyEnter})
@@ -608,10 +608,10 @@ func TestFinishWaitsForAnAnswerInFlight(t *testing.T) {
 }
 
 func TestReadLocalShowsOnlyTheSelectedSourcesDelegatedWork(t *testing.T) {
-	gh := record(10, task.Working)
+	gh := record(10, task.Implementing)
 	gh.Source = task.GitHub
-	legacy := record(11, task.Working) // no source: a GitHub issue
-	lin := record(12, task.Working)
+	legacy := record(11, task.Implementing) // no source: a GitHub issue
+	lin := record(12, task.Implementing)
 	lin.Source = task.Linear
 	s := stubSource{recs: []*task.Record{gh, legacy, lin}}
 	for _, tc := range []struct {
@@ -641,9 +641,9 @@ func TestReadLocalShowsOnlyTheSelectedSourcesDelegatedWork(t *testing.T) {
 }
 
 func TestAHiddenTaskReturnsWhenTheSourceIncludesIt(t *testing.T) {
-	lin := record(12, task.Working)
+	lin := record(12, task.Implementing)
 	lin.Source = task.Linear
-	s := stubSource{recs: []*task.Record{record(10, task.Working), lin}}
+	s := stubSource{recs: []*task.Record{record(10, task.Implementing), lin}}
 	m := Model{Width: 100, Height: 30, IssueSource: task.GitHub}
 	readLocal(context.Background(), s, &m)
 	if len(m.Tasks) != 1 || len(s.recs) != 2 {

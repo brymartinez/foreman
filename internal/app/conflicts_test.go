@@ -50,7 +50,7 @@ func TestConflictRunsMergeTurnThenReview(t *testing.T) {
 		!strings.Contains(f.claude.resumed[0], "- retry.go\n") {
 		t.Fatalf("implementer not resumed with the merge: %q", f.claude.resumed)
 	}
-	if cr := got.CompetingReviews(); len(f.codex.reviewed) != 1 || got.State != task.Reviewing || len(cr) != 1 || cr[0].Head != "merge01" || got.Delegation.PRHead != "merge01" {
+	if cr := got.CompetingReviews(); len(f.codex.reviewed) != 1 || got.State != task.WaitingForCI || len(cr) != 1 || cr[0].Head != "merge01" || got.Delegation.PRHead != "merge01" {
 		t.Fatalf("state %s reviews %+v head %s", got.State, got.Reviews, got.Delegation.PRHead)
 	}
 	if len(f.wt.checks) != 2 {
@@ -68,7 +68,7 @@ func TestFreshMergeTurnWhenSessionIsGone(t *testing.T) {
 	if !strings.Contains(f.claude.prompt, "## Merge conflicts") || !strings.Contains(f.claude.prompt, "- retry.go\n") {
 		t.Errorf("fresh prompt lacks the merge:\n%s", f.claude.prompt)
 	}
-	if got.State != task.Reviewing || len(got.CompetingReviews()) != 1 {
+	if got.State != task.WaitingForCI || len(got.CompetingReviews()) != 1 {
 		t.Errorf("state %s reviews %d", got.State, len(got.CompetingReviews()))
 	}
 }
@@ -103,7 +103,7 @@ func TestMergeTurnDoesNotUseFixRound(t *testing.T) {
 	if len(f.claude.resumed) != 2 || !strings.Contains(f.claude.resumed[1], "conflicts with the latest origin/main") {
 		t.Fatalf("want a fix turn then a merge turn: %q", f.claude.resumed)
 	}
-	if got.State != task.Reviewing || len(got.CompetingReviews()) != 2 || !got.LatestReview().Clean || got.ChangeRequestsSinceDecision() != 1 {
+	if got.State != task.WaitingForCI || len(got.CompetingReviews()) != 2 || !got.LatestReview().Clean || got.ChangeRequestsSinceDecision() != 1 {
 		t.Fatalf("state %s reviews %d change requests %d", got.State, len(got.CompetingReviews()), got.ChangeRequestsSinceDecision())
 	}
 	if !strings.Contains(f.codex.reviewed[1], "review_rounds to 3.") {
@@ -142,7 +142,7 @@ func TestConflictCheckBeforeReviewingAnsweredFeedback(t *testing.T) {
 	movesHead(f, "d00d002")
 	f.wt.conflicts = [][]string{{"retry.go"}}
 	rec := resumeRun(t, f, key)
-	if len(f.wt.checks) != checks+2 || rec.State != task.Reviewing || rec.LatestReview().Head != "d00d002" {
+	if len(f.wt.checks) != checks+2 || rec.State != task.WaitingForCI || rec.LatestReview().Head != "d00d002" {
 		t.Fatalf("checks %d state %s", len(f.wt.checks)-checks, rec.State)
 	}
 	if last := f.claude.resumed[len(f.claude.resumed)-1]; !strings.Contains(last, "conflicts with the latest origin/main") {
@@ -199,7 +199,7 @@ func TestRespondAfterManualResolutionReviews(t *testing.T) {
 	if !strings.Contains(last, "Decision: A. I resolved the files in the worktree") {
 		t.Errorf("answer not delivered: %q", last)
 	}
-	if cr := got.CompetingReviews(); got.State != task.Reviewing || len(cr) != 1 || cr[0].Head != "merge01" {
+	if cr := got.CompetingReviews(); got.State != task.WaitingForCI || len(cr) != 1 || cr[0].Head != "merge01" {
 		t.Fatalf("state %s reviews %+v", got.State, got.Reviews)
 	}
 }
@@ -247,7 +247,7 @@ func TestRetargetedPRIsCheckedAgainstItsNewBase(t *testing.T) {
 	if last := f.wt.checks[len(f.wt.checks)-1]; last.Base != "release" {
 		t.Fatalf("checked against %s, want the PR's current base", last.Base)
 	}
-	if got.State != task.Reviewing || got.Delegation.BaseRef != "origin/release" || len(got.CompetingReviews()) != 1 {
+	if got.State != task.WaitingForCI || got.Delegation.BaseRef != "origin/release" || len(got.CompetingReviews()) != 1 {
 		t.Fatalf("state %s base %s reviews %d", got.State, got.Delegation.BaseRef, len(got.CompetingReviews()))
 	}
 	if p := f.codex.reviewed[len(f.codex.reviewed)-1]; !strings.Contains(p, "git diff origin/release...HEAD") {

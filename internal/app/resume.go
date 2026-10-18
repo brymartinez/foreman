@@ -24,7 +24,7 @@ func (a App) Resume(ctx context.Context, key task.Key) (*task.Record, error) {
 		if err := a.resumable(key, cur); err != nil {
 			return nil, err
 		}
-		cur.State = task.Working
+		cur.State = task.Implementing
 		cur.LastOutcome = &task.Outcome{Status: "resumed", Summary: feedbackNote(len(cur.UnhandledFeedback()), cur.Delegation.PR), At: a.Now()}
 		var err error
 		token, err = a.claimLaunch(cur)

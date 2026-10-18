@@ -6,10 +6,10 @@ func TestNextReviewIsTheSelfReviewUntilItPassesTheCurrentChange(t *testing.T) {
 	desc := ProposalDigest("feat: x", "Closes #7")
 	other := ProposalDigest("feat: x", "Closes #7, retries 5xx")
 	onPR := func(head, digest string, reviews ...Review) *Record {
-		return &Record{State: Reviewing, Delegation: &Delegation{PR: 7, PRHead: head, PRDigest: digest}, Reviews: reviews}
+		return &Record{State: SelfReviewing, Delegation: &Delegation{PR: 7, PRHead: head, PRDigest: digest}, Reviews: reviews}
 	}
 	local := func(head string, reviews ...Review) *Record {
-		return &Record{State: Working, Delegation: &Delegation{ReviewBeforePR: true, LocalHead: head, ProposedTitle: "feat: x", ProposedBody: "Closes #7"}, Reviews: reviews}
+		return &Record{State: Implementing, Delegation: &Delegation{ReviewBeforePR: true, LocalHead: head, ProposedTitle: "feat: x", ProposedBody: "Closes #7"}, Reviews: reviews}
 	}
 	for name, tc := range map[string]struct {
 		rec  *Record
@@ -51,10 +51,10 @@ func TestNextReviewIsTheSelfReviewUntilItPassesTheCurrentChange(t *testing.T) {
 func TestReviewPendingWaitsForTheCompetingReviewOfTheCurrentChange(t *testing.T) {
 	desc := ProposalDigest("feat: x", "Closes #7")
 	onPR := func(head string, reviews ...Review) *Record {
-		return &Record{State: Reviewing, Delegation: &Delegation{PR: 7, PRHead: head, PRDigest: desc}, Reviews: reviews}
+		return &Record{State: SelfReviewing, Delegation: &Delegation{PR: 7, PRHead: head, PRDigest: desc}, Reviews: reviews}
 	}
 	local := func(head string, reviews ...Review) *Record {
-		return &Record{State: Working, Delegation: &Delegation{ReviewBeforePR: true, LocalHead: head, ProposedTitle: "feat: x", ProposedBody: "Closes #7"}, Reviews: reviews}
+		return &Record{State: Implementing, Delegation: &Delegation{ReviewBeforePR: true, LocalHead: head, ProposedTitle: "feat: x", ProposedBody: "Closes #7"}, Reviews: reviews}
 	}
 	other := ProposalDigest("feat: x", "Closes #7, retries 5xx")
 	selfClean := Review{Kind: SelfReview, PR: 7, Head: "h1", Proposal: desc, Clean: true}
@@ -126,13 +126,6 @@ func TestChangeRequestsFromBothReviewersShareOneCount(t *testing.T) {
 	}
 	if got := rec.ChangeRequestsSinceDecision(); got != 3 {
 		t.Fatalf("ChangeRequestsSinceDecision() = %d, want 3", got)
-	}
-}
-
-func TestPhaseOfAReviewingTaskWithOnlyASelfReviewIsReview(t *testing.T) {
-	rec := Record{State: Reviewing, Delegation: &Delegation{PR: 7, PRHead: "h1"}, Reviews: []Review{{Kind: SelfReview, PR: 7, Head: "h1", Clean: true}}}
-	if got := rec.PhaseOf(); got != PhaseReview {
-		t.Fatalf("PhaseOf() = %q, want %q", got, PhaseReview)
 	}
 }
 

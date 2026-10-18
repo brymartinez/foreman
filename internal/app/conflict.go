@@ -39,7 +39,7 @@ func (a App) conflict(ctx context.Context, rec *task.Record, pr PullRequest) (*t
 		cd.ConflictAttempts = append(cd.ConflictAttempts, task.ConflictAttempt{Head: pr.HeadSHA, Base: base})
 		cd.ConflictPending = true
 		cd.PRHead = pr.HeadSHA
-		cur.State, cur.CI = task.Working, nil
+		cur.State, cur.CI = task.Implementing, nil
 		note = fmt.Sprintf("PR #%d conflicts with %s; %s is repairing it", cd.PR, pr.BaseRefName, cd.Implementer.Agent)
 		cur.LastOutcome = &task.Outcome{Status: "conflict_repair", Summary: note, At: a.Now()}
 		var err error

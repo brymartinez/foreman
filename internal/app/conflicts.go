@@ -56,13 +56,16 @@ func (a App) resolveConflicts(ctx, final context.Context, rec *task.Record, log 
 			return rec, false, err
 		}
 		fmt.Fprintf(log, "foreman: %s conflicts with origin/%s in %s; merging\n", subject, base, strings.Join(files, ", "))
+		if rec, err = a.update(final, rec.Key, existing(func(cur *task.Record) { cur.State = task.Implementing })); err != nil {
+			return rec, false, err
+		}
 		res := a.runTurn(ctx, rec, turnRequest{merge: &agent.MergeBrief{Base: base, Files: files}}, a.verifiedPR(log), log)
 		if res.err == nil && res.turn.Outcome.Status == agent.Blocked {
 			res.turn.Outcome.Questions = withConflicts(res.turn.Outcome.Questions, d.Worktree, base, files)
 		}
 		if rec, err = a.finishTurn(ctx, final, rec.Key, "merging the base branch", res, func(cur *task.Record) {
 			applyTurnResult(cur, res, a.Now())
-		}, log); err != nil || !(rec.State == task.Reviewing || local && rec.State == task.Working) {
+		}, log); err != nil || !(rec.State.Reviewing() || local && rec.State == task.Implementing) {
 			return rec, false, err
 		}
 	}

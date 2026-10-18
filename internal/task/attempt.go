@@ -7,22 +7,28 @@ import "time"
 type Phase string
 
 const (
-	PhasePlanning       Phase = "planning"
-	PhaseImplementation Phase = "implementation"
-	PhaseReview         Phase = "review" // review rounds and the fix turns between them
-	PhaseCI             Phase = "ci"
-	PhasePaused         Phase = "paused" // waiting on the developer: a decision, a failure, PR feedback
+	PhasePlanning          Phase = "planning"
+	PhaseImplementation    Phase = "implementation" // implementer turns, review fixes included
+	PhaseSelfReview        Phase = "self_review"
+	PhaseAdversarialReview Phase = "adversarial_review"
+	PhaseOpeningPR         Phase = "opening_pr"
+	PhaseCI                Phase = "ci"
+	PhasePaused            Phase = "paused" // waiting on the developer: a decision, a failure, PR feedback
 	// PhaseEnded is a handed-over, merged, or closed PR. It is not measured.
 	PhaseEnded Phase = "ended"
+	// PhaseReview is the review rounds and the fix turns between them together, as
+	// attempts recorded them before the stages. Foreman no longer writes it.
+	PhaseReview Phase = "review"
 )
 
 // MeasuredPhases lists the phases an attempt's total is split into, in display order.
-var MeasuredPhases = []Phase{PhasePlanning, PhaseImplementation, PhaseReview, PhaseCI, PhasePaused}
+// An attempt with legacy review time adds PhaseReview.
+var MeasuredPhases = []Phase{PhasePlanning, PhaseImplementation, PhaseSelfReview, PhaseAdversarialReview, PhaseOpeningPR, PhaseCI, PhasePaused}
 
-// ValidPhase reports whether p is a phase foreman writes.
+// ValidPhase reports whether p is a phase a task file may hold.
 func ValidPhase(p Phase) bool {
 	switch p {
-	case PhasePlanning, PhaseImplementation, PhaseReview, PhaseCI, PhasePaused, PhaseEnded:
+	case PhasePlanning, PhaseImplementation, PhaseSelfReview, PhaseAdversarialReview, PhaseOpeningPR, PhaseCI, PhasePaused, PhaseEnded, PhaseReview:
 		return true
 	}
 	return false
@@ -61,32 +67,41 @@ func (r *Record) CurrentAttempt() *Attempt {
 	return &r.Attempts[len(r.Attempts)-1]
 }
 
-// PhaseOf derives the current phase from the task's state and progress.
+// PhaseOf is the phase of the task's state: each stage is its own phase.
 func (r *Record) PhaseOf() Phase {
-	d := r.Delegation
-	if d == nil {
+	if r.Delegation == nil {
 		return ""
 	}
 	switch r.State {
-	case Working:
-		switch {
-		case d.PR != 0, r.LocalReview():
-			return PhaseReview
-		case r.PlanPosted():
-			return PhaseImplementation
-		}
+	case Planning:
 		return PhasePlanning
-	case Reviewing:
-		if latest := r.LatestCompeting(); latest != nil && latest.Clean && d.PR != 0 && latest.PR == d.PR && latest.Head != "" && latest.Head == d.PRHead {
-			return PhaseCI
-		}
-		return PhaseReview
+	case Implementing:
+		return PhaseImplementation
+	case SelfReviewing:
+		return PhaseSelfReview
+	case AdversarialReviewing:
+		return PhaseAdversarialReview
+	case OpeningPR:
+		return PhaseOpeningPR
+	case WaitingForCI:
+		return PhaseCI
 	case NeedsDecision, Failed, Reviewed:
 		return PhasePaused
 	case ReadyForHuman, Done, PRClosed:
 		return PhaseEnded
 	}
 	return ""
+}
+
+// LegacyReview reports an attempt with time in the old combined review phase. Its
+// review and fix time cannot be split into the stages afterwards.
+func (a *Attempt) LegacyReview() bool {
+	for _, m := range a.Marks {
+		if m.Phase == PhaseReview {
+			return true
+		}
+	}
+	return false
 }
 
 // Track records the current phase on the current attempt. It is called on every task

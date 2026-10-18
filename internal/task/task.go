@@ -35,10 +35,21 @@ func (a Agent) Reviewer() Agent {
 type State string
 
 const (
-	Discovered    State = "DISCOVERED"
-	Working       State = "WORKING"
+	Discovered State = "DISCOVERED"
+	// The stages name what a delegated task is doing now. Foreman writes each one
+	// before the agent turn it names, so a refresh or a restart shows the step that runs.
+	Planning     State = "PLANNING"
+	Implementing State = "IMPLEMENTING" // an implementer turn: code, a fix, an answer, a merge
+	// SelfReviewing and AdversarialReviewing are the implementer's own review and the
+	// competing agent's review of the current change.
+	SelfReviewing        State = "SELF_REVIEW"
+	AdversarialReviewing State = "ADVERSARIAL_REVIEW"
+	// OpeningPR is the turn that pushes a cleanly reviewed local commit and opens its PR.
+	OpeningPR State = "OPENING_PR"
+	// WaitingForCI is a PR with a clean adversarial review, waiting for the gate to
+	// read CI. No agent turn runs for it.
+	WaitingForCI  State = "WAITING_FOR_CI"
 	NeedsDecision State = "NEEDS_DECISION"
-	Reviewing     State = "REVIEWING"
 	ReadyForHuman State = "READY_FOR_HUMAN"
 	// Reviewed means the developer commented on the task's pull request and the agent
 	// has not answered yet. Resuming the task hands it those comments.
@@ -48,7 +59,26 @@ const (
 	// PRClosed means the task's PR was closed without merging. The agent did not
 	// fail, so the task keeps its file and branch. Cleanup may remove its worktree.
 	PRClosed State = "PR_CLOSED"
+	// LegacyWorking and LegacyReviewing are the states task files held before the
+	// stages. Foreman never writes them; UpgradeState maps them when a file is read.
+	LegacyWorking   State = "WORKING"
+	LegacyReviewing State = "REVIEWING"
 )
+
+// Active reports a stage: the task is delegated work in progress.
+func (s State) Active() bool {
+	switch s {
+	case Planning, Implementing, SelfReviewing, AdversarialReviewing, OpeningPR, WaitingForCI:
+		return true
+	}
+	return false
+}
+
+// Runnable reports a stage that ends in an agent turn, which a launch starts a runner for.
+func (s State) Runnable() bool { return s.Active() && s != WaitingForCI }
+
+// Reviewing reports either review stage.
+func (s State) Reviewing() bool { return s == SelfReviewing || s == AdversarialReviewing }
 
 // Repo is "owner/name", as gh reports nameWithOwner.
 type Repo string
@@ -769,4 +799,48 @@ func (r *Record) coversLocal(review *Review) bool {
 // PR on GitHub can differ from the reviewed text in those alone.
 func ProposalDigest(title, body string) string {
 	return Digest(strings.TrimSpace(title) + "\n\n" + strings.TrimSpace(strings.ReplaceAll(body, "\r\n", "\n")))
+}
+
+// ReviewStage is the stage of the review the current change needs next.
+func (r *Record) ReviewStage() State {
+	if r.NextReview() == SelfReview {
+		return SelfReviewing
+	}
+	return AdversarialReviewing
+}
+
+// NextStage is the stage a run started now begins with. It follows the runner's own
+// order: a conflict repair or an undelivered answer goes to the implementer, then a
+// reviewed local commit opens its PR, then a change without its reviews is reviewed,
+// then the plan, then implementation.
+func (r *Record) NextStage() State {
+	d := r.Delegation
+	switch {
+	case d == nil:
+		return Planning
+	case d.ConflictPending:
+		return Implementing
+	case r.OpenPending():
+		return OpeningPR
+	case r.ReviewPending():
+		return r.ReviewStage()
+	case !r.PlanPosted() && d.PR == 0:
+		return Planning
+	}
+	return Implementing
+}
+
+// UpgradeState maps a state from before the stages to the stage the record shows is
+// current. A REVIEWING task whose clean competing review covers the recorded change
+// waits for CI. The next write saves the new state.
+func (r *Record) UpgradeState() {
+	switch r.State {
+	case LegacyWorking:
+		r.State = r.NextStage()
+	case LegacyReviewing:
+		r.State = r.NextStage()
+		if latest := r.LatestCompeting(); r.Delegation != nil && r.Delegation.PR != 0 && r.competingCovers(latest) && latest.Clean {
+			r.State = WaitingForCI
+		}
+	}
 }

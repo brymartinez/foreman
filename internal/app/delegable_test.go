@@ -31,8 +31,8 @@ func TestDelegableHidesDelegatedWorkInProgress(t *testing.T) {
 	}
 	report := InboxReport{Current: []InboxEntry{
 		{Item: InboxItem{Key: task.Key{Repo: "a/one", Number: 1}, Kind: task.Issue, Title: "Never delegated"}},
-		entry(2, task.Working),
-		entry(3, task.Reviewing),
+		entry(2, task.Implementing),
+		entry(3, task.WaitingForCI),
 		entry(4, task.NeedsDecision),
 		entry(5, task.ReadyForHuman),
 		entry(6, task.Failed),

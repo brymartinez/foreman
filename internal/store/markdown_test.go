@@ -22,7 +22,7 @@ func delegated() *task.Record {
 		Kind:  task.Issue,
 		Title: "Provider retries",
 		URL:   "https://github.com/testorg/example/issues/825",
-		State: task.Working,
+		State: task.Implementing,
 		Delegation: &task.Delegation{
 			Implementer:       task.Session{Agent: task.Claude, ID: "d46213bb-3c77-45e9-9d7c-52856e03ab18"},
 			StartedAt:         time.Date(2026, 9, 24, 16, 0, 0, 0, time.UTC),
@@ -237,7 +237,7 @@ func TestFileMatchesDesignDocShape(t *testing.T) {
 	raw, _ := os.ReadFile(filepath.Join(s.Dir, "testorg-example-825.md"))
 	for _, line := range []string{
 		"---\nrepo: testorg/example\nnumber: 825\n",
-		"\nstate: WORKING\n",
+		"\nstate: IMPLEMENTING\n",
 		"\nimplementation_agent: claude\n",
 		"\nreview_agent: codex\n",
 		"\nbranch: agent/825-provider-retries\n",
@@ -275,7 +275,7 @@ func TestSavePreservesUserFrontmatterAndBody(t *testing.T) {
 	path := filepath.Join(s.Dir, "testorg-example-825.md")
 	raw, _ := os.ReadFile(path)
 	edited := strings.Replace(string(raw), "---\nrepo:", "---\n# my note\ntags: [work, retries]\nrepo:", 1)
-	edited = strings.Replace(edited, "state: WORKING", "state: WORKING # watching this one", 1)
+	edited = strings.Replace(edited, "state: IMPLEMENTING", "state: IMPLEMENTING # watching this one", 1)
 	edited += "\nHuman notes added in Obsidian.\n"
 	if err := os.WriteFile(path, []byte(edited), 0o644); err != nil {
 		t.Fatal(err)
@@ -285,7 +285,7 @@ func TestSavePreservesUserFrontmatterAndBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	loaded.State = task.Reviewing
+	loaded.State = task.WaitingForCI
 	loaded.Delegation.PR = 912
 	if err := s.Save(ctx, loaded); err != nil {
 		t.Fatal(err)
@@ -293,7 +293,7 @@ func TestSavePreservesUserFrontmatterAndBody(t *testing.T) {
 	out, _ := os.ReadFile(path)
 	for _, want := range []string{
 		"# my note\ntags: [work, retries]\nrepo:",
-		"state: REVIEWING # watching this one",
+		"state: WAITING_FOR_CI # watching this one",
 		"pr: 912",
 		"Human notes added in Obsidian.\n",
 	} {
@@ -707,5 +707,66 @@ func TestStoreRejectsAReviewOfUnknownKind(t *testing.T) {
 	}
 	if _, err := s.Get(ctx, task.Key{Repo: "a/b", Number: 3}); err == nil || !strings.Contains(err.Error(), "unknown kind") {
 		t.Fatalf("Get() error = %v, want an unknown kind error", err)
+	}
+}
+
+func TestEachStageRoundTrips(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	for _, state := range []task.State{task.Planning, task.Implementing, task.SelfReviewing, task.AdversarialReviewing, task.OpeningPR, task.WaitingForCI} {
+		rec := delegated()
+		rec.State = state
+		if err := s.Save(ctx, rec); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.Get(ctx, rec.Key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.State != state {
+			t.Errorf("saved %s, loaded %s", state, got.State)
+		}
+	}
+}
+
+func TestOldStatesLoadAsTheCurrentStage(t *testing.T) {
+	const head = "---\nrepo: a/b\nnumber: 3\nkind: issue\nimplementation_agent: claude\nbranch: feat/3-x\n"
+	const plan = "plan:\n  - {doc: analysis, url: u}\n  - {doc: prd, url: u}\n  - {doc: design, url: u}\n  - {doc: plan, url: u}\n"
+	const cleanReview = "reviews:\n  - {round: 1, kind: self, reviewer: claude, pr: 4, head: h1, verdict: clean, summary: ok, at: 2026-09-24T18:00:00Z}\n  - {round: 2, reviewer: codex, pr: 4, head: h1, verdict: clean, summary: ok, at: 2026-09-24T18:10:00Z}\n"
+	for name, tc := range map[string]struct {
+		file string
+		want task.State
+	}{
+		"working without a plan plans":                       {head + "state: WORKING\n---\n", task.Planning},
+		"working with a plan implements":                     {head + "state: WORKING\n" + plan + "---\n", task.Implementing},
+		"working on an unreviewed local commit self-reviews": {head + "state: WORKING\nreview_before_pr: true\nlocal_head: h1\nproposed_title: t\nproposed_body: b\n" + plan + "---\n", task.SelfReviewing},
+		"reviewing an unreviewed PR self-reviews":            {head + "state: REVIEWING\npr: 4\npr_head: h1\n" + plan + "---\n", task.SelfReviewing},
+		"reviewing a cleanly reviewed PR waits for CI":       {head + "state: REVIEWING\npr: 4\npr_head: h1\n" + plan + cleanReview + "---\n", task.WaitingForCI},
+	} {
+		s := Markdown{Dir: t.TempDir()}
+		if err := os.WriteFile(filepath.Join(s.Dir, "a-b-3.md"), []byte(tc.file), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.Get(ctx, task.Key{Repo: "a/b", Number: 3})
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got.State != tc.want {
+			t.Errorf("%s: loaded %s, want %s", name, got.State, tc.want)
+		}
+	}
+}
+
+func TestOldReviewPhaseMarksStillLoad(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	old := "---\nrepo: a/b\nnumber: 3\nkind: issue\nstate: READY_FOR_HUMAN\nimplementation_agent: claude\nattempts:\n  - started_at: 2026-10-01T09:00:00Z\n    marks:\n      - at: 2026-10-01T09:00:00Z\n        phase: review\n---\n"
+	if err := os.WriteFile(filepath.Join(s.Dir, "a-b-3.md"), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, task.Key{Repo: "a/b", Number: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Attempts[0].LegacyReview() {
+		t.Fatalf("attempts = %+v, want the legacy review mark", got.Attempts)
 	}
 }

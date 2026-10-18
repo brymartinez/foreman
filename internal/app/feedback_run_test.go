@@ -74,7 +74,7 @@ func TestDisabledPRFeedbackKeepsCIUnverifiedAfterFailedReply(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := f.store.recs[key]
-	if rec.State != task.Reviewing || len(rec.Feedback) != 0 || len(f.claude.resumed) != 0 {
+	if rec.State != task.WaitingForCI || len(rec.Feedback) != 0 || len(f.claude.resumed) != 0 {
 		t.Fatalf("state %s, feedback %+v, resumed turns %d", rec.State, rec.Feedback, len(f.claude.resumed))
 	}
 }
@@ -124,7 +124,7 @@ func TestFeedbackTurnWithCommitsIsReviewed(t *testing.T) {
 	if got := len(rec.CompetingReviews()); got != reviews+1 || !rec.SelfReviewPassed() {
 		t.Fatalf("%d competing review rounds, want %d after a self-review of the new head", got, reviews+1)
 	}
-	if rec.State != task.Reviewing || rec.CI != nil {
+	if rec.State != task.WaitingForCI || rec.CI != nil {
 		t.Fatalf("state = %s ci = %+v; the gate must check CI for the new head", rec.State, rec.CI)
 	}
 	if n := len(rec.UnhandledFeedback()); n != 0 {
@@ -244,7 +244,7 @@ func TestCommentsDuringARunAreAnsweredBeforeHandover(t *testing.T) {
 	if f.claude.starts != 1 {
 		t.Errorf("implementer started %d times", f.claude.starts)
 	}
-	if rec.State != task.Reviewing || len(rec.CompetingReviews()) != 1 {
+	if rec.State != task.WaitingForCI || len(rec.CompetingReviews()) != 1 {
 		t.Errorf("state = %s reviews = %d; the clean review still stands", rec.State, len(rec.CompetingReviews()))
 	}
 }
@@ -358,5 +358,28 @@ func TestFeedbackRestartDoesNotHandOverANewCommitWithoutReviews(t *testing.T) {
 		if len(got.Reviews) != reviews+2 || !strings.HasSuffix(kinds(got), "self competing") || got.LatestCompeting().Head != "c0ffee9" {
 			t.Errorf("replies %v: state %s reviews %s; want a self-review and a competing review of the new commit", replies, got.State, kinds(got))
 		}
+	}
+}
+
+func TestADescriptionEditedDuringAnAnswerIsReviewedInTheSameRun(t *testing.T) {
+	f := newFixture()
+	key := waiting(t, f)
+	reviews, starts := len(f.store.recs[key].Reviews), f.claude.starts
+	f.claude.turn = prTurn("sid-1")
+	edited := "Retry 5xx and 429.\n\nCloses #825"
+	// The developer edits the description while the agent answers the comment, so
+	// the run reads the edit only with the turn's PR.
+	f.claude.onResume = func() {
+		pr := f.gh.prs[912]
+		pr.Body = edited
+		f.gh.prs[912] = pr
+	}
+	rec := resumeRun(t, f, key)
+	pr := f.gh.prs[912]
+	if len(rec.Reviews) != reviews+2 || !strings.HasSuffix(kinds(rec), "self competing") || rec.LatestCompeting().Proposal != task.ProposalDigest(pr.Title, pr.Body) {
+		t.Fatalf("state %s reviews %s; want a self-review and a competing review of the edited description", rec.State, kinds(rec))
+	}
+	if rec.State.Reviewing() || len(f.claude.resumed) != 1 || f.claude.starts != starts {
+		t.Fatalf("state %s, resumed %d, fresh starts %d; want no further implementer turn", rec.State, len(f.claude.resumed), f.claude.starts-starts)
 	}
 }

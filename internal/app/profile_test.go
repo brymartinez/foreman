@@ -132,7 +132,7 @@ func TestRouteLineKeepsTheReasonOnOneLine(t *testing.T) {
 func TestImplementTurnCarriesProfile(t *testing.T) {
 	f := newFixture()
 	key := failedRouted(f)
-	f.store.recs[key].State = task.Working
+	f.store.recs[key].State = task.Implementing
 	f.store.recs[key].Decisions = []task.Decision{{Question: task.Question{Issue: "q"}, Answer: "A", AnsweredAt: now}}
 	f.codex.turn = agent.Turn{Outcome: agent.Outcome{Status: agent.FailedRun, Summary: "stuck"}}
 	if err := f.run(context.Background(), key, 4242, &bytes.Buffer{}); err != nil {

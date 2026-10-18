@@ -13,7 +13,7 @@ import (
 
 func TestInboxStopsCheckingAnIssueGitHubNoLongerHas(t *testing.T) {
 	gone := seen(2, task.Discovered, "open", t0, task.Assigned)
-	delegated := seen(3, task.Reviewing, "open", t0, task.Assigned)
+	delegated := seen(3, task.WaitingForCI, "open", t0, task.Assigned)
 	delegated.Delegation = &task.Delegation{}
 	store := &fakeStore{recs: map[task.Key]*task.Record{gone.Key: gone, delegated.Key: delegated}}
 	notFound := fmt.Errorf("%w: gh: Not Found (HTTP 404)", ErrGone)

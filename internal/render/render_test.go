@@ -12,13 +12,13 @@ import (
 
 func TestTaskRowsCarryStateAndBadges(t *testing.T) {
 	rows := TaskRows(&task.Record{
-		Key: task.Key{Repo: "testorg/example", Number: 831}, Title: "Provider retries", State: task.Reviewing,
+		Key: task.Key{Repo: "testorg/example", Number: 831}, Title: "Provider retries", State: task.WaitingForCI,
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912},
 		CI:         &task.CIStatus{State: task.CIPassing},
 		Reviews:    []task.Review{{Round: 1, Clean: true}},
 	})
 	want := []string{
-		"testorg/example#831       Claude  REVIEWING",
+		"testorg/example#831       Claude  WAITING_FOR_CI",
 		"Provider retries",
 		"PR #912 · reviewer: Codex · CI ✓ · review ✓",
 	}
@@ -26,7 +26,7 @@ func TestTaskRowsCarryStateAndBadges(t *testing.T) {
 		t.Fatalf("TaskRows = %q\nwant %q", rows, want)
 	}
 	rows = TaskRows(&task.Record{
-		Key: task.Key{Repo: "a/b", Number: 7}, Title: "No PR yet", State: task.Working,
+		Key: task.Key{Repo: "a/b", Number: 7}, Title: "No PR yet", State: task.Implementing,
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex}, Reviewer: task.Claude},
 	})
 	if len(rows) != 2 {
@@ -35,7 +35,7 @@ func TestTaskRowsCarryStateAndBadges(t *testing.T) {
 }
 
 func TestLinearDelegatedTaskShowsItsIdentifier(t *testing.T) {
-	rec := &task.Record{Key: task.Key{Repo: "acme/linear", Source: task.Linear, ExternalID: "uuid-7"}, Identifier: "LIN-7", State: task.Working, Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}}}
+	rec := &task.Record{Key: task.Key{Repo: "acme/linear", Source: task.Linear, ExternalID: "uuid-7"}, Identifier: "LIN-7", State: task.Implementing, Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}}}
 	if identity, _, _ := TaskHead(rec); identity != "acme/linear · LIN-7" {
 		t.Fatalf("task identity = %q", identity)
 	}
@@ -65,7 +65,7 @@ func TestTaskPRKeepsTheStatesInItsShortForms(t *testing.T) {
 		{task.CIStatus{State: task.CIPending}, []task.Review{{Round: 2, Kind: task.SelfReview, Clean: true}}, "CI pending", "self-review ✓", "self-review ✓"},
 	} {
 		s := TaskPR(&task.Record{
-			Key: task.Key{Repo: "a/b", Number: 831}, State: task.Reviewing, CI: &tc.ci, Reviews: tc.reviews,
+			Key: task.Key{Repo: "a/b", Number: 831}, State: task.WaitingForCI, CI: &tc.ci, Reviews: tc.reviews,
 			Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912},
 		})
 		if s.PR != "PR #912" || s.Reviewer != "reviewer: Codex" {
@@ -140,7 +140,7 @@ func TestShowClaudeTranscript(t *testing.T) {
 func TestShowPlanLinks(t *testing.T) {
 	var buf bytes.Buffer
 	Show(&buf, &task.Record{
-		Key: task.Key{Repo: "a/b", Number: 7}, State: task.Working,
+		Key: task.Key{Repo: "a/b", Number: 7}, State: task.Implementing,
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex}, Reviewer: task.Claude},
 		Plan:       []task.PlanComment{{Doc: task.Analysis, URL: "https://x/1"}, {Doc: task.PRD, URL: "https://x/2"}},
 	})
@@ -211,7 +211,7 @@ Answer it: press Enter on the task in the dashboard.
 func TestShowPRAndValidation(t *testing.T) {
 	var buf bytes.Buffer
 	Show(&buf, &task.Record{
-		Key: task.Key{Repo: "a/b", Number: 825}, Title: "T", State: task.Reviewing,
+		Key: task.Key{Repo: "a/b", Number: 825}, Title: "T", State: task.WaitingForCI,
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912, PRURL: "https://github.com/a/b/pull/912"},
 		Validation: []task.Check{{Command: "go test ./...", Passed: true}, {Command: "golangci-lint run", Passed: false}},
 	})
@@ -225,7 +225,7 @@ func TestShowPRAndValidation(t *testing.T) {
 func TestShowLatestReview(t *testing.T) {
 	var buf bytes.Buffer
 	Show(&buf, &task.Record{
-		Key: task.Key{Repo: "a/b", Number: 1}, State: task.Working,
+		Key: task.Key{Repo: "a/b", Number: 1}, State: task.Implementing,
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912},
 		Reviews: []task.Review{{Round: 1, Clean: true}, {Round: 2, Reviewer: task.Codex, Summary: "one bug",
 			Findings: []task.Finding{{Severity: "blocking", File: "retry.go", Line: 40, Summary: "4xx retried"}}}},
@@ -240,7 +240,7 @@ func TestShowLatestReview(t *testing.T) {
 func TestShowLabelsASelfReview(t *testing.T) {
 	var buf bytes.Buffer
 	Show(&buf, &task.Record{
-		Key: task.Key{Repo: "a/b", Number: 1}, State: task.Working,
+		Key: task.Key{Repo: "a/b", Number: 1}, State: task.Implementing,
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912},
 		Reviews:    []task.Review{{Round: 1, Kind: task.SelfReview, Reviewer: task.Claude, Findings: []task.Finding{{Severity: "blocking", Summary: "no test"}}}},
 	})
@@ -252,7 +252,7 @@ func TestShowLabelsASelfReview(t *testing.T) {
 func TestShowPrintsProfileAndReason(t *testing.T) {
 	var buf bytes.Buffer
 	Show(&buf, &task.Record{
-		Key: task.Key{Repo: "a/b", Number: 7}, State: task.Working,
+		Key: task.Key{Repo: "a/b", Number: 7}, State: task.Implementing,
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex}, Reviewer: task.Claude, RouteReason: "narrow, well-specified change",
 			Profile: &task.Profile{Name: "codex", Agent: task.Codex, PlanModel: "gpt-6-luna", PlanReasoningEffort: "xhigh", Model: "gpt-6-sol", ReasoningEffort: "medium"}},
 	})
@@ -260,7 +260,7 @@ func TestShowPrintsProfileAndReason(t *testing.T) {
 		t.Errorf("missing profile in:\n%s", buf.String())
 	}
 	buf.Reset()
-	Show(&buf, &task.Record{Key: task.Key{Repo: "a/b", Number: 7}, State: task.Working,
+	Show(&buf, &task.Record{Key: task.Key{Repo: "a/b", Number: 7}, State: task.Implementing,
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex}})
 	if strings.Contains(buf.String(), "Profile") {
 		t.Errorf("an unrouted task shows a profile:\n%s", buf.String())

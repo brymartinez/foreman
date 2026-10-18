@@ -199,7 +199,7 @@ func (s *routeSource) Route(_ context.Context, req app.RouteRequest) (app.Decisi
 
 func (s *routeSource) Start(_ context.Context, req app.StartRequest) (*task.Record, error) {
 	s.starts = append(s.starts, req)
-	return &task.Record{Key: task.Key{Repo: req.Repo, Number: req.Issue}, State: task.Working,
+	return &task.Record{Key: task.Key{Repo: req.Repo, Number: req.Issue}, State: task.Implementing,
 		Delegation: &task.Delegation{Branch: "feat/1-x", Profile: req.Profile}}, nil
 }
 

@@ -46,24 +46,27 @@ Every agent interaction is one headless turn that runs to completion and returns
 app.Start, from the dashboard (enter on an inbox issue, or auto mode)
   ├─ gh: repo + default branch of the managed clone, fetch issue
   ├─ git: ensure worktree <root>/<owner>-<repo>/<branch> with branch slashes as directories
-  ├─ store: task file, state WORKING, session id, launch claim (one locked write)
+  ├─ store: task file, first stage (Record.NextStage), session id, launch claim
+  │         (one locked write)
   ├─ pin: the active gh account (kept on restarts), worktree commit identity, SSH
   │       push account check; a mismatch is FAILED and nothing launches
   └─ spawn detached `foreman __run owner/repo#825` with the claim's token in
      FOREMAN_LAUNCH (pid + log recorded), exit
 
-runner (one process per task, exits when the task leaves WORKING/REVIEWING):
-  if the gate flagged a merge conflict:
+runner (one process per task; before each agent turn it writes the stage that turn
+runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR):
+  if the gate flagged a merge conflict (IMPLEMENTING):
     turn = implementer.Resume(session, merge origin/<base>, resolve, validate, push)
     pr_opened, same PR, head moved, new head contains the base head, every
-                    reported check passed -> REVIEWING, then the review below
+                    reported check passed -> SELF_REVIEW, then the review below
     blocked      -> NEEDS_DECISION with the agent's questions, exit
     anything else -> NEEDS_DECISION, "merge again" or "I fixed it", exit
     (a repair runner that cannot spawn or dies is also NEEDS_DECISION)
   if the verified PR head has no review (crash mid-review, or new commits):
     re-verify the PR, record its head, skip to the review below
   turn = implementer.Start(worktree, prompt)          # later: Resume(session, msg)
-  until every planning document is on the issue (and no PR exists), the turn plans:
+  until every planning document is on the issue (and no PR exists), the turn plans
+  (PLANNING, through the posting of the four comments; IMPLEMENTING after):
     planned      -> gh: post analysis, PRD, design, and plan as four issue comments
                     (edit the earlier comments on a re-plan), record their ids and URLs,
                     then turn = implementer.Start(new session, posted plan links)
@@ -76,7 +79,7 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
     blocked      -> save each of Questions as a decision, state NEEDS_DECISION, exit
     failed       -> state FAILED, exit
     pr_opened    -> (the agent pushed and ran gh pr create) gh: confirm PR exists
-                    record PR and its head commit, state REVIEWING
+                    record PR and its head commit, state SELF_REVIEW
                     before every review: git fetch base and branch, then
                       git merge-tree origin/<branch> origin/<base>
                       clean    -> review; the branch is left as is
@@ -84,16 +87,16 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
                                   rebase or force-push, push); recheck; after two
                                   turns still conflicting -> NEEDS_DECISION, exit
                     read the PR description and store its digest beside the head
-                    self = implementer.Review(disposable read-only session,
+                    SELF_REVIEW: self = implementer.Review(disposable read-only session,
                                               PR description + git diff), until a clean
                                               one covers this head and description
                     self error -> FAILED, exit (never falls back to the competing review)
                     self clean -> the competing review of the same change, in this run
-                    review = reviewer.Review(disposable read-only session,
-                                             PR description + PR comments + git diff +
-                                             earlier competing rounds)
-                    clean    -> record review and the head it covered; stay REVIEWING, exit
-                    findings (either review) -> WORKING; implementer.Resume(session,
+                    ADVERSARIAL_REVIEW: review = reviewer.Review(disposable read-only
+                                             session, PR description + PR comments +
+                                             git diff + earlier competing rounds)
+                    clean    -> record review and the head it covered; WAITING_FOR_CI, exit
+                    findings (either review) -> IMPLEMENTING; implementer.Resume(session,
                                 findings); agent pushes fixes and reports pr_opened
                                 again; re-verify; self-review, then re-review
                     findings after fix_rounds reviewed fixes since the last answer ->
@@ -105,7 +108,7 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
   review_ready instead of pr_opened (pr_opened there fails the task):
     review_ready -> verify the branch, a clean worktree, and a new descendant commit,
                     and that no PR is open and origin has no such branch (else FAILED);
-                    save the commit with the proposed PR title and description, WORKING
+                    save the commit with the proposed PR title and description
                     before every review: git fetch base, then
                       git merge-tree HEAD origin/<base>
                       conflict -> implementer.Resume(session, merge the base locally, no
@@ -113,18 +116,20 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
                     self = implementer.Review(proposed description + git diff), as above
                     review = reviewer.Review(proposed description + git diff +
                                              earlier competing rounds)
-                    findings -> implementer.Resume(session, findings); fix, commit locally,
+                    findings -> IMPLEMENTING; implementer.Resume(session, findings); fix,
+                                commit locally,
                                 review_ready again with the updated description;
                                 self-review, then re-review
                     findings after fix_rounds reviewed fixes since the last answer ->
                                 NEEDS_DECISION as above, with stop (no PR) in place of
                                 accept, exit
-                    clean    -> an open PR for the branch with the reviewed head, title,
-                                and description is adopted; otherwise
+                    clean    -> OPENING_PR: an open PR for the branch with the reviewed
+                                head, title, and description is adopted; otherwise
                                 implementer turn: push exactly that commit, gh pr create
                                 with that title and --body-file; gh: confirm the PR and its
                                 head, title, and body match the review (mismatch -> FAILED)
-                                record PR and head, the clean review covers it, REVIEWING, exit
+                                record PR and head, the clean review covers it,
+                                WAITING_FOR_CI, exit
   a stop answered at the fix limit -> FAILED with the unresolved findings; any PR and
   branch stay, and the task is never handed over
   when the loop ends on a clean review, or at a self-review fix limit diagnosed as a
@@ -149,7 +154,7 @@ foreman __learn       -> one evaluation of one task; output goes to <log_dir>/le
 app.Resume            -> disabled for legacy REVIEWED tasks; the next refresh
                          returns them to READY_FOR_HUMAN
 app.Respond           -> answer each waiting question in order; after the last,
-                         state WORKING, spawn runner
+                         the record's next stage, spawn runner
                          runner: Resume(session, all answers); on ErrNoSession, a fresh
                          Start whose prompt lists all recorded decisions
 app.Cancel            -> SIGTERM the runner, wait up to 30s for it to exit
@@ -210,20 +215,24 @@ foreman [-a|--auto|--no-auto] [-s github|linear|all] [--mentions|--no-mentions]
                            on: app.Route, then app.Start with the profile, no
                            confirmation; a wait holds the issue until the next refresh
 
-app.InboxView         -> runner pid dead while WORKING/REVIEWING -> FAILED
+app.InboxView         -> runner pid dead in a stage -> FAILED
                          runner pid dead in any other state -> clear the pid
                          readiness gate (gate.go), per task with a PR:
                            PR closed  -> stop the runner, PR_CLOSED
-                           PR reopened -> READY_FOR_HUMAN or REVIEWING
+                           PR reopened -> READY_FOR_HUMAN or WAITING_FOR_CI with a clean
+                             review of its head and description, else the stage it needs
+                           review stage, no runner, clean review of an earlier head or
+                             description (reopened, or a pre-stage file) -> spawn a
+                             runner that reviews it
                            PR_CLOSED leaving for any reason -> recreate a worktree
                              cleanup removed, from the kept branch in the managed
                              checkout; a failed restore warns, and the PR's state
                              still applies
                          and then, per stopped task with a PR, including FAILED:
                            PR merged -> DONE
-                           REVIEWING + clean review, PR head moved -> WORKING, spawn
-                             a runner that reviews the new commits
-                           REVIEWING + clean review: gh pr checks (read only)
+                           WAITING_FOR_CI, PR head or description changed -> the
+                             review stage it needs, spawn a runner that reviews it
+                           WAITING_FOR_CI: gh pr checks (read only)
                              pending              -> record, wait
                              finished             -> READY_FOR_HUMAN, ✓ CI or ✗ CI: <checks>
                            READY_FOR_HUMAN: refresh the CI result; flag new commits
@@ -231,7 +240,7 @@ app.InboxView         -> runner pid dead while WORKING/REVIEWING -> FAILED
                            clear stored feedback and return to READY_FOR_HUMAN
                          and then, per READY_FOR_HUMAN task with an open PR:
                            mergeable CONFLICTING, (PR head, base head) never tried ->
-                             record the pair, WORKING, spawn a runner
+                             record the pair, IMPLEMENTING, spawn a runner
                            UNKNOWN or MERGEABLE -> nothing
                          gh search, then a fetch of tracked items no search returned
                          issue closed, dead runner the gate could not read -> clear
@@ -245,7 +254,7 @@ app.InboxView         -> runner pid dead while WORKING/REVIEWING -> FAILED
                            FAILED and PR_CLOSED; a DONE task stays DONE if it reopens
                          learning on, per learnable task (a clean competing review, or
                          stalled at the self-review limit on a missed practice) no runner drives
-                         (not WORKING or REVIEWING), at most one per repository:
+                         (in no stage), at most one per repository:
                            evidence fingerprint differs from the stored evaluation, the
                            repository is not locked, no failed attempt on the same
                            evidence in the last hour -> spawn `foreman __learn`
@@ -303,8 +312,8 @@ the same commit. The commit message records why it changed.
   without process-list access. Older runners without a lock still use `ps`. A dead
   runner is reaped only after the gate has read its PR, so a
   GitHub outage delays a FAILED verdict instead of risking a wrong one.
-- **A launch claims the task before it spawns.** The write that makes a task WORKING
-  also stores `launch: {token, pid, since}`, with this foreman's pid, under the task
+- **A launch claims the task before it spawns.** The write that moves a task into a
+  runnable stage also stores `launch: {token, pid, since}`, with this foreman's pid, under the task
   lock. Any start while that pid runs gets "already starting" and changes nothing. The
   launch clears the pid when it records the runner, so a dashboard that outlives the
   launch holds nothing; from then on the live runner holds starts off. A failed spawn
@@ -336,8 +345,9 @@ the same commit. The commit message records why it changed.
   |---|---|---|
   | `stepAnswer` | legacy PR feedback turn, disabled by the CLI | unused |
   | `stepPickUpReview` | re-verify the PR, record its head | PR not open: implement. Else review |
-  | `stepImplement` | a plan, implement, or fix turn | plan posted or checkpoint verified: implement. Not REVIEWING: done. Else review |
-  | `stepReview` | conflict check, self-review or competing review, escalate | findings: implement. Clean self-review: review. Clean: done |
+  | `stepImplement` | a plan, implement, or fix turn | plan posted or checkpoint verified: implement. Commit or PR to review: review. Else done |
+  | `stepReview` | conflict check, self-review or competing review, escalate | findings: implement. Clean self-review: review. Clean local: open PR. Clean: done |
+  | `stepOpenPR` | adopt or open the PR for a cleanly reviewed local commit | done |
   | `stepHandover` | legacy comment handover, disabled by the CLI | unused |
 
   Every implementer turn goes through `runTurn` (turn, then the PR check) and
@@ -385,13 +395,29 @@ the same commit. The commit message records why it changed.
 - **Every write goes through `App.update`**, which sends the alert when the state
   enters NEEDS_DECISION, FAILED, READY_FOR_HUMAN, or REVIEWED. Call sites never notify
   on their own. A test fails on any other `Store.Update` or `Store.Save` in `app`.
+- **The state is the stage.** A delegated task in progress is in one of PLANNING,
+  IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, OPENING_PR, or WAITING_FOR_CI. Each
+  step writes its stage before its agent turn, so the task file, the dashboard list,
+  and the `s` pane show what runs, across refreshes and restarts. Any turn that can
+  change the branch is IMPLEMENTING: code, review fixes, answers, and merges. Findings
+  from either review go back to IMPLEMENTING, and a new change is self-reviewed before
+  the adversarial review. Which step runs next still comes from the record
+  (`firstStep`, `Record.NextStage`), never from the state, so a stale state cannot
+  skip a step. Task files that hold the old WORKING or REVIEWING load as the stage
+  the record needs (`Record.UpgradeState`), and the next write saves it. Runners
+  started before the upgrade are not supported; stop them before upgrading. Rejected:
+  keeping WORKING and REVIEWING with a separate stage field, which could disagree.
 - **Attempts record where the time went.** An attempt is one run of work that produces
   one PR. `App.Start` opens one unless it keeps the PR or the current attempt has no PR
   yet, and stores the task log's size
   as the attempt's first byte; the runner stamps the first agent turn. `App.update`
-  calls `Record.Track`, which derives the phase from the state (`PhaseOf`: planning,
-  implementation, review and fixes, CI wait, paused, ended) and adds a mark when it
-  changes, so the runner and the dashboard refresh both record boundaries. Track also
+  calls `Record.Track`, which maps the state to its phase (`PhaseOf`: planning,
+  implementing with review fixes, self-review, adversarial review, opening PR, CI
+  wait, paused, ended) and adds a mark when it changes, so the runner and the
+  dashboard refresh both record boundaries. Attempts recorded before the stages have
+  a `review` phase that holds review rounds and fixes together; history shows it as
+  "legacy review and fixes" and the separate reviews as unavailable, with any stage
+  time the attempt recorded after the upgrade beside it. Track also
   stamps the first READY_FOR_HUMAN as the handoff and the merge or close as the end.
   The marks tile the time, so the phase totals add up to the first turn to the first
   handoff. Rejected: a timestamp at each of the forty-odd state assignments, where one
@@ -400,8 +426,8 @@ the same commit. The commit message records why it changed.
 - **States mean one thing each.** FAILED is stopped and restartable, including a
   cancelled run; a separate CANCELLED state was rejected. A PR closed without merging
   is `PR_CLOSED`, not FAILED: it is how the developer calls off work, so it sends no
-  alert, keeps the branch, and returns to READY_FOR_HUMAN or REVIEWING if the PR is
-  reopened. A closed issue takes precedence and makes the task DONE. The runner can't write to a `PR_CLOSED` task, so the stop that
+  alert, keeps the branch, and returns to READY_FOR_HUMAN, WAITING_FOR_CI, or the
+  stage it needs if the PR is reopened. A closed issue takes precedence and makes the task DONE. The runner can't write to a `PR_CLOSED` task, so the stop that
   follows is never saved as a failure.
 - **A reset discards the run, never the PR link.** `App.Reset` deletes only the run the
   developer confirmed: its start time, worktree, branch, and runner log must still match
@@ -583,7 +609,7 @@ the same commit. The commit message records why it changed.
   line (`route_logged`). A restart with the same agent keeps the profile; another agent
   drops it. The reviewer starts as the competing agent and uses its review settings.
 - Rejected: routing inside `app.Start` (a manual start could not confirm first) and in
-  the runner (the task is already WORKING, so it could neither wait nor change agents).
+  the runner (the task is already running, so it could neither wait nor change agents).
 - **Dollar budgets cap Claude only.** Codex reports no cost and its tokens arrive only
   when a turn ends, so foreman records Codex tokens and never invents a price.
 - **Validation is self-reported.** Foreman records what the agent ran and doesn't re-run
@@ -683,8 +709,8 @@ the same commit. The commit message records why it changed.
   commit and a digest of the title and description it read, and a restart resumes from the record:
   a commit or description without a review goes to review, a clean pair to the PR step.
 - **A review covers one PR head and description.** Each review records the head and
-  description it read. A REVIEWING task whose head or description changed is reviewed
-  again, self-review first; new commits on a READY_FOR_HUMAN PR are only
+  description it read. A WAITING_FOR_CI task whose head or description changed is
+  reviewed again, self-review first; new commits on a READY_FOR_HUMAN PR are only
   flagged, because that PR is the developer's now. A crash mid-review restarts at the
   review, not the implementation.
 - **Conflicts are checked before every review** with `git merge-tree` on
@@ -727,7 +753,7 @@ the same commit. The commit message records why it changed.
   a reply turn at handover or on restart, and the dashboard does not turn new PR
   comments into REVIEWED tasks. A legacy REVIEWED task returns to READY_FOR_HUMAN on
   refresh; a restarted task whose only pending work is old feedback returns to
-  REVIEWING until CI finishes, without an agent turn. Reviews still read PR comments
+  WAITING_FOR_CI until CI finishes, without an agent turn. Reviews still read PR comments
   as history.
 - **A handed-over PR that conflicts is repaired once per (PR head, base head) pair.**
   Every attempted pair is kept, so none is tried twice. A repair is accepted only if

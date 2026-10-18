@@ -846,7 +846,7 @@ scenario_cancel() {
 	echo "cancel: stopping a run keeps its work and can be resumed"
 	setup cancel
 	E2E_AGENT_SLEEP=30.017 start 42 >/dev/null
-	check "the runner is working" wait_status "WORKING" 5
+	check "the runner is working" wait_status "IMPLEMENTING" 5
 	sleep 0.5
 	local pid
 	pid=$(runner_pid 42)
@@ -1256,7 +1256,7 @@ scenario_account() {
 	issue 43 "Fix pagination"
 	file="$sandbox/tasks/acme-widgets-43.md"
 	E2E_AGENT_SLEEP=30.017 start 43 >/dev/null
-	check "a second task is working" wait_status "WORKING" 5
+	check "a second task is working" wait_status "IMPLEMENTING" 5
 	sleep 0.5
 	kill -TERM "$(runner_pid 43)"
 	check "stopping its runner leaves it FAILED" wait_status "FAILED" 5

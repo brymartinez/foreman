@@ -182,7 +182,7 @@ func TestInboxClosedIssueCompletesAWorkingTaskWithoutARunner(t *testing.T) {
 	f.app.CleanOnDone = true
 	key := reviewed(t, f)
 	// A start that exited before launch recorded a runner pid.
-	f.store.recs[key].State = task.Working
+	f.store.recs[key].State = task.Implementing
 	if _, err := f.app.Inbox(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -316,15 +316,13 @@ func TestReopenedPRRecreatesACleanedWorktreeWhenWorkResumes(t *testing.T) {
 	setPR(f, "open")
 	setHead(f, "beef002")
 	ensured := len(f.wt.reqs)
-	// The first refresh reopens the task under review. The second finds commits since
-	// the clean review and launches a runner, which needs the worktree back.
-	for range 2 {
-		if _, err := f.app.Inbox(context.Background()); err != nil {
-			t.Fatal(err)
-		}
+	// The refresh reopens the task and, with commits since the clean review, launches
+	// a runner to review them, which needs the worktree back.
+	if _, err := f.app.Inbox(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.Working || got.Delegation.RunnerPID == 0 {
+	if got.State != task.SelfReviewing || got.Delegation.RunnerPID == 0 {
 		t.Fatalf("state %s pid %d", got.State, got.Delegation.RunnerPID)
 	}
 	// No base ref: the kept branch must exist, or the restore fails instead of starting
@@ -390,7 +388,7 @@ func TestGateCompletesAMergedPRClosedTaskWhoseWorktreeCannotBeRestored(t *testin
 func TestInboxClosedIssueCompletesATaskWhoseDeadRunnerPRCouldNotBeRead(t *testing.T) {
 	f := newFixture()
 	key := reviewed(t, f)
-	f.store.recs[key].State = task.Working
+	f.store.recs[key].State = task.Implementing
 	f.store.recs[key].Delegation.RunnerPID = 77
 	f.app.GitHub = &failPR{fakeGitHub: f.gh, fail: 1}
 	if _, err := f.app.Inbox(context.Background()); err != nil {

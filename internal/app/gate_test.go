@@ -21,7 +21,7 @@ func reviewed(t *testing.T, f fixture) task.Key {
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.store.recs[key]; got.State != task.Reviewing || got.Delegation.RunnerPID != 0 {
+	if got := f.store.recs[key]; got.State != task.WaitingForCI || got.Delegation.RunnerPID != 0 {
 		t.Fatalf("setup: state %s pid %d", got.State, got.Delegation.RunnerPID)
 	}
 	return key
@@ -58,7 +58,7 @@ func TestGatePendingWaits(t *testing.T) {
 	if _, _, err := f.app.Status(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.store.recs[key]; got.State != task.Reviewing || got.CI.State != task.CIPending || len(f.runners.spawned) != 1 {
+	if got := f.store.recs[key]; got.State != task.WaitingForCI || got.CI.State != task.CIPending || len(f.runners.spawned) != 1 {
 		t.Errorf("state %s ci %+v spawned %d", got.State, got.CI, len(f.runners.spawned))
 	}
 }
@@ -72,7 +72,7 @@ func TestGateSkipsTasksARunnerIsDriving(t *testing.T) {
 	if _, _, err := f.app.Status(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.store.recs[key]; got.State != task.Reviewing || got.CI != nil {
+	if got := f.store.recs[key]; got.State != task.WaitingForCI || got.CI != nil {
 		t.Errorf("state %s ci %+v", got.State, got.CI)
 	}
 }
@@ -313,7 +313,7 @@ func TestGateClosedPRWithADeadRunnerNeverReportsAFailure(t *testing.T) {
 	} {
 		f := newFixture()
 		key := reviewed(t, f)
-		f.store.recs[key].State = task.Working
+		f.store.recs[key].State = task.Implementing
 		f.store.recs[key].Delegation.RunnerPID = 77 // never added to f.runners.alive
 		setCI(f, task.CIStatus{State: task.CIPassing})
 		setPR(f, tc.pr)
@@ -321,7 +321,7 @@ func TestGateClosedPRWithADeadRunnerNeverReportsAFailure(t *testing.T) {
 		if _, err := f.app.Tasks(context.Background()); err != nil {
 			t.Fatal(err)
 		}
-		if got := f.store.recs[key]; got.State != task.Working {
+		if got := f.store.recs[key]; got.State != task.Implementing {
 			t.Fatalf("%s: local reread changed the state to %s before GitHub refresh", tc.name, got.State)
 		}
 		if _, _, err := f.app.Status(context.Background()); err != nil {
@@ -340,7 +340,7 @@ func TestGateClosedPRWithADeadRunnerNeverReportsAFailure(t *testing.T) {
 func TestGateUnreadablePRLeavesADeadRunnerAlone(t *testing.T) {
 	f := newFixture()
 	key := reviewed(t, f)
-	f.store.recs[key].State = task.Working
+	f.store.recs[key].State = task.Implementing
 	f.store.recs[key].Delegation.RunnerPID = 77 // never added to f.runners.alive
 	setCI(f, task.CIStatus{State: task.CIPassing})
 	closed := f.gh.prs[912]
@@ -359,7 +359,7 @@ func TestGateUnreadablePRLeavesADeadRunnerAlone(t *testing.T) {
 		t.Errorf("warnings = %v", warnings)
 	}
 	got := f.store.recs[key]
-	if got.State != task.Working || got.Delegation.RunnerPID != 77 {
+	if got.State != task.Implementing || got.Delegation.RunnerPID != 77 {
 		t.Fatalf("the refresh judged an unread PR: state %s pid %d", got.State, got.Delegation.RunnerPID)
 	}
 	if len(f.notes.sent) != 0 {
@@ -382,7 +382,7 @@ func TestGateUnreadablePRLeavesADeadRunnerAlone(t *testing.T) {
 func TestInboxUnreadablePRLeavesADeadRunnerAlone(t *testing.T) {
 	f := newFixture()
 	key := reviewed(t, f)
-	f.store.recs[key].State = task.Working
+	f.store.recs[key].State = task.Implementing
 	f.store.recs[key].Delegation.RunnerPID = 77
 	delete(f.gh.prs, 912)
 	f.gh.items = []InboxItem{item(825, "open", t0, task.Assigned)}
@@ -391,7 +391,7 @@ func TestInboxUnreadablePRLeavesADeadRunnerAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.Working || got.Delegation.RunnerPID != 77 {
+	if got.State != task.Implementing || got.Delegation.RunnerPID != 77 {
 		t.Errorf("state %s pid %d", got.State, got.Delegation.RunnerPID)
 	}
 	if len(f.notes.sent) != 0 {
@@ -402,7 +402,7 @@ func TestInboxUnreadablePRLeavesADeadRunnerAlone(t *testing.T) {
 func TestReapStillFailsADeadRunnerWithNoPR(t *testing.T) {
 	f := newFixture()
 	key := reviewed(t, f)
-	f.store.recs[key].State = task.Working
+	f.store.recs[key].State = task.Implementing
 	f.store.recs[key].Delegation.PR = 0 // nothing pushed yet, so nothing to read
 	f.store.recs[key].Delegation.RunnerPID = 77
 	f.notes.sent = nil
@@ -483,7 +483,7 @@ func TestGateClosedPRLeavesARestartedRunnerAlone(t *testing.T) {
 	// to stop, and its pid must survive.
 	f.runners.onStop = func(pid int) {
 		_, err := f.app.Store.Update(context.Background(), key, func(cur *task.Record) (*task.Record, error) {
-			cur.State, cur.Delegation.RunnerPID, cur.Delegation.PR = task.Working, 99, 0
+			cur.State, cur.Delegation.RunnerPID, cur.Delegation.PR = task.Implementing, 99, 0
 			return cur, nil
 		})
 		if err != nil {
@@ -496,7 +496,7 @@ func TestGateClosedPRLeavesARestartedRunnerAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.Delegation.RunnerPID != 99 || got.State != task.Working {
+	if got.Delegation.RunnerPID != 99 || got.State != task.Implementing {
 		t.Errorf("the restarted run lost its runner: state %s pid %d", got.State, got.Delegation.RunnerPID)
 	}
 	if !slices.Equal(f.runners.stopped, []int{77}) || !f.runners.alive[99] {
@@ -509,14 +509,17 @@ func TestGateReopenedPRReturnsToTheActiveList(t *testing.T) {
 		name   string
 		review func(*task.Review)
 		want   task.State
+		rerun  bool // a runner starts to review the reopened PR again
 	}{
-		{"clean review of the head GitHub reports", func(*task.Review) {}, task.ReadyForHuman},
-		{"review requested changes", func(r *task.Review) { r.Clean = false }, task.Reviewing},
-		{"clean review of an earlier head", func(r *task.Review) { r.Head = "older01" }, task.Reviewing},
+		{"clean review of the head GitHub reports", func(*task.Review) {}, task.ReadyForHuman, false},
+		{"review requested changes", func(r *task.Review) { r.Clean = false }, task.Implementing, false},
+		// The self-review covers the PR's head and description; the competing review
+		// read an earlier one, so only it runs again.
+		{"clean review of an earlier head", func(r *task.Review) { r.Head = "older01" }, task.AdversarialReviewing, true},
 		// A review from before heads were recorded cannot be shown to cover the
 		// reopened PR, so it must not hand the task to the developer.
-		{"clean review with no recorded head", func(r *task.Review) { r.Head = "" }, task.Reviewing},
-		{"clean review of an earlier description", func(r *task.Review) { r.Proposal = task.ProposalDigest("", "Retry everything.") }, task.Reviewing},
+		{"clean review with no recorded head", func(r *task.Review) { r.Head = "" }, task.AdversarialReviewing, true},
+		{"clean review of an earlier description", func(r *task.Review) { r.Proposal = task.ProposalDigest("", "Retry everything.") }, task.AdversarialReviewing, true},
 	} {
 		f := newFixture()
 		key := reviewed(t, f)
@@ -537,6 +540,9 @@ func TestGateReopenedPRReturnsToTheActiveList(t *testing.T) {
 		got := f.store.recs[key]
 		if got.State != tc.want || len(recs) != 1 || recs[0].Key != key {
 			t.Errorf("%s: state %s, delegated work %d", tc.name, got.State, len(recs))
+		}
+		if rerun := len(f.runners.spawned) == 2; rerun != tc.rerun {
+			t.Errorf("%s: runners spawned %d, want a review run %t", tc.name, len(f.runners.spawned), tc.rerun)
 		}
 		if got.LastOutcome.Status != "pr_reopened" || !strings.Contains(got.LastOutcome.Summary, "PR #912 reopened") {
 			t.Errorf("%s: outcome %+v", tc.name, got.LastOutcome)
@@ -559,7 +565,7 @@ func TestGateClosedPRDoesNotStopARunStartedSinceItClosed(t *testing.T) {
 			t.Fatal(err)
 		}
 		if _, err := f.app.Store.Update(context.Background(), key, func(cur *task.Record) (*task.Record, error) {
-			cur.State, cur.Delegation.PR, cur.Delegation.RunnerPID = task.Working, 913, 99
+			cur.State, cur.Delegation.PR, cur.Delegation.RunnerPID = task.Implementing, 913, 99
 			return cur, nil
 		}); err != nil {
 			t.Fatal(err)
@@ -570,7 +576,7 @@ func TestGateClosedPRDoesNotStopARunStartedSinceItClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.Working || got.Delegation.PR != 913 || got.Delegation.RunnerPID != 99 {
+	if got.State != task.Implementing || got.Delegation.PR != 913 || got.Delegation.RunnerPID != 99 {
 		t.Errorf("the new run was ended by the old PR: state %s pr %d pid %d", got.State, got.Delegation.PR, got.Delegation.RunnerPID)
 	}
 	if len(f.runners.stopped) != 0 {
@@ -648,11 +654,67 @@ func TestInboxListsReadyWithoutAChangedEntry(t *testing.T) {
 
 func TestReconcileClosedIssueEndsIdleDelegatedTasks(t *testing.T) {
 	blocked := seen(7, task.NeedsDecision, "open", t0)
-	working := seen(8, task.Working, "open", t0)
+	working := seen(8, task.Implementing, "open", t0)
 	working.Delegation = &task.Delegation{RunnerPID: 4242}
 	items := []InboxItem{item(7, "closed", t1, task.Tracked), item(8, "closed", t1, task.Tracked)}
 	Reconcile(items, []*task.Record{blocked, working}, nil, true, now)
-	if blocked.State != task.Done || working.State != task.Working {
+	if blocked.State != task.Done || working.State != task.Implementing {
 		t.Errorf("blocked %s working %s", blocked.State, working.State)
+	}
+}
+
+func TestAReviewStageWithoutARunnerAfterACleanReviewIsReviewedAgain(t *testing.T) {
+	// A task file from before the stages loads a REVIEWING task with new commits since
+	// its clean review as SELF_REVIEW, with no runner.
+	f := newFixture()
+	key := reviewed(t, f)
+	setHead(f, "beef002")
+	rec := f.store.recs[key]
+	rec.Delegation.PRHead, rec.State = "beef002", task.SelfReviewing
+	setCI(f, task.CIStatus{State: task.CIPassing})
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.SelfReviewing || got.Delegation.RunnerPID == 0 || len(f.runners.spawned) != 2 {
+		t.Fatalf("state %s pid %d spawned %d; want a runner for the self-review", got.State, got.Delegation.RunnerPID, len(f.runners.spawned))
+	}
+}
+
+func TestARestartedReviewReadsThePRsCurrentDescription(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	pr := f.gh.prs[912]
+	pr.Body = "Retry 5xx and 429.\n\nCloses #825"
+	f.gh.prs[912] = pr
+	setCI(f, task.CIStatus{State: task.CIPassing})
+	// A run ended in a review stage on the description the record still holds.
+	f.store.recs[key].State = task.AdversarialReviewing
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.Delegation.PRDigest != task.ProposalDigest(pr.Title, pr.Body) || got.State != task.SelfReviewing || len(f.runners.spawned) != 2 {
+		t.Fatalf("digest stored %t, state %s, spawned %d; want the edit stored and a self-review run", got.Delegation.PRDigest == task.ProposalDigest(pr.Title, pr.Body), got.State, len(f.runners.spawned))
+	}
+	starts := f.claude.starts
+	if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; f.claude.starts != starts || len(f.claude.resumed) != 0 || got.LatestCompeting().Proposal != got.Delegation.PRDigest {
+		t.Fatalf("implementer turns %d/%d, reviews %s; want only the reviews of the edited description", f.claude.starts-starts, len(f.claude.resumed), kinds(got))
+	}
+}
+
+func TestARestartedReviewThatTheCleanReviewCoversWaitsForCI(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	setCI(f, task.CIStatus{State: task.CIPending})
+	f.store.recs[key].State = task.AdversarialReviewing
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.WaitingForCI || len(f.runners.spawned) != 1 {
+		t.Fatalf("state %s spawned %d; want a CI wait without a runner", got.State, len(f.runners.spawned))
 	}
 }

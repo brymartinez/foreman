@@ -55,7 +55,7 @@ func TestLearningEligibilityOfATaskStalledAtTheSelfReviewLimit(t *testing.T) {
 	}{
 		"stopped on a practice gap":            {task.DiagnosedPracticeGap, task.Failed, stopReply, true},
 		"waiting on a practice gap":            {task.DiagnosedPracticeGap, task.NeedsDecision, "", true},
-		"another round after a practice gap":   {task.DiagnosedPracticeGap, task.Working, "A. Address the remaining findings in another round", false},
+		"another round after a practice gap":   {task.DiagnosedPracticeGap, task.Implementing, "A. Address the remaining findings in another round", false},
 		"failed later after another round":     {task.DiagnosedPracticeGap, task.Failed, "A. Address the remaining findings in another round", false},
 		"stopped with no cause found":          {task.DiagnosedNone, task.Failed, stopReply, false},
 		"waiting on a conflict in the context": {task.DiagnosedConflict, task.NeedsDecision, "", false},

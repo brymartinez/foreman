@@ -69,7 +69,7 @@ func TestCancelReportsARunnerThatHasNotExited(t *testing.T) {
 	if _, err := f.app.Cancel(context.Background(), rec); err == nil || !strings.Contains(err.Error(), "has not exited yet") {
 		t.Errorf("err = %v", err)
 	}
-	if got := f.store.recs[rec.Key]; got.State != task.Working || got.Delegation.RunnerPID != 4242 {
+	if got := f.store.recs[rec.Key]; got.State != task.Planning || got.Delegation.RunnerPID != 4242 {
 		t.Errorf("a runner still running must stay recorded: %s pid %d", got.State, got.Delegation.RunnerPID)
 	}
 }

@@ -60,7 +60,10 @@ type HistoryRow struct {
 	// close for TimingNoHandoff.
 	Total  time.Duration
 	Phases map[task.Phase]time.Duration
-	Log    LogRange
+	// LegacyReview marks an attempt from before the stages, whose review and fix time
+	// is one PhaseReview total that cannot be split.
+	LegacyReview bool
+	Log          LogRange
 }
 
 // historyWorkers bounds the parallel gh reads when the history view opens.
@@ -370,5 +373,5 @@ func timeRow(row *HistoryRow, att *task.Attempt) {
 		}
 		row.Timing = TimingNoHandoff
 	}
-	row.Total, row.Phases = end.Sub(att.StartedAt), att.Phases(end)
+	row.Total, row.Phases, row.LegacyReview = end.Sub(att.StartedAt), att.Phases(end), att.LegacyReview()
 }
