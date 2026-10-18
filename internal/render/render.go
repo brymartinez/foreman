@@ -126,9 +126,18 @@ func reviewBadge(r *task.Record) string {
 	case latest == nil:
 		return ""
 	case latest.Clean:
-		return "review ✓"
+		return reviewName(latest) + " ✓"
 	}
-	return fmt.Sprintf("review round %d: %d %s", latest.Round, len(latest.Findings), plural(len(latest.Findings), "finding", "findings"))
+	return fmt.Sprintf("%s round %d: %d %s", reviewName(latest), latest.Round, len(latest.Findings), plural(len(latest.Findings), "finding", "findings"))
+}
+
+// reviewName tells the implementer's own review from the competing one, so a clean
+// self-review never reads as the review that hands the task over.
+func reviewName(rv *task.Review) string {
+	if rv.Kind == task.SelfReview {
+		return "self-review"
+	}
+	return "review"
 }
 
 // reviewState is reviewBadge without the round and the word findings, for a pane too
@@ -140,9 +149,9 @@ func reviewState(r *task.Record) string {
 	case latest == nil:
 		return ""
 	case latest.Clean:
-		return "review ✓"
+		return reviewName(latest) + " ✓"
 	}
-	return fmt.Sprintf("review ✗ %d", len(latest.Findings))
+	return fmt.Sprintf("%s ✗ %d", reviewName(latest), len(latest.Findings))
 }
 
 func Show(w io.Writer, r *task.Record) {
@@ -218,7 +227,7 @@ func Show(w io.Writer, r *task.Record) {
 		if latest.Clean {
 			verdict = "clean"
 		}
-		fmt.Fprintf(w, "\nLatest review (round %d of %d, %s, %s): %s\n", latest.Round, len(r.Reviews), agentName(latest.Reviewer), latest.At.Local().Format(time.DateTime), verdict)
+		fmt.Fprintf(w, "\nLatest %s (round %d of %d, %s, %s): %s\n", reviewName(latest), latest.Round, len(r.Reviews), agentName(latest.Reviewer), latest.At.Local().Format(time.DateTime), verdict)
 		if s := strings.TrimSpace(latest.Summary); s != "" {
 			fmt.Fprintf(w, "  %s\n", s)
 		}

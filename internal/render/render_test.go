@@ -57,6 +57,12 @@ func TestTaskPRKeepsTheStatesInItsShortForms(t *testing.T) {
 			[]task.Review{{Round: 2, Findings: []task.Finding{{}, {}, {}}}},
 			"CI ✗", "review ✗ 3", "review round 2: 3 findings",
 		},
+		{
+			task.CIStatus{State: task.CIPending},
+			[]task.Review{{Round: 1, Kind: task.SelfReview, Findings: []task.Finding{{}}}},
+			"CI pending", "self-review ✗ 1", "self-review round 1: 1 finding",
+		},
+		{task.CIStatus{State: task.CIPending}, []task.Review{{Round: 2, Kind: task.SelfReview, Clean: true}}, "CI pending", "self-review ✓", "self-review ✓"},
 	} {
 		s := TaskPR(&task.Record{
 			Key: task.Key{Repo: "a/b", Number: 831}, State: task.Reviewing, CI: &tc.ci, Reviews: tc.reviews,
@@ -228,6 +234,18 @@ func TestShowLatestReview(t *testing.T) {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("missing %q in:\n%s", want, buf.String())
 		}
+	}
+}
+
+func TestShowLabelsASelfReview(t *testing.T) {
+	var buf bytes.Buffer
+	Show(&buf, &task.Record{
+		Key: task.Key{Repo: "a/b", Number: 1}, State: task.Working,
+		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912},
+		Reviews:    []task.Review{{Round: 1, Kind: task.SelfReview, Reviewer: task.Claude, Findings: []task.Finding{{Severity: "blocking", Summary: "no test"}}}},
+	})
+	if !strings.Contains(buf.String(), "Latest self-review (round 1 of 1, Claude,") {
+		t.Errorf("self-review not labelled in:\n%s", buf.String())
 	}
 }
 

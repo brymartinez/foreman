@@ -83,13 +83,24 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
                       conflict -> implementer.Resume(session, merge the base, never
                                   rebase or force-push, push); recheck; after two
                                   turns still conflicting -> NEEDS_DECISION, exit
+                    read the PR description and store its digest beside the head
+                    self = implementer.Review(disposable read-only session,
+                                              PR description + git diff), until a clean
+                                              one covers this head and description
+                    self error -> FAILED, exit (never falls back to the competing review)
+                    self clean -> the competing review of the same change, in this run
                     review = reviewer.Review(disposable read-only session,
-                                             PR description + PR comments + git diff + earlier rounds)
+                                             PR description + PR comments + git diff +
+                                             earlier competing rounds)
                     clean    -> record review and the head it covered; stay REVIEWING, exit
-                    findings -> WORKING; implementer.Resume(session, findings); agent pushes
-                                fixes and reports pr_opened again; re-verify; re-review
+                    findings (either review) -> WORKING; implementer.Resume(session,
+                                findings); agent pushes fixes and reports pr_opened
+                                again; re-verify; self-review, then re-review
                     findings after fix_rounds reviewed fixes since the last answer ->
-                                NEEDS_DECISION (A: another round, B: accept remaining), exit
+                      competing: NEEDS_DECISION (A: another round, B: accept remaining), exit
+                      self:      diagnosis turn (implementer, no tools), then
+                                 NEEDS_DECISION (another round or stop; a verified
+                                 context conflict adds which statement governs), exit
   with review_before_pr captured on the task and no PR yet, a finished turn returns
   review_ready instead of pr_opened (pr_opened there fails the task):
     review_ready -> verify the branch, a clean worktree, and a new descendant commit,
@@ -99,19 +110,26 @@ runner (one process per task, exits when the task leaves WORKING/REVIEWING):
                       git merge-tree HEAD origin/<base>
                       conflict -> implementer.Resume(session, merge the base locally, no
                                   push); after two turns still conflicting -> NEEDS_DECISION
-                    review = reviewer.Review(proposed description + git diff + earlier rounds)
+                    self = implementer.Review(proposed description + git diff), as above
+                    review = reviewer.Review(proposed description + git diff +
+                                             earlier competing rounds)
                     findings -> implementer.Resume(session, findings); fix, commit locally,
-                                review_ready again with the updated description; re-review
+                                review_ready again with the updated description;
+                                self-review, then re-review
                     findings after fix_rounds reviewed fixes since the last answer ->
-                                NEEDS_DECISION (A: another round, B: stop, no PR), exit
+                                NEEDS_DECISION as above, with stop (no PR) in place of
+                                accept, exit
                     clean    -> an open PR for the branch with the reviewed head, title,
                                 and description is adopted; otherwise
                                 implementer turn: push exactly that commit, gh pr create
                                 with that title and --body-file; gh: confirm the PR and its
                                 head, title, and body match the review (mismatch -> FAILED)
                                 record PR and head, the clean review covers it, REVIEWING, exit
-  when the loop ends on a clean review and the evidence changed since the stored
-  evaluation: spawn detached `foreman __learn owner/repo#825`, then exit
+  a stop answered at the fix limit -> FAILED with the unresolved findings; any PR and
+  branch stay, and the task is never handed over
+  when the loop ends on a clean review, or at a self-review fix limit diagnosed as a
+  missed practice, and the evidence changed since the stored evaluation: spawn
+  detached `foreman __learn owner/repo#825`, then exit
 
 foreman __learn       -> one evaluation of one task; output goes to <log_dir>/learning.log
   ├─ knowledge: take the repository's lock without waiting; held -> exit 0, a later
@@ -225,7 +243,8 @@ app.InboxView         -> runner pid dead while WORKING/REVIEWING -> FAILED
                            check keeps the worktree for the next refresh
                          Reconcile, per item: issue closed, no runner -> DONE, including
                            FAILED and PR_CLOSED; a DONE task stays DONE if it reopens
-                         learning on, per cleanly reviewed task no runner drives
+                         learning on, per learnable task (a clean competing review, or
+                         stalled at the self-review limit on a missed practice) no runner drives
                          (not WORKING or REVIEWING), at most one per repository:
                            evidence fingerprint differs from the stored evaluation, the
                            repository is not locked, no failed attempt on the same
@@ -318,7 +337,7 @@ the same commit. The commit message records why it changed.
   | `stepAnswer` | legacy PR feedback turn, disabled by the CLI | unused |
   | `stepPickUpReview` | re-verify the PR, record its head | PR not open: implement. Else review |
   | `stepImplement` | a plan, implement, or fix turn | plan posted or checkpoint verified: implement. Not REVIEWING: done. Else review |
-  | `stepReview` | conflict check, review, escalate | findings: implement. Clean: done |
+  | `stepReview` | conflict check, self-review or competing review, escalate | findings: implement. Clean self-review: review. Clean: done |
   | `stepHandover` | legacy comment handover, disabled by the CLI | unused |
 
   Every implementer turn goes through `runTurn` (turn, then the PR check) and
@@ -469,8 +488,9 @@ the same commit. The commit message records why it changed.
   matches `internal/agent/outcome.schema.json`: `planned`, `checkpoint`, `pr_opened`, `blocked` with
   questions, or `failed`. `agent.ParseOutcome` is the only way an implementer's output
   enters the program, and it rejects questions with fewer than two options or duplicate
-  labels. The reviewer, the routing selector, and the evaluator have their own schemas and
-  parsers, `agent.ParseReview`, `agent.ParseSelection`, and `agent.ParseEvaluation`.
+  labels. The reviewer, the routing selector, the evaluator, and the limit diagnosis have
+  their own schemas and parsers, `agent.ParseReview`, `agent.ParseSelection`,
+  `agent.ParseEvaluation`, and `agent.ParseDiagnosis`.
   Rejected: interactive sessions with terminal scraping.
 - **Permissions.** The dangerous bypass flags are never used. Claude runs with
   `acceptEdits` and the fixed `Bash,WebFetch,WebSearch` tool list; the list is not
@@ -605,6 +625,25 @@ the same commit. The commit message records why it changed.
 
 ### Review
 
+- **The implementer reviews its own change first.** Every change gets a self-review
+  before the competing review: a fresh, disposable, read-only session of the
+  implementing agent with its review model, the reviewer budget, and `review_rounds`
+  passes. It never resumes the implementer's session or an earlier self-review. Its
+  prompt carries the PR description (or the proposed one) and the diff instructions,
+  and nothing else: no issue, plan, decisions, PR comments, or earlier findings, so it
+  judges the change as the competing reviewer will. Its findings go to the implementer
+  like any review's. A self-review that errors fails the task; it never falls back to
+  the competing reviewer, which would skip it. Rejected: running the self-review inside
+  the implementer's session, which shares the blind spots it is meant to catch.
+- **Review kinds live on the record.** Each review records its kind (`self`, or empty
+  for competing, so older task files read as competing), the head, and the digest of
+  the title and description it read. A clean self-review counts only while the stored
+  head and description digest match, so a restart, a new commit, or a description-only
+  edit needs a new self-review. The review step re-reads the PR description and stores
+  its digest before choosing. The gate, PR adoption, and reopening read competing
+  reviews only, so a clean self-review never hands a task over.
+- **The competing review stays independent.** Its prompt lists only earlier competing
+  rounds; self-review rounds and findings never reach it.
 - **The reviewer starts as the competing agent** in a disposable session
   (`--no-session-persistence` / `--ephemeral`) that never sees the implementer's
   session. Before each review, a fresh `quota-axi` report can move the review to
@@ -644,10 +683,28 @@ the same commit. The commit message records why it changed.
   GitHub's `mergeable` was rejected for this: it reads UNKNOWN after a push and names no
   files. The implementer merges the base, never rebases or force-pushes. After two
   turns that still conflict, the developer is asked.
-- **Two round settings.** `review_rounds` (3) is how many passes the reviewer makes over
-  a PR or a local change. `fix_rounds` (3) is how many reviewed fixes run before the
-  developer is asked to accept the rest or go again. The cap is checked after a review, so no fix reaches the
-  developer unreviewed, and answering resets it.
+- **Two round settings.** `review_rounds` (3) is how many passes each review, self or
+  competing, makes over a PR or a local change. `fix_rounds` (3) is how many reviewed
+  fixes run before the developer is asked; fixes requested by either review count
+  against it. The cap is checked after a review, so no fix reaches the developer
+  unreviewed, and answering resets it. At the cap after a competing review, the
+  developer can accept the rest (stop, for a local change) or go again.
+- **An unclean self-review is never accepted.** At the cap after a self-review, the
+  options are another round or a stop. Before asking, one diagnosis turn of the
+  implementer's agent, with the evaluator's tool-less restrictions and the reviewer
+  budget, reads the open findings and the context the implementer was given: issue,
+  plan documents, context file, PR or proposed description, `AGENTS.md` and
+  `CLAUDE.md`, and the repository knowledge in its prompt. It answers `practice_gap`,
+  `conflict`, or `none`. Go keeps a conflict only when every quoted statement appears
+  in its named source (whitespace runs compare equal), and otherwise reports none, so
+  a model cannot invent one. A verified conflict lists each statement with its source
+  and adds options for which statement governs. A practice gap goes to learning. A
+  failed diagnosis still asks, saying it was unavailable. The review, the diagnosis,
+  and the question are written together, and the diagnosis is stored on the decision,
+  so a restart neither asks without one nor runs it twice. An answer reaches the
+  implementer, which reconciles code, plan, and description, and the next change
+  needs a new self-review. A stop fails the task with the unresolved findings and
+  leaves any PR and branch as they are.
 
 ### CI and handover
 
@@ -811,8 +868,11 @@ the same commit. The commit message records why it changed.
   come from a validated `owner/repo`, so one repository cannot reach another's
   directory. Writes use a temp file and rename.
 - **Two triggers, no daemon.** The runner spawns `foreman __learn` when its loop ends
-  on a clean review. The refresh spawns it for a task with a clean review whose
-  evidence fingerprint changed: review count, answered decisions, PR comments, PR
+  on a clean review, or when it asks at the self-review fix limit with a `practice_gap`
+  diagnosis. The refresh spawns it for a learnable task whose evidence fingerprint
+  changed. A task is learnable with a clean competing review, or while its latest
+  decision is a `practice_gap` limit that waits for an answer or was answered with a
+  stop. The fingerprint covers review count, answered decisions, PR comments, PR
   number, head, and outcome, and the attempt's end. CI is not in the fingerprint, so a
   CI change never re-evaluates. A failed evaluation of the same evidence waits an hour.
   Merged or closed tasks that were never evaluated are not started, so turning
@@ -828,7 +888,8 @@ the same commit. The commit message records why it changed.
     PR comment) is active at once. An `observed` one is a candidate until evidence
     from two tasks backs it.
   - The prompt numbers the task's answered decisions (D1...) and human PR comments
-    (C1...). A `source: maintainer` item must cite some of them in `cites`, and
+    (C1...). A fix-limit decision without a context conflict is left out, because its
+    answer (another round or stop) says nothing a learning could cite. A `source: maintainer` item must cite some of them in `cites`, and
     nothing else (`Evaluation.MaintainerRefs`). Otherwise Go treats it as observed
     and logs it, so a model cannot invent a correction. The evaluator still judges
     whether the cited item says what it claims; the citations, kept in the evidence,
@@ -866,6 +927,10 @@ the same commit. The commit message records why it changed.
   file recorded, and leaves out logins ending in `[bot]`, because the gate stops recording when the PR merges or closes. The
   merge changes the fingerprint, so the evaluation after it sees comments posted just
   before it. A comment posted after that evaluation starts nothing.
+- **Self-review rounds are labelled as the implementer's own review.** The prompt
+  says their findings are not the developer's word, and that a mistake specific to the
+  task is `one_off`. Self-review findings alone can only make a candidate; promotion
+  still needs a second task or a maintainer citation.
 - **Time and cost are context, not a score.** The evaluator prompt says so, and says
   CI is not evidence. A long or expensive task is not a failure by itself.
 - **Prompts get a bounded selection.** Planning and implementation turns, including
