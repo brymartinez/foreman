@@ -746,8 +746,8 @@ the same commit. The commit message records why it changed.
   description it read, and with claim verification the claim set and PRD digests too;
   a review of other claims or another PRD does not cover the change. A WAITING_FOR_CI
   task whose head, description, or PRD changed is reviewed again, self-review first
-  (the gate reads the PRD of such a task on each refresh, and fails the task when it
-  cannot load it); new commits on a READY_FOR_HUMAN PR are only
+  (the gate reads the PRD of such a task, and of a claim-verified PR it finds
+  reopened, on each refresh before CI, and fails the task when it cannot load it); new commits on a READY_FOR_HUMAN PR are only
   flagged, because that PR is the developer's now. A crash mid-review restarts at the
   review, not the implementation.
 - **Conflicts are checked before every review** with `git merge-tree` on

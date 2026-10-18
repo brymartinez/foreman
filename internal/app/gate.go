@@ -75,12 +75,13 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			}
 		}
 		// The PRD is a review's acceptance criteria, so an edit to it while the task
-		// waits for CI needs new reviews, like an edited description. A PRD that cannot
+		// waits for CI, or while its PR was closed, needs new reviews, like an edited
+		// description. A PRD that cannot
 		// be loaded fails the task, as it would stop the review. Neither needs CI, so the
 		// PRD is read first.
 		var prd string
 		var prdErr error
-		checkPRD := pr.State == "open" && r.State == task.WaitingForCI && r.Delegation.ClaimVerification
+		checkPRD := pr.State == "open" && (r.State == task.WaitingForCI || r.State == task.PRClosed) && r.Delegation.ClaimVerification
 		if checkPRD {
 			var text string
 			if text, prdErr = a.reviewPRD(ctx, r); prdErr == nil {
@@ -121,7 +122,15 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 				note = restartForPRD(cur, prd, a.Now())
 			case !ciRead:
 			case cur.State == task.PRClosed:
+				if checkPRD && prdErr == nil {
+					// The stored digest decides whether the clean review still covers the PR.
+					cur.Delegation.PRDDigest = prd
+				}
 				note = reopen(cur, pr, ci, a.Now())
+				if checkPRD && prdErr != nil {
+					note = fmt.Sprintf("PR #%d reopened, but its PRD could not be loaded: %v", cur.Delegation.PR, prdErr)
+					failTask(cur, note, a.Now())
+				}
 			case gated(cur):
 				note = advance(cur, pr, ci, a.Now())
 			case rereview(cur):
