@@ -183,18 +183,21 @@ func ReviewPrompt(b ReviewBrief) string {
 		writeReviewComments(&s, b)
 	}
 	if len(b.Previous) > 0 {
-		s.WriteString("## Earlier review rounds\n\nYou or another reviewer reported these findings on earlier versions of this change.\n\n")
+		s.WriteString("## Earlier review rounds\n\nYou or another reviewer reported these findings in earlier rounds of this change.\n\n")
 		for _, r := range b.Previous {
 			fmt.Fprintf(&s, "Round %d (%s):\n", r.Round, orNone(r.Summary, "no summary"))
 			writeFindings(&s, r.Findings)
 			s.WriteString("\n")
 		}
-		s.WriteString("Check each earlier finding: is it fixed, and did the fix break anything? Then review the updated change as a whole. Do not repeat a finding that is resolved. An earlier finding based only on this review's inability to run validation commands is not a code defect; record that as a nonblocking limitation instead. Report a defect again only if it is still there.\n\n")
+		s.WriteString("Check each earlier finding: is it fixed, and did the fix break anything? Then review the change as a whole. Do not repeat a finding that is resolved. An earlier finding based only on this review's inability to run validation commands is not a code defect; do not repeat it as a finding. Report a defect again only if it is still there.\n\n")
+		if b.Claimed {
+			s.WriteString("Record that inability as a nonblocking limitation.\n\n")
+		}
 	}
 	if b.Passes > 0 {
 		kind := "the first review of this pull request"
 		if len(b.Previous) > 0 {
-			kind = "a re-review: the implementer has changed the code since the earlier rounds above"
+			kind = "a re-review after the earlier rounds above"
 		}
 		fmt.Fprintf(&s, "## Review passes\n\nThe developer set review_rounds to %d. This is %s.\n\n", b.Passes, kind)
 	}

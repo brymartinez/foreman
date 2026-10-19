@@ -85,7 +85,7 @@ func TestReReviewPromptListsEarlierFindingsInFull(t *testing.T) {
 		{Severity: "blocking", File: "retry.go", Line: 40, Summary: "4xx retried", Detail: "The guard checks >= 400."}}}}
 	p := ReviewPrompt(b)
 	for _, want := range []string{"## Earlier review rounds", "Round 1 (one bug)", "1. [blocking] 4xx retried", "retry.go:40", "The guard checks >= 400.",
-		"Check each earlier finding", "review the updated change as a whole", "Do not repeat a finding that is resolved",
+		"Check each earlier finding", "review the change as a whole", "Do not repeat a finding that is resolved",
 		"inability to run validation commands is not a code defect"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("re-review prompt missing %q:\n%s", want, p)
@@ -93,6 +93,13 @@ func TestReReviewPromptListsEarlierFindingsInFull(t *testing.T) {
 	}
 	if p := ReviewPrompt(reviewBrief()); strings.Contains(p, "## Earlier review rounds") {
 		t.Errorf("a first review has no earlier rounds:\n%s", p)
+	}
+	if strings.Contains(p, "Record that inability as a nonblocking limitation") {
+		t.Errorf("a review without claims cannot report limitations:\n%s", p)
+	}
+	b.Claimed = true
+	if p := ReviewPrompt(b); !strings.Contains(p, "Record that inability as a nonblocking limitation") {
+		t.Errorf("a claim re-review should retain the execution limit as a limitation:\n%s", p)
 	}
 }
 
@@ -103,7 +110,7 @@ func TestReviewPromptKeepsPassCount(t *testing.T) {
 		t.Errorf("first review:\n%s", p)
 	}
 	b.Previous = []task.Review{{Round: 1, Findings: []task.Finding{{Severity: "blocking", Summary: "x"}}}}
-	if p := ReviewPrompt(b); !strings.Contains(p, "review_rounds to 3. This is a re-review") {
+	if p := ReviewPrompt(b); !strings.Contains(p, "review_rounds to 3. This is a re-review after the earlier rounds") {
 		t.Errorf("re-review:\n%s", p)
 	}
 	b.Passes = 0
