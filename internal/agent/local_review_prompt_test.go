@@ -32,8 +32,15 @@ func TestImplementationPromptWithoutLocalReviewStillOpensThePR(t *testing.T) {
 	b := localBrief()
 	b.LocalReview = false
 	p := ImplementationPrompt(b)
-	if strings.Contains(p, "review_ready") || !strings.Contains(p, "gh pr create") {
+	if strings.Contains(p, "review_ready") || !strings.Contains(p, "gh pr create") || !strings.Contains(p, "gh pr comment <number>") {
 		t.Fatal("the PR workflow prompt changed")
+	}
+	if !strings.Contains(p, ReplyMarker) || !strings.Contains(p, "Do not add screenshots to, or edit, the PR description") {
+		t.Fatal("the opening turn must attach screenshots without editing the PR description")
+	}
+	b.PR = 912
+	if strings.Contains(ImplementationPrompt(b), "gh pr comment <number>") {
+		t.Fatal("a fix to an existing PR must not repost screenshots")
 	}
 }
 
@@ -89,9 +96,9 @@ func TestReviewPromptForAProposedPRUsesTheProposedDescriptionAndLocalDiff(t *tes
 }
 
 func TestOpenPRPromptPushesTheReviewedCommitWithTheReviewedDescription(t *testing.T) {
-	p := OpenPRPrompt(OpenPRBrief{Branch: "feat/7", BaseBranch: "main", Head: "abc1234", Title: "feat: retry 5xx", BodyFile: "/tmp/body.md",
+	p := OpenPRPrompt(OpenPRBrief{Branch: "feat/7", BaseBranch: "main", Head: "abc1234", Title: "feat: retry 5xx", IssueURL: "https://github.com/a/b/issues/7", BodyFile: "/tmp/body.md",
 		Validation: []task.Check{{Command: "go test ./...", Passed: true}}})
-	for _, want := range []string{"abc1234", "git push -u origin feat/7", "gh pr create --base main --head feat/7", "--body-file /tmp/body.md", "feat: retry 5xx", `"pr_opened"`, "go test ./..."} {
+	for _, want := range []string{"abc1234", "git push -u origin feat/7", "gh pr create --base main --head feat/7", "--body-file /tmp/body.md", "feat: retry 5xx", "https://github.com/a/b/issues/7", `"pr_opened"`, "go test ./...", "gh pr comment <number>", ReplyMarker, "Do not add screenshots to, or edit, the PR description"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("prompt lacks %q:\n%s", want, p)
 		}

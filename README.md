@@ -289,7 +289,9 @@ part of the task.
    runner keeps going after you quit the dashboard.
 3. The runner has the agent implement the issue, run validation, push, and open a PR
    with `gh pr create`. Foreman then checks with GitHub that the PR exists and targets
-   the right branch.
+   the right branch. When the issue or repository asks for screenshots, the opening
+   agent attaches them in a PR comment after the PR exists, or reports why it could
+   not. It leaves the PR description as written for review.
 4. The implementing agent first reviews its own PR in a fresh, read-only, throwaway
    session that sees only the PR description and the code. Its findings go back to the
    implementer's session, and the self-review repeats until it is clean for the
@@ -432,9 +434,10 @@ automated reviews that run on new PRs see the finished change. The implementer
 commits locally and proposes a PR title and description. Both reviews read that
 description and the local diff, and fixes stay local. After a clean review, the
 implementer pushes the reviewed commit and opens the PR with the reviewed description,
-and foreman checks that the PR matches. If the fix limit is reached first, you choose
-another round or stopping the task without a PR. A task keeps the setting it started
-with, including when you restart it.
+and foreman checks that the PR matches. Requested screenshots go in a PR comment
+after it opens; they never alter the reviewed description. If the fix limit is reached
+first, you choose another round or stopping the task without a PR. A task keeps the
+setting it started with, including when you restart it.
 
 ## When you close a PR
 

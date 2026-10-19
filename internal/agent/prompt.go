@@ -8,10 +8,10 @@ import (
 	"github.com/brymartinez/foreman/internal/task"
 )
 
-// ReplyMarker opens every reply the agent posts on a pull request. The agent answers
-// through the developer's own gh login, so the author cannot tell its replies from the
-// developer's comments, and a comment the developer writes has to count. Markdown
-// hides the marker, and foreman drops any comment that carries it.
+// ReplyMarker marks comments the agent posts on a pull request, including screenshot
+// evidence. The agent uses the developer's gh login, so the author cannot distinguish
+// these from developer feedback. Markdown hides the marker, and foreman ignores marked
+// comments when looking for feedback or human comments for learning.
 const ReplyMarker = "<!-- foreman:reply -->"
 
 type TaskBrief struct {
@@ -224,7 +224,16 @@ Do not push the branch or open a pull request. Another agent reviews your local 
 
 - When the change is review-ready: commit everything (the worktree must be clean), push with `+"`git push -u origin %s`"+`, then open a pull request with `+"`gh pr create --base %s --head %s`"+`. If a pull request for this branch already exists (`+"`gh pr view %s`"+`), push to it instead of opening another. %s
 - Take prNumber and prUrl from `+"`gh pr view --json number,url`"+` after pushing; do not guess them.
-`, b.Branch, b.BaseBranch, b.Branch, b.Branch, prIssueRule(b))
+%s`, b.Branch, b.BaseBranch, b.Branch, b.Branch, prIssueRule(b), screenshotCommentInstructions(b.PR == 0))
+}
+
+// Screenshot uploads belong in a PR comment so they cannot change the description
+// that the reviewers judge. The marker keeps the agent's comment out of feedback.
+func screenshotCommentInstructions(firstPR bool) string {
+	if !firstPR {
+		return ""
+	}
+	return fmt.Sprintf("- If the issue or repository asks for screenshots, capture them after the PR exists and attach them to one PR comment. Use `gh pr comment <number> --body '%s Screenshots' --attach '<path>#alt text'` (repeat --attach for more images). Before posting, read `gh pr view <number> --json comments` and skip the upload if a comment already contains `%s Screenshots`. Keep screenshot files out of the committed change and clean up only temporary files you created. Do not add screenshots to, or edit, the PR description. If a requested screenshot cannot be captured or uploaded after the PR exists, still report pr_opened and name the missing evidence in the outcome summary so foreman records the PR.\n", ReplyMarker, ReplyMarker)
 }
 
 func finishedStatus(b TaskBrief) string {
@@ -554,6 +563,7 @@ type OpenPRBrief struct {
 	BaseBranch string
 	Head       string
 	Title      string
+	IssueURL   string
 	// BodyFile holds the reviewed description, written by foreman so it reaches gh
 	// byte for byte.
 	BodyFile   string
@@ -571,6 +581,9 @@ type OpenPRBrief struct {
 func OpenPRPrompt(b OpenPRBrief) string {
 	var s strings.Builder
 	s.WriteString("Another agent reviewed your local change and found nothing to fix. Push it and open the pull request now.\n\n")
+	if b.IssueURL != "" {
+		fmt.Fprintf(&s, "The issue is %s. Check it and repository instructions for any requested screenshots.\n\n", b.IssueURL)
+	}
 	if len(b.Decisions) > 0 {
 		s.WriteString("The developer answered your questions:\n\n")
 		for _, d := range b.Decisions {
@@ -587,10 +600,11 @@ func OpenPRPrompt(b OpenPRBrief) string {
 
 4. Take prNumber and prUrl from `+"`gh pr view --json number,url`"+`; do not guess them.
 
-End with JSON matching the provided schema: "pr_opened" with prNumber, prUrl, and the validation below; "blocked" with questions if a push or gh command fails in a way you cannot fix without changing the branch; or "failed". Set fields that do not apply to null, or [] for questions. Set documents to null.
+%s
+End with JSON matching the provided schema: "pr_opened" with prNumber, prUrl, and the validation below; "blocked" with questions if the push or PR creation fails in a way you cannot fix without changing the branch; or "failed". Set fields that do not apply to null, or [] for questions. Set documents to null.
 
 Validation run on the reviewed commit:
-`, b.Head, b.Branch, b.Branch, b.BaseBranch, b.Branch, b.BodyFile, b.Title)
+`, b.Head, b.Branch, b.Branch, b.BaseBranch, b.Branch, b.BodyFile, b.Title, screenshotCommentInstructions(true))
 	for _, c := range b.Validation {
 		fmt.Fprintf(&s, "- %s: passed %t\n", c.Command, c.Passed)
 	}

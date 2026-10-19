@@ -96,7 +96,7 @@ func (a App) openTurn(ctx context.Context, rec *task.Record, adapter AgentAdapte
 	d := rec.Delegation
 	in.Prompt = agent.OpenPRPrompt(agent.OpenPRBrief{
 		Branch: d.Branch, BaseBranch: strings.TrimPrefix(d.BaseRef, "origin/"), Head: d.LocalHead,
-		Title: d.ProposedTitle, BodyFile: bodyFile, Validation: rec.Validation, Decisions: rec.Undelivered(),
+		Title: d.ProposedTitle, IssueURL: rec.URL, BodyFile: bodyFile, Validation: rec.Validation, Decisions: rec.Undelivered(),
 		Claims: d.Claims,
 	})
 	if err := a.startAttempt(ctx, rec); err != nil {

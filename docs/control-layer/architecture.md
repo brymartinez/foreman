@@ -703,7 +703,11 @@ the same commit. The commit message records why it changed.
   earlier rounds, but not the issue, decisions, or validation, so the review stays
   independent. A blank description stops the review. A task with claim verification
   adds the PRD as the acceptance criteria and the implementer's claims; the description
-  is then the change as the implementer describes it.
+  is then the change as the implementer describes it. When the issue or repository
+  requests screenshots, the opening agent attaches them in a PR comment after the PR
+  exists, without editing the reviewed description. The comment carries the agent
+  marker so feedback and learning do not mistake it for a developer comment. A retry
+  checks existing comments before posting again.
 - **Claim verification is set when a planning task starts.** `claim_verification` is
   copied onto the delegation when a task that will plan starts (the CLI always enables
   it; a task that continues a PR has no PRD and starts without it). A restart keeps it,
@@ -745,6 +749,9 @@ the same commit. The commit message records why it changed.
   of the PR's head, so the gate goes straight to CI. Each local review records the
   commit and a digest of the title and description it read, and a restart resumes from the record:
   a commit or description without a review goes to review, a clean pair to the PR step.
+  The opening turn may capture requested screenshots after the PR exists and post them
+  as a marked comment. Screenshot uploads never relax the exact title and body
+  comparison with the clean review.
 - **A review covers one PR head and description.** Each review records the head and
   description it read, and with claim verification the claim set and PRD digests too;
   a review of other claims or another PRD does not cover the change. A WAITING_FOR_CI
