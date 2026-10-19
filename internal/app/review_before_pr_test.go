@@ -90,7 +90,7 @@ func localTask(t *testing.T, f fixture) task.Key {
 	t.Helper()
 	f.app.ReviewBeforePR = true
 	key := started(t, f, startReq(t))
-	postedPlan(f.store.recs[key])
+	postedPlan(f, f.store.recs[key])
 	delete(f.gh.prs, 912)
 	return key
 }
@@ -174,7 +174,7 @@ func TestReviewReadyFailsWithoutAVerifiedCommit(t *testing.T) {
 func TestReviewReadyIsRejectedOutsideALocalReview(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
-	postedPlan(f.store.recs[key])
+	postedPlan(f, f.store.recs[key])
 	f.wt.checkpointHeads = []string{"commit1"}
 	f.claude.turn = reviewReadyTurn("sid-1", "Closes #825")
 	res := f.app.runTurn(context.Background(), f.store.recs[key], turnRequest{}, f.app.verifiedPR(io.Discard), io.Discard)
@@ -447,6 +447,7 @@ func TestReviewBeforePRResumesACleanCommitAtThePROpening(t *testing.T) {
 	rec.Delegation.LocalHead, rec.Delegation.ProposedTitle, rec.Delegation.ProposedBody = "commit1", proposedTitle, proposedBody
 	rec.Delegation.Implementer.ID = "sid-1"
 	rec.Reviews = []task.Review{{Round: 1, Reviewer: task.Codex, Head: "commit1", Proposal: task.ProposalDigest(proposedTitle, proposedBody), Clean: true, At: now}}
+	rec.Reviews[0].Scope, rec.Reviews[0].Plan = rec.Delegation.ScopeDigest, rec.Delegation.PlanDigest
 	f.claude.turns = []agent.Turn{prTurn("sid-1")}
 	opensPR(t, f, "commit1", proposedTitle, proposedBody, 0)
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
@@ -467,6 +468,7 @@ func TestReviewBeforePRAdoptsAMatchingPRWithoutAnotherTurn(t *testing.T) {
 	rec := f.store.recs[key]
 	rec.Delegation.LocalHead, rec.Delegation.ProposedTitle, rec.Delegation.ProposedBody = "commit1", proposedTitle, proposedBody
 	rec.Reviews = []task.Review{{Round: 1, Reviewer: task.Codex, Head: "commit1", Proposal: task.ProposalDigest(proposedTitle, proposedBody), Clean: true, At: now}}
+	rec.Reviews[0].Scope, rec.Reviews[0].Plan = rec.Delegation.ScopeDigest, rec.Delegation.PlanDigest
 	pr := fixturePR()
 	pr.HeadSHA, pr.Title, pr.Body = "commit1", proposedTitle, proposedBody+"\n"
 	f.gh.prs[912] = pr
@@ -525,7 +527,7 @@ func TestATaskKeepsItsWorkflowWhenTheSettingChanges(t *testing.T) {
 
 	f = newFixture()
 	key = started(t, f, startReq(t))
-	postedPlan(f.store.recs[key])
+	postedPlan(f, f.store.recs[key])
 	f.app.ReviewBeforePR = true
 	f.claude.turn = prTurn("sid-1")
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {

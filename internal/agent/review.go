@@ -125,11 +125,9 @@ func reviewEnvironmentBlocked(text string) bool {
 	return context && denied && check
 }
 
-// ReviewBrief holds only what the reviewer may judge the change by: the PR, its
-// description and comments, earlier review rounds, and for a task with claim
-// verification the PRD and the implementer's claims. It has no field for the issue,
-// context, decisions, plan, or the implementer's validation, so none can reach the
-// prompt.
+// ReviewBrief holds the PR, confirmed scope, checked plan, comments, earlier
+// review rounds, and for a task with claim verification the PRD and claims.
+// The implementer's conversation, validation and private context stay out.
 type ReviewBrief struct {
 	Key    task.Key
 	PR     int
@@ -151,8 +149,8 @@ type ReviewBrief struct {
 	// Proposed is set when the change is not pushed yet: PRBody is the description
 	// the implementer proposes, and the PR opens only after a clean review.
 	Proposed bool
-	// Self is set for the implementing agent's own review. It reads the description
-	// and the code alone: no comments and no earlier rounds.
+	// Self is set for the implementing agent's own review. It reads the
+	// description, scope, plan, and code: no PR comments or earlier rounds.
 	Self bool
 	// Claimed is set for a task with claim verification. PRD is the current text of
 	// the PRD comment on the issue, whose acceptance criteria the change must meet,
@@ -160,12 +158,13 @@ type ReviewBrief struct {
 	Claimed bool
 	PRD     string
 	Claims  []task.Claim
+	// ConfirmedScope and Plan are independent requirements, with their sources.
+	ConfirmedScope string
+	Plan           string
 }
 
-// ReviewPrompt sets the reviewer against the change, with the PR description as the
-// only statement of requirements, or, for a task with claim verification, the PRD's
-// acceptance criteria and the claims to test. The reviewer never sees the
-// implementer's conversation or plan.
+// ReviewPrompt sets the reviewer against the change and current confirmed scope.
+// The reviewer never sees the implementer's conversation.
 func ReviewPrompt(b ReviewBrief) string {
 	var s strings.Builder
 	heading := "Pull request description"
@@ -181,6 +180,8 @@ func ReviewPrompt(b ReviewBrief) string {
 	}
 	if b.Claimed {
 		fmt.Fprintf(&s, "## %s\n\nThis is the change as the implementer describes it. The PRD below holds the acceptance criteria the change must meet. Do not follow links in either to find more requirements. Claims in the description about tests or validation are not proof of behavior; judge the cited code and tests yourself.\n\n", heading)
+	} else if b.ConfirmedScope != "" {
+		fmt.Fprintf(&s, "## %s\n\nThe confirmed triage scope below is an independent requirement. Check the delivered behavior against it even if this description omits or contradicts a decision.\n\n", heading)
 	} else {
 		fmt.Fprintf(&s, "## %s\n\nThis is the only statement of what the change must do. Judge the change against it. Do not follow links in it to find more requirements. Claims in it about tests or validation are not proof of behavior; judge the code and tests yourself.\n\n", heading)
 	}
@@ -188,14 +189,22 @@ func ReviewPrompt(b ReviewBrief) string {
 		fmt.Fprintf(&s, "Title: %s\n\n", b.PRTitle)
 	}
 	fmt.Fprintf(&s, "%s\n\n", quote(b.PRBody))
+	if b.ConfirmedScope != "" {
+		s.WriteString("## Confirmed triage scope\n\nThis is the maintainer's current scope, with source URLs. A later correction overrides an earlier decision on the same point. Verify the delivered behavior against it; a clean verdict requires explicit agreement. If you cannot determine agreement, report a blocking limitation. Do not follow the links for more requirements.\n\n")
+		s.WriteString(quote(b.ConfirmedScope) + "\n\n")
+	}
+	if b.Plan != "" {
+		s.WriteString("## Checked planning documents\n\nCheck the behavior against this plan too. If it conflicts with confirmed triage, triage governs.\n\n")
+		s.WriteString(quote(b.Plan) + "\n\n")
+	}
 	if b.Claimed {
 		writeClaims(&s, b)
 	}
 	silentWorkSection(&s)
 	if text := strings.TrimSpace(b.StageInstructions); text != "" {
-		read := "Where they mention the issue, the PRD, or the developer's decisions, read it as the pull request description."
+		read := "Where they mention the issue or developer decisions, read them as confirmed triage and the pull request description."
 		if b.Claimed {
-			read = "Where they mention the issue or the developer's decisions, read it as the PRD and the pull request description."
+			read = "Where they mention the issue or developer decisions, read them as confirmed triage, the PRD, and the pull request description."
 		}
 		fmt.Fprintf(&s, "## Developer workflow instructions\n\nThe developer's instructions for reviewing. %s Where they conflict with the review rules below, the rules below win.\n\n", read)
 		s.WriteString(text + "\n\n")

@@ -50,6 +50,10 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, token string, l
 	if rec, err = a.logRoute(ctx, rec, log); err != nil {
 		return err
 	}
+	if _, err := a.readScope(ctx, rec.Key); err != nil {
+		_, saveErr := a.update(final, rec.Key, existing(func(cur *task.Record) { failTask(cur, err.Error(), a.Now()) }))
+		return saveErr
+	}
 
 	if rec.Delegation.ConflictPending {
 		// The gate found the handed-over PR conflicting with its base. A repair
@@ -151,6 +155,7 @@ type taskRun struct {
 	feedback   []PRComment  // the comments the next stepAnswer answers
 	rounds     int          // how many times this run has answered comments
 	plan       issuePlan    // the plan on the issue, read before a planning turn
+	scope      confirmedScope
 	// selfPassed is set when this run's self-review just passed the change, so the
 	// competing review of the same change follows without a second conflict check.
 	selfPassed bool
@@ -158,7 +163,12 @@ type taskRun struct {
 
 func (r *taskRun) loop(next step) error {
 	for next != stepDone {
+		var stopped bool
 		var err error
+		next, stopped, err = r.scopeBoundary(next)
+		if err != nil || stopped {
+			return err
+		}
 		switch next {
 		case stepImplement:
 			next, err = r.implement()
@@ -180,6 +190,58 @@ func (r *taskRun) loop(next step) error {
 		}
 	}
 	return nil
+}
+
+// scopeBoundary re-reads triage before every stage. A changed scope invalidates
+// prior plan and code reviews; a removed label or unreadable source stops the run.
+func (r *taskRun) scopeBoundary(next step) (step, bool, error) {
+	scope, err := r.a.readScope(r.ctx, r.rec.Key)
+	if err != nil {
+		rec, saveErr := r.a.update(r.final, r.rec.Key, existing(func(cur *task.Record) { failTask(cur, err.Error(), r.a.Now()) }))
+		r.rec = rec
+		return stepDone, true, saveErr
+	}
+	r.scope = scope
+	if r.rec.Delegation.ScopeDigest != scope.digest {
+		clearSession := r.rec.Delegation.ScopeDigest != "" || r.rec.PlanPosted()
+		rec, err := r.a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
+			cur.Delegation.ScopeDigest = scope.digest
+			cur.Delegation.PlanScopeDigest = ""
+			cur.Delegation.PlanDigest = ""
+			if clearSession {
+				cur.Delegation.Implementer.ID = ""
+			}
+		}))
+		if err != nil {
+			return stepDone, true, err
+		}
+		r.rec = rec
+	}
+	if r.rec.PlanPosted() && r.rec.Delegation.PlanDigest != "" {
+		plan, err := r.a.readIssuePlan(r.ctx, r.rec)
+		if err != nil {
+			rec, saveErr := r.a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
+				failTask(cur, fmt.Sprintf("reading checked planning documents failed: %v", err), r.a.Now())
+			}))
+			r.rec = rec
+			return stepDone, true, saveErr
+		}
+		if !plan.complete() || planDigest(plan.texts()) != r.rec.Delegation.PlanDigest {
+			rec, err := r.a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
+				cur.Delegation.PlanScopeDigest = ""
+				cur.Delegation.PlanDigest = ""
+				cur.Delegation.Implementer.ID = ""
+			}))
+			if err != nil {
+				return stepDone, true, err
+			}
+			r.rec = rec
+		}
+	}
+	if next != stepImplement && r.a.needsPlan(r.rec) {
+		return stepImplement, false, nil
+	}
+	return next, false, nil
 }
 
 // implement runs an implementer turn with the open findings, if any. A posted plan
@@ -348,6 +410,14 @@ func (r *taskRun) review() (step, error) {
 	default:
 		review, reviewer, reviewErr = a.review(r.ctx, rec, title, body, prd, r.log)
 	}
+	if reviewErr == nil {
+		if rec.Delegation.ClaimVerification {
+			_, reviewErr = a.reviewPRD(r.ctx, rec)
+		}
+	}
+	if reviewErr == nil {
+		_, _, reviewErr = a.reviewRequirements(r.ctx, rec)
+	}
 	// Every fix is reviewed; the developer is asked only once fix_rounds fixes, requested
 	// by either reviewer, still leave findings. A self-review at the limit is diagnosed
 	// first, and the review, the diagnosis, and the question are written together, so a
@@ -464,7 +534,8 @@ func (a App) reviewRounds() int {
 // needsPlan is true until every planning document is on the issue. A task that
 // already has a PR, from before planning existed, goes on without one.
 func (a App) needsPlan(rec *task.Record) bool {
-	return !rec.PlanPosted() && rec.Delegation.PR == 0
+	return (!rec.PlanPosted() && rec.Delegation.PR == 0) ||
+		(rec.PlanPosted() && rec.Delegation.ScopeDigest != "" && rec.Delegation.PlanScopeDigest != rec.Delegation.ScopeDigest)
 }
 
 // implement runs one implementer turn. It resumes the session with a conflict repair,
@@ -709,11 +780,15 @@ func reviewTarget(rec *task.Record) string {
 }
 
 // selfReview runs the implementing agent's review in a fresh, read-only session. It
-// reads the description and the code alone: not the implementer's session, the issue,
-// the plan, the PR comments, or earlier findings. It never falls back to another
+// reads the description, confirmed scope, checked plan, and code, without the
+// implementer's session, PR comments, or earlier findings. It never falls back to another
 // agent, so an error stops the task instead of skipping to the competing review.
 func (a App) selfReview(ctx context.Context, rec *task.Record, title, body, prd string, log io.Writer) (agent.ReviewOutcome, error) {
 	d := rec.Delegation
+	scope, plan, err := a.reviewRequirements(ctx, rec)
+	if err != nil {
+		return agent.ReviewOutcome{}, err
+	}
 	adapter, ok := a.Agents[d.Implementer.Agent]
 	if !ok {
 		return agent.ReviewOutcome{}, fmt.Errorf("agent %s is not configured", d.Implementer.Agent)
@@ -724,7 +799,7 @@ func (a App) selfReview(ctx context.Context, rec *task.Record, title, body, prd 
 	}
 	brief := agent.ReviewBrief{Key: rec.Key, PR: d.PR, PRTitle: title, PRBody: body, Branch: d.Branch, BaseBranch: strings.TrimPrefix(d.BaseRef, "origin/"),
 		StageInstructions: instructions.Content(), Passes: a.reviewRounds(), Proposed: rec.LocalReview(), Self: true,
-		Claimed: d.ClaimVerification, PRD: prd, Claims: d.Claims}
+		Claimed: d.ClaimVerification, PRD: prd, Claims: d.Claims, ConfirmedScope: scope.text, Plan: plan}
 	if err := a.startAttempt(ctx, rec); err != nil {
 		return agent.ReviewOutcome{}, err
 	}
@@ -738,6 +813,10 @@ func (a App) selfReview(ctx context.Context, rec *task.Record, title, body, prd 
 // only the competing rounds, never a self-review.
 func (a App) review(ctx context.Context, rec *task.Record, title, body, prd string, log io.Writer) (agent.ReviewOutcome, task.Agent, error) {
 	d := rec.Delegation
+	scope, plan, requirementsErr := a.reviewRequirements(ctx, rec)
+	if requirementsErr != nil {
+		return agent.ReviewOutcome{}, d.Reviewer, requirementsErr
+	}
 	chosen := d.Reviewer
 	if chosen != d.Implementer.Agent && a.Quota != nil {
 		if quotas, err := a.Quota.Quota(ctx); err == nil {
@@ -753,9 +832,8 @@ func (a App) review(ctx context.Context, rec *task.Record, title, body, prd stri
 	if !ok {
 		return agent.ReviewOutcome{}, chosen, fmt.Errorf("reviewer %s is not configured", chosen)
 	}
-	// The PR description is the reviewer's only statement of requirements, except for a
-	// task with claim verification, which adds the PRD. A local commit is reviewed with
-	// the proposed description.
+	// Confirmed scope and the checked plan are independent requirements. Claim
+	// verification adds the PRD. A local commit uses the proposed description.
 	local, target := rec.LocalReview(), reviewTarget(rec)
 	instructions, err := a.Stages.Resolve(d.Worktree, task.StageReview)
 	if err != nil {
@@ -763,7 +841,7 @@ func (a App) review(ctx context.Context, rec *task.Record, title, body, prd stri
 	}
 	brief := agent.ReviewBrief{Key: rec.Key, PR: d.PR, PRTitle: title, PRBody: body, Branch: d.Branch, BaseBranch: strings.TrimPrefix(d.BaseRef, "origin/"),
 		StageInstructions: instructions.Content(), Previous: rec.CompetingReviews(), Passes: a.reviewRounds(), Proposed: local,
-		Claimed: d.ClaimVerification, PRD: prd, Claims: d.Claims}
+		Claimed: d.ClaimVerification, PRD: prd, Claims: d.Claims, ConfirmedScope: scope.text, Plan: plan}
 	// Comments are history, not requirements, so the review goes on without them. A
 	// local commit has no PR to read them from.
 	if !local {
@@ -797,6 +875,32 @@ func (a App) review(ctx context.Context, rec *task.Record, title, body, prd stri
 		out, err = reviewer.Review(ctx, in)
 	}
 	return out, chosen, err
+}
+
+func (a App) reviewRequirements(ctx context.Context, rec *task.Record) (confirmedScope, string, error) {
+	scope, err := a.readScope(ctx, rec.Key)
+	if err != nil {
+		return confirmedScope{}, "", err
+	}
+	if scope.digest != rec.Delegation.ScopeDigest {
+		return confirmedScope{}, "", errors.New("confirmed triage changed before review; restart to recheck planning and implementation")
+	}
+	if !rec.PlanPosted() {
+		return scope, "", nil
+	}
+	plan, err := a.readIssuePlan(ctx, rec)
+	if err != nil {
+		return confirmedScope{}, "", fmt.Errorf("reading planning documents for review: %w", err)
+	}
+	if !plan.complete() || planDigest(plan.texts()) != rec.Delegation.PlanDigest || rec.Delegation.PlanScopeDigest != scope.digest {
+		return confirmedScope{}, "", errors.New("planning documents changed or have not been checked against current triage; restart to reconcile them")
+	}
+	var text strings.Builder
+	for _, doc := range task.PlanDocs {
+		f := plan.found[doc]
+		fmt.Fprintf(&text, "### %s\nSource: %s\n%s\n\n", doc.Title(), f.comment.URL, f.text)
+	}
+	return scope, text.String(), nil
 }
 
 func addUsage(total *task.Usage, turn task.Usage) {
@@ -860,6 +964,10 @@ func (a App) brief(ctx context.Context, rec *task.Record, log io.Writer) (agent.
 	if err != nil {
 		return agent.TaskBrief{}, err
 	}
+	scope, err := a.readScope(ctx, rec.Key)
+	if err != nil {
+		return agent.TaskBrief{}, err
+	}
 	prior, err := a.priorBrief(ctx, rec)
 	if err != nil {
 		return agent.TaskBrief{}, err
@@ -871,19 +979,20 @@ func (a App) brief(ctx context.Context, rec *task.Record, log io.Writer) (agent.
 		}
 	}
 	return agent.TaskBrief{
-		PriorPR:    prior,
-		Key:        rec.Key,
-		Identifier: issue.Identifier,
-		Title:      issue.Title,
-		URL:        issue.URL,
-		IssueBody:  issue.Body,
-		Context:    string(contextText),
-		Branch:     d.Branch,
-		BaseBranch: strings.TrimPrefix(d.BaseRef, "origin/"),
-		Worktree:   d.Worktree,
-		Decisions:  rec.Decisions,
-		Plan:       rec.Plan,
-		Knowledge:  a.repoKnowledge(rec.Repo, issue, log),
+		PriorPR:        prior,
+		Key:            rec.Key,
+		Identifier:     issue.Identifier,
+		Title:          issue.Title,
+		URL:            issue.URL,
+		IssueBody:      issue.Body,
+		ConfirmedScope: scope.text,
+		Context:        string(contextText),
+		Branch:         d.Branch,
+		BaseBranch:     strings.TrimPrefix(d.BaseRef, "origin/"),
+		Worktree:       d.Worktree,
+		Decisions:      rec.Decisions,
+		Plan:           rec.Plan,
+		Knowledge:      a.repoKnowledge(rec.Repo, issue, log),
 	}, nil
 }
 
@@ -1061,6 +1170,42 @@ func (a App) postPlan(ctx, final context.Context, rec *task.Record, docs map[tas
 			applyStop(ctx, cur, "planning", log, a.Now())
 		}))
 	}
+	scope, scopeErr := a.readScope(ctx, rec.Key)
+	if scopeErr == nil && scope.digest != rec.Delegation.ScopeDigest {
+		scopeErr = errors.New("confirmed triage changed during planning; restart to revise the documents")
+	}
+	if scopeErr != nil {
+		return a.update(final, rec.Key, existing(func(cur *task.Record) { failTask(cur, scopeErr.Error(), a.Now()) }))
+	}
+	texts := onIssue.texts()
+	if texts == nil {
+		texts = map[task.PlanDoc]string{}
+	}
+	for doc, text := range docs {
+		if strings.TrimSpace(text) != "" {
+			texts[doc] = text
+		}
+	}
+	checked, checkErr := a.checkPlan(ctx, rec, scope, texts, onIssue, log)
+	if checkErr != nil || !checked.Clean {
+		return a.update(final, rec.Key, existing(func(cur *task.Record) {
+			switch {
+			case checkErr != nil:
+				failTask(cur, checkErr.Error(), a.Now())
+			case len(checked.Findings) == 0:
+				failTask(cur, "plan agreement with confirmed triage is inconclusive; revise and restart", a.Now())
+			default:
+				proposed := onIssue
+				proposed.found = make(map[task.PlanDoc]foundPlan, len(texts))
+				for doc, text := range texts {
+					f := onIssue.found[doc]
+					f.text = text
+					proposed.found[doc] = f
+				}
+				askScopePlanConflict(cur, scope, proposed, checked, a.Now())
+			}
+		}))
+	}
 	for _, doc := range task.PlanDocs {
 		found, isFound := onIssue.found[doc]
 		if strings.TrimSpace(docs[doc]) == "" {
@@ -1107,7 +1252,10 @@ func (a App) postPlan(ctx, final context.Context, rec *task.Record, docs map[tas
 		}
 		fmt.Fprintf(log, "foreman: posted the %s: %s\n", doc.Title(), posted.URL)
 	}
-	return rec, nil
+	return a.update(final, rec.Key, existing(func(cur *task.Record) {
+		cur.Delegation.PlanScopeDigest = scope.digest
+		cur.Delegation.PlanDigest = planDigest(texts)
+	}))
 }
 
 // stillPlanComment returns id when the comment still starts with doc's marker, and
@@ -1185,6 +1333,8 @@ func applyReview(rec *task.Record, kind task.ReviewKind, reviewer task.Agent, r 
 		Summary:  r.Summary,
 		Findings: r.Findings,
 		At:       now,
+		Scope:    rec.Delegation.ScopeDigest,
+		Plan:     rec.Delegation.PlanDigest,
 	}
 	if d := rec.Delegation; d.ClaimVerification {
 		review.Claims, review.PRD, review.Limitations = task.ClaimsDigest(d.Claims), d.PRDDigest, r.Limitations

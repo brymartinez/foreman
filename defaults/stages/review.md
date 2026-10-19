@@ -3,7 +3,7 @@
 ## Scope
 
 1. Follow the repository's AGENTS.md and CLAUDE.md.
-2. Check the change against the pull request description first: does it meet each stated requirement, and do nothing it wasn't asked to do? The description is the only source of requirements. Don't follow its links for more.
+2. Check the change against confirmed triage, the checked plan, and the pull request description. Confirmed triage governs if they conflict. For claim verification, check the PRD and claims too. Don't follow links for more requirements.
 3. Read beyond the diff. Look at callers of changed functions, other places that share the changed type or config, and error paths the tests skip.
 4. Use PR comments and commit messages to track feedback and find your way around the change. They add no requirements, and a claim in them is not proof.
 5. Try to break the change. Look for counterexamples, regressions, and missing cases by reading the code and tests. The implementation session runs vet, tests, builds, and end-to-end checks; this read-only review does not rerun them.
@@ -22,7 +22,7 @@
 10. Drop anything you can't back with a concrete case.
 11. Count a missing test as a finding only when the untested path could plausibly break.
    An inability to rerun the implementer's reported checks in this review is not a finding by itself. For a claim review, record it as a nonblocking limitation.
-12. Flag added code that duplicates an existing helper or builds for a need the description doesn't state.
+12. Flag added code that duplicates an existing helper or builds for a need the confirmed scope and checked plan don't state.
 
 ## Reporting
 

@@ -258,6 +258,8 @@ type fakeAgent struct {
 	reviewBudgets []float64
 	resumeErr     error
 	reviews       []agent.ReviewOutcome // consumed in order; clean once empty
+	scopeReviews  []agent.ReviewOutcome
+	scopeReviewed []string
 	reviewErr     error
 	reviewed      []string
 	during        func() // runs inside Start, while the turn is in progress
@@ -280,6 +282,15 @@ func (f *fakeAgent) next() (agent.Turn, error) {
 }
 
 func (f *fakeAgent) Review(_ context.Context, in agent.StartInput) (agent.ReviewOutcome, error) {
+	if strings.HasPrefix(in.Prompt, "You are checking planning documents") {
+		f.scopeReviewed = append(f.scopeReviewed, in.Prompt)
+		if len(f.scopeReviews) > 0 {
+			r := f.scopeReviews[0]
+			f.scopeReviews = f.scopeReviews[1:]
+			return r, nil
+		}
+		return agent.ReviewOutcome{Clean: true, Summary: "plan agrees with triage"}, nil
+	}
 	f.reviewed = append(f.reviewed, in.Prompt)
 	f.reviewBudgets = append(f.reviewBudgets, in.MaxBudgetUSD)
 	f.steps = append(f.steps, in.Step)
@@ -346,7 +357,7 @@ func newFixture() fixture {
 		store: &fakeStore{recs: map[task.Key]*task.Record{}},
 		gh: &fakeGitHub{
 			repo:  RepoInfo{Repo: "testorg/example", DefaultBranch: "main"},
-			issue: Issue{Title: "Provider retries", Body: "Retry failed requests.", URL: "https://x/825", State: "open", UpdatedAt: t0},
+			issue: Issue{Title: "Provider retries", Body: "Retry failed requests.", URL: "https://x/825", State: "open", Labels: []string{"triaged"}, UpdatedAt: t0},
 			prs: map[int]PullRequest{912: {
 				Key: task.Key{Repo: "testorg/example", Number: 912}, URL: "https://github.com/testorg/example/pull/912",
 				State: "open", HeadRefName: "feat/825-provider-retries", BaseRefName: "main", HeadSHA: "c0ffee1",
@@ -736,7 +747,7 @@ func TestStartPicksBranchTypeFromLabelsOrOverride(t *testing.T) {
 		want     string
 	}{{"", "fix/825-provider-retries"}, {"chore", "chore/825-provider-retries"}} {
 		f := newFixture()
-		f.gh.issue.Labels = []string{"bug"}
+		f.gh.issue.Labels = []string{"bug", "triaged"}
 		req := startReq(t)
 		req.BranchType = tc.override
 		rec, err := f.app.Start(context.Background(), req)
@@ -752,7 +763,7 @@ func TestStartPicksBranchTypeFromLabelsOrOverride(t *testing.T) {
 func TestLinearStartUsesTrackerBranchName(t *testing.T) {
 	f := newFixture()
 	key := task.Key{Repo: f.gh.repo.Repo, Source: task.Linear, ExternalID: "uuid-42"}
-	f.app.Linear = &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", BranchName: "bryan/web-42-fix-cache", Title: "Fix cache", State: "open"}}
+	f.app.Linear = &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", BranchName: "bryan/web-42-fix-cache", Title: "Fix cache", State: "open", Labels: []string{"triaged"}}}
 	rec, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude})
 	if err != nil {
 		t.Fatal(err)
@@ -765,7 +776,7 @@ func TestLinearStartUsesTrackerBranchName(t *testing.T) {
 func TestLinearStartRejectsUnsafeTrackerBranchName(t *testing.T) {
 	f := newFixture()
 	key := task.Key{Repo: f.gh.repo.Repo, Source: task.Linear, ExternalID: "uuid-42"}
-	f.app.Linear = &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", BranchName: "../outside", Title: "Fix cache", State: "open"}}
+	f.app.Linear = &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", BranchName: "../outside", Title: "Fix cache", State: "open", Labels: []string{"triaged"}}}
 	if _, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude}); err == nil || !strings.Contains(err.Error(), "invalid branch name") {
 		t.Fatalf("start error = %v", err)
 	}
@@ -803,6 +814,7 @@ func TestStartNewOnlyStartsAnIssueNeverDelegated(t *testing.T) {
 
 func TestStartNewOnlyRejectsIssueWhoseTriagedLabelWasRemoved(t *testing.T) {
 	f := newFixture()
+	f.gh.issue.Labels = nil
 	key := task.Key{Repo: "testorg/example", Number: 825}
 	_, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Issue: key.Number, Agent: task.Claude, NewOnly: true})
 	if err == nil || !strings.Contains(err.Error(), "triaged") {
@@ -811,7 +823,7 @@ func TestStartNewOnlyRejectsIssueWhoseTriagedLabelWasRemoved(t *testing.T) {
 	if len(f.runners.spawned) != 0 || len(f.wt.reqs) != 0 {
 		t.Fatalf("auto start spawned %d runners and made %d worktrees", len(f.runners.spawned), len(f.wt.reqs))
 	}
-	if _, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Issue: key.Number, Agent: task.Claude}); err != nil {
-		t.Fatalf("manual start without triaged label: %v", err)
+	if _, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Issue: key.Number, Agent: task.Claude}); err == nil || !strings.Contains(err.Error(), "triaged") {
+		t.Fatalf("manual start without triaged label = %v", err)
 	}
 }

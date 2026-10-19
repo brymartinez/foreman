@@ -87,10 +87,15 @@ func TestLinearAutoStartRechecksExactTriagedLabelBeforeWorktree(t *testing.T) {
 	}
 }
 
-func TestLinearManualStartDoesNotRequireTriagedLabel(t *testing.T) {
+func TestLinearManualStartRequiresTriagedLabel(t *testing.T) {
 	f := newFixture()
 	key := task.Key{Repo: f.gh.repo.Repo, Source: task.Linear, ExternalID: "uuid-42"}
-	f.app.Linear = &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", URL: "https://linear.app/acme/issue/WEB-42", State: "open"}}
+	tracker := &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", URL: "https://linear.app/acme/issue/WEB-42", State: "open"}}
+	f.app.Linear = tracker
+	if _, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude}); err == nil || !strings.Contains(err.Error(), "triaged") {
+		t.Fatalf("manual start without triaged = %v", err)
+	}
+	tracker.issue.Labels = []string{"triaged"}
 	rec, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude})
 	if err != nil || rec == nil || rec.Key != key || rec.Delegation.Branch != "feat/linear-web-42-fix-cache" {
 		t.Fatalf("start = %+v, %v", rec, err)
@@ -103,7 +108,7 @@ func TestLinearManualStartDoesNotRequireTriagedLabel(t *testing.T) {
 func TestLinearSuggestionUsesFullBranchWorktreePath(t *testing.T) {
 	f := newFixture()
 	key := task.Key{Repo: f.gh.repo.Repo, Source: task.Linear, ExternalID: "uuid-42"}
-	f.app.Linear = &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", State: "open", BranchName: "bryan/web-42-fix-cache"}}
+	f.app.Linear = &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", State: "open", Labels: []string{"triaged"}, BranchName: "bryan/web-42-fix-cache"}}
 	rec, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude})
 	if err != nil {
 		t.Fatal(err)
@@ -132,7 +137,7 @@ func TestLinearRouteReadsIssueAndCommentsFromLinear(t *testing.T) {
 func TestLinearRunnerReadsStoredSourceAndPostsFourPlanningComments(t *testing.T) {
 	f := newFixture()
 	key := task.Key{Repo: f.gh.repo.Repo, Source: task.Linear, ExternalID: "uuid-42"}
-	tracker := &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", Body: "Use bounded retries.", URL: "https://linear.app/acme/issue/WEB-42", State: "open"}}
+	tracker := &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", Body: "Use bounded retries.", URL: "https://linear.app/acme/issue/WEB-42", State: "open", Labels: []string{"triaged"}}}
 	f.app.Linear = tracker
 	started(t, f, StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude})
 	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2")}
@@ -156,7 +161,7 @@ func TestLinearRunnerReadsStoredSourceAndPostsFourPlanningComments(t *testing.T)
 func TestLinearReplanningRepostsDeletedCommentAndEditsOtherComments(t *testing.T) {
 	f := newFixture()
 	key := task.Key{Repo: f.gh.repo.Repo, Source: task.Linear, ExternalID: "uuid-42"}
-	tracker := &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", State: "open"}, missing: map[string]bool{"old-prd": true}}
+	tracker := &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", Body: "Fix cache.", URL: "https://linear.app/acme/issue/WEB-42", State: "open", Labels: []string{"triaged"}}, missing: map[string]bool{"old-prd": true}}
 	f.app.Linear = tracker
 	started(t, f, StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude})
 	tracker.comments = []TrackerComment{
@@ -178,7 +183,7 @@ func TestLinearReplanningRepostsDeletedCommentAndEditsOtherComments(t *testing.T
 func TestClosedLinearIssueFinishesDelegatedTaskInGitHubOnlyView(t *testing.T) {
 	f := newFixture()
 	key := task.Key{Repo: f.gh.repo.Repo, Source: task.Linear, ExternalID: "uuid-42"}
-	tracker := &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", State: "open"}}
+	tracker := &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", State: "open", Labels: []string{"triaged"}}}
 	f.app.Linear = tracker
 	f.app.LinearProjects = map[task.Repo]string{key.Repo: "https://linear.app/acme/project/web-123"}
 	started(t, f, StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude})
@@ -200,7 +205,7 @@ func TestClosedLinearIssueFinishesDelegatedTaskInGitHubOnlyView(t *testing.T) {
 func TestLinearTaskRefreshesAndResumesAfterGitHubOnlyLaunch(t *testing.T) {
 	f := newFixture()
 	key := task.Key{Repo: f.gh.repo.Repo, Source: task.Linear, ExternalID: "uuid-42"}
-	tracker := &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", State: "open"}}
+	tracker := &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", State: "open", Labels: []string{"triaged"}}}
 	f.app.Linear = tracker
 	f.app.LinearProjects = map[task.Repo]string{key.Repo: "https://linear.app/acme/project/web-123"}
 	started(t, f, StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude})

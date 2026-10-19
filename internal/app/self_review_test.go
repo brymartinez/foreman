@@ -60,7 +60,7 @@ func TestSelfReviewRunsBeforeTheCompetingReviewOfAPR(t *testing.T) {
 	if !strings.Contains(p, "> Retry 5xx only.") || !strings.Contains(p, "git diff origin/main...HEAD") || !strings.Contains(p, "review_rounds to 2") {
 		t.Errorf("self-review prompt lacks the description, the diff, or the passes:\n%s", p)
 	}
-	for _, leak := range []string{"sid-1", "Retry failed requests.", "Pull request comments", "Earlier review rounds"} {
+	for _, leak := range []string{"sid-1", "Pull request comments", "Earlier review rounds"} {
 		if strings.Contains(p, leak) {
 			t.Errorf("self-review prompt carries %q:\n%s", leak, p)
 		}
@@ -227,7 +227,7 @@ func TestLocalChangeIsSelfReviewedBeforeTheCompetingReviewAndThePR(t *testing.T)
 		t.Errorf("local self-review = %+v", self)
 	}
 	p := f.claude.reviewed[0]
-	if !strings.Contains(p, "Proposed pull request description") || !strings.Contains(p, "Title: feat: retry 5xx") || strings.Contains(p, "Retry failed requests.") {
+	if !strings.Contains(p, "Proposed pull request description") || !strings.Contains(p, "Title: feat: retry 5xx") || !strings.Contains(p, "## Confirmed triage scope") {
 		t.Errorf("local self-review prompt:\n%s", p)
 	}
 	if !strings.Contains(f.claude.resumed[0], "no test covers the 4xx path") {

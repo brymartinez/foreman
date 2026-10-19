@@ -44,6 +44,7 @@ Every agent interaction is one headless turn that runs to completion and returns
 
 ```
 app.Start, from the dashboard (enter on an inbox issue, or auto mode)
+  ├─ require the exact triaged label for either start path
   ├─ gh: repo + default branch of the managed clone, fetch issue
   ├─ git: ensure worktree <root>/<owner>-<repo>/<branch> with branch slashes as directories
   ├─ store: task file, first stage (Record.NextStage), session id, launch claim
@@ -53,7 +54,10 @@ app.Start, from the dashboard (enter on an inbox issue, or auto mode)
   └─ spawn detached `foreman __run owner/repo#825` with the claim's token in
      FOREMAN_LAUNCH (pid + log recorded), exit
 
-runner (one process per task; before each agent turn it writes the stage that turn
+runner (one process per task; before each stage it rereads the triaged label and
+confirmed scope from ordered triage decisions/correction comments, or the issue
+description when there are none; a changed scope invalidates plan and reviews;
+before each agent turn it writes the stage that turn
 runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR):
   if the gate flagged a merge conflict (IMPLEMENTING):
     turn = implementer.Resume(session, merge origin/<base>, resolve, validate, push)
@@ -65,9 +69,12 @@ runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR)
   if the verified PR head has no review (crash mid-review, or new commits):
     re-verify the PR, record its head, skip to the review below
   turn = implementer.Start(worktree, prompt)          # later: Resume(session, msg)
-  until every planning document is on the issue (and no PR exists), the turn plans
+  until every planning document is checked against current scope (or a legacy PR
+  has no plan), the turn plans
   (PLANNING, through the posting of the four comments; IMPLEMENTING after):
-    planned      -> gh: post analysis, PRD, design, and plan as four issue comments
+    planned      -> read-only checker must explicitly agree that all four documents
+                    match confirmed scope; then post analysis, PRD, design, and plan
+                    as four issue comments
                     (edit the earlier comments on a re-plan), record their ids and URLs,
                     then turn = implementer.Start(new session, posted plan links)
   while implementing before a PR exists, a turn may return checkpoint:
@@ -91,14 +98,15 @@ runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR)
                       read the PRD comment, storing its digest (gone, unmarked, or
                       empty PRD -> FAILED)
                     SELF_REVIEW: self = implementer.Review(disposable read-only session,
-                                              PR description + git diff [+ PRD + claims]),
+                                              PR description + current triage + checked
+                                              plan + git diff [+ PRD + claims]),
                                               until a clean one covers this head and
                                               description [and claims and PRD]
                     self error -> FAILED, exit (never falls back to the competing review)
                     self clean -> the competing review of the same change, in this run
                     ADVERSARIAL_REVIEW: review = reviewer.Review(disposable read-only
-                                             session, PR description + PR comments +
-                                             git diff + earlier competing rounds
+                                             session, PR description + current triage +
+                                             checked plan + PR comments + git diff + earlier competing rounds
                                              [+ PRD + claims])
                     clean    -> record review and the head it covered; WAITING_FOR_CI, exit
                     findings (either review) -> IMPLEMENTING; implementer.Resume(session,
@@ -664,9 +672,9 @@ the same commit. The commit message records why it changed.
   before the competing review: a fresh, disposable, read-only session of the
   implementing agent with its review model, the reviewer budget, and `review_rounds`
   passes. It never resumes the implementer's session or an earlier self-review. Its
-  prompt carries the PR description (or the proposed one) and the diff instructions,
-  and nothing else: no issue, plan, decisions, PR comments, or earlier findings, so it
-  judges the change as the competing reviewer will. Its findings go to the implementer
+  prompt carries the PR description (or the proposed one), current confirmed triage,
+  checked plan, and diff instructions, but no PR comments or earlier findings. Its
+  findings go to the implementer
   like any review's. A self-review that errors fails the task; it never falls back to
   the competing reviewer, which would skip it. Rejected: running the self-review inside
   the implementer's session, which shares the blind spots it is meant to catch.
@@ -704,12 +712,12 @@ the same commit. The commit message records why it changed.
   behavior. If review permissions alone prevent rerunning it, the reviewer records a
   nonblocking limitation rather than requesting changes. A visible failure, a plausible
   untested failure path, or a concrete defect remains a finding.
-- **The PR description is the only requirements, unless the task verifies claims.** The
-  prompt carries the description, the PR comments, `git diff origin/<base>...HEAD`, and
-  earlier rounds, but not the issue, decisions, or validation, so the review stays
-  independent. A blank description stops the review. A task with claim verification
-  adds the PRD as the acceptance criteria and the implementer's claims; the description
-  is then the change as the implementer describes it. When screenshots are requested
+- **Confirmed triage and the checked plan are independent review requirements.** The
+  prompt carries them with source links, the PR description and comments,
+  `git diff origin/<base>...HEAD`, and earlier competing rounds. Ordinary issue
+  discussion and implementation validation add no requirements. A blank description
+  stops the review. A task with claim verification also adds the PRD as acceptance
+  criteria and the implementer's claims. When screenshots are requested
   or the agent captured them, the opening agent attaches them in a PR comment after
   the PR exists, without editing the reviewed description. The comment carries the agent
   marker so feedback and learning do not mistake it for a developer comment. A retry
@@ -845,15 +853,15 @@ the same commit. The commit message records why it changed.
   Work an agent holds stays in DELEGATED WORK, so an issue is never delegated
   twice. `mentions: false` hides mention-only items but never a delegated task that
   needs the developer.
-- **Auto mode requires current triage.** A never-delegated, open, assigned issue needs
-  the exact `triaged` label for auto mode. Without it, the inbox shows "awaiting triage"
-  and still allows manual start. Labels come from the selected tracker on each refresh, including
+- **Every start requires current triage.** A never-delegated, open, assigned issue needs
+  the exact `triaged` label for auto mode or manual start. Without it, the inbox shows
+  "awaiting triage". Labels come from the selected tracker on each refresh, including
   tracked-item lookups; they are not task-file state. Auto mode uses them only after a
   successful selected-source refresh. Starting a refresh or failing one blocks auto starts from
   the retained inbox until another refresh succeeds. The auto start's existing issue
   fetch checks the label again through the issue's source before making a worktree,
-  so removal after the refresh also stops the start. Manual starts skip this label
-  check. Dashboard start and routing requests carry the source-qualified key from
+  so removal after the refresh also stops the start. Manual starts check it at the
+  same boundary. Dashboard start and routing requests carry the source-qualified key from
   the selected inbox item, including Linear's stable issue ID. Routing reads the
   issue and recent comments from that tracker. In-flight starts and auto routing
   retries use the same key to release slots and retain routing selections.

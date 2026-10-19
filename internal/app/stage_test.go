@@ -86,7 +86,8 @@ func TestARestartPicksUpAtTheStageTheRecordStillNeeds(t *testing.T) {
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude, ID: "sid-1"}, Branch: "feat/825-provider-retries",
 			ReviewBeforePR: true, LocalHead: head, ProposedTitle: proposedTitle, ProposedBody: proposedBody},
 		Reviews: []task.Review{{Round: 1, Kind: task.SelfReview, Reviewer: task.Claude, Head: head, Proposal: digest, Clean: true, At: now}}}
-	postedPlan(rec)
+	postedPlan(f, rec)
+	rec.Reviews[0].Scope, rec.Reviews[0].Plan = rec.Delegation.ScopeDigest, rec.Delegation.PlanDigest
 	f.store.recs[key] = rec
 	delete(f.gh.prs, 912)
 	if got := started(t, f, startReq(t)); f.store.recs[got].State != task.AdversarialReviewing {

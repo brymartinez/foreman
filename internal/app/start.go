@@ -88,7 +88,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 	if issue.State != "open" {
 		return nil, fmt.Errorf("%s is %s", issueLabel(key, issue.Identifier), issue.State)
 	}
-	if req.NewOnly && !slices.Contains(issue.Labels, "triaged") {
+	if !slices.Contains(issue.Labels, "triaged") {
 		return nil, fmt.Errorf("%s no longer has the triaged label", issueLabel(key, issue.Identifier))
 	}
 
@@ -218,6 +218,9 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		if prev != nil {
 			cur.Delegation.ReviewBeforePR = prev.ReviewBeforePR
 			cur.Delegation.ClaimVerification = prev.ClaimVerification
+			cur.Delegation.ScopeDigest = prev.ScopeDigest
+			cur.Delegation.PlanScopeDigest = prev.PlanScopeDigest
+			cur.Delegation.PlanDigest = prev.PlanDigest
 		}
 		// The pin belongs to the task, not the agent, so every restart keeps it.
 		if prev != nil {

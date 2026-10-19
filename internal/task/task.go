@@ -226,6 +226,11 @@ type Delegation struct {
 	// PRDDigest is the Digest of the PRD text the review step last loaded from the
 	// issue. A review covers one PRD.
 	PRDDigest string
+	// ScopeDigest is the effective triage scope last read at a stage boundary.
+	// PlanScopeDigest and PlanDigest identify the plan checked against that scope.
+	ScopeDigest     string
+	PlanScopeDigest string
+	PlanDigest      string
 }
 
 // Launch is taken under the task lock before a runner is spawned, by the foreman
@@ -595,6 +600,8 @@ type Review struct {
 	// task with claim verification.
 	Claims string
 	PRD    string
+	Scope  string // confirmed triage scope the reviewer checked
+	Plan   string // planning documents the reviewer checked
 	// Limitations are the behaviors the reviewer could not check.
 	Limitations []Limitation
 }
@@ -652,7 +659,7 @@ func (r *Record) CurrentChange() (head, proposal string) {
 // of another head or description as current.
 func (r *Record) selfCovers(review *Review) bool {
 	head, proposal := r.CurrentChange()
-	return review != nil && review.Kind == SelfReview && review.PR == r.Delegation.PR && review.Head == head && review.Proposal == proposal && r.ClaimsCovered(review)
+	return review != nil && review.Kind == SelfReview && review.PR == r.Delegation.PR && review.Head == head && review.Proposal == proposal && r.ClaimsCovered(review) && r.ScopeCovered(review)
 }
 
 // SelfReviewPassed reports a clean self-review of the current change and description.
@@ -777,10 +784,23 @@ func (r *Record) competingCovers(review *Review) bool {
 	if !r.ClaimsCovered(review) {
 		return false
 	}
+	if !r.ScopeCovered(review) {
+		return false
+	}
 	if r.LocalReview() {
 		return r.coversLocal(review)
 	}
 	return review.PR == d.PR && review.Head == d.PRHead && (review.Proposal == "" || d.PRDigest == "" || review.Proposal == d.PRDigest)
+}
+
+func (r *Record) ScopeCovered(review *Review) bool {
+	if review == nil {
+		return false
+	}
+	if r.Delegation == nil || r.Delegation.ScopeDigest == "" {
+		return true
+	}
+	return review.Scope == r.Delegation.ScopeDigest && review.Plan == r.Delegation.PlanDigest
 }
 
 // BeforePR reports a task reviewed before its PR opens that has no PR yet. Its

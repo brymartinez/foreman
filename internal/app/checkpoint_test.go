@@ -18,16 +18,30 @@ func checkpointTurn(id, next string) agent.Turn {
 	}, Usage: task.Usage{ClaudeCostUSD: 1.25, ClaudeTurns: 1}}
 }
 
-func postedPlan(rec *task.Record) {
-	for _, doc := range task.PlanDocs {
-		rec.SetPlanComment(task.PlanComment{Doc: doc, URL: "https://example.test/plan/" + string(doc)})
+func postedPlan(f fixture, rec *task.Record) {
+	if f.gh.comments == nil {
+		f.gh.comments = map[int64]IssueComment{}
 	}
+	texts := map[task.PlanDoc]string{}
+	for _, doc := range task.PlanDocs {
+		id := int64(700 + len(texts))
+		text := "Posted " + string(doc) + "."
+		url := "https://example.test/plan/" + string(doc)
+		f.gh.comments[id] = IssueComment{ID: id, URL: url, Body: planCommentBody(doc, task.DescriptionFingerprint(f.gh.issue.Body), text)}
+		rec.SetPlanComment(task.PlanComment{Doc: doc, URL: url, CommentID: id})
+		texts[doc] = text
+	}
+	scope := confirmedScope{text: "Source: " + f.gh.issue.URL + "\n" + f.gh.issue.Body}
+	scope.digest = task.Digest(scope.text)
+	rec.Delegation.ScopeDigest = scope.digest
+	rec.Delegation.PlanScopeDigest = scope.digest
+	rec.Delegation.PlanDigest = planDigest(texts)
 }
 
 func TestCheckpointStartsFreshImplementationSessionWithOnlyDurableHandoff(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
-	postedPlan(f.store.recs[key])
+	postedPlan(f, f.store.recs[key])
 	f.wt.checkpointHeads = []string{"commit1"}
 	f.claude.turns = []agent.Turn{checkpointTurn("first-session", "Add the dashboard log pager"), prTurn("second-session")}
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
@@ -49,7 +63,7 @@ func TestCheckpointStartsFreshImplementationSessionWithOnlyDurableHandoff(t *tes
 			t.Errorf("fresh prompt missing %q", want)
 		}
 	}
-	for _, unwanted := range []string{"Retry failed requests.", "Committed the first part", "first-session"} {
+	for _, unwanted := range []string{"Committed the first part", "first-session"} {
 		if strings.Contains(p, unwanted) {
 			t.Errorf("fresh prompt carried %q", unwanted)
 		}
@@ -59,7 +73,7 @@ func TestCheckpointStartsFreshImplementationSessionWithOnlyDurableHandoff(t *tes
 func TestFailedCheckpointValidationResumesSameSessionForRepair(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
-	postedPlan(f.store.recs[key])
+	postedPlan(f, f.store.recs[key])
 	f.wt.checkpointHeads = []string{"commit1"}
 	failed := checkpointTurn("first-session", "Continue work")
 	failed.Outcome.Validation = append(failed.Outcome.Validation, task.Check{Command: "pnpm lint", Passed: false})
@@ -83,7 +97,7 @@ func TestFailedCheckpointValidationResumesSameSessionForRepair(t *testing.T) {
 func TestRepeatedFailedCheckpointValidationStopsAfterRepairLimit(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
-	postedPlan(f.store.recs[key])
+	postedPlan(f, f.store.recs[key])
 	failed := checkpointTurn("first-session", "Continue work")
 	failed.Outcome.Validation = []task.Check{{Command: "pnpm lint", Passed: false}}
 	f.claude.turns = []agent.Turn{failed, failed, failed}
@@ -104,7 +118,7 @@ func TestRepeatedFailedCheckpointValidationStopsAfterRepairLimit(t *testing.T) {
 func TestCheckpointVerificationFailureStopsBeforeAnotherSession(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
-	postedPlan(f.store.recs[key])
+	postedPlan(f, f.store.recs[key])
 	f.wt.checkpointErr = errors.New("checkpoint has uncommitted files")
 	f.claude.turn = checkpointTurn("first-session", "Continue work")
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
@@ -146,7 +160,7 @@ func TestRetryPreservesCheckpointOnlyWhenBranchHeadMatches(t *testing.T) {
 func TestCheckpointRepairStopsBeforeResumingWhenGHSwitchesAccounts(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
-	postedPlan(f.store.recs[key])
+	postedPlan(f, f.store.recs[key])
 	failed := checkpointTurn("first-session", "Continue work")
 	failed.Outcome.Validation = []task.Check{{Command: "pnpm lint", Passed: false}}
 	f.claude.turns = []agent.Turn{failed, checkpointTurn("first-session", "Continue work")}

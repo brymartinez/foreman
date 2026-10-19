@@ -12,7 +12,7 @@ Write four documents before any code. Each is posted on the issue as its own com
 
 The current code, the gap, and the constraints.
 
-4. Read the issue and every comment (`gh issue view <number> --repo <owner>/<repo> --comments`). Note what the comments add. Do not restate the issue.
+4. Read the confirmed triage scope and source links Foreman supplies in the prompt. Ordinary discussion comments do not change the confirmed scope. Do not restate the issue.
 5. What the code does today, with `file:line` references where they help a reader find it.
 6. The root cause for a bug, or the gap for a feature.
 7. Constraints: callers, stored data, config, public API, compatibility.

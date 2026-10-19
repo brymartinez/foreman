@@ -207,7 +207,7 @@ Auto mode is off until you turn it on with `a` or `-a`. While it is on, it start
 assigned to you that foreman has never delegated, from the selected source, oldest first, with `auto.agent` and
 no context file. It looks after the first refresh, after each successful refresh, and
 when a run ends. Only issues with the exact `triaged` label
-start automatically; you can start an unlabelled issue by hand. Mentions, FAILED
+start automatically; manual starts also require the exact `triaged` label. Mentions, FAILED
 tasks, and previously REVIEWED tasks never start on their own. At most `auto.max_concurrent`
 runs are active at once, and
 runs you start by hand count toward that limit. Issues in one repository start one
@@ -328,15 +328,19 @@ part of the task.
 ## Planning
 
 Before any code, the implementer writes four documents: an analysis, a PRD, a design,
-and an implementation plan. `plan.md` sets what each one covers. The runner posts each
-document on the issue as its own comment. It then starts a fresh session with the
-posted plan links to implement the work. If planning needs a decision, the task goes
-to `NEEDS_DECISION`. Otherwise, it continues to the PR without an approval step.
-The reviewer checks the PR against the posted PRD.
+and an implementation plan. `plan.md` sets what each one covers. Foreman reads
+`## Triage decisions` and later `## Triage correction` comments in order; if there
+are none, the issue description is the confirmed scope. It gives that scope and its
+source links to the planner, checks the documents against it, then posts each as an
+issue comment. Existing plans receive the same check before adoption. A conflict
+pauses for a decision; an unreadable or inconclusive check fails with a reason.
+The implementer then receives the checked plan and scope. Both reviews compare the
+delivered behavior with the current scope and plan, even when the PR description
+omits a decision. A changed scope or plan invalidates earlier checks before handoff.
 
 The `s` view links the four comments. A task that plans again, for example after a
 failed run, edits the same comments instead of adding new ones. A task that already
-has a PR goes on without a plan.
+has a PR and no plan continues to review against the confirmed scope.
 
 ## Stage instructions
 

@@ -29,7 +29,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif "issues(first:" in query:
             data = {"issues": {"nodes": [self.issue(True)], "pageInfo": {"hasNextPage": False}}}
         elif "comments(first:" in query:
-            data = {"issue": {"comments": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
+            comments = []
+            for name in sorted(os.listdir(state)):
+                if name.startswith("linear-comment-"):
+                    number = name.removeprefix("linear-comment-")
+                    with open(os.path.join(state, name)) as comment:
+                        comments.append({"id": f"comment-{number}", "body": comment.read(), "url": issue_url + f"#comment-{number}"})
+            data = {"issue": {"comments": {"nodes": comments, "pageInfo": {"hasNextPage": False}}}}
         elif "issue(id:" in query:
             data = {"issue": self.issue(False) if variables.get("id") == issue_id else None}
         elif "commentCreate(" in query:

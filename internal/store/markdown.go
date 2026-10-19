@@ -201,6 +201,9 @@ type frontmatter struct {
 	ClaimVerification   bool                   `yaml:"claim_verification,omitempty"`
 	Claims              []task.Claim           `yaml:"claims,omitempty"`
 	PRDDigest           string                 `yaml:"prd_digest,omitempty"`
+	ScopeDigest         string                 `yaml:"scope_digest,omitempty"`
+	PlanScopeDigest     string                 `yaml:"plan_scope_digest,omitempty"`
+	PlanDigest          string                 `yaml:"plan_digest,omitempty"`
 	GitHub              *snapshot              `yaml:"github,omitempty"`
 	LastGitHubSync      *time.Time             `yaml:"last_github_sync,omitempty"`
 	Decisions           []decisionFM           `yaml:"decisions,omitempty"`
@@ -255,6 +258,8 @@ type reviewFM struct {
 	Proposal string          `yaml:"proposal,omitempty"`
 	Claims   string          `yaml:"claims,omitempty"`
 	PRD      string          `yaml:"prd,omitempty"`
+	Scope    string          `yaml:"scope,omitempty"`
+	Plan     string          `yaml:"plan,omitempty"`
 	// Limitations are what the reviewer could not check.
 	Limitations []task.Limitation `yaml:"limitations,omitempty"`
 }
@@ -402,6 +407,9 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 			ClaimVerification: fm.ClaimVerification,
 			Claims:            fm.Claims,
 			PRDDigest:         fm.PRDDigest,
+			ScopeDigest:       fm.ScopeDigest,
+			PlanScopeDigest:   fm.PlanScopeDigest,
+			PlanDigest:        fm.PlanDigest,
 		}
 		if fm.StartedAt != nil {
 			rec.Delegation.StartedAt = *fm.StartedAt
@@ -448,7 +456,7 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 			return nil, fmt.Errorf("review round %d has unknown kind %q", r.Round, r.Kind)
 		}
 		rec.Reviews = append(rec.Reviews, task.Review{Round: r.Round, Kind: r.Kind, Reviewer: r.Reviewer, PR: r.PR, Clean: r.Verdict == "clean", Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head, Proposal: r.Proposal,
-			Claims: r.Claims, PRD: r.PRD, Limitations: r.Limitations})
+			Claims: r.Claims, PRD: r.PRD, Scope: r.Scope, Plan: r.Plan, Limitations: r.Limitations})
 	}
 	if c := fm.CI; c != nil {
 		switch c.State {
@@ -530,6 +538,7 @@ func fromRecord(rec *task.Record) frontmatter {
 		fm.ConflictAttempts, fm.ConflictPending = d.ConflictAttempts, d.ConflictPending
 		fm.ReviewBeforePR, fm.LocalHead, fm.ProposedTitle, fm.ProposedBody = d.ReviewBeforePR, d.LocalHead, d.ProposedTitle, d.ProposedBody
 		fm.ClaimVerification, fm.Claims, fm.PRDDigest = d.ClaimVerification, d.Claims, d.PRDDigest
+		fm.ScopeDigest, fm.PlanScopeDigest, fm.PlanDigest = d.ScopeDigest, d.PlanScopeDigest, d.PlanDigest
 	}
 	if s := rec.GitHub; s != nil {
 		fm.GitHub = &snapshot{UpdatedAt: s.UpdatedAt, State: s.State, Reasons: s.Reasons}
@@ -558,7 +567,7 @@ func fromRecord(rec *task.Record) frontmatter {
 			verdict = "clean"
 		}
 		fm.Reviews = append(fm.Reviews, reviewFM{Round: r.Round, Kind: r.Kind, Reviewer: r.Reviewer, PR: r.PR, Verdict: verdict, Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head, Proposal: r.Proposal,
-			Claims: r.Claims, PRD: r.PRD, Limitations: r.Limitations})
+			Claims: r.Claims, PRD: r.PRD, Scope: r.Scope, Plan: r.Plan, Limitations: r.Limitations})
 	}
 	if c := rec.CI; c != nil {
 		fm.CI = &ciFM{State: c.State, Failing: c.Failing, CheckedAt: c.CheckedAt}

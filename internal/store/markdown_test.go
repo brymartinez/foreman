@@ -670,8 +670,13 @@ func TestStoreRoundTripsClaimsAndTheirReviewDigests(t *testing.T) {
 	want.Delegation.ClaimVerification = true
 	want.Delegation.Claims = []task.Claim{{Criteria: []string{"AC1", "AC2"}, Behavior: "retries 5xx", Evidence: "client.go:40, client_test.go", Check: "go test ./..."}}
 	want.Delegation.PRDDigest = task.Digest("the PRD")
+	want.Delegation.ScopeDigest = task.Digest("confirmed triage")
+	want.Delegation.PlanScopeDigest = want.Delegation.ScopeDigest
+	want.Delegation.PlanDigest = task.Digest("checked plan")
 	want.Reviews[1].Claims = task.ClaimsDigest(want.Delegation.Claims)
 	want.Reviews[1].PRD = want.Delegation.PRDDigest
+	want.Reviews[1].Scope = want.Delegation.ScopeDigest
+	want.Reviews[1].Plan = want.Delegation.PlanDigest
 	want.Reviews[1].Limitations = []task.Limitation{{Behavior: "retry under load", Reason: "no load test harness"}, {Behavior: "Linear PRD read", Reason: "no Linear token", Blocking: true}}
 	if err := s.Save(ctx, want); err != nil {
 		t.Fatal(err)
@@ -681,11 +686,11 @@ func TestStoreRoundTripsClaimsAndTheirReviewDigests(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := got.Delegation
-	if !d.ClaimVerification || !reflect.DeepEqual(d.Claims, want.Delegation.Claims) || d.PRDDigest != want.Delegation.PRDDigest {
+	if !d.ClaimVerification || !reflect.DeepEqual(d.Claims, want.Delegation.Claims) || d.PRDDigest != want.Delegation.PRDDigest || d.ScopeDigest != want.Delegation.ScopeDigest || d.PlanScopeDigest != want.Delegation.PlanScopeDigest || d.PlanDigest != want.Delegation.PlanDigest {
 		t.Fatalf("delegation = %+v", d)
 	}
 	r := got.Reviews[1]
-	if r.Claims != want.Reviews[1].Claims || r.PRD != want.Reviews[1].PRD || !reflect.DeepEqual(r.Limitations, want.Reviews[1].Limitations) {
+	if r.Claims != want.Reviews[1].Claims || r.PRD != want.Reviews[1].PRD || r.Scope != want.Reviews[1].Scope || r.Plan != want.Reviews[1].Plan || !reflect.DeepEqual(r.Limitations, want.Reviews[1].Limitations) {
 		t.Fatalf("review = %+v", r)
 	}
 }

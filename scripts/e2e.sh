@@ -164,6 +164,7 @@ case "$1 $2" in
 	# Issue comments: POST creates, PATCH edits. The body is stored for later reads.
 	if [ "$3" = PATCH ]; then id=${4##*/}; else id=$(($(cat "$s/comment-seq" 2>/dev/null || echo 3000) + 1)); echo "$id" >"$s/comment-seq"; fi
 	n=$(echo "$4" | sed -n 's#.*/issues/\([0-9]*\)/comments#\1#p')
+	repo=$(echo "$4" | sed -n 's#repos/\([^/]*/[^/]*\)/issues/[0-9]*/comments#\1#p')
 	printf '%s' "${6#body=}" >"$s/comment-$id.md"
 	body=$(sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' "$s/comment-$id.md" | awk '{printf "%s\\n", $0}')
 	# A reply in an inline thread answers that thread and nothing else.
@@ -172,14 +173,13 @@ case "$1 $2" in
 		printf '{"id":%s,"html_url":"https://github.com/acme/widgets/pull/0#discussion_r%s","body":"%s"}\n' "$id" "$id" "$body"
 		exit 0 ;;
 	esac
-	# A comment on a pull request joins its conversation, so the next read sees it.
-	conv="$s/conv-repos-acme-widgets-issues-$n-comments.json"
-	if [ -f "$conv" ]; then
-		entry=$(printf '{"id":%s,"html_url":"https://github.com/acme/widgets/pull/%s#issuecomment-%s","body":"%s","updated_at":"2026-10-01T10:00:00Z","user":{"login":"brymartinez"}}' "$id" "$n" "$id" "$body")
-		cur=$(cat "$conv")
-		if [ "$cur" = "[[]]" ]; then printf '[[%s]]\n' "$entry" >"$conv"; else printf '%s,%s]]\n' "${cur%]]}" "$entry" >"$conv"; fi
-	fi
-	printf '{"id":%s,"html_url":"https://github.com/acme/widgets/issues/%s#issuecomment-%s","body":"%s"}\n' "$id" "${n:-0}" "$id" "$body" | tee "$s/api-$id.json" ;;
+	# Posted issue and pull request comments join the next conversation read.
+	conv="$s/conv-repos-$(echo "$repo" | tr '/' '-')-issues-$n-comments.json"
+	if [ -f "$conv" ]; then url="https://github.com/$repo/pull/$n#issuecomment-$id"; else url="https://github.com/$repo/issues/$n#issuecomment-$id"; fi
+	entry=$(printf '{"id":%s,"html_url":"%s","body":"%s","updated_at":"2026-10-01T10:00:00Z","user":{"login":"brymartinez"}}' "$id" "$url" "$body")
+	cur=$(cat "$conv" 2>/dev/null || echo '[[]]')
+	if [ "$cur" = "[[]]" ]; then printf '[[%s]]\n' "$entry" >"$conv"; else printf '%s,%s]]\n' "${cur%]]}" "$entry" >"$conv"; fi
+	printf '{"id":%s,"html_url":"https://github.com/%s/issues/%s#issuecomment-%s","body":"%s"}\n' "$id" "$repo" "${n:-0}" "$id" "$body" | tee "$s/api-$id.json" ;;
 "api repos/"*)
 	# A pull request's conversation: the comments, the inline comments, and the reviews.
 	case "$2" in
@@ -453,9 +453,10 @@ notifications_config() {
 
 issue() { # issue <number> <title> [labels-json]
 	echo "$2" >"$state/title-$1"
-	printf '%s\n' "${3:-[]}" >"$state/labels-$1.json"
+	local labels=${3:-'[{"name":"triaged"}]'}
+	printf '%s\n' "$labels" >"$state/labels-$1.json"
 	printf '{"number":%s,"title":"%s","body":"do it","labels":%s,"url":"https://github.com/acme/widgets/issues/%s","state":"OPEN","updatedAt":"2026-09-25T10:00:00Z"}\n' \
-		"$1" "$2" "${3:-[]}" "$1" >"$state/issue-$1.json"
+		"$1" "$2" "$labels" "$1" >"$state/issue-$1.json"
 	printf '{"number":%s,"title":"%s","html_url":"https://github.com/acme/widgets/issues/%s","state":"open","updated_at":"2026-09-25T10:00:00Z"}\n' \
 		"$1" "$2" "$1" >"$state/api-$1.json"
 }
@@ -467,7 +468,7 @@ scenario_runner() {
 	check "the runner reaches a clean review" wait_status "review ✓"
 	local log
 	log=$(ls "$sandbox"/logs/acme-widgets-42.log)
-	check "log has the runner's finish line" contains "$log" "finished"
+	check "log has the runner's finish line" eventually 5 grep -qF "finished" "$log"
 	check "log lines are timestamped" grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$log"
 	check "agent stderr reached the log" contains "$log" "claude stderr progress"
 	check "no line is stamped twice" bash -c "! grep -qE '^[^ ]+ [0-9]{4}-[0-9]{2}-[0-9]{2}T' '$log'"
@@ -484,8 +485,8 @@ scenario_runner() {
 	check "review uses its Codex model" contains "$state/models.log" "codex model=gpt-6-sol"
 	check "review uses medium Codex effort" contains "$state/models.log" 'codex model_reasoning_effort="medium"'
 	check "the review carries the PR description" contains "$state/review-prompt.txt" "> Retry 5xx only."
-	check "the implementer self-reviews before the competing review" bash -c "grep -E '^(claude|codex) review' '$state/agents.log' | head -2 | tr '\n' ' ' | grep -qx 'claude review codex review '"
-	check "the review leaves out the issue body" bash -c "! grep -qF 'do it' '$state/review-prompt.txt'"
+	check "the implementer self-reviews before the competing review" bash -c "grep -E '^(claude|codex) review' '$state/agents.log' | tail -2 | tr '\n' ' ' | grep -qx 'claude review codex review '"
+	check "the review carries the issue description as triage scope" contains "$state/review-prompt.txt" "do it"
 	check "the review carries the PRD" contains "$state/review-prompt.txt" "> R1. Retry 5xx responses."
 	check "the review carries the claims to test" contains "$state/review-prompt.txt" "the client retries 5xx responses"
 	check "the task file holds the claims" contains "$sandbox/tasks/acme-widgets-42.md" "the client retries 5xx responses"

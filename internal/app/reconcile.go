@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brymartinez/foreman/internal/agent"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -158,17 +159,68 @@ func (r *taskRun) reconcilePlan() (bool, error) {
 	p, readErr := a.readIssuePlan(r.ctx, r.rec)
 	answer, answered := planConflictAnswer(r.rec, p.fingerprint)
 	adopt := readErr == nil && p.complete() && (len(p.conflicts) == 0 || answer == optionText(keepPlanOption))
+	var missingPlanErr error
+	if readErr == nil && r.rec.PlanPosted() && !p.complete() && r.rec.Delegation.ClaimVerification {
+		_, missingPlanErr = a.reviewPRD(r.ctx, r.rec)
+	}
+	var emptyPlanErr error
+	if readErr == nil {
+		for _, doc := range task.PlanDocs {
+			if f, ok := p.found[doc]; ok && strings.TrimSpace(f.text) == "" {
+				emptyPlanErr = fmt.Errorf("the %s planning comment %s is empty", doc.Title(), f.comment.URL)
+				if doc == task.PRD && r.rec.Delegation.ClaimVerification {
+					_, emptyPlanErr = a.reviewPRD(r.ctx, r.rec)
+				}
+				break
+			}
+		}
+	}
+	var scopeCheckErr error
+	var scopeCheck agent.ReviewOutcome
+	if adopt {
+		scopeCheck, scopeCheckErr = a.checkPlan(r.ctx, r.rec, r.scope, p.texts(), p, r.log)
+	}
+	scopeAnswer := scopePlanAnswer(r.rec, r.scope.digest, planDigest(p.texts()))
 	rec, err := a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
 		switch {
 		case readErr != nil:
 			failTask(cur, fmt.Sprintf("reading the issue to reconcile its plan failed: %v", readErr), a.Now())
 			applyStop(r.ctx, cur, "planning", r.log, a.Now())
+		case emptyPlanErr != nil:
+			failTask(cur, emptyPlanErr.Error(), a.Now())
+		case r.rec.PlanPosted() && !p.complete():
+			if missingPlanErr != nil {
+				failTask(cur, missingPlanErr.Error(), a.Now())
+			} else {
+				var missing []string
+				for _, doc := range task.PlanDocs {
+					if _, ok := p.found[doc]; !ok {
+						if ref := cur.PlanComment(doc); ref != nil {
+							missing = append(missing, doc.Title()+": "+ref.URL)
+						}
+					}
+				}
+				failTask(cur, "recorded planning documents were deleted or lost their markers ("+strings.Join(missing, ", ")+"); restore or revise them before restarting", a.Now())
+			}
+		case scopeCheckErr != nil:
+			failTask(cur, scopeCheckErr.Error(), a.Now())
+		case adopt && !scopeCheck.Clean && len(scopeCheck.Findings) == 0:
+			failTask(cur, "plan agreement with confirmed triage is inconclusive; inspect the planning comments and retry", a.Now())
+		case adopt && !scopeCheck.Clean && strings.HasPrefix(scopeAnswer, "A."):
+			// The developer chose to revise; the next planning turn sees every
+			// existing document and must return corrected text.
+		case adopt && !scopeCheck.Clean && strings.HasPrefix(scopeAnswer, "B."):
+			failTask(cur, "confirmed triage has not changed; correct the triage comment and restart", a.Now())
+		case adopt && !scopeCheck.Clean:
+			askScopePlanConflict(cur, r.scope, p, scopeCheck, a.Now())
 		case len(p.conflicts) > 0 && !answered:
 			askAboutPlanConflict(cur, p, a.Now())
 		case adopt:
 			for _, doc := range task.PlanDocs {
 				cur.SetPlanComment(p.found[doc].comment)
 			}
+			cur.Delegation.PlanScopeDigest = r.scope.digest
+			cur.Delegation.PlanDigest = planDigest(p.texts())
 		}
 	}))
 	if err != nil {
@@ -178,7 +230,7 @@ func (r *taskRun) reconcilePlan() (bool, error) {
 	if rec.State != task.Planning {
 		return false, nil
 	}
-	if adopt {
+	if adopt && scopeCheck.Clean {
 		fmt.Fprintln(r.log, "foreman: the issue already has the plan; implementing it")
 		return true, nil
 	}

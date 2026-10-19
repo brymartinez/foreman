@@ -50,6 +50,115 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			recs[i] = updated
 			continue
 		}
+		if pr.State == "open" && r.State == task.PRClosed && r.Delegation.RunnerPID == 0 {
+			scope, scopeErr := a.readScope(ctx, r.Key)
+			if scopeErr != nil {
+				updated, err := a.update(ctx, r.Key, func(cur *task.Record) (*task.Record, error) {
+					if cur != nil && cur.Delegation != nil && cur.State == task.PRClosed {
+						failTask(cur, scopeErr.Error(), a.Now())
+					}
+					return cur, nil
+				})
+				if err != nil {
+					return nil, nil, nil, err
+				}
+				notes[r.Key] = append(notes[r.Key], scopeErr.Error())
+				recs[i] = updated
+				continue
+			}
+			if scope.digest != r.Delegation.ScopeDigest {
+				r, err = a.update(ctx, r.Key, func(cur *task.Record) (*task.Record, error) {
+					if cur != nil && cur.Delegation != nil && cur.State == task.PRClosed {
+						cur.Delegation.ScopeDigest = scope.digest
+						cur.Delegation.PlanScopeDigest = ""
+						cur.Delegation.PlanDigest = ""
+					}
+					return cur, nil
+				})
+				if err != nil {
+					return nil, nil, nil, err
+				}
+			}
+		}
+		// A waiting PR cannot be handed over against a scope or plan the reviews
+		// never saw. Reconcile changes before reading CI or advancing the task.
+		if pr.State == "open" && r.State == task.WaitingForCI && r.Delegation.RunnerPID == 0 {
+			// A missing PRD already has a precise failure path. Keep that cause
+			// visible instead of reporting it as a generic missing plan.
+			prdChanged := false
+			if r.Delegation.ClaimVerification {
+				prdText, prdErr := a.reviewPRD(ctx, r)
+				if prdErr != nil {
+					note := fmt.Sprintf("PR #%d waited for CI, but its PRD could not be loaded: %v", r.Delegation.PR, prdErr)
+					updated, err := a.update(ctx, r.Key, existing(func(cur *task.Record) { failTask(cur, note, a.Now()) }))
+					if err != nil {
+						return nil, nil, nil, err
+					}
+					notes[r.Key] = append(notes[r.Key], note)
+					recs[i] = updated
+					continue
+				}
+				prdChanged = task.Digest(prdText) != r.Delegation.PRDDigest
+			}
+			scope, scopeErr := a.readScope(ctx, r.Key)
+			changed := scopeErr == nil && scope.digest != r.Delegation.ScopeDigest
+			if scopeErr == nil && r.PlanPosted() && !changed && !prdChanged {
+				var plan issuePlan
+				plan, scopeErr = a.readIssuePlan(ctx, r)
+				if scopeErr == nil && (!plan.complete() || planDigest(plan.texts()) != r.Delegation.PlanDigest) {
+					changed = true
+				}
+			}
+			if scopeErr != nil || changed {
+				var token, note string
+				updated, err := a.update(ctx, r.Key, existing(func(cur *task.Record) {
+					if cur.State != task.WaitingForCI || cur.Delegation.RunnerPID != 0 {
+						return
+					}
+					if scopeErr != nil {
+						note = fmt.Sprintf("confirmed scope or plan could not be read: %v", scopeErr)
+						failTask(cur, note, a.Now())
+						return
+					}
+					cur.Delegation.ScopeDigest = scope.digest
+					cur.Delegation.PlanScopeDigest = ""
+					cur.Delegation.PlanDigest = ""
+					cur.Delegation.Implementer.ID = ""
+					cur.CI = nil
+					if cur.PlanPosted() {
+						cur.State = task.Implementing
+					} else {
+						cur.State = cur.ReviewStage()
+					}
+					note = "confirmed scope or planning documents changed; rechecking before handoff"
+				}))
+				if err != nil {
+					return nil, nil, nil, err
+				}
+				if changed && updated.State.Runnable() {
+					updated, err = a.update(ctx, r.Key, func(cur *task.Record) (*task.Record, error) {
+						if cur.State.Runnable() && cur.Delegation.RunnerPID == 0 {
+							token, err = a.claimLaunch(cur)
+						}
+						return cur, err
+					})
+					if err != nil {
+						return nil, nil, nil, err
+					}
+					if token != "" {
+						updated, err = a.launch(ctx, r.Key, token)
+						if err != nil {
+							return nil, nil, nil, err
+						}
+					}
+				}
+				if note != "" {
+					notes[r.Key] = append(notes[r.Key], note)
+				}
+				recs[i] = updated
+				continue
+			}
+		}
 		if r.State != task.PRClosed && !(pr.State == "merged" && r.Delegation.RunnerPID == 0) && !gated(r) && !rereview(r) {
 			// A running task keeps its state until the runner stops.
 			continue
@@ -307,7 +416,7 @@ func reopen(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) s
 	}
 	rec.CI = &ci
 	latest := rec.LatestCompeting()
-	reviewed := latest != nil && latest.Clean && latest.PR == d.PR && latest.Head != "" && latest.Head == pr.HeadSHA && describedAsReviewed(rec, pr) && rec.ClaimsCovered(latest)
+	reviewed := latest != nil && latest.Clean && latest.PR == d.PR && latest.Head != "" && latest.Head == pr.HeadSHA && describedAsReviewed(rec, pr) && rec.ClaimsCovered(latest) && rec.ScopeCovered(latest)
 	// The stage follows the PR as GitHub reports it now: a clean review of its head
 	// and description waits for CI, and anything else is the stage the change needs.
 	if !describedAsReviewed(rec, pr) {

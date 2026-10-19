@@ -221,7 +221,7 @@ func handsOverNow(rec *task.Record, ci *task.CIStatus) bool {
 func reviewCovers(rec *task.Record, head, digest string) bool {
 	latest := rec.LatestCompeting()
 	described := latest != nil && (latest.Proposal == "" || digest == "" || latest.Proposal == digest)
-	return described && rec.ClaimsCovered(latest) && latest.Clean && latest.PR == rec.Delegation.PR && head != "" && latest.Head == head
+	return described && rec.ClaimsCovered(latest) && rec.ScopeCovered(latest) && latest.Clean && latest.PR == rec.Delegation.PR && head != "" && latest.Head == head
 }
 
 // beforeHandover answers comments that arrived while the run worked, so the developer

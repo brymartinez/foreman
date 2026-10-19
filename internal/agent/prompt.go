@@ -20,7 +20,9 @@ type TaskBrief struct {
 	Title      string
 	URL        string
 	IssueBody  string
-	Context    string // contents of the --context Markdown file, if any
+	// ConfirmedScope contains the ordered triage decisions and source URLs.
+	ConfirmedScope string
+	Context        string // contents of the --context Markdown file, if any
 	// StageInstructions is the developer's instructions for the stage this prompt is
 	// for (implement, review), global then repo. Callers set only that stage's.
 	StageInstructions string
@@ -93,6 +95,10 @@ func ImplementationPrompt(b TaskBrief) string {
 			body = "(The issue has no description.)"
 		}
 		s.WriteString(body + "\n\n")
+	}
+	if scope := strings.TrimSpace(b.ConfirmedScope); scope != "" {
+		s.WriteString("## Confirmed triage scope\n\nThis is the maintainer-confirmed scope. Planning documents, implementation, and PR description must agree with it. A later correction overrides an earlier decision on the same point.\n\n")
+		s.WriteString(scope + "\n\n")
 	}
 
 	silentWorkSection(&s)

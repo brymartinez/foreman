@@ -322,11 +322,8 @@ func TestAnEditedPRDIsReviewedAgainBeforeHandover(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = f.store.recs[key]
-	if kinds(got) != "self competing self competing" || got.State != task.WaitingForCI {
-		t.Fatalf("state %s reviews %s", got.State, kinds(got))
-	}
-	if p := f.codex.reviewed[1]; !strings.Contains(p, "> R2. Never retry 4xx.") {
-		t.Errorf("the re-review did not read the edited PRD:\n%s", p)
+	if got.State != task.Implementing || kinds(got) != "self competing" || got.Delegation.PlanScopeDigest != got.Delegation.ScopeDigest {
+		t.Fatalf("state %s reviews %s plan scope %q; edited plan must be rechecked before implementation", got.State, kinds(got), got.Delegation.PlanScopeDigest)
 	}
 }
 
@@ -455,11 +452,8 @@ func TestAPRDEditedBeforeTheOpeningIsReviewedBeforeThePROpens(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if kinds(got) != "self competing self competing" || got.State != task.WaitingForCI || got.Delegation.PR != 912 {
+	if got.State != task.Failed || got.Delegation.PR != 0 || !strings.Contains(got.LastOutcome.Summary, "planning documents changed") {
 		t.Fatalf("state %s pr %d reviews %s outcome %+v", got.State, got.Delegation.PR, kinds(got), got.LastOutcome)
-	}
-	if p := f.codex.reviewed[1]; !strings.Contains(p, "> R2. Never retry 4xx.") {
-		t.Errorf("the re-review did not read the edited PRD:\n%s", p)
 	}
 }
 

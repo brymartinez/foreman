@@ -45,7 +45,7 @@ func linearPlanComments(fingerprint string, docs ...task.PlanDoc) []TrackerComme
 
 func linearTask(t *testing.T, f *fixture) (task.Key, *lifecycleTracker) {
 	key := task.Key{Repo: f.gh.repo.Repo, Source: task.Linear, ExternalID: "uuid-42"}
-	tracker := &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", Body: "Use bounded retries.", URL: "https://linear.app/acme/issue/WEB-42", State: "open"}}
+	tracker := &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", Body: "Use bounded retries.", URL: "https://linear.app/acme/issue/WEB-42", State: "open", Labels: []string{"triaged"}}}
 	f.app.Linear = tracker
 	started(t, *f, StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude})
 	return key, tracker
@@ -255,7 +255,7 @@ func TestAnUnreadableIssueFailsTheTaskBeforePlanning(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := f.store.recs[key]
-		if got.State != task.Failed || got.LastOutcome.Summary != "reading the issue to reconcile its plan failed: HTTP 502" || f.claude.starts != 0 || len(f.gh.comments) != 0 {
+		if got.State != task.Failed || got.LastOutcome.Summary != "reading triage comments: HTTP 502" || f.claude.starts != 0 || len(f.gh.comments) != 0 {
 			t.Fatalf("state %s outcome %+v starts %d comments %d", got.State, got.LastOutcome, f.claude.starts, len(f.gh.comments))
 		}
 	})

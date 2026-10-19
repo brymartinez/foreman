@@ -127,7 +127,7 @@ func TestReviewPromptStageInstructionsYieldToTheReviewRules(t *testing.T) {
 	if stage < 0 || stance < stage || !strings.Contains(p, "Check the change against the issue and the PRD.") {
 		t.Fatalf("stage instructions must appear before the review rules:\n%s", p)
 	}
-	if !strings.Contains(p, "read it as the pull request description") {
+	if !strings.Contains(p, "read them as confirmed triage and the pull request description") {
 		t.Errorf("stage instructions that name the issue or PRD must be redirected:\n%s", p)
 	}
 }

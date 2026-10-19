@@ -288,7 +288,7 @@ func TestReviewPromptGetsOnlyReviewInstructions(t *testing.T) {
 	}
 }
 
-func TestReviewPromptUsesPRBodyNotIssue(t *testing.T) {
+func TestReviewPromptUsesPRBodyAndConfirmedScope(t *testing.T) {
 	f := newFixture()
 	f.gh.prComments = map[int][]PRComment{912: {{Kind: task.IssueComment, ID: 1, Author: "dev", Body: "Also handle 429."}}}
 	key := started(t, f, startReq(t))
@@ -297,13 +297,13 @@ func TestReviewPromptUsesPRBodyNotIssue(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := f.codex.reviewed[0]
-	for _, want := range []string{"> Retry 5xx only.", "> Also handle 429."} {
+	for _, want := range []string{"> Retry 5xx only.", "> Also handle 429.", "## Confirmed triage scope", "> Retry failed requests.", "> Source: https://x/825"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("review prompt missing %q:\n%s", want, p)
 		}
 	}
-	// The issue body, the context file, and the implementer's validation claim.
-	for _, leaked := range []string{"Retry failed requests.", "https://x/825", "Preserve the existing 5xx-only", "go test ./...: passed"} {
+	// Context and the implementer's validation claim remain private to implementation.
+	for _, leaked := range []string{"Preserve the existing 5xx-only", "go test ./...: passed"} {
 		if strings.Contains(p, leaked) {
 			t.Errorf("review prompt carries %q:\n%s", leaked, p)
 		}
@@ -512,8 +512,8 @@ func TestPlanIsPostedThenAFreshSessionImplementsIt(t *testing.T) {
 	if !slices.Equal(f.claude.stages, []task.Stage{task.StagePlan, task.StageImplement}) {
 		t.Errorf("implementer stages = %v", f.claude.stages)
 	}
-	if strings.Contains(f.codex.reviewed[0], "## PRD") || strings.Contains(f.codex.reviewed[0], "R1. Retry 5xx.") {
-		t.Errorf("the review must not carry the PRD:\n%s", f.codex.reviewed[0])
+	if !strings.Contains(f.codex.reviewed[0], "## Checked planning documents") || !strings.Contains(f.codex.reviewed[0], "R1. Retry 5xx.") {
+		t.Errorf("the review must carry the checked plan:\n%s", f.codex.reviewed[0])
 	}
 	if got.Usage.ClaudeCostUSD != 0.5 || !strings.Contains(log.String(), "foreman: posted the PRD: https://") {
 		t.Errorf("usage %+v log %q", got.Usage, log.String())
@@ -620,8 +620,8 @@ func TestCodexPlansAndClaudeReviewsWithoutThePRD(t *testing.T) {
 	if len(f.codex.prompts) != 2 || !strings.Contains(f.codex.prompts[0], "## Plan first") || !strings.Contains(f.codex.prompt, "- Implementation plan: https://github.com/") || len(f.codex.resumed) != 0 || got.Delegation.Implementer.ID != "th-2" {
 		t.Errorf("codex must implement in a fresh thread: prompts %q resumed %q session %q", f.codex.prompts, f.codex.resumed, got.Delegation.Implementer.ID)
 	}
-	if len(f.claude.reviewed) != 1 || strings.Contains(f.claude.reviewed[0], "R1. Retry 5xx.") || !strings.Contains(f.claude.reviewed[0], "> Retry 5xx only.") {
-		t.Errorf("claude's review must carry the PR description, not the PRD: %q", f.claude.reviewed)
+	if len(f.claude.reviewed) != 1 || !strings.Contains(f.claude.reviewed[0], "R1. Retry 5xx.") || !strings.Contains(f.claude.reviewed[0], "> Retry 5xx only.") {
+		t.Errorf("claude's review must carry the PR description and checked plan: %q", f.claude.reviewed)
 	}
 }
 
