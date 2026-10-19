@@ -218,6 +218,7 @@ Do not push the branch or open a pull request. Another agent reviews your local 
 
 - When the change is review-ready: commit everything (the worktree must be clean) and run the validation.
 - Write the pull request you propose in prTitle and prBody. The description is the reviewer's only statement of what the change must do, so state the requirements it meets. %s
+- Defer requested screenshots until the PR-opening turn, which posts them in a PR comment. Do not put screenshot placeholders in prBody or leave untracked images before review_ready.
 `, prIssueRule(b))
 	}
 	return fmt.Sprintf(`## Opening the pull request
@@ -233,7 +234,7 @@ func screenshotCommentInstructions(firstPR bool) string {
 	if !firstPR {
 		return ""
 	}
-	return fmt.Sprintf("- If the issue or repository asks for screenshots, capture them after the PR exists and attach them to one PR comment. Use `gh pr comment <number> --body '%s Screenshots' --attach '<path>#alt text'` (repeat --attach for more images). Before posting, read `gh pr view <number> --json comments` and skip the upload if a comment already contains `%s Screenshots`. Keep screenshot files out of the committed change and clean up only temporary files you created. Do not add screenshots to, or edit, the PR description. If a requested screenshot cannot be captured or uploaded after the PR exists, still report pr_opened and name the missing evidence in the outcome summary so foreman records the PR.\n", ReplyMarker, ReplyMarker)
+	return fmt.Sprintf("- If the issue or repository asks for screenshots, capture them after the PR exists. If you already captured screenshots for this change, use those. Attach available screenshots to one PR comment with `gh pr comment <number> --body '%s Screenshots' --attach '<path>#alt text'` (repeat --attach for more images). Before posting, read `gh pr view <number> --json comments` and skip the upload if a comment already contains `%s Screenshots`. Do not change the reviewed commit when capturing screenshots, and clean up only temporary files you created. Do not add screenshots to, or edit, the PR description. If a requested screenshot cannot be captured or uploaded after the PR exists, still report pr_opened and name the missing evidence in the outcome summary so foreman records the PR.\n", ReplyMarker, ReplyMarker)
 }
 
 func finishedStatus(b TaskBrief) string {
@@ -582,7 +583,7 @@ func OpenPRPrompt(b OpenPRBrief) string {
 	var s strings.Builder
 	s.WriteString("Another agent reviewed your local change and found nothing to fix. Push it and open the pull request now.\n\n")
 	if b.IssueURL != "" {
-		fmt.Fprintf(&s, "The issue is %s. Check it and repository instructions for any requested screenshots.\n\n", b.IssueURL)
+		fmt.Fprintf(&s, "The issue is %s. Check it and repository instructions for requested screenshots, and use any screenshots already captured for this change.\n\n", b.IssueURL)
 	}
 	if len(b.Decisions) > 0 {
 		s.WriteString("The developer answered your questions:\n\n")
@@ -590,7 +591,7 @@ func OpenPRPrompt(b OpenPRBrief) string {
 			fmt.Fprintf(&s, "Question: %s\nDecision: %s\n\n", d.Question.Issue, d.Answer)
 		}
 	}
-	fmt.Fprintf(&s, `Push exactly the reviewed commit, with exactly the reviewed title and description. Do not change, commit, rebase, or amend anything.
+	fmt.Fprintf(&s, `Push exactly the reviewed commit, with exactly the reviewed title and description. Do not change the reviewed code or description, and do not commit, rebase, or amend.
 
 1. Check that `+"`git rev-parse HEAD`"+` is %s and `+"`git status`"+` is clean. If not, stop and end with "failed".
 2. Push with `+"`git push -u origin %s`"+`.

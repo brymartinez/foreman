@@ -703,9 +703,9 @@ the same commit. The commit message records why it changed.
   earlier rounds, but not the issue, decisions, or validation, so the review stays
   independent. A blank description stops the review. A task with claim verification
   adds the PRD as the acceptance criteria and the implementer's claims; the description
-  is then the change as the implementer describes it. When the issue or repository
-  requests screenshots, the opening agent attaches them in a PR comment after the PR
-  exists, without editing the reviewed description. The comment carries the agent
+  is then the change as the implementer describes it. When screenshots are requested
+  or the agent captured them, the opening agent attaches them in a PR comment after
+  the PR exists, without editing the reviewed description. The comment carries the agent
   marker so feedback and learning do not mistake it for a developer comment. A retry
   checks existing comments before posting again.
 - **Claim verification is set when a planning task starts.** `claim_verification` is

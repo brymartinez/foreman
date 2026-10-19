@@ -289,9 +289,9 @@ part of the task.
    runner keeps going after you quit the dashboard.
 3. The runner has the agent implement the issue, run validation, push, and open a PR
    with `gh pr create`. Foreman then checks with GitHub that the PR exists and targets
-   the right branch. When the issue or repository asks for screenshots, the opening
-   agent attaches them in a PR comment after the PR exists, or reports why it could
-   not. It leaves the PR description as written for review.
+   the right branch. When screenshots are requested or the agent captured them, the
+   opening agent attaches them in a PR comment after the PR exists, or reports why it
+   could not. It leaves the PR description as written for review.
 4. The implementing agent first reviews its own PR in a fresh, read-only, throwaway
    session that sees only the PR description and the code. Its findings go back to the
    implementer's session, and the self-review repeats until it is clean for the

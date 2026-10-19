@@ -13,7 +13,7 @@ func localBrief() TaskBrief {
 
 func TestImplementationPromptBeforeReviewAsksForACommitAndAProposedPR(t *testing.T) {
 	p := ImplementationPrompt(localBrief())
-	for _, want := range []string{`"review_ready"`, "prTitle", "prBody", "Do not push the branch or open a pull request", `"Closes #7"`} {
+	for _, want := range []string{`"review_ready"`, "prTitle", "prBody", "Do not push the branch or open a pull request", `"Closes #7"`, "Defer requested screenshots until the PR-opening turn"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("prompt lacks %q", want)
 		}
