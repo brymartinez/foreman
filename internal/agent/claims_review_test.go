@@ -22,7 +22,8 @@ func TestClaimedReviewPromptCarriesThePRDAndTheClaimsToTest(t *testing.T) {
 		p := ReviewPrompt(b)
 		for _, want := range []string{"## PRD", "> - AC1. 5xx responses are retried.", "acceptance criteria",
 			"## Implementer's claims", "only 5xx is retried", "retry.go:40, retry_test.go TestRetry", "go test ./... passed",
-			"criterion no claim covers", "counterexample", "not proof", "limitation", "blocking", "> Retry 5xx responses only."} {
+			"criterion no claim covers", "counterexample", "not proof", "limitation", "blocking", "nonblocking",
+			"belongs to implementation validation", "Do not run vet, tests, builds", "> Retry 5xx responses only."} {
 			if !strings.Contains(p, want) {
 				t.Errorf("self %t: review prompt lacks %q:\n%s", self, want, p)
 			}

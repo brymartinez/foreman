@@ -302,6 +302,9 @@ part of the task.
    back to the implementer too, and each fix gets a new self-review before the next
    competing review. The loop repeats until the competing review is clean. A
    self-review that errors fails the task.
+   Both reviews read code and tests without running validation commands. The
+   implementer runs those commands; inability to rerun them in review alone does not
+   request changes.
    Foreman has no `wait_for_pr` flag or config key: the first push and PR happen
    before this review. Fixes found during review are committed and pushed to the
    same PR before the next review pass.

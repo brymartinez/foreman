@@ -698,6 +698,12 @@ the same commit. The commit message records why it changed.
   strictly read-only:
   Claude gets only `Read, Grep, Glob` and read-only git, and Codex the read-only
   sandbox. Letting it run tests was rejected, because Claude's Bash has no sandbox.
+- **Validation commands run in implementation, not review.** Reviewers read code and
+  tests but do not run vet, tests, builds, or end-to-end scripts. A reported passing
+  check is still a claim about execution, not proof that the tests establish the
+  behavior. If review permissions alone prevent rerunning it, the reviewer records a
+  nonblocking limitation rather than requesting changes. A visible failure, a plausible
+  untested failure path, or a concrete defect remains a finding.
 - **The PR description is the only requirements, unless the task verifies claims.** The
   prompt carries the description, the PR comments, `git diff origin/<base>...HEAD`, and
   earlier rounds, but not the issue, decisions, or validation, so the review stays

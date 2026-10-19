@@ -71,8 +71,8 @@ func TestReviewPromptLabelsCommentsAsNonAuthoritative(t *testing.T) {
 
 func TestReviewPromptAsksForVerifiedCounterexamples(t *testing.T) {
 	p := ReviewPrompt(reviewBrief())
-	for _, want := range []string{"## Review stance", "fresh", "counterexamples", "regressions", "missing cases", "Run focused checks when your tools allow them", "verify the defect by reading the code",
-		"Report only concrete defects you verified yourself", "not evidence"} {
+	for _, want := range []string{"## Review stance", "fresh", "counterexamples", "regressions", "missing cases", "Do not run vet, tests, builds", "Read the tests and code to judge behavior",
+		"nonblocking limitation", "do not request changes for that reason alone", "Report only concrete defects you verified yourself", "not proof of behavior"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("review prompt missing %q:\n%s", want, p)
 		}
@@ -85,7 +85,8 @@ func TestReReviewPromptListsEarlierFindingsInFull(t *testing.T) {
 		{Severity: "blocking", File: "retry.go", Line: 40, Summary: "4xx retried", Detail: "The guard checks >= 400."}}}}
 	p := ReviewPrompt(b)
 	for _, want := range []string{"## Earlier review rounds", "Round 1 (one bug)", "1. [blocking] 4xx retried", "retry.go:40", "The guard checks >= 400.",
-		"Check each earlier finding", "review the updated change as a whole", "Do not repeat a finding that is resolved"} {
+		"Check each earlier finding", "review the updated change as a whole", "Do not repeat a finding that is resolved",
+		"inability to run validation commands is not a code defect"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("re-review prompt missing %q:\n%s", want, p)
 		}

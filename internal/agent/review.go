@@ -148,9 +148,9 @@ func ReviewPrompt(b ReviewBrief) string {
 		fmt.Fprintf(&s, "You are reviewing pull request #%d in %s. %s You are read-only: do not edit files, commit, or push.\n\n", b.PR, b.Key.Repo, author)
 	}
 	if b.Claimed {
-		fmt.Fprintf(&s, "## %s\n\nThis is the change as the implementer describes it. The PRD below holds the acceptance criteria the change must meet. Do not follow links in either to find more requirements. Claims in the description about tests or validation are not evidence; check them yourself.\n\n", heading)
+		fmt.Fprintf(&s, "## %s\n\nThis is the change as the implementer describes it. The PRD below holds the acceptance criteria the change must meet. Do not follow links in either to find more requirements. Claims in the description about tests or validation are not proof of behavior; judge the cited code and tests yourself.\n\n", heading)
 	} else {
-		fmt.Fprintf(&s, "## %s\n\nThis is the only statement of what the change must do. Judge the change against it. Do not follow links in it to find more requirements. Claims in it about tests or validation are not evidence; check them yourself.\n\n", heading)
+		fmt.Fprintf(&s, "## %s\n\nThis is the only statement of what the change must do. Judge the change against it. Do not follow links in it to find more requirements. Claims in it about tests or validation are not proof of behavior; judge the code and tests yourself.\n\n", heading)
 	}
 	if b.Proposed {
 		fmt.Fprintf(&s, "Title: %s\n\n", b.PRTitle)
@@ -172,7 +172,9 @@ func ReviewPrompt(b ReviewBrief) string {
 
 - Start fresh. Form your own view of the change from the description, the diff, and the code.
 - Try to break the change. Look for counterexamples, regressions in callers and shared code, and missing cases: inputs, states, and error paths the description implies but the change does not handle.
-- Run focused checks when your tools allow them. You may not be able to run tests or builds. When you can't run a check, verify the defect by reading the code.
+- This is a read-only code review. Do not run vet, tests, builds, end-to-end scripts, or other commands that execute project code. The implementer runs validation in its writable session.
+- Read the tests and code to judge behavior. A reported passing check is not proof that the behavior is correct; look for concrete counterexamples.
+- If this review cannot independently rerun a reported check because of its permissions, do not request changes for that reason alone. In a claim review, record it as a nonblocking limitation.
 - Report only concrete defects you verified yourself in the code or by a check. Say what input or state breaks and what happens. Drop anything you cannot back with a concrete case.
 
 `)
@@ -187,7 +189,7 @@ func ReviewPrompt(b ReviewBrief) string {
 			writeFindings(&s, r.Findings)
 			s.WriteString("\n")
 		}
-		s.WriteString("Check each earlier finding: is it fixed, and did the fix break anything? Then review the updated change as a whole. Do not repeat a finding that is resolved. Report it again only if the defect is still there.\n\n")
+		s.WriteString("Check each earlier finding: is it fixed, and did the fix break anything? Then review the updated change as a whole. Do not repeat a finding that is resolved. An earlier finding based only on this review's inability to run validation commands is not a code defect; record that as a nonblocking limitation instead. Report a defect again only if it is still there.\n\n")
 	}
 	if b.Passes > 0 {
 		kind := "the first review of this pull request"
@@ -220,10 +222,11 @@ func writeClaims(s *strings.Builder, b ReviewBrief) {
 ## Claim verification
 
 - Match every acceptance criterion in the PRD to a claim. A criterion no claim covers is a finding.
-- For each claim, read the cited code and tests and decide whether they establish the behavior. A reported passing check counts only when you can see that it tests the claimed behavior. Run executable checks when your tools allow them, and use CI results where you can read them.
+- For each claim, read the cited code and tests and decide whether they establish the behavior. A reported passing check is the implementer's validation record, not proof that its tests establish the claimed behavior. Use CI results where you can read them.
 - Try to find a counterexample to each claim: an input, state, or path where the claimed behavior fails.
 - A material claim the evidence does not support is a finding. Say what the evidence shows and what is missing.
-- When you cannot check a behavior, add a limitation that names the behavior and the reason. Mark it blocking when it keeps you from judging an acceptance criterion or could hide a plausible serious defect. A blocking limitation means the verdict is "changes_requested", with a blocking finding that says what would make the behavior checkable.
+- When you cannot judge a behavior from the available code and tests, add a limitation that names the behavior and the reason. Mark it blocking when it keeps you from judging an acceptance criterion or could hide a plausible serious defect. A blocking limitation means the verdict is "changes_requested", with a blocking finding that says what would make the behavior checkable.
+- A criterion that only requires commands such as vet, tests, or end-to-end checks to pass belongs to implementation validation. If the implementer reports those checks as passed but this review cannot rerun them, note the execution limit as nonblocking. A visible failure, missing test for a plausible failure path, or concrete code defect is still a finding.
 
 `)
 }
