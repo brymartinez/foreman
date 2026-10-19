@@ -707,7 +707,9 @@ the same commit. The commit message records why it changed.
   or the agent captured them, the opening agent attaches them in a PR comment after
   the PR exists, without editing the reviewed description. The comment carries the agent
   marker so feedback and learning do not mistake it for a developer comment. A retry
-  checks existing comments before posting again.
+  checks existing comments before posting again. Foreman supplies no screenshot data;
+  the agent uses documented local setup and repository seed, fixture, or demo data,
+  and names missing evidence in its outcome when none is suitable.
 - **Claim verification is set when a planning task starts.** `claim_verification` is
   copied onto the delegation when a task that will plan starts (the CLI always enables
   it; a task that continues a PR has no PRD and starts without it). A restart keeps it,
