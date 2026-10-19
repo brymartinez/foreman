@@ -401,7 +401,7 @@ sleep "${E2E_REVIEW_SLEEP:-0}"
 echo '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":20,"reasoning_output_tokens":5}}'
 if [ -n "$wt" ] && [ -f "$E2E_STATE/findings-once" ]; then
 	rm "$E2E_STATE/findings-once"
-	echo '{"verdict":"changes_requested","summary":"429 is missing","findings":[{"severity":"blocking","file":"widgets.go","line":1,"summary":"429 is not retried","detail":"retry 429 too"}]}' >"$last"
+	echo '{"verdict":"changes_requested","summary":"429 is missing","findings":[{"category":"defect","severity":"blocking","file":"widgets.go","line":1,"summary":"429 is not retried","detail":"retry 429 too"}]}' >"$last"
 	exit 0
 fi
 echo '{"verdict":"clean","summary":"looks right","findings":[]}' >"$last"

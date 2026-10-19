@@ -10,8 +10,9 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["severity", "file", "line", "summary", "detail"],
+        "required": ["category", "severity", "file", "line", "summary", "detail"],
         "properties": {
+          "category": { "type": "string", "enum": ["defect", "unavailable_check"] },
           "severity": { "type": "string", "enum": ["blocking", "should_fix"] },
           "file": { "type": ["string", "null"] },
           "line": { "type": ["integer", "null"] },

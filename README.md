@@ -607,7 +607,7 @@ log_dir: ~/.local/share/foreman/logs
 knowledge_dir: ~/.local/share/foreman/knowledge # what foreman learns, per repository
 review_rounds: 3                     # passes over the whole PR per self-review and per review
 fix_rounds: 3                        # fixes asked by either review before foreman asks you
-review_before_pr: false              # review and fix locally; open the PR after a clean review
+review_before_pr: false              # open the PR before review; set true to review locally first
 mentions: true                       # show items found only because they mention you
 default_source: github               # dashboard issue source: github, linear, or all
 refresh: 60                          # seconds between dashboard issue-source refreshes

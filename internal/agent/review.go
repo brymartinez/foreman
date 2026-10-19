@@ -31,6 +31,7 @@ func ParseReview(raw []byte) (ReviewOutcome, error) {
 		Verdict  string `json:"verdict"`
 		Summary  string `json:"summary"`
 		Findings []struct {
+			Category string  `json:"category"`
 			Severity string  `json:"severity"`
 			File     *string `json:"file"`
 			Line     *int    `json:"line"`
@@ -43,12 +44,30 @@ func ParseReview(raw []byte) (ReviewOutcome, error) {
 		return ReviewOutcome{}, fmt.Errorf("review is not valid JSON: %w", err)
 	}
 	out := ReviewOutcome{Summary: w.Summary}
+	unavailable := false
 	for _, f := range w.Findings {
 		if f.Severity != "blocking" && f.Severity != "should_fix" {
 			return ReviewOutcome{}, fmt.Errorf("finding has unknown severity %q", f.Severity)
 		}
 		if strings.TrimSpace(f.Summary) == "" {
 			return ReviewOutcome{}, errors.New("finding has no summary")
+		}
+		// Earlier reviewers put denied review commands in findings. Keep that
+		// environment-only result from blocking even when it is mislabeled a defect.
+		if f.Category == "defect" && f.File == nil && f.Line == nil && reviewEnvironmentBlocked(f.Summary+" "+f.Detail) {
+			f.Category = "unavailable_check"
+		}
+		switch f.Category {
+		case "unavailable_check":
+			if f.File != nil || f.Line != nil || strings.TrimSpace(f.Detail) == "" {
+				return ReviewOutcome{}, errors.New("unavailable check needs a reason and no code location")
+			}
+			out.Limitations = append(out.Limitations, task.Limitation{Behavior: f.Summary, Reason: f.Detail})
+			unavailable = true
+			continue
+		case "defect":
+		default:
+			return ReviewOutcome{}, fmt.Errorf("finding has unknown category %q", f.Category)
 		}
 		tf := task.Finding{Severity: f.Severity, Summary: f.Summary, Detail: f.Detail}
 		if f.File != nil {
@@ -66,7 +85,7 @@ func ParseReview(raw []byte) (ReviewOutcome, error) {
 		}
 		blocked = blocked || l.Blocking
 	}
-	out.Limitations = w.Limitations
+	out.Limitations = append(out.Limitations, w.Limitations...)
 	switch w.Verdict {
 	case "clean":
 		if len(out.Findings) > 0 {
@@ -80,6 +99,11 @@ func ParseReview(raw []byte) (ReviewOutcome, error) {
 		out.Clean = true
 	case "changes_requested":
 		if len(out.Findings) == 0 {
+			if unavailable && !blocked {
+				out.Clean = true
+				out.Summary = "No code defect found; unavailable checks recorded as nonblocking limitations"
+				break
+			}
 			return ReviewOutcome{}, errors.New("review requests changes but lists no findings")
 		}
 		// The implementer receives findings, not limitations, so a blocking limitation
@@ -91,6 +115,14 @@ func ParseReview(raw []byte) (ReviewOutcome, error) {
 		return ReviewOutcome{}, fmt.Errorf("unknown review verdict %q", w.Verdict)
 	}
 	return out, nil
+}
+
+func reviewEnvironmentBlocked(text string) bool {
+	text = strings.ToLower(text)
+	context := strings.Contains(text, "review") || strings.Contains(text, "session") || strings.Contains(text, "sandbox")
+	denied := strings.Contains(text, "denied") || strings.Contains(text, "permission") || strings.Contains(text, "read-only") || strings.Contains(text, "read only")
+	check := strings.Contains(text, "go vet") || strings.Contains(text, "go test") || strings.Contains(text, "e2e") || strings.Contains(text, "test") || strings.Contains(text, "build") || strings.Contains(text, "command") || strings.Contains(text, "check")
+	return context && denied && check
 }
 
 // ReviewBrief holds only what the reviewer may judge the change by: the PR, its
@@ -203,7 +235,7 @@ func ReviewPrompt(b ReviewBrief) string {
 	}
 	s.WriteString(`## Final response
 
-Reply with JSON matching the provided schema. Use verdict "clean" with no findings, or "changes_requested" with one finding per problem. Severity is "blocking" or "should_fix". Set file and line when you can point at them, else null.
+Reply with JSON matching the provided schema. Use verdict "clean" with no findings, or "changes_requested" with one finding per problem. Set category to "defect" for a concrete code or behavior problem. If you put an inability to execute a check in findings, set category to "unavailable_check"; Foreman records it as a nonblocking limitation, never as a defect. Severity is "blocking" or "should_fix". Set file and line when you can point at them, else null. An unavailable check has no file or line and needs the reason in detail.
 `)
 	if b.Claimed {
 		s.WriteString("List each behavior you could not check in limitations, with the reason, or set limitations to []. A blocking limitation needs verdict \"changes_requested\" and a blocking finding.\n")

@@ -493,7 +493,7 @@ func TestPromptIncludesAnsweredDecisions(t *testing.T) {
 	}
 }
 
-const reviewJSON = `{"verdict":"changes_requested","summary":"one bug","findings":[{"severity":"blocking","file":"retry.go","line":40,"summary":"4xx retried","detail":"guard missing"}]}`
+const reviewJSON = `{"verdict":"changes_requested","summary":"one bug","findings":[{"category":"defect","severity":"blocking","file":"retry.go","line":40,"summary":"4xx retried","detail":"guard missing"}]}`
 
 func TestReviewAdaptersAreReadOnlyAndDisposable(t *testing.T) {
 	var got Command

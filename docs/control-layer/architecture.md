@@ -740,7 +740,12 @@ the same commit. The commit message records why it changed.
   plausible serious defect) cannot come with a clean verdict, so `agent.ParseReview`
   rejects that pair. It also rejects a blocking limitation without a blocking finding,
   because the implementer receives findings, not limitations. Limitations are stored on
-  the round.
+  the round. Each finding declares whether it is a defect or an unavailable check.
+  `agent.ParseReview` moves unavailable checks to nonblocking limitations; a response
+  requesting changes only for unavailable checks becomes clean. A response that also
+  reports a defect still requests changes for that defect. For older review wording,
+  a location-free finding that explicitly says the review environment denied commands
+  is handled the same way even if it is labeled as a defect.
 - **`review_before_pr` reviews before the PR opens.** Repositories that review every new
   PR automatically would otherwise review code Foreman's fixes still change. The setting
   is copied into the task when it starts, and a restart keeps it, so a config change never

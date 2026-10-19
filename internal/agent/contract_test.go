@@ -175,15 +175,15 @@ func TestParseReview(t *testing.T) {
 	if err != nil || !clean.Clean {
 		t.Fatalf("clean: %+v %v", clean, err)
 	}
-	cr, err := ParseReview([]byte(`{"verdict":"changes_requested","summary":"s","findings":[{"severity":"blocking","file":"a.go","line":12,"summary":"nil deref","detail":"d"},{"severity":"should_fix","file":null,"line":null,"summary":"missing test","detail":""}]}`))
+	cr, err := ParseReview([]byte(`{"verdict":"changes_requested","summary":"s","findings":[{"category":"defect","severity":"blocking","file":"a.go","line":12,"summary":"nil deref","detail":"d"},{"category":"defect","severity":"should_fix","file":null,"line":null,"summary":"missing test","detail":""}]}`))
 	if err != nil || cr.Clean || len(cr.Findings) != 2 || cr.Findings[0].Line != 12 || cr.Findings[1].File != "" {
 		t.Fatalf("changes: %+v %v", cr, err)
 	}
 	for _, bad := range []string{
-		`{"verdict":"clean","summary":"s","findings":[{"severity":"blocking","file":null,"line":null,"summary":"x","detail":""}]}`,
+		`{"verdict":"clean","summary":"s","findings":[{"category":"defect","severity":"blocking","file":null,"line":null,"summary":"x","detail":""}]}`,
 		`{"verdict":"changes_requested","summary":"s","findings":[]}`,
 		`{"verdict":"lgtm","summary":"s","findings":[]}`,
-		`{"verdict":"changes_requested","summary":"s","findings":[{"severity":"nit","file":null,"line":null,"summary":"x","detail":""}]}`,
+		`{"verdict":"changes_requested","summary":"s","findings":[{"category":"defect","severity":"nit","file":null,"line":null,"summary":"x","detail":""}]}`,
 	} {
 		if _, err := ParseReview([]byte(bad)); err == nil {
 			t.Errorf("accepted %s", bad)
