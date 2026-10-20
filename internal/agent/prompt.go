@@ -70,6 +70,12 @@ type TaskBrief struct {
 	// Claims is set for a task with claim verification. A turn that finishes a change
 	// returns its claims for the reviewers.
 	Claims bool
+	// FullSuite is set for a task with the full-suite gate. The turn tags its checks
+	// and reports the full suite. FocusedOnly is set for a fix, answer, or merge turn,
+	// which runs focused checks only. FinalCheck is set for the final-check turn.
+	FullSuite   bool
+	FocusedOnly bool
+	FinalCheck  *FinalCheck
 }
 
 // MergeBrief is the base branch a PR conflicts with and the files that conflict.
@@ -179,6 +185,11 @@ For a multi-part change, complete one coherent, testable part at a time. When th
 The next session receives the commit and nextObjective, not this transcript. Keep nextObjective under 500 characters; the committed code, issue, and posted plan hold the details.
 
 `, finish)
+	}
+	if b.FinalCheck != nil {
+		s.WriteString(FinalCheckMessage(*b.FinalCheck) + "\n")
+	} else if b.FullSuite && !b.Planning {
+		fullSuiteSection(&s, b.FocusedOnly)
 	}
 	if b.Claims && !b.Planning {
 		claimsSection(&s)
@@ -575,6 +586,8 @@ type OpenPRBrief struct {
 	// byte for byte.
 	BodyFile   string
 	Validation []task.Check
+	// Unverified explains why the repository has no full suite to run, if it has none.
+	Unverified string
 	// Decisions are answers the implementer has not received yet.
 	Decisions []task.Decision
 	// Claims are the reviewed claims of a task with claim verification, which the
@@ -613,7 +626,14 @@ End with JSON matching the provided schema: "pr_opened" with prNumber, prUrl, an
 Validation run on the reviewed commit:
 `, b.Head, b.Branch, b.Branch, b.BaseBranch, b.Branch, b.BodyFile, b.Title, screenshotCommentInstructions(true))
 	for _, c := range b.Validation {
-		fmt.Fprintf(&s, "- %s: passed %t\n", c.Command, c.Passed)
+		scope := ""
+		if c.Scope != "" {
+			scope = " (" + string(c.Scope) + ")"
+		}
+		fmt.Fprintf(&s, "- %s%s: passed %t\n", c.Command, scope, c.Passed)
+	}
+	if b.Unverified != "" {
+		fmt.Fprintf(&s, "\nNo full suite was run: %s. Name this in the outcome summary.\n", b.Unverified)
 	}
 	if len(b.Claims) > 0 {
 		claims, _ := json.Marshal(b.Claims)

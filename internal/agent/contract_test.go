@@ -345,3 +345,99 @@ func TestOutcomeSchemaRequiresANullableClaimsArray(t *testing.T) {
 		}
 	}
 }
+
+func TestParseOutcomeReadsCheckScopes(t *testing.T) {
+	got, err := ParseOutcome([]byte(`{"status":"pr_opened","summary":"s","prNumber":912,"prUrl":"u","questions":[],
+"validation":[{"command":"go test ./internal/app","passed":true,"scope":"focused"},{"command":"go test ./...","passed":true,"scope":"full"},{"command":"go vet ./...","passed":true}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []task.CheckScope{task.FocusedCheck, task.FullCheck, task.FocusedCheck}
+	for i, c := range got.Validation {
+		if c.Scope != want[i] {
+			t.Errorf("check %d scope = %q, want %q", i, c.Scope, want[i])
+		}
+	}
+	_, err = ParseOutcome([]byte(`{"status":"pr_opened","summary":"s","prNumber":912,"prUrl":"u","questions":[],"validation":[{"command":"go test ./...","passed":true,"scope":"everything"}]}`))
+	if err == nil || !strings.Contains(err.Error(), "everything") {
+		t.Fatalf("unknown scope err = %v", err)
+	}
+}
+
+func TestParseOutcomeReadsAFullSuiteReport(t *testing.T) {
+	const prefix = `{"status":"review_ready","summary":"s","prTitle":"feat: x","prBody":"Closes #7","validation":[{"command":"go test ./...","passed":true,"scope":"full"}],"fullSuite":`
+	got, err := ParseOutcome([]byte(prefix + `{"status":"run","revision":" abc123 ","docOnly":[{"path":"docs/guide.md","evidence":"no test or build reads docs/"}],"explanation":null}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := got.FullSuite; f == nil || f.Status != FullSuiteRun || f.Revision != "abc123" || len(f.DocOnly) != 1 || f.DocOnly[0].Path != "docs/guide.md" {
+		t.Fatalf("full suite = %+v", got.FullSuite)
+	}
+	got, err = ParseOutcome([]byte(prefix + `{"status":"unavailable","revision":null,"docOnly":null,"explanation":"the repository documents no test command"}}`))
+	if err != nil || got.FullSuite == nil || got.FullSuite.Status != FullSuiteUnavailable || got.FullSuite.Explanation != "the repository documents no test command" {
+		t.Fatalf("unavailable = %+v, %v", got.FullSuite, err)
+	}
+	for _, absent := range []string{`null}`, `null,"x":0}`} {
+		if got, err := ParseOutcome([]byte(prefix + absent)); err != nil || got.FullSuite != nil {
+			t.Errorf("absent report = %+v, %v", got.FullSuite, err)
+		}
+	}
+	for name, report := range map[string]string{
+		"a run without a revision":          `{"status":"run","revision":" ","docOnly":[],"explanation":null}`,
+		"an unavailable suite unexplained":  `{"status":"unavailable","revision":null,"docOnly":null,"explanation":" "}`,
+		"a documentation-only path unnamed": `{"status":"run","revision":"abc","docOnly":[{"path":"","evidence":"e"}],"explanation":null}`,
+		"an unknown status":                 `{"status":"skipped","revision":"abc","docOnly":[],"explanation":null}`,
+	} {
+		if _, err := ParseOutcome([]byte(prefix + report + `}`)); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+}
+
+// Evidence is the implementer's judgment. An empty entry leaves its path uncovered for
+// the runner to report, rather than failing the turn's output.
+func TestParseOutcomeKeepsEmptyEvidenceForTheRunnerToJudge(t *testing.T) {
+	got, err := ParseOutcome([]byte(`{"status":"pr_opened","summary":"s","prNumber":9,"prUrl":"u","validation":[{"command":"go test ./...","passed":true,"scope":"full"}],
+"fullSuite":{"status":"run","revision":"abc","docOnly":[{"path":"README.md","evidence":" "}],"explanation":null}}`))
+	if err != nil || got.FullSuite == nil || len(got.FullSuite.DocOnly) != 1 {
+		t.Fatalf("got %+v, %v", got.FullSuite, err)
+	}
+}
+
+func TestParseOutcomeIgnoresAFullSuiteReportOnACheckpoint(t *testing.T) {
+	got, err := ParseOutcome([]byte(`{"status":"checkpoint","summary":"s","nextObjective":"next part","validation":[{"command":"go test ./internal/app","passed":true,"scope":"focused"}],
+"fullSuite":{"status":"bogus","revision":null,"docOnly":null,"explanation":null}}`))
+	if err != nil || got.FullSuite != nil {
+		t.Fatalf("checkpoint = %+v, %v", got.FullSuite, err)
+	}
+}
+
+func TestOutcomeSchemaRequiresANullableFullSuiteAndCheckScopes(t *testing.T) {
+	var schema struct {
+		Required   []string `json:"required"`
+		Properties map[string]struct {
+			Type     json.RawMessage `json:"type"`
+			Required []string        `json:"required"`
+			Items    struct {
+				Required []string `json:"required"`
+			} `json:"items"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal([]byte(OutcomeSchema), &schema); err != nil {
+		t.Fatal(err)
+	}
+	full, ok := schema.Properties["fullSuite"]
+	var types []string
+	_ = json.Unmarshal(full.Type, &types)
+	if !ok || !slices.Contains(schema.Required, "fullSuite") || !slices.Equal(types, []string{"object", "null"}) {
+		t.Fatalf("fullSuite schema = %+v, required %v", full, schema.Required)
+	}
+	for _, field := range []string{"status", "revision", "docOnly", "explanation"} {
+		if !slices.Contains(full.Required, field) {
+			t.Errorf("fullSuite does not require %s", field)
+		}
+	}
+	if !slices.Contains(schema.Properties["validation"].Items.Required, "scope") {
+		t.Error("a check does not require scope")
+	}
+}

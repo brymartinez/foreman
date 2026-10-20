@@ -218,6 +218,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		if prev != nil {
 			cur.Delegation.ReviewBeforePR = prev.ReviewBeforePR
 			cur.Delegation.ClaimVerification = prev.ClaimVerification
+			cur.Delegation.FullSuiteGate = prev.FullSuiteGate
 			cur.Delegation.ScopeDigest = prev.ScopeDigest
 			cur.Delegation.PlanScopeDigest = prev.PlanScopeDigest
 			cur.Delegation.PlanDigest = prev.PlanDigest
@@ -243,6 +244,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		// continues a PR has no plan.
 		if prev == nil {
 			cur.Delegation.ClaimVerification = a.ClaimVerification && cur.Delegation.PR == 0
+			cur.Delegation.FullSuiteGate = a.FullSuiteGate
 		}
 		// The same branch has the same PR, so a restart can pick up at its review.
 		// Another implementer starts over: its reviewer wrote the existing PR. A

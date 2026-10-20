@@ -75,7 +75,7 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, token string, l
 		if rec, current, err = a.currentPR(ctx, final, rec); err != nil {
 			return err
 		}
-		if current && reviewCovers(rec, rec.Delegation.PRHead, rec.Delegation.PRDigest) {
+		if current && reviewCovers(rec, rec.Delegation.PRHead, rec.Delegation.PRDigest) && !rec.FinalCheckPending() {
 			// A task left by the old feedback flow already passed review. Hand it
 			// back without resuming the implementer on the same comments.
 			_, err = a.update(final, rec.Key, existing(func(cur *task.Record) {
@@ -124,6 +124,7 @@ const (
 	stepReview                   // resolve merge conflicts, then review the PR head or local commit
 	stepOpenPR                   // push a cleanly reviewed local commit and open its PR
 	stepHandover                 // read comments that arrived during the run
+	stepFinalCheck               // supply the full-suite result a cleanly reviewed change needs
 	stepDone
 )
 
@@ -140,6 +141,8 @@ func firstStep(rec *task.Record, waiting int) step {
 		return stepReview
 	case rec.ReviewPending():
 		return stepPickUpReview
+	case rec.FinalCheckPending():
+		return stepFinalCheck
 	}
 	return stepImplement
 }
@@ -182,6 +185,8 @@ func (r *taskRun) loop(next step) error {
 			next, err = r.openPR()
 		case stepHandover:
 			next, err = r.handover()
+		case stepFinalCheck:
+			next, err = r.finalCheck()
 		default:
 			return fmt.Errorf("unknown run step %d", next)
 		}
@@ -317,6 +322,8 @@ func (r *taskRun) answer() (step, error) {
 		// Blocked, failed, or stopped. The comments stay unanswered, so the next run
 		// asks for them again.
 		return stepDone, nil
+	case rec.FinalCheckPending():
+		return stepFinalCheck, nil
 	case !rec.ReviewPending():
 		// A turn that pushed nothing leaves the code its review already covers, so
 		// there is nothing to review and the task goes back to the developer.
@@ -448,6 +455,7 @@ func (r *taskRun) review() (step, error) {
 				escalateReview(cur, a.fixRounds(), a.Now())
 			}
 		}
+		holdForFinalCheck(cur)
 	})); err != nil {
 		return stepDone, err
 	}
@@ -456,6 +464,8 @@ func (r *taskRun) review() (step, error) {
 	case kind == task.SelfReview && rec.SelfReviewPassed() && rec.State == task.SelfReviewing:
 		r.selfPassed = true
 		return stepReview, nil
+	case rec.State == task.Implementing && rec.FinalCheckPending():
+		return stepFinalCheck, nil
 	case rec.State == task.OpeningPR && rec.OpenPending():
 		return stepOpenPR, nil
 	case rec.State == task.Implementing:
@@ -578,6 +588,8 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 			// Documents may have appeared on the issue since the session last saw it.
 			resume += agent.ExistingPlansMessage(req.existingPlans)
 		}
+	} else if req.finalCheck != nil {
+		resume = agent.FinalCheckMessage(*req.finalCheck)
 	} else if merge != nil && local {
 		resume = agent.LocalMergeMessage(d.Branch, merge.Base, merge.Files)
 	} else if merge != nil {
@@ -591,6 +603,9 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 	}
 	if resume != "" && d.ClaimVerification && !planning {
 		resume += agent.ClaimsMessage
+	}
+	if resume != "" && !planning {
+		resume = fullSuiteResume(rec, req, resume)
 	}
 	if resume != "" && d.Implementer.ID != "" {
 		if err := a.startAttempt(ctx, rec); err != nil {
@@ -615,6 +630,8 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 	brief.Merge = merge
 	brief.LocalReview = d.BeforePR()
 	brief.Claims = d.ClaimVerification
+	brief.FullSuite, brief.FinalCheck = d.FullSuiteGate, req.finalCheck
+	brief.FocusedOnly = d.FullSuiteGate && !needsFullResult(rec, req)
 	brief.PR, brief.Feedback, brief.Conflict = d.PR, feedbackItems(feedback), conflict
 	if d.PR == 0 && d.CheckpointNext != "" {
 		brief.CheckpointHead, brief.NextObjective = d.CheckpointHead, d.CheckpointNext
@@ -679,6 +696,8 @@ func (a App) answerFeedback(ctx, final context.Context, rec *task.Record, commen
 	fmt.Fprintf(log, "foreman: %s\n", feedbackNote(len(comments), d.PR))
 	res := a.runTurn(ctx, rec, turnRequest{feedback: comments}, a.verifiedPR(log), log)
 	return a.finishTurn(ctx, final, rec.Key, "answering PR feedback", res, func(cur *task.Record) {
+		// The result is stored first, so the handover below judges coverage by it.
+		recordFull(cur, res)
 		applyFeedbackTurn(cur, res.turn, res.pr, res.err, comments, headBefore, a.Now())
 	}, log)
 }
@@ -1112,6 +1131,7 @@ func markDelivered(rec *task.Record, now time.Time) {
 // reads the description the commit came with.
 func applyTurnResult(rec *task.Record, res turnResult, now time.Time) {
 	applyTurn(rec, res.turn, res.pr, res.err, now)
+	recordFull(rec, res)
 	if res.err != nil || res.turn.Outcome.Status != agent.ReviewReady {
 		return
 	}

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -41,6 +42,19 @@ type fakeWorktrees struct {
 	syncs   []string
 	syncErr error
 	onSync  func(dir string)
+	// changed answers ChangedPaths by "from..to"; a pair it lacks is not an ancestor.
+	changed map[string][]string
+}
+
+func (f *fakeWorktrees) ChangedPaths(_ context.Context, _, from, to string) ([]string, error) {
+	if from == to {
+		return nil, nil
+	}
+	paths, ok := f.changed[from+".."+to]
+	if !ok {
+		return nil, fmt.Errorf("%s is not an ancestor of %s", from, to)
+	}
+	return paths, nil
 }
 
 func (f *fakeWorktrees) SyncDefaultBranch(_ context.Context, dir, branch string) error {

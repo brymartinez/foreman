@@ -96,10 +96,17 @@ func (a App) feedback(ctx context.Context, rec *task.Record) (*task.Record, stri
 		return updated, "", nil
 	}
 	var note string
+	var held bool
 	updated, err = a.update(ctx, rec.Key, func(cur *task.Record) (*task.Record, error) {
 		// Read again under the lock: a resume since the gate's list owns the task now.
 		if cur == nil || cur.State != rec.State || cur.Delegation == nil || cur.Delegation.PR != rec.Delegation.PR {
 			return cur, nil
+		}
+		if want == task.ReadyForHuman {
+			if held = handBackOrHold(cur, a.Now()); held {
+				note = cur.LastOutcome.Summary
+				return cur, nil
+			}
 		}
 		cur.State = want
 		status := "reviewed"
@@ -110,6 +117,9 @@ func (a App) feedback(ctx context.Context, rec *task.Record) (*task.Record, stri
 		cur.LastOutcome = &task.Outcome{Status: status, Summary: note, At: a.Now()}
 		return cur, nil
 	})
+	if err == nil && held {
+		updated, err = a.launchFinalCheck(ctx, rec.Key)
+	}
 	return updated, note, err
 }
 
@@ -210,7 +220,7 @@ func (a App) currentPR(ctx, final context.Context, rec *task.Record) (updated *t
 // to the developer once its comments are answered: CI has finished. A task with claim
 // verification waits for the gate instead, which reads the PRD before handing it over.
 func handsOverNow(rec *task.Record, ci *task.CIStatus) bool {
-	return ci != nil && ci.State != task.CIPending && !rec.Delegation.ClaimVerification
+	return ci != nil && ci.State != task.CIPending && !rec.Delegation.ClaimVerification && !rec.FinalCheckPending()
 }
 
 // reviewCovers reports a clean competing review of head and of the description with

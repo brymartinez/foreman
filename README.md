@@ -305,6 +305,12 @@ part of the task.
    Both reviews read code and tests without running validation commands. The
    implementer runs those commands; inability to rerun them in review alone does not
    request changes.
+   The implementer runs the repository's full documented suite before the first
+   review and focused checks for each fix. Before handoff, Foreman needs a full-suite
+   result that covers the final commit. If a fix changed behavior or a validation
+   input since the last full run, the implementer runs the suite once more, and a fix
+   it commits then is reviewed again. A repository with no identifiable full suite is
+   handed off with the agent's explanation of what it could not verify.
    Foreman has no `wait_for_pr` flag or config key: the first push and PR happen
    before this review. Fixes found during review are committed and pushed to the
    same PR before the next review pass.

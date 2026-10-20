@@ -258,7 +258,7 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			}
 			// A PR that had a clean review is reviewed again by a runner the gate starts.
 			// One without a clean review shows the stage it needs and waits for a start.
-			if rereview(cur) {
+			if rereview(cur) || cur.State == task.Implementing && cur.FinalCheckPending() && cur.Delegation.RunnerPID == 0 && !launching(cur) {
 				var err error
 				if token, err = a.claimLaunch(cur); err != nil {
 					return nil, err
@@ -281,12 +281,17 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 		// this is where feedback arrives. It runs after advance, so a task
 		// handed over by this same refresh is checked in the same pass.
 		if pr.State == "open" && !a.ReplyToPRFeedback && updated.State == task.Reviewed {
+			var held bool
 			updated, err = a.update(ctx, r.Key, existing(func(cur *task.Record) {
 				if cur.State == task.Reviewed {
-					cur.State = task.ReadyForHuman
 					cur.Feedback = nil
+					held = handBackOrHold(cur, a.Now())
 				}
 			}))
+			if err == nil && held {
+				notes[r.Key] = append(notes[r.Key], updated.LastOutcome.Summary)
+				updated, err = a.launchFinalCheck(ctx, r.Key)
+			}
 			if err != nil {
 				return nil, nil, nil, err
 			}
@@ -423,13 +428,17 @@ func reopen(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) s
 		d.PRDigest = task.ProposalDigest(pr.Title, pr.Body)
 	}
 	rec.State = rec.NextStage()
-	if reviewed {
+	// A change no full result covers goes to its final check, which the gate launches.
+	if reviewed && !rec.FinalCheckPending() {
 		rec.State = task.WaitingForCI
 	}
-	if reviewed && ci.State != task.CIPending {
+	if rec.State == task.WaitingForCI && ci.State != task.CIPending {
 		rec.State = task.ReadyForHuman
 	}
 	summary := fmt.Sprintf("PR #%d reopened; it is back under review", d.PR)
+	if reviewed && rec.FinalCheckPending() {
+		summary = fmt.Sprintf("PR #%d reopened; its review is clean, and it needs a final full check", d.PR)
+	}
 	if rec.State == task.ReadyForHuman {
 		summary = fmt.Sprintf("PR #%d reopened; its review is clean and CI has finished", d.PR)
 	}
@@ -535,6 +544,12 @@ func advance(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) 
 		rec.State, rec.CI = rec.NextStage(), nil
 		return outcome("re_review", fmt.Sprintf("PR #%d has a new description since its clean review; it is being reviewed again", d.PR))
 	}
+	if rec.State == task.WaitingForCI && rec.FinalCheckPending() {
+		// A task that reached WAITING_FOR_CI without a covering full result, such as one
+		// whose runner stopped after the clean review, is not handed to the developer.
+		rec.State, rec.CI = task.Implementing, nil
+		return outcome("final_check", fmt.Sprintf("PR #%d has no full-suite result that covers %s; %s is running the final check", d.PR, short(d.PRHead), d.Implementer.Agent))
+	}
 	prev := rec.CI
 	rec.CI = &ci
 	if rec.State == task.ReadyForHuman || rec.State == task.Reviewed {
@@ -569,4 +584,35 @@ func checkNames(checks []task.CheckRun) string {
 		names[i] = c.Name
 	}
 	return strings.Join(names, ", ")
+}
+
+// handBackOrHold gives a cleanly reviewed task back to the developer, as READY_FOR_HUMAN,
+// once a full-suite result covers its head. Without one it goes to IMPLEMENTING for the
+// final check instead, and handBackOrHold reports true so the caller launches that run.
+func handBackOrHold(rec *task.Record, now time.Time) bool {
+	if !rec.FinalCheckPending() {
+		rec.State = task.ReadyForHuman
+		return false
+	}
+	d := rec.Delegation
+	rec.State, rec.CI = task.Implementing, nil
+	rec.LastOutcome = &task.Outcome{Status: "final_check", Summary: fmt.Sprintf("PR #%d has no full-suite result that covers %s; %s is running the final check", d.PR, short(d.PRHead), d.Implementer.Agent), At: now}
+	return true
+}
+
+// launchFinalCheck starts the runner for a task handBackOrHold sent to its final check,
+// unless a runner or launch already has it.
+func (a App) launchFinalCheck(ctx context.Context, key task.Key) (*task.Record, error) {
+	var token string
+	updated, err := a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
+		var err error
+		if cur != nil && cur.Delegation != nil && cur.State == task.Implementing && cur.FinalCheckPending() && cur.Delegation.RunnerPID == 0 && !launching(cur) {
+			token, err = a.claimLaunch(cur)
+		}
+		return cur, err
+	})
+	if err != nil || token == "" {
+		return updated, err
+	}
+	return a.launch(ctx, key, token)
 }

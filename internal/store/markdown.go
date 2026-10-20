@@ -199,6 +199,8 @@ type frontmatter struct {
 	ProposedTitle       string                 `yaml:"proposed_title,omitempty"`
 	ProposedBody        string                 `yaml:"proposed_body,omitempty"`
 	ClaimVerification   bool                   `yaml:"claim_verification,omitempty"`
+	FullSuiteGate       bool                   `yaml:"full_suite_gate,omitempty"`
+	FinalChecks         int                    `yaml:"final_checks,omitempty"`
 	Claims              []task.Claim           `yaml:"claims,omitempty"`
 	PRDDigest           string                 `yaml:"prd_digest,omitempty"`
 	ScopeDigest         string                 `yaml:"scope_digest,omitempty"`
@@ -210,6 +212,7 @@ type frontmatter struct {
 	LastOutcome         *outcomeFM             `yaml:"last_outcome,omitempty"`
 	Usage               usageFM                `yaml:"usage,omitempty"`
 	Validation          []task.Check           `yaml:"validation,omitempty"`
+	FullResult          *task.FullResult       `yaml:"full_result,omitempty"`
 	Reviews             []reviewFM             `yaml:"reviews,omitempty"`
 	Plan                []task.PlanComment     `yaml:"plan,omitempty"`
 	Feedback            []feedbackFM           `yaml:"feedback,omitempty"`
@@ -405,6 +408,8 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 			ProposedTitle:     fm.ProposedTitle,
 			ProposedBody:      fm.ProposedBody,
 			ClaimVerification: fm.ClaimVerification,
+			FullSuiteGate:     fm.FullSuiteGate,
+			FinalChecks:       fm.FinalChecks,
 			Claims:            fm.Claims,
 			PRDDigest:         fm.PRDDigest,
 			ScopeDigest:       fm.ScopeDigest,
@@ -433,7 +438,7 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 	if fm.LastGitHubSync != nil {
 		rec.LastGitHubSync = *fm.LastGitHubSync
 	}
-	rec.Validation = fm.Validation
+	rec.Validation, rec.FullResult = fm.Validation, fm.FullResult
 	rec.Plan = fm.Plan
 	for _, f := range fm.Feedback {
 		switch f.Kind {
@@ -538,6 +543,7 @@ func fromRecord(rec *task.Record) frontmatter {
 		fm.ConflictAttempts, fm.ConflictPending = d.ConflictAttempts, d.ConflictPending
 		fm.ReviewBeforePR, fm.LocalHead, fm.ProposedTitle, fm.ProposedBody = d.ReviewBeforePR, d.LocalHead, d.ProposedTitle, d.ProposedBody
 		fm.ClaimVerification, fm.Claims, fm.PRDDigest = d.ClaimVerification, d.Claims, d.PRDDigest
+		fm.FullSuiteGate, fm.FinalChecks = d.FullSuiteGate, d.FinalChecks
 		fm.ScopeDigest, fm.PlanScopeDigest, fm.PlanDigest = d.ScopeDigest, d.PlanScopeDigest, d.PlanDigest
 	}
 	if s := rec.GitHub; s != nil {
@@ -547,7 +553,7 @@ func fromRecord(rec *task.Record) frontmatter {
 		t := rec.LastGitHubSync
 		fm.LastGitHubSync = &t
 	}
-	fm.Validation = rec.Validation
+	fm.Validation, fm.FullResult = rec.Validation, rec.FullResult
 	fm.Plan = rec.Plan
 	fm.Attempts = rec.Attempts
 	if r := rec.Reset; r != nil {

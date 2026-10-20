@@ -26,7 +26,9 @@ Read these only when the task needs them:
 ## Commands
 
 ```bash
-go vet ./... && go test ./...
+go vet ./... && go test ./...   # full supported suite, with scripts/e2e.sh
+go test ./internal/app          # focused: the packages you changed
+scripts/e2e.sh full_check       # focused: the named scenarios you affected
 go build -o dist/foreman ./cmd/foreman
 make setup                # build, install to ~/.local/bin, copy default stage files
 scripts/e2e.sh            # built binary against a local origin, stand-in gh, stub agents

@@ -220,6 +220,12 @@ type Delegation struct {
 	// returns Claims with each change, and both reviews check them against the PRD.
 	// Tasks started without it keep the review workflow they started with.
 	ClaimVerification bool
+	// FullSuiteGate is set when a task starts. Its change is then handed off only with
+	// a full-suite result that covers it, and FinalChecks counts the final-check turns
+	// run toward the current handoff. Tasks started without it keep the workflow they
+	// started with.
+	FullSuiteGate bool
+	FinalChecks   int
 	// Claims is the latest full claim set the implementer returned. It stays in the
 	// task file and is never published.
 	Claims []Claim
@@ -303,8 +309,72 @@ func (d *Delegation) LastConflict() ConflictAttempt {
 
 // Check is one validation command the implementation agent ran, as it reported it.
 type Check struct {
-	Command string `json:"command" yaml:"command"`
-	Passed  bool   `json:"passed" yaml:"passed"`
+	Command string     `json:"command" yaml:"command"`
+	Passed  bool       `json:"passed" yaml:"passed"`
+	Scope   CheckScope `json:"scope" yaml:"scope,omitempty"`
+}
+
+// CheckScope tells a focused check from one in the repository's full supported suite.
+// A check stored before scopes existed has none and counts as focused.
+type CheckScope string
+
+const (
+	FocusedCheck CheckScope = "focused"
+	FullCheck    CheckScope = "full"
+)
+
+// DocOnlyPath is a path changed since a full run, with the implementer's
+// repository-specific evidence that it cannot affect behavior or the supported checks.
+type DocOnlyPath struct {
+	Path     string `json:"path" yaml:"path"`
+	Evidence string `json:"evidence" yaml:"evidence"`
+}
+
+// FullResult is the repository's full supported suite as Foreman last verified it.
+// Foreman checks Git facts alone: Revision is Head or its ancestor, and every path
+// changed between them is in DocOnly with nonempty evidence. It cannot judge whether
+// the evidence is sound.
+type FullResult struct {
+	// Head is the commit the result was checked against, and covers when Covered is set.
+	Head string `yaml:"head"`
+	// Revision is the commit the full suite ran on.
+	Revision string        `yaml:"revision,omitempty"`
+	Checks   []Check       `yaml:"checks,omitempty"`
+	DocOnly  []DocOnlyPath `yaml:"doc_only,omitempty"`
+	Covered  bool          `yaml:"covered,omitempty"`
+	// Reason says why a result does not cover Head.
+	Reason string `yaml:"reason,omitempty"`
+	// Unverified is the implementer's explanation for a repository with no
+	// identifiable full suite. It permits handoff with the explanation shown.
+	Unverified string    `yaml:"unverified,omitempty"`
+	At         time.Time `yaml:"at"`
+}
+
+// Covers reports whether the result lets head be handed off: a verified run of head,
+// or a repository with no full suite to run.
+func (f *FullResult) Covers(head string) bool {
+	return f != nil && (f.Unverified != "" || f.Covered && head != "" && f.Head == head)
+}
+
+// Gap says why the result does not cover head, or "" when it does.
+func (f *FullResult) Gap(head string) string {
+	switch {
+	case f.Covers(head):
+		return ""
+	case f == nil:
+		return "no full-suite result was reported"
+	case !f.Covered:
+		return f.Reason
+	}
+	return fmt.Sprintf("the full result covers %s, and the change moved to %s since", ShortSHA(f.Head), ShortSHA(head))
+}
+
+// ShortSHA is the seven-character form of a commit, as Git shows it.
+func ShortSHA(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
 }
 
 // Outcome is the last thing an agent turn (or the runner) reported, kept for show.
@@ -471,6 +541,9 @@ type Record struct {
 	Usage          Usage
 	// Validation is what the implementation agent reported with its PR.
 	Validation []Check
+	// FullResult is the latest full-suite report Foreman verified. Handoff needs one
+	// that covers the change it hands off.
+	FullResult *FullResult
 	// Reviews are the review rounds, oldest first.
 	Reviews []Review
 	// Plan holds the planning documents posted on the issue, in PlanDocs order.
@@ -826,6 +899,19 @@ func (r *Record) OpenPending() bool {
 	return r.competingCovers(latest) && latest.Clean
 }
 
+// FinalCheckPending reports a change with a clean competing review that cannot be
+// handed off yet, because no full-suite result covers it. Its next turn is the
+// implementer's final check.
+func (r *Record) FinalCheckPending() bool {
+	d := r.Delegation
+	if d == nil || !d.FullSuiteGate {
+		return false
+	}
+	latest := r.LatestCompeting()
+	head, _ := r.CurrentChange()
+	return latest != nil && latest.Clean && r.competingCovers(latest) && !r.FullResult.Covers(head)
+}
+
 // coversLocal reports whether review read the stored local commit together with its
 // current proposed title and description.
 func (r *Record) coversLocal(review *Review) bool {
@@ -857,7 +943,7 @@ func (r *Record) NextStage() State {
 	switch {
 	case d == nil:
 		return Planning
-	case d.ConflictPending:
+	case d.ConflictPending, r.FinalCheckPending():
 		return Implementing
 	case r.OpenPending():
 		return OpeningPR

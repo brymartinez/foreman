@@ -76,6 +76,7 @@ func (a App) repairConflict(ctx, final context.Context, rec *task.Record, log io
 			applyTurn(cur, res.turn, nil, res.err, a.Now())
 		} else {
 			applyConflictTurn(cur, res.turn, res.pr, res.err, a.Now())
+			recordFull(cur, res)
 		}
 	}, log)
 }

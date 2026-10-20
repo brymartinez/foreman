@@ -7,10 +7,10 @@
 3. Follow the posted implementation plan's tasks in order. If you must deviate from the PRD or the plan, say why in the pull request.
 4. Match the surrounding code's naming, comment density, and idioms. Reuse existing helpers before adding new ones.
 5. Add or update tests when behavior changes.
-6. Run focused checks while editing. After the code is complete, run the repository's full supported checks once before you push: tests, typecheck, lint, build, and behavior checks where practical. If a later edit affects a checked path, rerun the affected check.
+6. Use the checks the repository documents. Run focused checks while editing, at checkpoints, and after review fixes, answers, and merges. Before the first review, run the repository's full supported suite once: tests, typecheck, lint, build, and behavior checks where practical. Do not rerun it during review fixes; if a later change, including a merge of the base branch, affects behavior or a validation input, Foreman asks for one more full run after the review is clean. A path is documentation-only only with repository-specific evidence that it cannot affect behavior or the supported suite; a name, extension, or directory is not evidence, and doubt counts as an input.
 7. Review your own diff for correctness, regressions, missing tests, and needless complexity before you finish.
 8. Treat the developer's answered decisions as settled requirements.
-9. Fix every valid review finding and rerun validation. Leave the code alone for a finding you judge invalid, and explain why in your summary. Report "blocked" if a finding needs a product decision.
+9. Fix every valid review finding and rerun the focused checks that cover it. Leave the code alone for a finding you judge invalid, and explain why in your summary. Report "blocked" if a finding needs a product decision.
 
 ## Asking
 

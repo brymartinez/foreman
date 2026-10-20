@@ -22,6 +22,9 @@ type turnRequest struct {
 	// openBodyFile is set for the turn that pushes a reviewed local commit and opens
 	// its PR. It holds the reviewed description.
 	openBodyFile string
+	// finalCheck is set for the turn that supplies the full-suite result a cleanly
+	// reviewed change needs before handoff.
+	finalCheck *agent.FinalCheck
 }
 
 // turnResult is a finished implementer turn. pr is the verified PR when the turn
@@ -30,7 +33,8 @@ type turnResult struct {
 	turn           agent.Turn
 	pr             *PullRequest
 	checkpointHead string
-	localHead      string // the verified commit of a review_ready turn
+	localHead      string           // the verified commit of a review_ready turn
+	full           *task.FullResult // the turn's verified full-suite report, if it sent one
 	err            error
 }
 
@@ -72,7 +76,7 @@ func (a App) runTurn(ctx context.Context, rec *task.Record, req turnRequest, che
 		return turnResult{turn: turn, err: err}
 	}
 	if turn.Outcome.Status == agent.Checkpoint {
-		if a.needsPlan(rec) || rec.Delegation.PR != 0 || req.findings != nil || len(req.feedback) > 0 || req.merge != nil || req.openBodyFile != "" || rec.Delegation.ConflictPending {
+		if a.needsPlan(rec) || rec.Delegation.PR != 0 || req.findings != nil || len(req.feedback) > 0 || req.merge != nil || req.openBodyFile != "" || req.finalCheck != nil || rec.Delegation.ConflictPending {
 			return turnResult{turn: turn, err: fmt.Errorf("checkpoint is only allowed during initial implementation")}
 		}
 		if rec.Delegation.Checkpoints >= maxImplementationCheckpoints {
@@ -85,6 +89,11 @@ func (a App) runTurn(ctx context.Context, rec *task.Record, req turnRequest, che
 		fmt.Fprintf(log, "foreman: verified implementation checkpoint %s\n", short(head))
 		return turnResult{turn: turn, checkpointHead: head}
 	}
+	return a.requireFullCheck(ctx, rec, req, a.checkChange(ctx, rec, req, turn, check, log), check, log)
+}
+
+// checkChange verifies the change a review_ready or pr_opened turn reports.
+func (a App) checkChange(ctx context.Context, rec *task.Record, req turnRequest, turn agent.Turn, check prCheck, log io.Writer) turnResult {
 	if turn.Outcome.Status == agent.ReviewReady {
 		return a.checkReviewReady(ctx, rec, req, turn, log)
 	}
@@ -119,7 +128,10 @@ func (a App) checkReviewReady(ctx context.Context, rec *task.Record, req turnReq
 	}
 	var head string
 	var err error
-	if d.Checkpoints > 0 {
+	if req.finalCheck != nil && d.LocalHead != "" {
+		// A final check that only verifies the reviewed commit keeps it.
+		head, err = a.Worktrees.ReviewHead(ctx, d.Worktree, d.Branch, d.LocalHead)
+	} else if d.Checkpoints > 0 {
 		head, err = a.Worktrees.ReviewHead(ctx, d.Worktree, d.Branch, d.CheckpointHead)
 	} else {
 		head, err = a.Worktrees.Checkpoint(ctx, d.Worktree, d.Branch, d.CheckpointHead)
@@ -191,6 +203,82 @@ func (a App) repairFailedCheckpoint(ctx context.Context, rec *task.Record, req t
 		err = resumeErr
 	}
 	return turn, err
+}
+
+// requireFullCheck evaluates the full-suite report of a verified change. The first
+// change sent to review and a final-check turn must hand in a result that covers their
+// head, and get one resume of the same session to supply it. A second miss fails the
+// turn. Fixes, answers, and merges need none; their report is recorded if they send one.
+func (a App) requireFullCheck(ctx context.Context, rec *task.Record, req turnRequest, res turnResult, check prCheck, log io.Writer) turnResult {
+	status := res.turn.Outcome.Status
+	if res.err != nil || !finishesChange(status) || req.openBodyFile != "" || !rec.Delegation.FullSuiteGate {
+		return res
+	}
+	res.full = a.evaluateFull(ctx, rec, res.turn.Outcome, res.head())
+	if !needsFullResult(rec, req) || res.full.Covers(res.head()) {
+		return res
+	}
+	reason := res.full.Gap(res.head())
+	d := rec.Delegation
+	adapter := a.Agents[d.Implementer.Agent]
+	if adapter == nil || res.turn.Session.ID == "" {
+		res.err = fmt.Errorf("the implementer returned %s for %s without a full-suite result that covers it: %s", status, short(res.head()), reason)
+		return res
+	}
+	if err := a.checkAccount(ctx, rec); err != nil {
+		res.err = err
+		return res
+	}
+	fmt.Fprintf(log, "foreman: %s returned %s without a covering full-suite result (%s); resuming session %s for it\n", adapter.Name(), status, reason, res.turn.Session.ID)
+	in := agent.StartInput{
+		Worktree: d.Worktree, Prompt: agent.MissingFullCheckMessage(status, res.head(), reason),
+		Stage: task.StageImplement, Step: agent.StepImplement,
+		Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD, Profile: d.Profile,
+	}
+	turn := res.turn
+	next, err := adapter.Resume(ctx, turn.Session, in)
+	addUsage(&turn.Usage, next.Usage)
+	if next.Session.ID != "" {
+		turn.Session = next.Session
+	}
+	if err != nil {
+		return turnResult{turn: turn, err: err}
+	}
+	claims := turn.Outcome.Claims
+	turn.Outcome = next.Outcome
+	if turn.Outcome.Status != status {
+		return turnResult{turn: turn, err: fmt.Errorf("the implementer answered the request for a full-suite result with %s, not %s", turn.Outcome.Status, status)}
+	}
+	// The request asked for the same outcome, so claims it left out are the ones it had.
+	if len(turn.Outcome.Claims) == 0 {
+		turn.Outcome.Claims = claims
+	}
+	res = a.checkChange(ctx, rec, req, turn, check, log)
+	if res.err != nil {
+		return res
+	}
+	res.full = a.evaluateFull(ctx, rec, res.turn.Outcome, res.head())
+	if !res.full.Covers(res.head()) {
+		res.err = fmt.Errorf("the implementer returned %s for %s without a full-suite result that covers it, after one request for it: %s", status, short(res.head()), res.full.Gap(res.head()))
+	}
+	return res
+}
+
+// needsFullResult reports a turn that must hand in a covering full result: the first
+// change sent to review, or a final check.
+func needsFullResult(rec *task.Record, req turnRequest) bool {
+	if req.finalCheck != nil {
+		return true
+	}
+	return len(rec.Reviews) == 0 && req.findings == nil && len(req.feedback) == 0 && req.merge == nil && !rec.Delegation.ConflictPending
+}
+
+// head is the change a verified turn hands in.
+func (r turnResult) head() string {
+	if r.pr != nil {
+		return r.pr.HeadSHA
+	}
+	return r.localHead
 }
 
 // missingClaimsError fails a turn that did not supply its claims after one request.

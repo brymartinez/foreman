@@ -219,8 +219,16 @@ func Show(w io.Writer, r *task.Record) {
 	if len(r.Validation) > 0 {
 		fmt.Fprintln(w, "\nValidation (reported by the agent)")
 		for _, c := range r.Validation {
-			fmt.Fprintf(w, "  %s %s\n", mark(c.Passed), c.Command)
+			scope := ""
+			if c.Scope != "" {
+				scope = " (" + string(c.Scope) + ")"
+			}
+			fmt.Fprintf(w, "  %s %s%s\n", mark(c.Passed), c.Command, scope)
 		}
+	}
+	if d := r.Delegation; d != nil && (d.FullSuiteGate || r.FullResult != nil) {
+		head, _ := r.CurrentChange()
+		fmt.Fprintf(w, "Full suite: %s\n", fullState(r.FullResult, head))
 	}
 	if latest := r.LatestReview(); latest != nil {
 		verdict := "changes requested"
@@ -325,4 +333,23 @@ func plural(n int, one, many string) string {
 		return one
 	}
 	return many
+}
+
+// fullState is the full-suite result as it stands for the current change.
+func fullState(f *task.FullResult, head string) string {
+	switch {
+	case f == nil:
+		return "missing, " + f.Gap(head)
+	case f.Unverified != "":
+		return "unverified, " + f.Unverified
+	case f.Covers(head):
+		since := ""
+		if n := len(f.DocOnly); n > 0 {
+			since = fmt.Sprintf("; %d documentation-only %s since", n, plural(n, "path", "paths"))
+		}
+		return fmt.Sprintf("covers %s (run on %s%s)", task.ShortSHA(head), task.ShortSHA(f.Revision), since)
+	case f.Covered:
+		return "stale, " + f.Gap(head)
+	}
+	return "not covered, " + f.Reason
 }

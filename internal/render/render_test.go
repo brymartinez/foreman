@@ -266,3 +266,32 @@ func TestShowPrintsProfileAndReason(t *testing.T) {
 		t.Errorf("an unrouted task shows a profile:\n%s", buf.String())
 	}
 }
+
+func TestShowListsCheckScopesAndTheFullSuiteState(t *testing.T) {
+	base := func(full *task.FullResult) string {
+		var buf bytes.Buffer
+		Show(&buf, &task.Record{
+			Key: task.Key{Repo: "a/b", Number: 825}, Title: "T", State: task.WaitingForCI,
+			Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}, Reviewer: task.Codex, PR: 912, PRHead: "c0ffee2", FullSuiteGate: true},
+			Validation: []task.Check{{Command: "go test ./internal/app", Passed: true, Scope: task.FocusedCheck}, {Command: "go test ./...", Passed: true, Scope: task.FullCheck}},
+			FullResult: full,
+		})
+		return buf.String()
+	}
+	for name, c := range map[string]struct {
+		full *task.FullResult
+		want string
+	}{
+		"covered": {&task.FullResult{Head: "c0ffee2", Revision: "c0ffee1", Covered: true, DocOnly: []task.DocOnlyPath{{Path: "docs/a.md", Evidence: "e"}}},
+			"Full suite: covers c0ffee2 (run on c0ffee1; 1 documentation-only path since)"},
+		"stale":      {&task.FullResult{Head: "c0ffee1", Revision: "c0ffee1", Covered: true}, "Full suite: stale, the full result covers c0ffee1, and the change moved to c0ffee2 since"},
+		"failed":     {&task.FullResult{Head: "c0ffee2", Revision: "c0ffee2", Reason: "full checks failed: go test ./..."}, "Full suite: not covered, full checks failed: go test ./..."},
+		"unverified": {&task.FullResult{Head: "c0ffee2", Unverified: "no documented test suite"}, "Full suite: unverified, no documented test suite"},
+		"missing":    {nil, "Full suite: missing, no full-suite result was reported"},
+	} {
+		out := base(c.full)
+		if !strings.Contains(out, "  ✓ go test ./internal/app (focused)\n  ✓ go test ./... (full)\n") || !strings.Contains(out, c.want) {
+			t.Errorf("%s: missing %q in:\n%s", name, c.want, out)
+		}
+	}
+}
