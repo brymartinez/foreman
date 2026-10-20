@@ -31,9 +31,30 @@ func (a App) evaluateFull(ctx context.Context, rec *task.Record, o agent.Outcome
 		return res
 	}
 	res.Revision, res.DocOnly = report.Revision, report.DocOnly
+	if len(res.Checks) == 0 {
+		res.Checks = recordedChecks(rec.FullResult, report.Revision)
+	}
 	res.Reason = a.uncovered(ctx, rec, res)
 	res.Covered = res.Reason == ""
 	return res
+}
+
+// recordedChecks are the full checks Foreman recorded for a run on revision, for a turn
+// that reuses that run and lists only the checks it ran itself. A revision Foreman has
+// no run for has none.
+func recordedChecks(stored *task.FullResult, revision string) []task.Check {
+	if stored == nil || stored.Revision == "" || !sameCommit(stored.Revision, revision) {
+		return nil
+	}
+	return stored.Checks
+}
+
+// sameCommit reports whether two names of a commit agree, one possibly abbreviated.
+func sameCommit(a, b string) bool {
+	if len(a) > len(b) {
+		a, b = b, a
+	}
+	return len(a) >= 7 && strings.HasPrefix(b, a)
 }
 
 // uncovered is why res does not cover its head, or "" when it does.

@@ -67,3 +67,24 @@ func TestFixMessagesKeepReviewFixesToFocusedChecks(t *testing.T) {
 		}
 	}
 }
+
+// A reused run is reported by revision and evidence. The turn's validation lists only
+// what it ran, because Foreman takes the run's checks from its own record.
+func TestReuseInstructionsKeepValidationToTheChecksThisTurnRan(t *testing.T) {
+	want := `Do not copy that run's checks into "validation": it lists only the checks this turn ran`
+	for name, p := range map[string]string{
+		"fresh prompt": ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}, Branch: "feat/7", BaseBranch: "main", Worktree: "/wt", FullSuite: true}),
+		"fix message":  FullSuiteMessage,
+		"final check":  FinalCheckMessage(FinalCheck{Head: "c0ffee2", Reason: "r", Revision: "c0ffee1", Changed: []string{"docs/a.md"}, PR: 9}),
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("%s lacks the reuse rule", name)
+		}
+	}
+	if !strings.Contains(FullSuiteMessage, `list only this turn's focused checks in "validation"`) {
+		t.Error("fix message does not keep validation to the focused checks")
+	}
+	if !strings.Contains(FinalCheckMessage(FinalCheck{Head: "c0ffee2", Reason: "r"}), "Foreman reuses the full checks it recorded for that revision") {
+		t.Error("final check does not say the recorded checks are reused")
+	}
+}

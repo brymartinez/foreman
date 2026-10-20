@@ -127,3 +127,45 @@ func TestAStoredResultStopsCoveringAMovedHead(t *testing.T) {
 		t.Fatalf("covers = %v at head1, %v at head2", stored.Covers("head1"), stored.Covers("head2"))
 	}
 }
+
+// evaluateWith checks report against head on a task whose stored result is stored.
+func evaluateWith(stored *task.FullResult, changed map[string][]string, checks []task.Check, report *agent.FullSuite, head string) *task.FullResult {
+	f := newFixture()
+	f.wt.changed = changed
+	rec := &task.Record{Delegation: &task.Delegation{Worktree: "/wt/x"}, FullResult: stored}
+	return f.app.evaluateFull(context.Background(), rec, agent.Outcome{Validation: checks, FullSuite: report}, head)
+}
+
+// A turn that reuses an earlier run lists only what it ran. The run's full checks come
+// from the result Foreman recorded for that revision.
+func TestEvaluateFullTakesAReusedRunsChecksFromTheRecordedResult(t *testing.T) {
+	focused := []task.Check{{Command: "go test ./internal/app", Passed: true, Scope: task.FocusedCheck}}
+	changed := map[string][]string{"commit1..commit2": {"docs/guide.md"}}
+	report := fullRun("commit1", doc("docs/guide.md", "no test, build, or CI step reads docs/"))
+	t.Run("a passing run on the same revision is reused", func(t *testing.T) {
+		stored := &task.FullResult{Head: "commit1", Revision: "commit1", Checks: []task.Check{fullCheck(true)}, Covered: true}
+		got := evaluateWith(stored, changed, focused, report, "commit2")
+		if !got.Covered || len(got.Checks) != 1 || got.Checks[0] != fullCheck(true) {
+			t.Fatalf("result = %+v", got)
+		}
+	})
+	t.Run("a short revision matches the recorded one", func(t *testing.T) {
+		stored := &task.FullResult{Head: "commit1abcdef", Revision: "commit1abcdef", Checks: []task.Check{fullCheck(true)}, Covered: true}
+		got := evaluateWith(stored, map[string][]string{"commit1..commit2": {"docs/guide.md"}}, focused, report, "commit2")
+		if !got.Covered {
+			t.Fatalf("result = %+v", got)
+		}
+	})
+	t.Run("a failed run is not reused", func(t *testing.T) {
+		stored := &task.FullResult{Head: "commit1", Revision: "commit1", Checks: []task.Check{fullCheck(false)}, Reason: "full checks failed"}
+		if got := evaluateWith(stored, changed, focused, report, "commit2"); got.Covered || !strings.Contains(got.Reason, "full checks failed") {
+			t.Fatalf("result = %+v", got)
+		}
+	})
+	t.Run("a revision Foreman has no run for names no full check", func(t *testing.T) {
+		stored := &task.FullResult{Head: "commit0", Revision: "commit0", Checks: []task.Check{fullCheck(true)}, Covered: true}
+		if got := evaluateWith(stored, changed, focused, report, "commit2"); got.Covered || !strings.Contains(got.Reason, "no full check") {
+			t.Fatalf("result = %+v", got)
+		}
+	})
+}

@@ -645,7 +645,10 @@ the same commit. The commit message records why it changed.
   it as `full_result` with the head it was checked against. It covers that head when
   the revision is the head or its ancestor, at least one `full` check ran and every one
   passed, and every path `git diff --name-only <revision> <head>` lists (both sides of
-  a rename) has an exact entry with nonempty evidence. Foreman cannot judge whether
+  a rename) has an exact entry with nonempty evidence. A turn that reuses an earlier
+  run lists only the checks it ran; when it names no full check, Foreman takes the
+  full checks it recorded for a run on that revision, and a revision it has no
+  passing run for covers nothing. Foreman cannot judge whether
   evidence is sound. The implementer judges it under the stage instructions: a path is
   documentation-only only with repository-specific evidence that it cannot affect
   behavior or the supported suite; a name, extension, or directory alone is never

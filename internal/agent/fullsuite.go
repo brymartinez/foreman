@@ -11,7 +11,8 @@ import (
 const fullSuiteRules = `- Use the checks the repository documents: its AGENTS.md, README, contributing guide, Makefile, scripts, and CI configuration. The full supported suite is the set those sources name for a complete check of the repository.
 - Tag every check in "validation" with "scope": "focused" for a check of the paths you changed, "full" for a part of the full supported suite.
 - With "pr_opened" or "review_ready", report the full suite in "fullSuite":
-  - When you ran it: status "run", revision the commit it ran on, explanation null. If revision is the commit you hand in, docOnly is []. If it is an earlier commit, docOnly lists every path changed since it (` + "`git diff --name-only <revision> HEAD`" + `), each with its evidence.
+  - When you ran it: status "run", revision the commit it ran on, explanation null. If revision is the commit you hand in, docOnly is [].
+  - When you reuse an earlier run because every path changed since is verified documentation-only: status "run", revision that run's commit, and docOnly listing every path changed since it (` + "`git diff --name-only <revision> HEAD`" + `), each with its evidence. Do not copy that run's checks into "validation": it lists only the checks this turn ran. Foreman takes the run's full checks from the result it recorded for that revision.
   - When the repository has no identifiable full suite: status "unavailable", revision and docOnly null, and an explanation of what could not be verified. Still run and report the relevant checks.
   - Null when this turn has no full result to report. Foreman then asks for one in a final check after the review is clean.
 - A path is documentation-only only when repository-specific evidence shows it cannot affect behavior or the supported suite, such as the test, build, or generation configuration that shows nothing reads it. Cite that evidence. A name, extension, or directory alone is not evidence: README, Markdown, reStructuredText, and .txt files can be test, build, or generated inputs, and a documentation-only file can live outside a docs directory.
@@ -31,7 +32,7 @@ const firstRunRule = "- Run focused checks while you edit and at checkpoints. Ru
 
 // fixRunRule keeps review fixes, answers, and merges to focused checks. The one full
 // rerun a change needs after them belongs to the final check after a clean review.
-const fixRunRule = "- Run only the focused checks that cover this change. Do not rerun the full suite in this turn, even when the change affects behavior. If every path changed since your last full run is verified documentation-only, report that run with evidence for each path. Otherwise set \"fullSuite\" to null: Foreman asks for one full run in a final check once the review is clean.\n"
+const fixRunRule = "- Run only the focused checks that cover this change. Do not rerun the full suite in this turn, even when the change affects behavior. If every path changed since your last full run is verified documentation-only, report that run's revision with evidence for each path, and list only this turn's focused checks in \"validation\". Otherwise set \"fullSuite\" to null: Foreman asks for one full run in a final check once the review is clean.\n"
 
 // FullSuiteMessage ends a resume message for a task with the full-suite gate, so a fix,
 // an answer, or a merge runs focused checks and reports them the same way.
@@ -66,7 +67,7 @@ func FinalCheckMessage(c FinalCheck) string {
 		}
 		s.WriteString("\n")
 	}
-	s.WriteString("1. Judge each changed path under the rules below. If every one is verified documentation-only, do not rerun the suite. Report the earlier revision with evidence for every path.\n")
+	s.WriteString("1. Judge each changed path under the rules below. If every one is verified documentation-only, do not rerun the suite. Report the earlier revision with evidence for every path, and list only the checks this turn ran in \"validation\"; Foreman reuses the full checks it recorded for that revision.\n")
 	s.WriteString("2. Otherwise run the repository's full supported suite on the head. If a check fails, fix the cause, commit, then rerun the focused checks and the full suite on the new commit. A new commit is reviewed again before handoff.\n")
 	s.WriteString("3. If the repository has no identifiable full suite, report it as unavailable with what could not be verified.\n\n")
 	if c.Local {

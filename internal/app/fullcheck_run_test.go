@@ -23,6 +23,12 @@ func withFullRun(turn agent.Turn, report *agent.FullSuite) agent.Turn {
 	return turn
 }
 
+// reusing reports an earlier full run from a turn that ran no full check itself.
+func reusing(turn agent.Turn, report *agent.FullSuite) agent.Turn {
+	turn.Outcome.FullSuite = report
+	return turn
+}
+
 func focusedOnly(turn agent.Turn) agent.Turn {
 	turn.Outcome.Validation = []task.Check{{Command: "go test ./internal/app", Passed: true, Scope: task.FocusedCheck}}
 	return turn
@@ -82,7 +88,8 @@ func TestADocumentationOnlyFixWithEvidenceReusesTheFullResult(t *testing.T) {
 	f.wt.changed = map[string][]string{"commit1..commit2": {"docs/guide.md"}}
 	f.claude.turns = []agent.Turn{
 		withFullRun(readyTurn(), fullRun("commit1")),
-		withFullRun(focusedOnly(readyTurn()), fullRun("commit1", doc("docs/guide.md", "no test, build, or CI step reads docs/ (Makefile, .github/workflows/ci.yml)"))),
+		// The fix ran focused checks only and reuses the run on commit1.
+		reusing(focusedOnly(readyTurn()), fullRun("commit1", doc("docs/guide.md", "no test, build, or CI step reads docs/ (Makefile, .github/workflows/ci.yml)"))),
 		prTurn("sid-1"),
 	}
 	f.codex.reviews = []agent.ReviewOutcome{findings("should_fix")}
@@ -335,5 +342,30 @@ func TestHandsOverNowWaitsForAPendingFinalCheck(t *testing.T) {
 	rec.FullResult = &task.FullResult{Head: "c0ffee1", Revision: "c0ffee1", Covered: true}
 	if !handsOverNow(rec, &task.CIStatus{State: task.CIPassing}) {
 		t.Fatal("a covered change was held back")
+	}
+}
+
+func TestAFinalCheckReusesAnEarlierRunForDocumentationOnlyPathsWithoutRerunningIt(t *testing.T) {
+	f := newFixture()
+	key := gatedLocalTask(t, f)
+	f.wt.checkpointHeads = []string{"commit1", "commit2", "commit2"}
+	f.wt.changed = map[string][]string{"commit1..commit2": {"docs/guide.md"}}
+	f.claude.turns = []agent.Turn{
+		withFullRun(readyTurn(), fullRun("commit1")),
+		focusedOnly(readyTurn()),
+		reusing(focusedOnly(readyTurn()), fullRun("commit1", doc("docs/guide.md", "no test, build, or CI step reads docs/"))),
+		prTurn("sid-1"),
+	}
+	f.codex.reviews = []agent.ReviewOutcome{findings("should_fix")}
+	opensPR(t, f, "commit2", proposedTitle, proposedBody, 2)
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.WaitingForCI || got.Delegation.PRHead != "commit2" || countResumed(f, "## Final full check") != 1 {
+		t.Fatalf("state %s head %s outcome %+v final checks %d", got.State, got.Delegation.PRHead, got.LastOutcome, countResumed(f, "## Final full check"))
+	}
+	if r := got.FullResult; !r.Covers("commit2") || len(r.Checks) != 1 || r.Checks[0].Scope != task.FullCheck {
+		t.Fatalf("full result = %+v", r)
 	}
 }
