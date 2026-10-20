@@ -54,6 +54,25 @@ type Outcome struct {
 	// Claims tie a pr_opened or review_ready change to the PRD acceptance criteria.
 	// The runner decides whether the task needs them.
 	Claims []task.Claim
+	// FullSuite is the full-suite report of a pr_opened or review_ready turn, or nil.
+	FullSuite *FullSuite
+}
+
+type FullSuiteStatus string
+
+const (
+	// FullSuiteRun is a full run on Revision, with evidence for every path changed since.
+	FullSuiteRun FullSuiteStatus = "run"
+	// FullSuiteUnavailable is a repository with no identifiable full suite.
+	FullSuiteUnavailable FullSuiteStatus = "unavailable"
+)
+
+// FullSuite is the implementer's report of the repository's full supported suite.
+type FullSuite struct {
+	Status      FullSuiteStatus    `json:"status"`
+	Revision    string             `json:"revision"`
+	DocOnly     []task.DocOnlyPath `json:"docOnly"`
+	Explanation string             `json:"explanation"`
 }
 
 // CheckpointValidationError keeps the failed commands available for a repair turn.
@@ -86,6 +105,14 @@ type wireOutcome struct {
 	PRTitle       *string         `json:"prTitle"`
 	PRBody        *string         `json:"prBody"`
 	Claims        []task.Claim    `json:"claims"`
+	FullSuite     *wireFullSuite  `json:"fullSuite"`
+}
+
+type wireFullSuite struct {
+	Status      FullSuiteStatus    `json:"status"`
+	Revision    *string            `json:"revision"`
+	DocOnly     []task.DocOnlyPath `json:"docOnly"`
+	Explanation *string            `json:"explanation"`
 }
 
 func ParseOutcome(raw []byte) (Outcome, error) {
@@ -95,6 +122,15 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 	}
 	if w.Summary == "" {
 		return Outcome{}, errors.New("agent outcome has no summary")
+	}
+	for i := range w.Validation {
+		switch c := &w.Validation[i]; c.Scope {
+		case "":
+			c.Scope = task.FocusedCheck
+		case task.FocusedCheck, task.FullCheck:
+		default:
+			return Outcome{}, fmt.Errorf("check %q has unknown scope %q (want focused or full)", c.Command, c.Scope)
+		}
 	}
 	out := Outcome{Status: w.Status, Summary: w.Summary}
 	var err error
@@ -126,6 +162,9 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 		if out.Claims, err = parseClaims(w.Claims); err != nil {
 			return Outcome{}, err
 		}
+		if out.FullSuite, err = parseFullSuite(w.FullSuite); err != nil {
+			return Outcome{}, err
+		}
 	case ReviewReady:
 		if w.PRNumber != nil || w.PRURL != nil || len(w.Questions) > 0 || w.Documents != nil {
 			return Outcome{}, errors.New("review_ready outcome includes unrelated fields")
@@ -144,6 +183,9 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 		out.PRTitle, out.PRBody = strings.TrimSpace(*w.PRTitle), strings.TrimSpace(*w.PRBody)
 		out.Validation = w.Validation
 		if out.Claims, err = parseClaims(w.Claims); err != nil {
+			return Outcome{}, err
+		}
+		if out.FullSuite, err = parseFullSuite(w.FullSuite); err != nil {
 			return Outcome{}, err
 		}
 	case Checkpoint:
@@ -196,4 +238,34 @@ func parseClaims(claims []task.Claim) ([]task.Claim, error) {
 		}
 	}
 	return claims, nil
+}
+
+// parseFullSuite checks a full-suite report's shape. Whether each path's evidence is
+// enough is the implementer's judgment, and whether the report covers the head is the
+// runner's, so an empty evidence string is kept for the runner to report as uncovered.
+func parseFullSuite(w *wireFullSuite) (*FullSuite, error) {
+	if w == nil {
+		return nil, nil
+	}
+	out := &FullSuite{Status: w.Status, DocOnly: w.DocOnly}
+	switch w.Status {
+	case FullSuiteRun:
+		if w.Revision == nil || strings.TrimSpace(*w.Revision) == "" {
+			return nil, errors.New("full suite report of a run needs the revision it ran on")
+		}
+		out.Revision = strings.TrimSpace(*w.Revision)
+		for i, p := range w.DocOnly {
+			if strings.TrimSpace(p.Path) == "" {
+				return nil, fmt.Errorf("full suite report, documentation-only path %d has no path", i+1)
+			}
+		}
+	case FullSuiteUnavailable:
+		if w.Explanation == nil || strings.TrimSpace(*w.Explanation) == "" {
+			return nil, errors.New("full suite report of an unavailable suite needs an explanation of what could not be verified")
+		}
+		out.Explanation, out.DocOnly = strings.TrimSpace(*w.Explanation), nil
+	default:
+		return nil, fmt.Errorf("full suite report has unknown status %q (want run or unavailable)", w.Status)
+	}
+	return out, nil
 }

@@ -12,7 +12,8 @@
     "documents",
     "prTitle",
     "prBody",
-    "claims"
+    "claims",
+    "fullSuite"
   ],
   "properties": {
     "status": {
@@ -54,7 +55,8 @@
         "additionalProperties": false,
         "required": [
           "command",
-          "passed"
+          "passed",
+          "scope"
         ],
         "properties": {
           "command": {
@@ -62,6 +64,13 @@
           },
           "passed": {
             "type": "boolean"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "focused",
+              "full"
+            ]
           }
         }
       }
@@ -182,6 +191,62 @@
           "check": {
             "type": "string"
           }
+        }
+      }
+    },
+    "fullSuite": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "revision",
+        "docOnly",
+        "explanation"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "run",
+            "unavailable"
+          ]
+        },
+        "revision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "docOnly": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "evidence"
+            ],
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "evidence": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "explanation": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     }

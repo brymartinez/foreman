@@ -825,3 +825,39 @@ func TestOldReviewPhaseMarksStillLoad(t *testing.T) {
 		t.Fatalf("attempts = %+v, want the legacy review mark", got.Attempts)
 	}
 }
+
+func TestStoreRoundTripsTheFullResultAndCheckScopes(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	want := delegated()
+	want.Validation = []task.Check{{Command: "go test ./internal/app", Passed: true, Scope: task.FocusedCheck}, {Command: "go test ./...", Passed: true, Scope: task.FullCheck}}
+	want.FullResult = &task.FullResult{
+		Head: "c0ffee2", Revision: "c0ffee1", Checks: []task.Check{{Command: "go test ./...", Passed: true, Scope: task.FullCheck}},
+		DocOnly: []task.DocOnlyPath{{Path: "docs/guide.md", Evidence: "no test or build reads docs/"}},
+		Covered: true, At: time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC),
+	}
+	if err := s.Save(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, want.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.FullResult, want.FullResult) || !reflect.DeepEqual(got.Validation, want.Validation) {
+		t.Fatalf("full result = %+v, validation %+v", got.FullResult, got.Validation)
+	}
+}
+
+func TestOldFileLoadsWithoutAFullResult(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	old := "---\nrepo: a/b\nnumber: 3\nkind: issue\nstate: READY_FOR_HUMAN\nimplementation_agent: claude\nbranch: feat/3-x\npr: 7\npr_head: c0ffee1\nvalidation:\n  - command: go test ./...\n    passed: true\n---\n"
+	if err := os.WriteFile(filepath.Join(s.Dir, "a-b-3.md"), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, task.Key{Repo: "a/b", Number: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.FullResult != nil || got.FullResult.Covers("c0ffee1") || got.Validation[0].Scope != "" {
+		t.Fatalf("full result = %+v, validation %+v", got.FullResult, got.Validation)
+	}
+}

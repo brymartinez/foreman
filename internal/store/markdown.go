@@ -210,6 +210,7 @@ type frontmatter struct {
 	LastOutcome         *outcomeFM             `yaml:"last_outcome,omitempty"`
 	Usage               usageFM                `yaml:"usage,omitempty"`
 	Validation          []task.Check           `yaml:"validation,omitempty"`
+	FullResult          *task.FullResult       `yaml:"full_result,omitempty"`
 	Reviews             []reviewFM             `yaml:"reviews,omitempty"`
 	Plan                []task.PlanComment     `yaml:"plan,omitempty"`
 	Feedback            []feedbackFM           `yaml:"feedback,omitempty"`
@@ -433,7 +434,7 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 	if fm.LastGitHubSync != nil {
 		rec.LastGitHubSync = *fm.LastGitHubSync
 	}
-	rec.Validation = fm.Validation
+	rec.Validation, rec.FullResult = fm.Validation, fm.FullResult
 	rec.Plan = fm.Plan
 	for _, f := range fm.Feedback {
 		switch f.Kind {
@@ -547,7 +548,7 @@ func fromRecord(rec *task.Record) frontmatter {
 		t := rec.LastGitHubSync
 		fm.LastGitHubSync = &t
 	}
-	fm.Validation = rec.Validation
+	fm.Validation, fm.FullResult = rec.Validation, rec.FullResult
 	fm.Plan = rec.Plan
 	fm.Attempts = rec.Attempts
 	if r := rec.Reset; r != nil {

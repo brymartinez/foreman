@@ -303,8 +303,51 @@ func (d *Delegation) LastConflict() ConflictAttempt {
 
 // Check is one validation command the implementation agent ran, as it reported it.
 type Check struct {
-	Command string `json:"command" yaml:"command"`
-	Passed  bool   `json:"passed" yaml:"passed"`
+	Command string     `json:"command" yaml:"command"`
+	Passed  bool       `json:"passed" yaml:"passed"`
+	Scope   CheckScope `json:"scope" yaml:"scope,omitempty"`
+}
+
+// CheckScope tells a focused check from one in the repository's full supported suite.
+// A check stored before scopes existed has none and counts as focused.
+type CheckScope string
+
+const (
+	FocusedCheck CheckScope = "focused"
+	FullCheck    CheckScope = "full"
+)
+
+// DocOnlyPath is a path changed since a full run, with the implementer's
+// repository-specific evidence that it cannot affect behavior or the supported checks.
+type DocOnlyPath struct {
+	Path     string `json:"path" yaml:"path"`
+	Evidence string `json:"evidence" yaml:"evidence"`
+}
+
+// FullResult is the repository's full supported suite as Foreman last verified it.
+// Foreman checks Git facts alone: Revision is Head or its ancestor, and every path
+// changed between them is in DocOnly with nonempty evidence. It cannot judge whether
+// the evidence is sound.
+type FullResult struct {
+	// Head is the commit the result was checked against, and covers when Covered is set.
+	Head string `yaml:"head"`
+	// Revision is the commit the full suite ran on.
+	Revision string        `yaml:"revision,omitempty"`
+	Checks   []Check       `yaml:"checks,omitempty"`
+	DocOnly  []DocOnlyPath `yaml:"doc_only,omitempty"`
+	Covered  bool          `yaml:"covered,omitempty"`
+	// Reason says why a result does not cover Head.
+	Reason string `yaml:"reason,omitempty"`
+	// Unverified is the implementer's explanation for a repository with no
+	// identifiable full suite. It permits handoff with the explanation shown.
+	Unverified string    `yaml:"unverified,omitempty"`
+	At         time.Time `yaml:"at"`
+}
+
+// Covers reports whether the result lets head be handed off: a verified run of head,
+// or a repository with no full suite to run.
+func (f *FullResult) Covers(head string) bool {
+	return f != nil && (f.Unverified != "" || f.Covered && head != "" && f.Head == head)
 }
 
 // Outcome is the last thing an agent turn (or the runner) reported, kept for show.
@@ -471,6 +514,9 @@ type Record struct {
 	Usage          Usage
 	// Validation is what the implementation agent reported with its PR.
 	Validation []Check
+	// FullResult is the latest full-suite report Foreman verified. Handoff needs one
+	// that covers the change it hands off.
+	FullResult *FullResult
 	// Reviews are the review rounds, oldest first.
 	Reviews []Review
 	// Plan holds the planning documents posted on the issue, in PlanDocs order.
