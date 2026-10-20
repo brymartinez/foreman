@@ -423,13 +423,17 @@ func reopen(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) s
 		d.PRDigest = task.ProposalDigest(pr.Title, pr.Body)
 	}
 	rec.State = rec.NextStage()
-	if reviewed {
+	// A change no full result covers goes to its final check, which the gate launches.
+	if reviewed && !rec.FinalCheckPending() {
 		rec.State = task.WaitingForCI
 	}
-	if reviewed && ci.State != task.CIPending {
+	if rec.State == task.WaitingForCI && ci.State != task.CIPending {
 		rec.State = task.ReadyForHuman
 	}
 	summary := fmt.Sprintf("PR #%d reopened; it is back under review", d.PR)
+	if reviewed && rec.FinalCheckPending() {
+		summary = fmt.Sprintf("PR #%d reopened; its review is clean, and it needs a final full check", d.PR)
+	}
 	if rec.State == task.ReadyForHuman {
 		summary = fmt.Sprintf("PR #%d reopened; its review is clean and CI has finished", d.PR)
 	}

@@ -660,11 +660,14 @@ the same commit. The commit message records why it changed.
 - **The first change sent to review needs a covering result; fixes do not.** An
   initial `review_ready` or `pr_opened` without one is resumed once in the same
   session to supply it, and a second miss fails the task. Review fixes, answers,
-  merges, and conflict repairs run focused checks; a report they send is recorded.
+  merges, and conflict repairs run focused checks only, and their prompt says not to
+  rerun the full suite; a report they send is recorded. The one rerun a changed
+  input needs belongs to the final check after the review is clean.
   Checkpoints need no full result.
 - **A final check runs before every handoff that lacks coverage.** Opening the
-  reviewed PR, moving to WAITING_FOR_CI after a clean competing review, and the gate's
-  move to READY_FOR_HUMAN each require a stored result that covers the head. Without
+  reviewed PR, moving to WAITING_FOR_CI after a clean competing review, and every move
+  to READY_FOR_HUMAN (the gate's, a reopened PR's, and an answer turn's that pushed
+  nothing) each require a stored result that covers the head. Without
   one, the task goes to IMPLEMENTING for a final-check implementer turn (the gate
   launches its runner). The prompt names the head, why the result does not cover it,
   and the paths changed since the last full run. The agent reports the earlier run

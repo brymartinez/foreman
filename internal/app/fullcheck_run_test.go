@@ -63,8 +63,9 @@ func TestAReviewFixWithFocusedChecksGetsOneFinalCheckAndNoSecondReviewOfTheSameH
 		t.Fatalf("competing reviews %d, final checks %d", len(f.codex.reviewed), countResumed(f, "## Final full check"))
 	}
 	fix := f.claude.resumed[0]
-	if !strings.Contains(fix, "Review round") || strings.Contains(fix, "has no full-suite result") {
-		t.Errorf("the fix turn must not be asked for a full run:\n%s", fix)
+	if !strings.Contains(fix, "Review round") || strings.Contains(fix, "has no full-suite result") ||
+		!strings.Contains(fix, "Do not rerun the full suite in this turn") || strings.Contains(fix, "Run the full suite once") {
+		t.Errorf("the fix turn must run focused checks only:\n%s", fix)
 	}
 	if !strings.Contains(f.claude.resumed[1], "covers commit1, and the change moved to commit2") {
 		t.Errorf("the final check must say why the result is stale:\n%s", f.claude.resumed[1])
@@ -270,5 +271,69 @@ func TestTheGateRefusesReadinessWithoutACoveringFullResult(t *testing.T) {
 	}
 	if got.Delegation.Launch == nil {
 		t.Fatal("the gate did not start the runner for the final check")
+	}
+}
+
+func TestAReopenedPRWithAPendingFinalCheckIsNotHandedOff(t *testing.T) {
+	f := newFixture()
+	f.app.FullSuiteGate = true
+	key := started(t, f, startReq(t))
+	f.claude.turn = withFullRun(prTurn("sid-1"), fullRun("c0ffee1"))
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	// The final check was pending when the developer closed the PR.
+	f.store.recs[key].FullResult.Head = "c0ffee0"
+	setPR(f, "closed")
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key].State; got != task.PRClosed {
+		t.Fatalf("setup: state %s", got)
+	}
+	setPR(f, "open")
+	setCI(f, task.CIStatus{State: task.CIPassing})
+	spawned := len(f.runners.spawned)
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.Implementing || !got.FinalCheckPending() || !strings.Contains(got.LastOutcome.Summary, "needs a final full check") {
+		t.Fatalf("state %s outcome %+v", got.State, got.LastOutcome)
+	}
+	if len(f.runners.spawned) != spawned+1 {
+		t.Fatalf("runners spawned %d, want the final check started", len(f.runners.spawned)-spawned)
+	}
+}
+
+// An answer turn that pushes nothing is handed over only when the full result it leaves
+// covers the head. Its own report is judged first, so a failed run blocks the handoff.
+func TestAnAnswerTurnWithAFailedFullRunGoesToTheFinalCheck(t *testing.T) {
+	f := newFixture()
+	key := waiting(t, f)
+	rec := f.store.recs[key]
+	rec.Delegation.FullSuiteGate = true
+	rec.FullResult = &task.FullResult{Head: "c0ffee1", Revision: "c0ffee1", Covered: true}
+	answer := withFullRun(prTurn("sid-1"), fullRun("c0ffee1"))
+	answer.Outcome.Validation = []task.Check{fullCheck(false)}
+	f.claude.turns = []agent.Turn{answer, withFullRun(prTurn("sid-1"), fullRun("c0ffee1"))}
+	got := resumeRun(t, f, key)
+	if countResumed(f, "## Final full check") != 1 || !strings.Contains(f.claude.resumed[1], "full checks failed") {
+		t.Fatalf("resumed %q", f.claude.resumed)
+	}
+	if got.State != task.WaitingForCI && got.State != task.ReadyForHuman || !got.FullResult.Covers("c0ffee1") {
+		t.Fatalf("state %s full %+v", got.State, got.FullResult)
+	}
+}
+
+func TestHandsOverNowWaitsForAPendingFinalCheck(t *testing.T) {
+	rec := &task.Record{Delegation: &task.Delegation{FullSuiteGate: true, PR: 912, PRHead: "c0ffee1"},
+		Reviews: []task.Review{{Round: 1, Reviewer: task.Codex, PR: 912, Head: "c0ffee1", Clean: true}}}
+	if handsOverNow(rec, &task.CIStatus{State: task.CIPassing}) {
+		t.Fatal("a change with no covering full result was handed over")
+	}
+	rec.FullResult = &task.FullResult{Head: "c0ffee1", Revision: "c0ffee1", Covered: true}
+	if !handsOverNow(rec, &task.CIStatus{State: task.CIPassing}) {
+		t.Fatal("a covered change was held back")
 	}
 }

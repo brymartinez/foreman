@@ -210,7 +210,7 @@ func (a App) currentPR(ctx, final context.Context, rec *task.Record) (updated *t
 // to the developer once its comments are answered: CI has finished. A task with claim
 // verification waits for the gate instead, which reads the PRD before handing it over.
 func handsOverNow(rec *task.Record, ci *task.CIStatus) bool {
-	return ci != nil && ci.State != task.CIPending && !rec.Delegation.ClaimVerification
+	return ci != nil && ci.State != task.CIPending && !rec.Delegation.ClaimVerification && !rec.FinalCheckPending()
 }
 
 // reviewCovers reports a clean competing review of head and of the description with

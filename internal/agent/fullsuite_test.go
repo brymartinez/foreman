@@ -19,7 +19,8 @@ func TestImplementationPromptAsksForCheckScopesAndTheFullSuiteReport(t *testing.
 		"README, Markdown, reStructuredText, and .txt files can be test, build, or generated inputs",
 		"a documentation-only file can live outside a docs directory",
 		"If the evidence is absent or you are unsure, treat the path as an input",
-		"A merge that brings in a behavior or validation input, or a path of uncertain effect, needs a new full run",
+		"Run the full suite once before you hand the change to its first review",
+		"A merge that brings in a behavior or validation input, or a path of uncertain effect, makes the earlier run stale",
 		"A merge that brings in only paths verified documentation-only leaves the earlier run valid",
 	} {
 		if !strings.Contains(p, want) {
@@ -50,6 +51,19 @@ func TestOpenPRPromptCarriesCheckScopesAndAnUnverifiedSuite(t *testing.T) {
 	for _, want := range []string{"- npm run lint (focused): passed true", "No full suite was run: no documented test suite"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("prompt lacks %q:\n%s", want, p)
+		}
+	}
+}
+
+func TestFixMessagesKeepReviewFixesToFocusedChecks(t *testing.T) {
+	for _, want := range []string{"Run only the focused checks that cover this change", "Do not rerun the full suite in this turn, even when the change affects behavior", "final check once the review is clean"} {
+		if !strings.Contains(FullSuiteMessage, want) {
+			t.Errorf("fix message lacks %q", want)
+		}
+	}
+	for _, unwanted := range []string{"Run the full suite once", "run the full suite again"} {
+		if strings.Contains(FullSuiteMessage, unwanted) {
+			t.Errorf("fix message asks for a full run: %q", unwanted)
 		}
 	}
 }

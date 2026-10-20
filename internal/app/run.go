@@ -322,6 +322,8 @@ func (r *taskRun) answer() (step, error) {
 		// Blocked, failed, or stopped. The comments stay unanswered, so the next run
 		// asks for them again.
 		return stepDone, nil
+	case rec.FinalCheckPending():
+		return stepFinalCheck, nil
 	case !rec.ReviewPending():
 		// A turn that pushed nothing leaves the code its review already covers, so
 		// there is nothing to review and the task goes back to the developer.
@@ -693,8 +695,9 @@ func (a App) answerFeedback(ctx, final context.Context, rec *task.Record, commen
 	fmt.Fprintf(log, "foreman: %s\n", feedbackNote(len(comments), d.PR))
 	res := a.runTurn(ctx, rec, turnRequest{feedback: comments}, a.verifiedPR(log), log)
 	return a.finishTurn(ctx, final, rec.Key, "answering PR feedback", res, func(cur *task.Record) {
-		applyFeedbackTurn(cur, res.turn, res.pr, res.err, comments, headBefore, a.Now())
+		// The result is stored first, so the handover below judges coverage by it.
 		recordFull(cur, res)
+		applyFeedbackTurn(cur, res.turn, res.pr, res.err, comments, headBefore, a.Now())
 	}, log)
 }
 

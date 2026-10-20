@@ -10,26 +10,32 @@ import (
 // since the full run, so the judgment of each path stays with the implementer.
 const fullSuiteRules = `- Use the checks the repository documents: its AGENTS.md, README, contributing guide, Makefile, scripts, and CI configuration. The full supported suite is the set those sources name for a complete check of the repository.
 - Tag every check in "validation" with "scope": "focused" for a check of the paths you changed, "full" for a part of the full supported suite.
-- Run focused checks while you edit, at checkpoints, and after review fixes. Run the full suite once before the first review, and again only when a later change affects behavior or a validation input.
 - With "pr_opened" or "review_ready", report the full suite in "fullSuite":
   - When you ran it: status "run", revision the commit it ran on, explanation null. If revision is the commit you hand in, docOnly is []. If it is an earlier commit, docOnly lists every path changed since it (` + "`git diff --name-only <revision> HEAD`" + `), each with its evidence.
   - When the repository has no identifiable full suite: status "unavailable", revision and docOnly null, and an explanation of what could not be verified. Still run and report the relevant checks.
-  - Null when this turn has no full result to report. Foreman then runs a final check before handoff.
+  - Null when this turn has no full result to report. Foreman then asks for one in a final check after the review is clean.
 - A path is documentation-only only when repository-specific evidence shows it cannot affect behavior or the supported suite, such as the test, build, or generation configuration that shows nothing reads it. Cite that evidence. A name, extension, or directory alone is not evidence: README, Markdown, reStructuredText, and .txt files can be test, build, or generated inputs, and a documentation-only file can live outside a docs directory.
-- Source, tests, configuration, build scripts, generated code, and any other input to the supported checks are not documentation-only. If the evidence is absent or you are unsure, treat the path as an input and run the full suite again.
-- Judge the paths a merge of the base branch brings in the same way. A merge that brings in a behavior or validation input, or a path of uncertain effect, needs a new full run. A merge that brings in only paths verified documentation-only leaves the earlier run valid.
+- Source, tests, configuration, build scripts, generated code, and any other input to the supported checks are not documentation-only. If the evidence is absent or you are unsure, treat the path as an input: the earlier full run no longer covers the change.
+- Judge the paths a merge of the base branch brings in the same way. A merge that brings in a behavior or validation input, or a path of uncertain effect, makes the earlier run stale. A merge that brings in only paths verified documentation-only leaves the earlier run valid.
 `
 
 // fullSuiteSection asks a fresh implementation turn to tag its checks and report the
 // full suite.
 func fullSuiteSection(s *strings.Builder) {
 	s.WriteString("## Validation\n\nForeman hands off a change only when a full-suite result covers its final commit.\n\n")
-	s.WriteString(fullSuiteRules + "\n")
+	s.WriteString(firstRunRule + fullSuiteRules + "\n")
 }
 
+// firstRunRule is when a fresh implementation turn runs the full suite.
+const firstRunRule = "- Run focused checks while you edit and at checkpoints. Run the full suite once before you hand the change to its first review.\n"
+
+// fixRunRule keeps review fixes, answers, and merges to focused checks. The one full
+// rerun a change needs after them belongs to the final check after a clean review.
+const fixRunRule = "- Run only the focused checks that cover this change. Do not rerun the full suite in this turn, even when the change affects behavior. If every path changed since your last full run is verified documentation-only, report that run with evidence for each path. Otherwise set \"fullSuite\" to null: Foreman asks for one full run in a final check once the review is clean.\n"
+
 // FullSuiteMessage ends a resume message for a task with the full-suite gate, so a fix,
-// an answer, or a merge reports its checks the same way.
-const FullSuiteMessage = "\nTag each check with its scope and report the full suite in \"fullSuite\":\n\n" + fullSuiteRules
+// an answer, or a merge runs focused checks and reports them the same way.
+const FullSuiteMessage = "\nTag each check with its scope and report the full suite in \"fullSuite\":\n\n" + fixRunRule + fullSuiteRules
 
 // MissingFullCheckMessage resumes a turn that finished a change without a full-suite
 // result that covers it.
