@@ -189,6 +189,12 @@ func TestARepositoryWithoutAFullSuiteIsHandedOffWithItsExplanation(t *testing.T)
 	if countResumed(f, "## Final full check") != 0 || len(f.claude.resumed) != 1 {
 		t.Fatalf("resumed %q", f.claude.resumed)
 	}
+	if !strings.Contains(f.claude.resumed[0], "No full suite was run: the repository documents no test command") {
+		t.Errorf("the open turn lacks the explanation:\n%s", f.claude.resumed[0])
+	}
+	if !strings.Contains(f.claude.prompts[0], "## Validation") {
+		t.Errorf("the implementer was not told how to report the full suite:\n%s", f.claude.prompts[0])
+	}
 }
 
 func TestFinalChecksStopAfterTheBound(t *testing.T) {

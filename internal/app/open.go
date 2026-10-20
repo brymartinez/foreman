@@ -97,11 +97,15 @@ func (r *taskRun) checkPRDBeforeOpening() (step, error) {
 // prompt.
 func (a App) openTurn(ctx context.Context, rec *task.Record, adapter AgentAdapter, in agent.StartInput, bodyFile string, log io.Writer) (agent.Turn, error) {
 	d := rec.Delegation
-	in.Prompt = agent.OpenPRPrompt(agent.OpenPRBrief{
+	brief := agent.OpenPRBrief{
 		Branch: d.Branch, BaseBranch: strings.TrimPrefix(d.BaseRef, "origin/"), Head: d.LocalHead,
 		Title: d.ProposedTitle, IssueURL: rec.URL, BodyFile: bodyFile, Validation: rec.Validation, Decisions: rec.Undelivered(),
 		Claims: d.Claims,
-	})
+	}
+	if f := rec.FullResult; f != nil {
+		brief.Unverified = f.Unverified
+	}
+	in.Prompt = agent.OpenPRPrompt(brief)
 	if err := a.startAttempt(ctx, rec); err != nil {
 		return agent.Turn{}, err
 	}

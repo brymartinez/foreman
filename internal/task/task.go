@@ -366,10 +366,11 @@ func (f *FullResult) Gap(head string) string {
 	case !f.Covered:
 		return f.Reason
 	}
-	return fmt.Sprintf("the full result covers %s, and the change moved to %s since", shortSHA(f.Head), shortSHA(head))
+	return fmt.Sprintf("the full result covers %s, and the change moved to %s since", ShortSHA(f.Head), ShortSHA(head))
 }
 
-func shortSHA(sha string) string {
+// ShortSHA is the seven-character form of a commit, as Git shows it.
+func ShortSHA(sha string) string {
 	if len(sha) > 7 {
 		return sha[:7]
 	}

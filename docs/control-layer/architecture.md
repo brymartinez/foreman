@@ -109,6 +109,8 @@ runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR)
                                              checked plan + PR comments + git diff + earlier competing rounds
                                              [+ PRD + claims])
                     clean    -> record review and the head it covered; WAITING_FOR_CI, exit
+                                (with the full-suite gate and no full result covering
+                                the head: final check first, see below)
                     findings (either review) -> IMPLEMENTING; implementer.Resume(session,
                                 findings); agent pushes fixes and reports pr_opened
                                 again; re-verify; self-review, then re-review
@@ -631,7 +633,49 @@ the same commit. The commit message records why it changed.
   when a turn ends, so foreman records Codex tokens and never invents a price.
 - **Validation is self-reported.** Foreman records what the agent ran and doesn't re-run
   it, because that would run untrusted commands outside the sandbox. CI is the
-  independent check.
+  independent check. Each check carries a scope, `focused` or `full` (absent reads as
+  focused). The repository's own documentation decides which checks form its full
+  supported suite; Foreman never chooses them.
+- **Handoff needs a full-suite result that covers the change.** `full_suite_gate` is
+  copied onto every task when it starts (the CLI always enables it); a restart keeps
+  it, and a task file without it keeps the workflow it started with. A `pr_opened` or
+  `review_ready` turn reports `fullSuite`: `run` with the revision the suite ran on and,
+  for each path changed since, documentation-only evidence; `unavailable` with an
+  explanation; or null. Foreman verifies a `run` report against Git alone and stores
+  it as `full_result` with the head it was checked against. It covers that head when
+  the revision is the head or its ancestor, at least one `full` check ran and every one
+  passed, and every path `git diff --name-only <revision> <head>` lists (both sides of
+  a rename) has an exact entry with nonempty evidence. Foreman cannot judge whether
+  evidence is sound. The implementer judges it under the stage instructions: a path is
+  documentation-only only with repository-specific evidence that it cannot affect
+  behavior or the supported suite; a name, extension, or directory alone is never
+  evidence, and absent or ambiguous evidence makes the path a validation input. No
+  path or extension list decides this in Foreman.
+- **A stored result stops covering a head when the head moves.** A turn that reports
+  no result keeps the old one, which then covers nothing until a new report passes the
+  check. A merge of the base branch is judged by the same rule as any change, through
+  the paths it brings in. A merge that brings in a behavior or validation input, or a
+  path of uncertain effect, leaves the earlier result stale; a merge that brings in
+  only paths verified documentation-only keeps it reusable.
+- **The first change sent to review needs a covering result; fixes do not.** An
+  initial `review_ready` or `pr_opened` without one is resumed once in the same
+  session to supply it, and a second miss fails the task. Review fixes, answers,
+  merges, and conflict repairs run focused checks; a report they send is recorded.
+  Checkpoints need no full result.
+- **A final check runs before every handoff that lacks coverage.** Opening the
+  reviewed PR, moving to WAITING_FOR_CI after a clean competing review, and the gate's
+  move to READY_FOR_HUMAN each require a stored result that covers the head. Without
+  one, the task goes to IMPLEMENTING for a final-check implementer turn (the gate
+  launches its runner). The prompt names the head, why the result does not cover it,
+  and the paths changed since the last full run. The agent reports the earlier run
+  with evidence for every path, or runs the suite; a failure is fixed in the same
+  turn. A turn that keeps the head and covers it hands off without another review; a
+  new commit goes through review again. The turn gets the same one-resume rule. Three
+  final checks per handoff, then the task fails with the reason.
+- **An `unavailable` suite permits handoff with its explanation.** It covers any
+  head, because the repository has no suite to rerun. The dashboard's task pane, which
+  shows each check's scope and the full-suite state, and the PR-opening turn carry the
+  explanation; the agent still reports the relevant checks it ran.
 
 ### Stage instructions
 

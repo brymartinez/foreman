@@ -75,7 +75,7 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, token string, l
 		if rec, current, err = a.currentPR(ctx, final, rec); err != nil {
 			return err
 		}
-		if current && reviewCovers(rec, rec.Delegation.PRHead, rec.Delegation.PRDigest) {
+		if current && reviewCovers(rec, rec.Delegation.PRHead, rec.Delegation.PRDigest) && !rec.FinalCheckPending() {
 			// A task left by the old feedback flow already passed review. Hand it
 			// back without resuming the implementer on the same comments.
 			_, err = a.update(final, rec.Key, existing(func(cur *task.Record) {

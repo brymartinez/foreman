@@ -584,6 +584,8 @@ type OpenPRBrief struct {
 	// byte for byte.
 	BodyFile   string
 	Validation []task.Check
+	// Unverified explains why the repository has no full suite to run, if it has none.
+	Unverified string
 	// Decisions are answers the implementer has not received yet.
 	Decisions []task.Decision
 	// Claims are the reviewed claims of a task with claim verification, which the
@@ -622,7 +624,14 @@ End with JSON matching the provided schema: "pr_opened" with prNumber, prUrl, an
 Validation run on the reviewed commit:
 `, b.Head, b.Branch, b.Branch, b.BaseBranch, b.Branch, b.BodyFile, b.Title, screenshotCommentInstructions(true))
 	for _, c := range b.Validation {
-		fmt.Fprintf(&s, "- %s: passed %t\n", c.Command, c.Passed)
+		scope := ""
+		if c.Scope != "" {
+			scope = " (" + string(c.Scope) + ")"
+		}
+		fmt.Fprintf(&s, "- %s%s: passed %t\n", c.Command, scope, c.Passed)
+	}
+	if b.Unverified != "" {
+		fmt.Fprintf(&s, "\nNo full suite was run: %s. Name this in the outcome summary.\n", b.Unverified)
 	}
 	if len(b.Claims) > 0 {
 		claims, _ := json.Marshal(b.Claims)
