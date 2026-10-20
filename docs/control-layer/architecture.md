@@ -669,8 +669,8 @@ the same commit. The commit message records why it changed.
   Checkpoints need no full result.
 - **A final check runs before every handoff that lacks coverage.** Opening the
   reviewed PR, moving to WAITING_FOR_CI after a clean competing review, and every move
-  to READY_FOR_HUMAN (the gate's, a reopened PR's, and an answer turn's that pushed
-  nothing) each require a stored result that covers the head. Without
+  to READY_FOR_HUMAN (the gate's, a reopened PR's, a REVIEWED task's whose comments are
+  cleared or answered, and an answer turn's that pushed nothing) each require a stored result that covers the head. Without
   one, the task goes to IMPLEMENTING for a final-check implementer turn (the gate
   launches its runner). The prompt names the head, why the result does not cover it,
   and the paths changed since the last full run. The agent reports the earlier run

@@ -396,3 +396,64 @@ func TestAnInitialTurnResumedWithAnAnswerIsToldToRunTheFullSuite(t *testing.T) {
 		t.Fatalf("state %s resumed %q", got.State, f.claude.resumed)
 	}
 }
+
+// gatedReviewed is a gated PR task in REVIEWED after a clean review and CI, whose stored
+// full result covers an earlier head.
+func gatedReviewed(t *testing.T, f fixture) task.Key {
+	t.Helper()
+	f.app.FullSuiteGate = true
+	key := started(t, f, startReq(t))
+	f.claude.turn = withFullRun(prTurn("sid-1"), fullRun("c0ffee1"))
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	setCI(f, task.CIStatus{State: task.CIPassing})
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	rec := f.store.recs[key]
+	if rec.State != task.ReadyForHuman {
+		t.Fatalf("setup: state %s", rec.State)
+	}
+	rec.State = task.Reviewed
+	rec.FullResult.Head = "c0ffee0"
+	return key
+}
+
+func TestAReviewedTaskWithAStaleResultGoesToTheFinalCheckNotToTheDeveloper(t *testing.T) {
+	for _, replies := range []bool{false, true} {
+		name := "with feedback replies off"
+		if replies {
+			name = "with feedback replies on and every comment gone"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newFixture()
+			key := gatedReviewed(t, f)
+			f.app.ReplyToPRFeedback = replies
+			spawned := len(f.runners.spawned)
+			if _, _, err := f.app.Status(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			got := f.store.recs[key]
+			if got.State != task.Implementing || !got.FinalCheckPending() || got.LastOutcome.Status != "final_check" {
+				t.Fatalf("state %s outcome %+v", got.State, got.LastOutcome)
+			}
+			if len(f.runners.spawned) != spawned+1 {
+				t.Fatalf("runners spawned %d, want the final check started", len(f.runners.spawned)-spawned)
+			}
+		})
+	}
+}
+
+func TestAReviewedTaskWithACoveringResultIsHandedBack(t *testing.T) {
+	f := newFixture()
+	key := gatedReviewed(t, f)
+	f.store.recs[key].FullResult.Head = "c0ffee1"
+	f.app.ReplyToPRFeedback = false
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.ReadyForHuman {
+		t.Fatalf("state %s", got.State)
+	}
+}
