@@ -11,8 +11,8 @@ import (
 const fullSuiteRules = `- Use the checks the repository documents: its AGENTS.md, README, contributing guide, Makefile, scripts, and CI configuration. The full supported suite is the set those sources name for a complete check of the repository.
 - Tag every check in "validation" with "scope": "focused" for a check of the paths you changed, "full" for a part of the full supported suite.
 - With "pr_opened" or "review_ready", report the full suite in "fullSuite":
-  - When you ran it: status "run", revision the commit it ran on, explanation null. If revision is the commit you hand in, docOnly is [].
-  - When you reuse an earlier run because every path changed since is verified documentation-only: status "run", revision that run's commit, and docOnly listing every path changed since it (` + "`git diff --name-only <revision> HEAD`" + `), each with its evidence. Do not copy that run's checks into "validation": it lists only the checks this turn ran. Foreman takes the run's full checks from the result it recorded for that revision.
+  - When you ran it: status "run", revision the SHA of the commit it ran on (not a branch or HEAD), explanation null. If revision is the commit you hand in, docOnly is [].
+  - When you reuse an earlier run because every path changed since is verified documentation-only: status "run", revision that run's commit SHA, and docOnly listing every path changed since it (` + "`git diff --name-only <revision> HEAD`" + `), each with its evidence. Do not copy that run's checks into "validation": it lists only the checks this turn ran. Foreman takes the run's full checks from the result it recorded for that revision.
   - When the repository has no identifiable full suite: status "unavailable", revision and docOnly null, and an explanation of what could not be verified. Still run and report the relevant checks.
   - Null when this turn has no full result to report. Foreman then asks for one in a final check after the review is clean.
 - A path is documentation-only only when repository-specific evidence shows it cannot affect behavior or the supported suite, such as the test, build, or generation configuration that shows nothing reads it. Cite that evidence. A name, extension, or directory alone is not evidence: README, Markdown, reStructuredText, and .txt files can be test, build, or generated inputs, and a documentation-only file can live outside a docs directory.
@@ -21,10 +21,15 @@ const fullSuiteRules = `- Use the checks the repository documents: its AGENTS.md
 `
 
 // fullSuiteSection asks a fresh implementation turn to tag its checks and report the
-// full suite.
-func fullSuiteSection(s *strings.Builder) {
+// full suite. A fix, answer, or merge turn that replaces a lost session runs focused
+// checks, as its resume would have.
+func fullSuiteSection(s *strings.Builder, focusedOnly bool) {
+	rule := firstRunRule
+	if focusedOnly {
+		rule = fixRunRule
+	}
 	s.WriteString("## Validation\n\nForeman hands off a change only when a full-suite result covers its final commit.\n\n")
-	s.WriteString(firstRunRule + fullSuiteRules + "\n")
+	s.WriteString(rule + fullSuiteRules + "\n")
 }
 
 // firstRunRule is when a fresh implementation turn runs the full suite.

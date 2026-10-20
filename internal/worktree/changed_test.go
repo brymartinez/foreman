@@ -56,6 +56,22 @@ func TestChangedPathsListsEveryPathBetweenACommitAndItsDescendant(t *testing.T) 
 		}
 	})
 
+	t.Run("an abbreviated SHA names its commit", func(t *testing.T) {
+		got, err := (Git{}).ChangedPaths(ctx, dir, tested[:7], docs)
+		if err != nil || !slices.Equal(got, []string{"docs/guide.md"}) {
+			t.Fatalf("paths = %v, %v", got, err)
+		}
+	})
+
+	// HEAD or a branch names another commit once it moves, so it cannot record a run.
+	t.Run("a ref name is refused", func(t *testing.T) {
+		for _, ref := range []string{"HEAD", "feat", "HEAD~1"} {
+			if _, err := (Git{}).ChangedPaths(ctx, dir, ref, renamed); err == nil || !strings.Contains(err.Error(), "not a commit SHA") {
+				t.Errorf("%s: err = %v", ref, err)
+			}
+		}
+	})
+
 	t.Run("a commit that is not an ancestor is refused", func(t *testing.T) {
 		_, err := (Git{}).ChangedPaths(ctx, dir, renamed, base)
 		if err == nil || !strings.Contains(err.Error(), "not an ancestor") {

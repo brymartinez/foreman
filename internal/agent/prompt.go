@@ -71,9 +71,11 @@ type TaskBrief struct {
 	// returns its claims for the reviewers.
 	Claims bool
 	// FullSuite is set for a task with the full-suite gate. The turn tags its checks
-	// and reports the full suite. FinalCheck is set for the final-check turn.
-	FullSuite  bool
-	FinalCheck *FinalCheck
+	// and reports the full suite. FocusedOnly is set for a fix, answer, or merge turn,
+	// which runs focused checks only. FinalCheck is set for the final-check turn.
+	FullSuite   bool
+	FocusedOnly bool
+	FinalCheck  *FinalCheck
 }
 
 // MergeBrief is the base branch a PR conflicts with and the files that conflict.
@@ -187,7 +189,7 @@ The next session receives the commit and nextObjective, not this transcript. Kee
 	if b.FinalCheck != nil {
 		s.WriteString(FinalCheckMessage(*b.FinalCheck) + "\n")
 	} else if b.FullSuite && !b.Planning {
-		fullSuiteSection(&s)
+		fullSuiteSection(&s, b.FocusedOnly)
 	}
 	if b.Claims && !b.Planning {
 		claimsSection(&s)

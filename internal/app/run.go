@@ -631,6 +631,7 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 	brief.LocalReview = d.BeforePR()
 	brief.Claims = d.ClaimVerification
 	brief.FullSuite, brief.FinalCheck = d.FullSuiteGate, req.finalCheck
+	brief.FocusedOnly = d.FullSuiteGate && !needsFullResult(rec, req)
 	brief.PR, brief.Feedback, brief.Conflict = d.PR, feedbackItems(feedback), conflict
 	if d.PR == 0 && d.CheckpointNext != "" {
 		brief.CheckpointHead, brief.NextObjective = d.CheckpointHead, d.CheckpointNext

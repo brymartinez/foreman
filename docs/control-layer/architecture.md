@@ -643,7 +643,8 @@ the same commit. The commit message records why it changed.
   for each path changed since, documentation-only evidence; `unavailable` with an
   explanation; or null. Foreman verifies a `run` report against Git alone and stores
   it as `full_result` with the head it was checked against. It covers that head when
-  the revision is the head or its ancestor, at least one `full` check ran and every one
+  the revision is a commit SHA (a ref such as HEAD or a branch moves, so it is refused)
+  and is the head or its ancestor, at least one `full` check ran and every one
   passed, and every path `git diff --name-only <revision> <head>` lists (both sides of
   a rename) has an exact entry with nonempty evidence. A turn that reuses an earlier
   run lists only the checks it ran; when it names no full check, Foreman takes the
@@ -663,9 +664,10 @@ the same commit. The commit message records why it changed.
 - **The first change sent to review needs a covering result; fixes do not.** An
   initial `review_ready` or `pr_opened` without one is resumed once in the same
   session to supply it, and a second miss fails the task. Review fixes, answers,
-  merges, and conflict repairs run focused checks only, and their prompt says not to
-  rerun the full suite; a report they send is recorded. The one rerun a changed
-  input needs belongs to the final check after the review is clean.
+  merges, and conflict repairs run focused checks only, and their prompt, resumed or
+  rebuilt after a lost session, says not to rerun the full suite; a report they send
+  is recorded. The one rerun a changed input needs belongs to the final check after
+  the review is clean.
   Checkpoints need no full result.
 - **A final check runs before every handoff that lacks coverage.** Opening the
   reviewed PR, moving to WAITING_FOR_CI after a clean competing review, and every move

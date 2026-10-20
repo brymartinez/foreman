@@ -11,8 +11,17 @@ import (
 
 // ChangedPaths lists every path that differs between from and to, sorted. A rename
 // lists both its old and new path. It refuses a from that is not to or an ancestor
-// of it, because a full result on another line of history says nothing about to.
+// of it, because a full result on another line of history says nothing about to. It
+// also refuses a from that is not a commit SHA: a name such as HEAD or a branch moves,
+// so a result stored under it would later name another commit.
 func (Git) ChangedPaths(ctx context.Context, dir, from, to string) ([]string, error) {
+	sha, err := git(ctx, dir, "rev-parse", "--verify", "--quiet", from+"^{commit}")
+	if err != nil {
+		return nil, fmt.Errorf("%s is not a commit", from)
+	}
+	if !strings.HasPrefix(strings.TrimSpace(string(sha)), strings.ToLower(from)) {
+		return nil, fmt.Errorf("%s names a ref, not a commit SHA", from)
+	}
 	cmd := exec.CommandContext(ctx, "git", "-C", dir, "merge-base", "--is-ancestor", from, to)
 	if err := cmd.Run(); err != nil {
 		var exit *exec.ExitError

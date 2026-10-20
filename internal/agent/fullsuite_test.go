@@ -33,6 +33,15 @@ func TestImplementationPromptAsksForCheckScopesAndTheFullSuiteReport(t *testing.
 	}
 }
 
+// A fix, answer, or merge turn that replaces a lost session gets the focused rule its
+// resume would have carried, not the first review's full run.
+func TestAFreshFixPromptKeepsToFocusedChecks(t *testing.T) {
+	p := ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}, Branch: "feat/7", BaseBranch: "main", Worktree: "/wt", FullSuite: true, FocusedOnly: true})
+	if !strings.Contains(p, "Do not rerun the full suite in this turn") || strings.Contains(p, "Run the full suite once before") {
+		t.Errorf("prompt:\n%s", p)
+	}
+}
+
 func TestFinalCheckMessageNamesTheGapAndTheChangedPaths(t *testing.T) {
 	p := FinalCheckMessage(FinalCheck{Head: "c0ffee22", Reason: "the full result covers c0ffee1", Revision: "c0ffee11", Changed: []string{"docs/a.md", "main.go"}, PR: 912})
 	for _, want := range []string{"## Final full check", "c0ffee2 has none: the full result covers c0ffee1", "since the full run on c0ffee1:\n\n- docs/a.md\n- main.go", "do not rerun the suite", "A new commit is reviewed again", `"pr_opened" for PR #912`, "unavailable"} {

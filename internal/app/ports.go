@@ -237,7 +237,8 @@ type WorktreeManager interface {
 	// accepted checkpoint.
 	ReviewHead(ctx context.Context, dir, branch, prior string) (string, error)
 	// ChangedPaths lists the paths that differ between from and to, both sides of a
-	// rename included. It fails when from is neither to nor an ancestor of it.
+	// rename included. It fails when from is not a commit SHA, or is neither to nor
+	// an ancestor of it.
 	ChangedPaths(ctx context.Context, dir, from, to string) ([]string, error)
 	// Remove deletes the worktree, and the branch if asked. It refuses a worktree with
 	// uncommitted or untracked changes unless Force is set. A path that no longer
