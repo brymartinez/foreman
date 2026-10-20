@@ -179,3 +179,22 @@ func handOffIfReviewed(rec *task.Record) {
 	rec.State = task.WaitingForCI
 	d.FinalChecks = 0
 }
+
+// fullSuiteResume adds the full-suite rules a resumed turn of a gated task works by. A
+// turn that must hand in a covering result gets the rule to run the full suite, and a
+// final check resumed with answers gets its own instructions back. Every other turn
+// runs focused checks.
+func fullSuiteResume(rec *task.Record, req turnRequest, resume string) string {
+	switch {
+	case !rec.Delegation.FullSuiteGate:
+		return resume
+	case req.finalCheck != nil:
+		if msg := agent.FinalCheckMessage(*req.finalCheck); resume != msg {
+			return resume + "\n\n" + msg
+		}
+		return resume
+	case needsFullResult(rec, req):
+		return resume + agent.FirstRunMessage
+	}
+	return resume + agent.FullSuiteMessage
+}

@@ -35,8 +35,12 @@ const firstRunRule = "- Run focused checks while you edit and at checkpoints. Ru
 const fixRunRule = "- Run only the focused checks that cover this change. Do not rerun the full suite in this turn, even when the change affects behavior. If every path changed since your last full run is verified documentation-only, report that run's revision with evidence for each path, and list only this turn's focused checks in \"validation\". Otherwise set \"fullSuite\" to null: Foreman asks for one full run in a final check once the review is clean.\n"
 
 // FullSuiteMessage ends a resume message for a task with the full-suite gate, so a fix,
-// an answer, or a merge runs focused checks and reports them the same way.
+// an answer after review, or a merge runs focused checks and reports them the same way.
 const FullSuiteMessage = "\nTag each check with its scope and report the full suite in \"fullSuite\":\n\n" + fixRunRule + fullSuiteRules
+
+// FirstRunMessage ends a resume message for a turn that must hand in a covering full
+// result, such as the first implementation turn resumed with answers.
+const FirstRunMessage = "\nTag each check with its scope and report the full suite in \"fullSuite\":\n\n" + firstRunRule + fullSuiteRules
 
 // MissingFullCheckMessage resumes a turn that finished a change without a full-suite
 // result that covers it.

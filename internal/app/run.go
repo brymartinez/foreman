@@ -604,8 +604,8 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 	if resume != "" && d.ClaimVerification && !planning {
 		resume += agent.ClaimsMessage
 	}
-	if resume != "" && d.FullSuiteGate && !planning && req.finalCheck == nil {
-		resume += agent.FullSuiteMessage
+	if resume != "" && !planning {
+		resume = fullSuiteResume(rec, req, resume)
 	}
 	if resume != "" && d.Implementer.ID != "" {
 		if err := a.startAttempt(ctx, rec); err != nil {

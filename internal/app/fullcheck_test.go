@@ -169,3 +169,47 @@ func TestEvaluateFullTakesAReusedRunsChecksFromTheRecordedResult(t *testing.T) {
 		}
 	})
 }
+
+// The rules a resume carries follow what the turn must hand in: a full run for the
+// first review, the final-check instructions for a final check, focused checks otherwise.
+func TestResumeRulesFollowWhatTheTurnMustHandIn(t *testing.T) {
+	gated := func() *task.Record {
+		return &task.Record{Delegation: &task.Delegation{FullSuiteGate: true},
+			Decisions: []task.Decision{{Question: task.Question{Issue: "Retry 4xx?"}, Answer: "A"}}}
+	}
+	final := &agent.FinalCheck{Head: "c0ffee2", Reason: "no full-suite result was reported", Local: true}
+
+	t.Run("an initial turn resumed with an answer runs the full suite", func(t *testing.T) {
+		got := fullSuiteResume(gated(), turnRequest{}, "answers")
+		if !strings.Contains(got, "Run the full suite once before you hand the change to its first review") || strings.Contains(got, "Do not rerun the full suite") {
+			t.Fatalf("resume:\n%s", got)
+		}
+	})
+	t.Run("a final check resumed with an answer keeps its instructions", func(t *testing.T) {
+		got := fullSuiteResume(gated(), turnRequest{finalCheck: final}, "answers")
+		if !strings.Contains(got, "## Final full check") || strings.Contains(got, "Do not rerun the full suite") {
+			t.Fatalf("resume:\n%s", got)
+		}
+	})
+	t.Run("a final check without answers is not repeated", func(t *testing.T) {
+		msg := agent.FinalCheckMessage(*final)
+		if got := fullSuiteResume(gated(), turnRequest{finalCheck: final}, msg); got != msg {
+			t.Fatalf("resume:\n%s", got)
+		}
+	})
+	t.Run("a review fix runs focused checks", func(t *testing.T) {
+		rec := gated()
+		rec.Reviews = []task.Review{{Round: 1}}
+		got := fullSuiteResume(rec, turnRequest{findings: &rec.Reviews[0]}, "findings")
+		if !strings.Contains(got, "Do not rerun the full suite in this turn") || strings.Contains(got, "Run the full suite once before") {
+			t.Fatalf("resume:\n%s", got)
+		}
+	})
+	t.Run("a task without the gate gets no rules", func(t *testing.T) {
+		rec := gated()
+		rec.Delegation.FullSuiteGate = false
+		if got := fullSuiteResume(rec, turnRequest{}, "answers"); got != "answers" {
+			t.Fatalf("resume:\n%s", got)
+		}
+	})
+}

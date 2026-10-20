@@ -369,3 +369,30 @@ func TestAFinalCheckReusesAnEarlierRunForDocumentationOnlyPathsWithoutRerunningI
 		t.Fatalf("full result = %+v", r)
 	}
 }
+
+func TestAnInitialTurnResumedWithAnAnswerIsToldToRunTheFullSuite(t *testing.T) {
+	f := newFixture()
+	key := gatedLocalTask(t, f)
+	q := task.Question{Issue: "Retry 4xx?", Options: []task.Option{{Label: "A", Description: "5xx only"}, {Label: "B", Description: "both"}}, Recommendation: "A"}
+	f.wt.checkpointHeads = []string{"commit1"}
+	f.claude.turns = []agent.Turn{
+		{Session: task.Session{Agent: task.Claude, ID: "sid-1"}, Outcome: agent.Outcome{Status: agent.Blocked, Summary: "?", Questions: []task.Question{q}}},
+		withFullRun(readyTurn(), fullRun("commit1")),
+		prTurn("sid-1"),
+	}
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	answer(f, key, "A")
+	opensPR(t, f, "commit1", proposedTitle, proposedBody, 1)
+	if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	resumed := f.claude.resumed[0]
+	if !strings.Contains(resumed, "Decision: A") || !strings.Contains(resumed, "Run the full suite once before you hand the change to its first review") || strings.Contains(resumed, "Do not rerun the full suite") {
+		t.Fatalf("answer resume:\n%s", resumed)
+	}
+	if got := f.store.recs[key]; got.State != task.WaitingForCI || countResumed(f, "has no full-suite result") != 0 {
+		t.Fatalf("state %s resumed %q", got.State, f.claude.resumed)
+	}
+}
