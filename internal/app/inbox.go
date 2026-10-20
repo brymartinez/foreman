@@ -53,6 +53,7 @@ type App struct {
 	// ClaimVerification is enabled in the CLI. A task that plans copies it when it
 	// starts. Off, tests exercise the review workflow of tasks started before claims.
 	ClaimVerification bool
+	FullSuiteGate     bool // enabled in the CLI; every task copies it when it starts
 	Linear            IssueTracker
 	LinearProjects    map[task.Repo]string
 	Repositories      RepositoryManager

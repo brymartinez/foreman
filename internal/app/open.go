@@ -19,6 +19,9 @@ import (
 // against the review. Either way the run ends there and the gate takes over.
 func (r *taskRun) openPR() (step, error) {
 	a := r.a
+	if r.rec.FinalCheckPending() {
+		return stepFinalCheck, nil
+	}
 	if err := r.enter(task.OpeningPR); err != nil {
 		return stepDone, err
 	}
@@ -174,6 +177,7 @@ func coverOpenedPR(rec *task.Record) {
 		latest.PR = d.PR
 	}
 	d.LocalHead, d.ProposedTitle, d.ProposedBody = "", "", ""
+	d.FinalChecks = 0
 }
 
 // writeBodyFile puts the reviewed description in a file outside the worktree, so gh

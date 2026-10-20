@@ -258,7 +258,7 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			}
 			// A PR that had a clean review is reviewed again by a runner the gate starts.
 			// One without a clean review shows the stage it needs and waits for a start.
-			if rereview(cur) {
+			if rereview(cur) || cur.State == task.Implementing && cur.FinalCheckPending() && cur.Delegation.RunnerPID == 0 && !launching(cur) {
 				var err error
 				if token, err = a.claimLaunch(cur); err != nil {
 					return nil, err
@@ -534,6 +534,12 @@ func advance(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) 
 		d.PRDigest = task.ProposalDigest(pr.Title, pr.Body)
 		rec.State, rec.CI = rec.NextStage(), nil
 		return outcome("re_review", fmt.Sprintf("PR #%d has a new description since its clean review; it is being reviewed again", d.PR))
+	}
+	if rec.State == task.WaitingForCI && rec.FinalCheckPending() {
+		// A task that reached WAITING_FOR_CI without a covering full result, such as one
+		// whose runner stopped after the clean review, is not handed to the developer.
+		rec.State, rec.CI = task.Implementing, nil
+		return outcome("final_check", fmt.Sprintf("PR #%d has no full-suite result that covers %s; %s is running the final check", d.PR, short(d.PRHead), d.Implementer.Agent))
 	}
 	prev := rec.CI
 	rec.CI = &ci

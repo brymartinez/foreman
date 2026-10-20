@@ -220,6 +220,12 @@ type Delegation struct {
 	// returns Claims with each change, and both reviews check them against the PRD.
 	// Tasks started without it keep the review workflow they started with.
 	ClaimVerification bool
+	// FullSuiteGate is set when a task starts. Its change is then handed off only with
+	// a full-suite result that covers it, and FinalChecks counts the final-check turns
+	// run toward the current handoff. Tasks started without it keep the workflow they
+	// started with.
+	FullSuiteGate bool
+	FinalChecks   int
 	// Claims is the latest full claim set the implementer returned. It stays in the
 	// task file and is never published.
 	Claims []Claim
@@ -348,6 +354,26 @@ type FullResult struct {
 // or a repository with no full suite to run.
 func (f *FullResult) Covers(head string) bool {
 	return f != nil && (f.Unverified != "" || f.Covered && head != "" && f.Head == head)
+}
+
+// Gap says why the result does not cover head, or "" when it does.
+func (f *FullResult) Gap(head string) string {
+	switch {
+	case f.Covers(head):
+		return ""
+	case f == nil:
+		return "no full-suite result was reported"
+	case !f.Covered:
+		return f.Reason
+	}
+	return fmt.Sprintf("the full result covers %s, and the change moved to %s since", shortSHA(f.Head), shortSHA(head))
+}
+
+func shortSHA(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
 }
 
 // Outcome is the last thing an agent turn (or the runner) reported, kept for show.
@@ -872,6 +898,19 @@ func (r *Record) OpenPending() bool {
 	return r.competingCovers(latest) && latest.Clean
 }
 
+// FinalCheckPending reports a change with a clean competing review that cannot be
+// handed off yet, because no full-suite result covers it. Its next turn is the
+// implementer's final check.
+func (r *Record) FinalCheckPending() bool {
+	d := r.Delegation
+	if d == nil || !d.FullSuiteGate {
+		return false
+	}
+	latest := r.LatestCompeting()
+	head, _ := r.CurrentChange()
+	return latest != nil && latest.Clean && r.competingCovers(latest) && !r.FullResult.Covers(head)
+}
+
 // coversLocal reports whether review read the stored local commit together with its
 // current proposed title and description.
 func (r *Record) coversLocal(review *Review) bool {
@@ -903,7 +942,7 @@ func (r *Record) NextStage() State {
 	switch {
 	case d == nil:
 		return Planning
-	case d.ConflictPending:
+	case d.ConflictPending, r.FinalCheckPending():
 		return Implementing
 	case r.OpenPending():
 		return OpeningPR

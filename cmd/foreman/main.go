@@ -110,6 +110,7 @@ func run(argv []string) int {
 	a := app.App{
 		ReplyToPRFeedback: false,
 		ClaimVerification: true,
+		FullSuiteGate:     true,
 		Store:             store.Markdown{Dir: cfg.TasksDir},
 		GitHub:            github.New(),
 		Linear:            linearClient,

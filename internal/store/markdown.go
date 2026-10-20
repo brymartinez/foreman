@@ -199,6 +199,8 @@ type frontmatter struct {
 	ProposedTitle       string                 `yaml:"proposed_title,omitempty"`
 	ProposedBody        string                 `yaml:"proposed_body,omitempty"`
 	ClaimVerification   bool                   `yaml:"claim_verification,omitempty"`
+	FullSuiteGate       bool                   `yaml:"full_suite_gate,omitempty"`
+	FinalChecks         int                    `yaml:"final_checks,omitempty"`
 	Claims              []task.Claim           `yaml:"claims,omitempty"`
 	PRDDigest           string                 `yaml:"prd_digest,omitempty"`
 	ScopeDigest         string                 `yaml:"scope_digest,omitempty"`
@@ -406,6 +408,8 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 			ProposedTitle:     fm.ProposedTitle,
 			ProposedBody:      fm.ProposedBody,
 			ClaimVerification: fm.ClaimVerification,
+			FullSuiteGate:     fm.FullSuiteGate,
+			FinalChecks:       fm.FinalChecks,
 			Claims:            fm.Claims,
 			PRDDigest:         fm.PRDDigest,
 			ScopeDigest:       fm.ScopeDigest,
@@ -539,6 +543,7 @@ func fromRecord(rec *task.Record) frontmatter {
 		fm.ConflictAttempts, fm.ConflictPending = d.ConflictAttempts, d.ConflictPending
 		fm.ReviewBeforePR, fm.LocalHead, fm.ProposedTitle, fm.ProposedBody = d.ReviewBeforePR, d.LocalHead, d.ProposedTitle, d.ProposedBody
 		fm.ClaimVerification, fm.Claims, fm.PRDDigest = d.ClaimVerification, d.Claims, d.PRDDigest
+		fm.FullSuiteGate, fm.FinalChecks = d.FullSuiteGate, d.FinalChecks
 		fm.ScopeDigest, fm.PlanScopeDigest, fm.PlanDigest = d.ScopeDigest, d.PlanScopeDigest, d.PlanDigest
 	}
 	if s := rec.GitHub; s != nil {

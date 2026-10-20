@@ -70,6 +70,10 @@ type TaskBrief struct {
 	// Claims is set for a task with claim verification. A turn that finishes a change
 	// returns its claims for the reviewers.
 	Claims bool
+	// FullSuite is set for a task with the full-suite gate. The turn tags its checks
+	// and reports the full suite. FinalCheck is set for the final-check turn.
+	FullSuite  bool
+	FinalCheck *FinalCheck
 }
 
 // MergeBrief is the base branch a PR conflicts with and the files that conflict.
@@ -179,6 +183,11 @@ For a multi-part change, complete one coherent, testable part at a time. When th
 The next session receives the commit and nextObjective, not this transcript. Keep nextObjective under 500 characters; the committed code, issue, and posted plan hold the details.
 
 `, finish)
+	}
+	if b.FinalCheck != nil {
+		s.WriteString(FinalCheckMessage(*b.FinalCheck) + "\n")
+	} else if b.FullSuite && !b.Planning {
+		fullSuiteSection(&s)
 	}
 	if b.Claims && !b.Planning {
 		claimsSection(&s)
