@@ -6,7 +6,7 @@ Write four documents before any code. Each is posted on the issue as its own com
 
 1. Start each document with `**Summary.**` and one or two plain sentences. A reader who stops there knows what the document decides.
 2. Write only what the document's job needs. Cut background the issue already gives and long reasons for choices with no real alternative.
-3. Refer to an earlier comment instead of repeating it. Name it ("see the Analysis", "R2 in the PRD") and add only what is new.
+3. Analysis, PRD, and Design may refer to earlier comments instead of repeating them. The implementation plan must stand alone.
 
 ## Analysis
 
@@ -39,7 +39,7 @@ The chosen approach and its meaningful trade-offs.
 
 A short, high-level order of work.
 
-16. Start with the goal in one sentence.
+16. Start with the goal in one sentence. Include every requirement, constraint, and acceptance criterion the implementer and self-reviewer need; they receive this document without the issue, triage, Analysis, PRD, or Design.
 17. Group the work into a few tasks in the order to do them: `### Task N: <component>`. Do not make a task for each file or test.
 18. For each task, name the component, the behavior it adds or changes, and the check that verifies it. Give an exact path or API only when it clarifies a constraint.
 19. Describe the behavior the tests verify, written first. Do not list every test by name.
@@ -47,6 +47,6 @@ A short, high-level order of work.
 
 ## Before you report
 
-21. Check every requirement maps to a task, names match across the four documents, and nothing is left as a placeholder. Fix what you find.
+21. Check every requirement maps to a task, names match across the four documents, and nothing is left as a placeholder or only available through a link to another document. Fix what you find.
 22. Build only what the requirements need.
 23. Follow the writing rules from the implement instructions in every document.

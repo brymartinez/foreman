@@ -153,7 +153,7 @@ func TestLinearRunnerReadsStoredSourceAndPostsFourPlanningComments(t *testing.T)
 			t.Errorf("comment %d = %+v, post %+v", i, rec.Plan[i], tracker.posted[i])
 		}
 	}
-	if len(tracker.reads) < 2 || !strings.Contains(f.claude.prompts[0], "WEB-42") || !strings.Contains(f.claude.prompts[1], tracker.posted[3].URL) {
+	if len(tracker.reads) < 2 || !strings.Contains(f.claude.prompts[0], "WEB-42") || !strings.Contains(f.claude.prompts[1], "### Task 1") || strings.Contains(f.claude.prompts[1], tracker.posted[3].URL) {
 		t.Errorf("reads = %+v, prompts = %+v", tracker.reads, f.claude.prompts)
 	}
 }

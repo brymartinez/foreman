@@ -14,7 +14,7 @@ func knowledgeBrief() TaskBrief {
 	}
 }
 
-func TestPlanningAndImplementationPromptsCarryRepositoryKnowledgeAsFallible(t *testing.T) {
+func TestPlanningAndImplementationPromptsOmitRepositoryKnowledge(t *testing.T) {
 	cases := map[string]func(*TaskBrief){
 		"implementation": func(*TaskBrief) {},
 		"planning":       func(b *TaskBrief) { b.Planning = true },
@@ -26,11 +26,8 @@ func TestPlanningAndImplementationPromptsCarryRepositoryKnowledgeAsFallible(t *t
 			b := knowledgeBrief()
 			edit(&b)
 			p := ImplementationPrompt(b)
-			if !strings.Contains(p, "## Repository knowledge") || !strings.Contains(p, "- Run make lint before pushing.") {
-				t.Fatalf("prompt lacks the knowledge section:\n%s", p)
-			}
-			if !strings.Contains(p, "may be wrong") || !strings.Contains(p, "repository's own instructions, the issue, the developer's decisions") {
-				t.Fatalf("knowledge section does not state its precedence:\n%s", p)
+			if strings.Contains(p, "## Repository knowledge") || strings.Contains(p, "Run make lint before pushing.") {
+				t.Fatalf("prompt leaked triage research context:\n%s", p)
 			}
 		})
 	}

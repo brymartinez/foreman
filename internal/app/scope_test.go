@@ -138,7 +138,7 @@ func TestReviewFindsBehaviorThatFollowsPRButConflictsWithTriage(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := f.store.recs[key]
-	if rec.State != task.NeedsDecision || len(f.codex.reviewed) != 1 || !strings.Contains(f.codex.reviewed[0], "Recent Activity") || len(f.claude.resumed) == 0 || !strings.Contains(f.claude.resumed[0], "Implementation uses recipients") {
-		t.Fatalf("state %s review %d resumed %+v", rec.State, len(f.codex.reviewed), f.claude.resumed)
+	if rec.State != task.NeedsDecision || len(f.codex.reviewed) != 1 || strings.Contains(f.codex.reviewed[0], "Recent Activity") || len(f.claude.prompts) < 3 || !strings.Contains(f.claude.prompts[2], "Implementation uses recipients") {
+		t.Fatalf("state %s review %d prompts %+v", rec.State, len(f.codex.reviewed), f.claude.prompts)
 	}
 }

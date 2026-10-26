@@ -372,17 +372,16 @@ func TestCodexStartReportsTurnFailure(t *testing.T) {
 	}
 }
 
-func TestImplementationPromptCarriesDurableContext(t *testing.T) {
+func TestImplementationPromptUsesOnlyTheCheckedPlan(t *testing.T) {
 	p := ImplementationPrompt(TaskBrief{
 		Key: task.Key{Repo: "testorg/example", Number: 825}, Title: "Provider retries", URL: "https://x/825",
 		IssueBody: "Retry failed requests.", Context: "Preserve the existing 5xx-only retry semantics.",
-		Branch: "agent/825-provider-retries", BaseBranch: "main", Worktree: "/wt/825-provider-retries",
+		PlanText: "R1. Retry only 5xx responses.",
+		Branch:   "agent/825-provider-retries", BaseBranch: "main", Worktree: "/wt/825-provider-retries",
 	})
 	for _, want := range []string{
 		"testorg/example#825",
-		"Retry failed requests.",
-		"authoritative",
-		"Preserve the existing 5xx-only retry semantics.",
+		"R1. Retry only 5xx responses.",
 		"/wt/825-provider-retries on branch agent/825-provider-retries, created from origin/main",
 		"git push -u origin agent/825-provider-retries",
 		"gh pr create --base main --head agent/825-provider-retries",
@@ -396,6 +395,11 @@ func TestImplementationPromptCarriesDurableContext(t *testing.T) {
 			t.Errorf("prompt missing %q", want)
 		}
 	}
+	for _, excluded := range []string{"Retry failed requests.", "Preserve the existing 5xx-only retry semantics."} {
+		if strings.Contains(p, excluded) {
+			t.Errorf("implementation prompt leaked %q", excluded)
+		}
+	}
 	if strings.Contains(ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 1}}), "## Implementation context") {
 		t.Error("context section rendered without context")
 	}
@@ -403,6 +407,26 @@ func TestImplementationPromptCarriesDurableContext(t *testing.T) {
 	for _, rule := range []string{"gh issue view", "Commit work in progress", "earlier turn"} {
 		if strings.Contains(p, rule) {
 			t.Errorf("prompt hard-codes the stage-file rule %q", rule)
+		}
+	}
+}
+
+func TestCorrectionPromptUsesOnlyLatestFindingsAsTaskContext(t *testing.T) {
+	p := ImplementationPrompt(TaskBrief{
+		Key: task.Key{Repo: "testorg/example", Number: 825}, Correction: true,
+		IssueBody: "ISSUE-SECRET", ConfirmedScope: "TRIAGE-SECRET", PlanText: "PLAN-SECRET",
+		Context: "CONTEXT-SECRET", Knowledge: "KNOWLEDGE-SECRET",
+		OpenFindings: []task.Finding{{Severity: "blocking", File: "retry.go", Line: 40, Summary: "429 is not retried", Detail: "Handle 429 too."}},
+		Branch:       "feat/825", BaseBranch: "main", Worktree: "/wt",
+	})
+	for _, want := range []string{"## Findings to correct", "429 is not retried", "Handle 429 too.", "return blocked"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("correction prompt missing %q", want)
+		}
+	}
+	for _, leaked := range []string{"ISSUE-SECRET", "TRIAGE-SECRET", "PLAN-SECRET", "CONTEXT-SECRET", "KNOWLEDGE-SECRET"} {
+		if strings.Contains(p, leaked) {
+			t.Errorf("correction prompt leaked %q", leaked)
 		}
 	}
 }
@@ -452,28 +476,23 @@ func TestPlanningPromptWritesDocumentsOnly(t *testing.T) {
 			t.Errorf("planning prompt missing %q", want)
 		}
 	}
-	plan := []task.PlanComment{{Doc: task.Analysis, URL: "https://x/1"}, {Doc: task.ImplementationPlan, URL: "https://x/4"}}
-	p = ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}, Plan: plan})
-	if strings.Contains(p, "## Plan first") || strings.Contains(p, `"planned"`) || !strings.Contains(p, "## The plan") || !strings.Contains(p, "- Implementation plan: https://x/4") {
+	p = ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}, PlanText: "R1. Retry 5xx."})
+	if strings.Contains(p, "## Plan first") || strings.Contains(p, `"planned"`) || !strings.Contains(p, "## Implementation plan") || !strings.Contains(p, "R1. Retry 5xx.") {
 		t.Errorf("a turn after the plan must follow it, not write it:\n%s", p)
 	}
 }
 
-func TestPlanningPromptCarriesDocumentsAlreadyOnTheIssue(t *testing.T) {
-	existing := map[task.PlanDoc]string{task.Analysis: "Retries 5xx only today.", task.PRD: "R1. Retry 5xx."}
-	p := ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}, Planning: true, ExistingPlans: existing})
-	for _, want := range []string{"## Documents already on the issue", "### Analysis\n\nRetries 5xx only today.", "### PRD\n\nR1. Retry 5xx.", "empty string", "Write every missing document: design, plan."} {
-		if !strings.Contains(p, want) {
-			t.Errorf("planning prompt missing %q:\n%s", want, p)
+func TestPlanningPromptOmitsDocumentsAlreadyOnTheIssue(t *testing.T) {
+	p := ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}, Planning: true})
+	for _, leaked := range []string{"## Documents already on the issue", "Retries 5xx only today.", "R1. Retry 5xx."} {
+		if strings.Contains(p, leaked) {
+			t.Errorf("planning prompt leaked %q:\n%s", leaked, p)
 		}
-	}
-	if p = ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}, Planning: true}); strings.Contains(p, "already on the issue") {
-		t.Errorf("a plan from scratch must not mention existing documents:\n%s", p)
 	}
 }
 
 func TestPromptIncludesAnsweredDecisions(t *testing.T) {
-	p := ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 1}, Decisions: []task.Decision{
+	p := ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 1}, Planning: true, Decisions: []task.Decision{
 		{Question: task.Question{Issue: "Retry 4xx?"}, Answer: "A. 5xx only"},
 		{Question: task.Question{Issue: "Unanswered?"}},
 	}})
@@ -546,10 +565,10 @@ func TestFindingsMessageCarriesEachFinding(t *testing.T) {
 }
 
 func TestImplementationPromptStageInstructions(t *testing.T) {
-	p := ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 1}, StageInstructions: "Write the failing test first.", Context: "Keep 5xx-only."})
-	stage, ctx := strings.Index(p, "## Developer workflow instructions"), strings.Index(p, "## Implementation context")
-	if stage < 0 || ctx < stage || !strings.Contains(p, "Write the failing test first.") {
-		t.Errorf("stage instructions must appear, before the task context:\n%s", p)
+	p := ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 1}, StageInstructions: "Write the failing test first.", PlanText: "Keep 5xx-only."})
+	stage, plan := strings.Index(p, "## Developer workflow instructions"), strings.Index(p, "## Implementation plan")
+	if stage < 0 || plan < stage || !strings.Contains(p, "Write the failing test first.") {
+		t.Errorf("stage instructions must appear before the plan:\n%s", p)
 	}
 	if strings.Contains(ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 1}, StageInstructions: " \n"}), "## Developer workflow instructions") {
 		t.Error("blank instructions must add no section")
@@ -668,7 +687,7 @@ func TestResumePromptsAskForSilentWork(t *testing.T) {
 }
 
 func TestReviewPromptAsksForSilentWork(t *testing.T) {
-	p := ReviewPrompt(ReviewBrief{Key: task.Key{Repo: "a/b", Number: 7}, PR: 912, PRBody: "Fix it.", Branch: "feat/7-x", BaseBranch: "main"})
+	p := ReviewPrompt(ReviewBrief{Key: task.Key{Repo: "a/b", Number: 7}, Branch: "feat/7-x", BaseBranch: "main"})
 	if !strings.Contains(p, "## Working silently") || !strings.Contains(p, "review findings") {
 		t.Errorf("review prompt lacks the silent work section:\n%s", p)
 	}
@@ -684,7 +703,7 @@ func TestSilentWorkRuleIsSharedByBothPrompts(t *testing.T) {
 	if !strings.Contains(ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}}), section) {
 		t.Error("implementation prompt does not carry the shared section")
 	}
-	if !strings.Contains(ReviewPrompt(ReviewBrief{Key: task.Key{Repo: "a/b", Number: 7}, PR: 912}), section) {
+	if !strings.Contains(ReviewPrompt(ReviewBrief{Key: task.Key{Repo: "a/b", Number: 7}}), section) {
 		t.Error("review prompt does not carry the shared section")
 	}
 }

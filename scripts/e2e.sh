@@ -247,7 +247,7 @@ if [[ " $* " == *" --no-session-persistence "* ]]; then
 fi
 # A planning turn starts with "## Plan first", or resumes one with its answers.
 planning=
-if [[ " $* " == *" --resume "* ]]; then
+if [[ " $* " == *" --resume "* || "$2" == *"You are correcting the latest review"* || "$2" == *"## Final full check"* || "$2" == *"Push it and open the pull request now"* ]]; then
 	if [[ "$2" == *"foreman posted your documents"* ]]; then
 		echo "claude implement" >>"$E2E_STATE/agents.log"
 		printf '%s' "$2" >"$E2E_STATE/plan-posted-prompt.txt"
@@ -270,7 +270,7 @@ if [[ " $* " == *" --resume "* ]]; then
 			exit 0
 		fi
 		# review_before_pr: fix findings locally, or push the reviewed commit and open the PR.
-		if [[ "$2" == *"of your local change by"* ]]; then
+		if [[ "$2" == *"of your local change by"* || "$2" == *"You are correcting the latest review"* ]]; then
 			echo "claude local-fix" >>"$E2E_STATE/agents.log"
 			echo "// retry 429" >>widgets.go
 			git commit -qam "fix: retry 429"
@@ -494,18 +494,18 @@ scenario_runner() {
 	check "the clean review starts the learner" eventually 10 test -f "$sandbox/knowledge/acme/widgets/evaluations/42.yaml"
 	check "the learner evaluates with the implementer's agent" contains "$state/evaluations.log" "claude evaluate"
 	check "the learner logs to learning.log" contains "$sandbox/logs/learning.log" "learn: evaluated acme/widgets task 42"
-	check "the prompt carries the implement stage file" contains "$state/prompt.txt" "Add or update tests when behavior changes."
+	check "planning carries the plan stage file" contains "$state/prompt.txt" "Write four documents before any code."
 	check "the first turn plans" contains "$state/prompt.txt" "## Plan first"
 	check "the four documents are posted on the issue" test "$(grep -c 'api --method POST repos/acme/widgets/issues/42/comments' "$state/gh.log")" = 4
 	check "the PRD comment has its heading" contains "$state/comment-3002.md" "## PRD"
-	check "a fresh session implements the posted plan" contains "$state/plan-posted-prompt.txt" "- Implementation plan: https://github.com/acme/widgets/issues/42#issuecomment-3004"
+	check "a fresh session implements the posted plan text" contains "$state/plan-posted-prompt.txt" "### Task 1: retries"
 	check "planning uses its Claude model" contains "$state/models.log" "claude model=sonnet"
 	check "implementation uses its Claude model" contains "$state/models.log" "claude model=opus"
 	check "review uses its Codex model" contains "$state/models.log" "codex model=gpt-6-sol"
 	check "review uses medium Codex effort" contains "$state/models.log" 'codex model_reasoning_effort="medium"'
-	check "the review carries the PR description" contains "$state/review-prompt.txt" "> Retry 5xx only."
+	check "the review omits the PR description" bash -c "! grep -qF '> Retry 5xx only.' '$state/review-prompt.txt'"
 	check "the implementer self-reviews before the competing review" bash -c "grep -E '^(claude|codex) review' '$state/agents.log' | tail -2 | tr '\n' ' ' | grep -qx 'claude review codex review '"
-	check "the review carries the issue description as triage scope" contains "$state/review-prompt.txt" "do it"
+	check "the review omits the issue description" bash -c "! grep -qF 'do it' '$state/review-prompt.txt'"
 	check "the review carries the PRD" contains "$state/review-prompt.txt" "> R1. Retry 5xx responses."
 	check "the review carries the claims to test" contains "$state/review-prompt.txt" "the client retries 5xx responses"
 	check "the task file holds the claims" contains "$sandbox/tasks/acme-widgets-42.md" "the client retries 5xx responses"
@@ -530,8 +530,8 @@ scenario_review_before_pr() {
 	check "the findings were fixed locally" contains "$state/agents.log" "claude local-fix"
 	check "two reviews ran" test "$(grep -c '^codex review' "$state/agents.log")" = 2
 	check "no review saw the branch on origin" bash -c "test \"\$(sort -u '$state/review-origin.log')\" = local"
-	check "the re-review read the updated description" contains "$state/review-prompt.txt" "> Retry 5xx and 429."
-	check "the review read a proposed pull request" contains "$state/review-prompt.txt" "proposed pull request"
+	check "the re-review is directed to the changed diff" contains "$state/review-prompt.txt" "git diff origin/main...HEAD"
+	check "the review omits the proposed description" bash -c "! grep -qF 'Retry 5xx and 429.' '$state/review-prompt.txt'"
 	check "the branch was pushed once" test "$(wc -l <"$state/pushes.log" | tr -d ' ')" = 1
 	head=$(git --git-dir="$sandbox/origin.git" rev-parse "$(sed -n 's/^branch: *//p' "$task_file")")
 	check "the task records the pushed commit as the PR head" contains "$task_file" "pr_head: $head"
@@ -574,7 +574,7 @@ scenario_plan_reuse() {
 	check "the runner reaches a clean review" wait_status "review ✓"
 	check "no planning turn runs" bash -c "! grep -qx 'claude plan' '$state/agents.log'"
 	check "nothing is posted on the issue" bash -c "! grep -qF 'api --method POST repos/acme/widgets/issues/42/comments' '$state/gh.log'"
-	check "the implementation follows the plan on the issue" contains "$state/plan-posted-prompt.txt" "- Implementation plan: https://github.com/acme/widgets/issues/42#issuecomment-2004"
+	check "the implementation follows the plan text on the issue" contains "$state/plan-posted-prompt.txt" "Posted earlier."
 	check "the task records the adopted comments" grep -q 'comment_id: 2002' "$sandbox/tasks/acme-widgets-42.md"
 }
 
@@ -863,7 +863,7 @@ scenario_conflicts() {
 	start 42 >/dev/null
 	check "the merged PR reaches a clean review" wait_status "review ✓"
 	check "the implementer merged once" test "$(turns 'claude merge')" = 1
-	check "the merge took no fix round" test "$(turns 'codex review')" = 1
+	check "the merge took no fix round" eventually 5 bash -c "test \"\$(grep -c '^codex review' '$state/agents.log')\" = 1"
 	local branch head
 	branch=$(git -C "$sandbox/origin.git" for-each-ref --format='%(refname:short)' 'refs/heads/*/42-*')
 	head=$(git -C "$sandbox/origin.git" rev-parse "$branch")
@@ -926,6 +926,7 @@ scenario_reset() {
 	wt=$(sed -n 's/^worktree: *//p' "$file")
 	branch=$(sed -n 's/^branch: *//p' "$file")
 	log=$(ls "$sandbox"/logs/acme-widgets-42.log)
+	check "the first runner finishes before reset" eventually 5 grep -qF "finished" "$log"
 	perl -pi -e 's/^state: .*/state: FAILED/' "$file"
 	echo wip >"$wt/notes.txt"
 	echo '[[{"id":71,"html_url":"https://github.com/acme/widgets/pull/942#issuecomment-71","body":"Only retry idempotent calls.","updated_at":"2026-10-01T10:00:00Z","user":{"login":"brymartinez"}}]]' \
@@ -958,8 +959,8 @@ scenario_reset() {
 	check "a manual start reaches a clean review" wait_status "review ✓"
 	check "the new run continues PR #942" bash -c "grep -q '^pr: 942$' '$file' && grep -q '^prior_pr: 942$' '$file' && ! grep -q '^reset:' '$file'"
 	check "on the PR's branch" grep -q "^branch: $branch\$" "$file"
-	check "a fresh session reads the prior PR" contains "$state/plan-posted-prompt.txt" "Continue updating pull request #942"
-	check "with its comments" contains "$state/plan-posted-prompt.txt" "> Only retry idempotent calls."
+	check "a fresh session receives the checked plan" contains "$state/plan-posted-prompt.txt" "### Task 1: retries"
+	check "without prior PR discussion" bash -c "! grep -qE 'Continue updating pull request #942|Only retry idempotent calls' '$state/plan-posted-prompt.txt'"
 	check "the branch kept the first run's commit" test "$(git --git-dir="$sandbox/origin.git" log --oneline "$branch" | grep -c 'feat: retries')" = 2
 }
 
@@ -1177,8 +1178,8 @@ scenario_learning() {
 	printf '[[{"id":4402,"html_url":"https://github.com/acme/widgets/pull/944#issuecomment-4402","body":"vet runs in CI only; drop it.","updated_at":"2026-10-01T09:00:00Z","user":{"login":"brymartinez"}}]]\n' >"$state/conv-repos-acme-widgets-issues-944-comments.json"
 	start 44 >/dev/null
 	check "the third task reaches a clean review" reviewed 44 20
-	check "its planning prompt carries the learning" contains "$state/prompt.txt" "Run go vet before each commit."
-	check "under the repository knowledge heading" contains "$state/prompt.txt" "## Repository knowledge"
+	check "its planning prompt omits the learning" bash -c "! grep -qF 'Run go vet before each commit.' '$state/prompt.txt'"
+	check "without a repository knowledge section" bash -c "! grep -qF '## Repository knowledge' '$state/prompt.txt'"
 	check "and is evaluated" evaluated acme/widgets 44
 	check "the developer's comment is citable maintainer evidence" eventually 10 grep -q -- '- C1' "$k/evaluations/44.yaml"
 	check "a maintainer contradiction retires the learning" eventually 5 grep -q 'status: retired' "$k/learnings.yaml"

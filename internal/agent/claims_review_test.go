@@ -19,11 +19,12 @@ func TestClaimedReviewPromptCarriesThePRDAndTheClaimsToTest(t *testing.T) {
 	for _, self := range []bool{false, true} {
 		b := claimedReviewBrief()
 		b.Self = self
+		b.Plan = "R1. Retry only 5xx."
 		p := ReviewPrompt(b)
 		for _, want := range []string{"## PRD", "> - AC1. 5xx responses are retried.", "acceptance criteria",
 			"## Implementer's claims", "only 5xx is retried", "retry.go:40, retry_test.go TestRetry", "go test ./... passed",
 			"criterion no claim covers", "counterexample", "not proof", "limitation", "blocking", "nonblocking",
-			"belongs to implementation validation", "Do not run vet, tests, builds", "> Retry 5xx responses only."} {
+			"belongs to implementation validation", "Do not run tests, builds"} {
 			if !strings.Contains(p, want) {
 				t.Errorf("self %t: review prompt lacks %q:\n%s", self, want, p)
 			}
@@ -31,10 +32,13 @@ func TestClaimedReviewPromptCarriesThePRDAndTheClaimsToTest(t *testing.T) {
 		if strings.Contains(p, "only statement of what the change must do") {
 			t.Errorf("self %t: the description is still the only requirements", self)
 		}
+		if strings.Contains(p, "Retry 5xx responses only.") {
+			t.Errorf("self %t: the PR description leaked into review", self)
+		}
 	}
 }
 
-func TestReviewPromptWithoutClaimsKeepsTheDescriptionAsTheOnlyRequirements(t *testing.T) {
+func TestReviewPromptWithoutClaimsOmitsClaimRequirements(t *testing.T) {
 	p := ReviewPrompt(reviewBrief())
 	for _, unwanted := range []string{"## PRD", "## Implementer's claims", "counterexample to each claim"} {
 		if strings.Contains(p, unwanted) {

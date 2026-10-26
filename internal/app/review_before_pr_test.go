@@ -241,7 +241,7 @@ func TestReviewBeforePRReviewsTheLocalCommitThenOpensThePR(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if len(f.codex.reviewed) != 1 || !strings.Contains(f.codex.reviewed[0], "Retry 5xx only.") || !strings.Contains(f.codex.reviewed[0], "proposed pull request") {
+	if len(f.codex.reviewed) != 1 || !strings.Contains(f.codex.reviewed[0], "## Review scope") || strings.Contains(f.codex.reviewed[0], "Retry 5xx only.") {
 		t.Fatalf("reviews = %q", f.codex.reviewed)
 	}
 	if openTurns(f) != 1 {
@@ -271,12 +271,12 @@ func TestReviewBeforePRFixesFindingsLocallyAndOpensWithTheUpdatedDescription(t *
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	fix := f.claude.resumed[0]
+	fix := f.claude.prompts[1]
 	if !strings.Contains(fix, "4xx retried") || !strings.Contains(fix, "review_ready") || strings.Contains(fix, "pr_opened") {
 		t.Fatalf("fix turn = %q", fix)
 	}
-	if len(f.codex.reviewed) != 2 || !strings.Contains(f.codex.reviewed[1], "never 4xx") {
-		t.Fatalf("the fix was not reviewed with its description: %q", f.codex.reviewed)
+	if len(f.codex.reviewed) != 2 || strings.Contains(f.codex.reviewed[1], "never 4xx") {
+		t.Fatalf("the fix review received a PR description: %q", f.codex.reviewed)
 	}
 	if got.State != task.WaitingForCI || got.Delegation.PR != 912 || got.Delegation.PRHead != "commit2" || openTurns(f) != 1 {
 		t.Fatalf("state %s delegation %+v open turns %d", got.State, got.Delegation, openTurns(f))
@@ -335,8 +335,8 @@ func TestReviewBeforePRAnotherRoundResetsTheLimitAndContinues(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if !strings.Contains(f.claude.resumed[1], "Decision: A.") || !strings.Contains(f.claude.resumed[1], "review_ready") {
-		t.Fatalf("answer turn = %q", f.claude.resumed[1])
+	if len(f.claude.prompts) < 3 || !strings.Contains(f.claude.prompts[2], "Answer: A.") || !strings.Contains(f.claude.prompts[2], "review_ready") {
+		t.Fatalf("answer turns = %q", f.claude.prompts)
 	}
 	if got.State != task.WaitingForCI || got.Delegation.PR != 912 || got.Delegation.PRHead != "commit3" || openTurns(f) != 1 {
 		t.Fatalf("state %s delegation %+v", got.State, got.Delegation)
@@ -368,8 +368,8 @@ func TestReviewBeforePRFreeTextAnswerReachesTheImplementer(t *testing.T) {
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(f.claude.resumed[1], "Keep 4xx retries; fix only the logging") {
-		t.Fatalf("answer turn = %q", f.claude.resumed[1])
+	if len(f.claude.prompts) < 3 || !strings.Contains(f.claude.prompts[2], "Keep 4xx retries; fix only the logging") {
+		t.Fatalf("answer turns = %q", f.claude.prompts)
 	}
 	if got := f.store.recs[key]; got.Delegation.PR != 912 {
 		t.Fatalf("state %s pr %d", got.State, got.Delegation.PR)
@@ -553,8 +553,8 @@ func TestReviewBeforePRResumesAnUpdatedDescriptionAtItsReview(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if len(f.codex.reviewed) != 1 || !strings.Contains(f.codex.reviewed[0], "never 4xx") {
-		t.Fatalf("the updated description was not reviewed: %q", f.codex.reviewed)
+	if len(f.codex.reviewed) != 1 || strings.Contains(f.codex.reviewed[0], "never 4xx") {
+		t.Fatalf("the updated description leaked into review: %q", f.codex.reviewed)
 	}
 	if got.Delegation.PR != 912 || got.LatestReview().Proposal != task.ProposalDigest(proposedTitle, updated) {
 		t.Fatalf("pr %d reviews %+v", got.Delegation.PR, got.Reviews)
@@ -620,8 +620,8 @@ func TestReviewBeforePRReviewsAChangedTitleBeforeOpening(t *testing.T) {
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.codex.reviewed) != 1 || !strings.Contains(f.codex.reviewed[0], "feat: retry everything") {
-		t.Fatalf("the new title was not reviewed: %q", f.codex.reviewed)
+	if len(f.codex.reviewed) != 1 || strings.Contains(f.codex.reviewed[0], "feat: retry everything") {
+		t.Fatalf("the new title leaked into review: %q", f.codex.reviewed)
 	}
 	if got := f.store.recs[key]; got.Delegation.PR != 912 {
 		t.Fatalf("state %s pr %d", got.State, got.Delegation.PR)

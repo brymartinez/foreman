@@ -399,7 +399,7 @@ func TestStartAfterResetWithNoPRStartsFromTheIssue(t *testing.T) {
 	}
 }
 
-func TestRunAfterResetPutsThePriorPRInAFreshSession(t *testing.T) {
+func TestRunAfterResetOmitsThePriorPRFromTheFreshSession(t *testing.T) {
 	f := newFixture()
 	resetTask(t, f, "closed")
 	req := startReq(t)
@@ -412,9 +412,9 @@ func TestRunAfterResetPutsThePriorPRInAFreshSession(t *testing.T) {
 	if f.claude.starts != 1 || len(f.claude.resumed) != 0 {
 		t.Fatalf("starts %d resumed %v", f.claude.starts, f.claude.resumed)
 	}
-	for _, want := range []string{"## Prior pull request", "#912", "Retry everything", "closed", "> Retry only 5xx."} {
-		if !strings.Contains(f.claude.prompt, want) {
-			t.Errorf("prompt missing %q", want)
+	for _, excluded := range []string{"## Prior pull request", "#912", "Retry everything", "> Retry only 5xx."} {
+		if strings.Contains(f.claude.prompt, excluded) {
+			t.Errorf("prompt leaked %q", excluded)
 		}
 	}
 }

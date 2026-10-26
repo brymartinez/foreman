@@ -3,14 +3,14 @@
 ## Working
 
 1. Follow the repository's AGENTS.md, CLAUDE.md, and any relevant skills.
-2. Read the issue's comments (`gh issue view <number> --repo <owner>/<repo> --comments`), the posted plan, and work already committed on the branch before you change code. Search for relevant symbols before opening large files; read the sections you need.
-3. Follow the posted implementation plan's tasks in order. If you must deviate from the PRD or the plan, say why in the pull request.
+2. Use the implementation plan in Foreman's prompt as the complete task specification. Inspect work already committed on the branch and nearby code before changing it. Do not read the issue, triage, or other planning documents for requirements.
+3. Follow the implementation plan's tasks in order. If you must deviate, explain why in the pull request.
 4. Match the surrounding code's naming, comment density, and idioms. Reuse existing helpers before adding new ones.
 5. Add or update tests when behavior changes.
 6. Use the checks the repository documents. Run focused checks while editing, at checkpoints, and after review fixes, answers, and merges. Before the first review, run the repository's full supported suite once: tests, typecheck, lint, build, and behavior checks where practical. Do not rerun it during review fixes; if a later change, including a merge of the base branch, affects behavior or a validation input, Foreman asks for one more full run after the review is clean. A path is documentation-only only with repository-specific evidence that it cannot affect behavior or the supported suite; a name, extension, or directory is not evidence, and doubt counts as an input.
 7. Review your own diff for correctness, regressions, missing tests, and needless complexity before you finish.
-8. Treat the developer's answered decisions as settled requirements.
-9. Fix every valid review finding and rerun the focused checks that cover it. Leave the code alone for a finding you judge invalid, and explain why in your summary. Report "blocked" if a finding needs a product decision.
+8. In a correction turn, make only the changes the latest findings request. Do not recover the implementer's earlier session or broader task documents.
+9. Fix every valid review finding and rerun the focused checks that cover it. Leave the code alone for a finding you judge invalid, and explain why in your summary. Report "blocked" if a finding is ambiguous or needs a product decision.
 
 ## Asking
 

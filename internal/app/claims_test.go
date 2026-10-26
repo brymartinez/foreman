@@ -155,8 +155,8 @@ func TestAFixReplacesTheClaimSetAndIsAskedForTheFullSet(t *testing.T) {
 	if task.ClaimsDigest(got.Delegation.Claims) != task.ClaimsDigest(fixed) {
 		t.Fatalf("claims = %+v, want the fix's full set", got.Delegation.Claims)
 	}
-	if len(f.claude.resumed) != 1 || !strings.Contains(f.claude.resumed[0], "full updated set of claims") {
-		t.Fatalf("resumed = %q, want the findings with a request for the full claim set", f.claude.resumed)
+	if len(f.claude.prompts) < 3 || !strings.Contains(f.claude.prompts[2], "## Findings to correct") || !strings.Contains(f.claude.prompts[2], "## Claim") {
+		t.Fatalf("fresh correction prompt = %q", f.claude.prompts)
 	}
 }
 
@@ -206,13 +206,16 @@ func TestBothReviewsReadThePRDAndTheClaims(t *testing.T) {
 		t.Fatalf("state %s reviews %s", got.State, kinds(got))
 	}
 	for name, p := range map[string]string{"self-review": f.claude.reviewed[0], "competing review": f.codex.reviewed[0]} {
-		for _, want := range []string{"## PRD", "> R1. Retry 5xx.", "## Implementer's claims", "the client retries 5xx responses", "retry.go:40, retry_test.go TestRetry5xx", "counterexample", "> Retry 5xx only."} {
+		for _, want := range []string{"## PRD", "> R1. Retry 5xx.", "## Implementer's claims", "the client retries 5xx responses", "retry.go:40, retry_test.go TestRetry5xx", "counterexample"} {
 			if !strings.Contains(p, want) {
 				t.Errorf("%s prompt lacks %q:\n%s", name, want, p)
 			}
 		}
 		if strings.Contains(p, "foreman:prd") {
 			t.Errorf("%s prompt carries the PRD comment's marker", name)
+		}
+		if strings.Contains(p, "Retry 5xx only.") {
+			t.Errorf("%s prompt carries the PR description", name)
 		}
 	}
 	prd, cd := task.Digest("R1. Retry 5xx."), task.ClaimsDigest(retryClaims)

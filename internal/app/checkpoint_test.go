@@ -58,7 +58,7 @@ func TestCheckpointStartsFreshImplementationSessionWithOnlyDurableHandoff(t *tes
 		t.Fatalf("checkpoint usage = %+v", got.Usage)
 	}
 	p := f.claude.prompts[1]
-	for _, want := range []string{"commit1", "Add the dashboard log pager", "https://example.test/plan/plan"} {
+	for _, want := range []string{"commit1", "Add the dashboard log pager", "Posted plan."} {
 		if !strings.Contains(p, want) {
 			t.Errorf("fresh prompt missing %q", want)
 		}

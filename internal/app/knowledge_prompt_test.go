@@ -35,7 +35,7 @@ func knowledgeSection(prompt string) string {
 	return section
 }
 
-func TestPlanningAndImplementationTurnsReceiveOnlyTheTasksRepositoryKnowledge(t *testing.T) {
+func TestPlanningAndImplementationTurnsOmitRepositoryKnowledge(t *testing.T) {
 	f := newFixture()
 	ks := knowledge.Store{Dir: t.TempDir()}
 	f.app.Knowledge = ks
@@ -51,11 +51,8 @@ func TestPlanningAndImplementationTurnsReceiveOnlyTheTasksRepositoryKnowledge(t 
 		t.Fatalf("prompts = %d", len(f.claude.prompts))
 	}
 	for i, p := range f.claude.prompts {
-		if got := knowledgeSection(p); got != "- Run make lint before pushing." {
-			t.Errorf("turn %d knowledge = %q", i, got)
-		}
-		if strings.Contains(p, "legacy billing") {
-			t.Errorf("turn %d carries another repository's knowledge", i)
+		if strings.Contains(p, "make lint") || strings.Contains(p, "legacy billing") {
+			t.Errorf("turn %d carries triage research context", i)
 		}
 	}
 	for _, p := range f.codex.reviewed {
@@ -68,7 +65,7 @@ func TestPlanningAndImplementationTurnsReceiveOnlyTheTasksRepositoryKnowledge(t 
 	}
 }
 
-func TestRepositoryKnowledgeInPromptsStaysWithinEightItemsAndTwoThousandCharacters(t *testing.T) {
+func TestRepositoryKnowledgeStaysOutOfPlanning(t *testing.T) {
 	f := newFixture()
 	ks := knowledge.Store{Dir: t.TempDir()}
 	f.app.Knowledge = ks
@@ -82,16 +79,8 @@ func TestRepositoryKnowledgeInPromptsStaysWithinEightItemsAndTwoThousandCharacte
 	if err := f.run(context.Background(), key, 4242, &strings.Builder{}); err != nil {
 		t.Fatal(err)
 	}
-	got := knowledgeSection(f.claude.prompts[0])
-	items := strings.Count(got, "- Keep the ")
-	if items == 0 || items > 8 {
-		t.Fatalf("items = %d:\n%s", items, got)
-	}
-	// The whole section counts: heading, notice, bullets, and newlines.
-	_, section, _ := strings.Cut(f.claude.prompts[0], "## Repository knowledge")
-	section, _, _ = strings.Cut(section, "\n## ")
-	if n := len("## Repository knowledge" + section); n > 2000 {
-		t.Errorf("knowledge section is %d characters", n)
+	if strings.Contains(f.claude.prompts[0], "Repository knowledge") || strings.Contains(f.claude.prompts[0], "Keep the alpha") {
+		t.Errorf("planner received private repository knowledge:\n%s", f.claude.prompts[0])
 	}
 }
 
@@ -123,9 +112,6 @@ func TestRunsWithoutTheKnowledgeSectionWhenTheStoreIsEmptyOrUnreadable(t *testin
 		}
 		if len(f.claude.prompts) != 1 || strings.Contains(f.claude.prompts[0], "## Repository knowledge") {
 			t.Error("unreadable knowledge must leave the section out and still run the turn")
-		}
-		if !strings.Contains(log.String(), "repository knowledge") {
-			t.Errorf("log does not mention the knowledge read error:\n%s", log.String())
 		}
 	})
 }

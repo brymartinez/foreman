@@ -17,22 +17,19 @@ func priorBrief(cont bool, state string) TaskBrief {
 	}
 }
 
-func TestPromptAfterResetCarriesThePriorPRAsContext(t *testing.T) {
+func TestPromptAfterResetOmitsThePriorPR(t *testing.T) {
 	p := ImplementationPrompt(priorBrief(false, "closed"))
-	for _, want := range []string{"## Prior pull request", "#12", "https://github.com/a/b/pull/12", "Cache the wrong thing", "closed", "> Caches every request.", "dev", "cache.go", "> Only cache GETs.", "Do not reopen it or push to its branch"} {
-		if !strings.Contains(p, want) {
-			t.Errorf("prompt missing %q", want)
+	for _, excluded := range []string{"## Prior pull request", "https://github.com/a/b/pull/12", "Caches every request.", "Only cache GETs."} {
+		if strings.Contains(p, excluded) {
+			t.Errorf("prompt leaked %q", excluded)
 		}
 	}
 }
 
-func TestPromptAfterResetOnAnOpenPRContinuesIt(t *testing.T) {
+func TestPromptAfterResetOnAnOpenPROmitsItsHistory(t *testing.T) {
 	p := ImplementationPrompt(priorBrief(true, "open"))
-	if !strings.Contains(p, "## Prior pull request") || !strings.Contains(p, "Continue updating pull request #12") {
+	if strings.Contains(p, "## Prior pull request") || strings.Contains(p, "Continue updating pull request #12") {
 		t.Errorf("prompt = %s", p)
-	}
-	if strings.Contains(p, "Do not reopen it") {
-		t.Error("an open PR the run continues must not be ruled out")
 	}
 }
 
