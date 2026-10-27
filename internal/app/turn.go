@@ -15,10 +15,10 @@ import (
 // turnRequest is the work an implementer turn resumes with when no answered decision
 // or conflict repair comes first. At most one of findings, feedback, and merge is set.
 type turnRequest struct {
-	existingPlans map[task.PlanDoc]string // planning documents already on the issue
-	findings      *task.Review            // open findings from the latest review
-	feedback      []PRComment             // PR comments to answer
-	merge         *agent.MergeBrief       // a base branch to merge before the next review
+	forcePlan bool              // an open PR needs a planning turn before work resumes
+	findings  *task.Review      // open findings from the latest review
+	feedback  []PRComment       // PR comments to answer
+	merge     *agent.MergeBrief // a base branch to merge before the next review
 	// openBodyFile is set for the turn that pushes a reviewed local commit and opens
 	// its PR. It holds the reviewed description.
 	openBodyFile string

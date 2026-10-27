@@ -50,7 +50,7 @@ func TestDefaultPlanStageKeepsFourDocumentsAndOmitsLineLevelDetail(t *testing.T)
 	plan := readStage(t, "plan.md")
 	for _, want := range []string{
 		"## Analysis", "## PRD", "## Design", "## Implementation plan",
-		"Refer to an earlier comment instead of repeating it",
+		"The implementation plan must stand alone",
 		"No line numbers",
 		"no commit messages",
 		"Do not list every test by name",

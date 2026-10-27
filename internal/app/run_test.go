@@ -48,8 +48,8 @@ func TestReviewLoopCleanFirstRound(t *testing.T) {
 		t.Fatalf("wrong reviewer: codex %d claude %d", len(f.codex.reviewed), len(f.claude.reviewed))
 	}
 	p := f.codex.reviewed[0]
-	if !strings.Contains(p, "pull request #912") || !strings.Contains(p, "> Retry 5xx only.") || strings.Contains(p, "5xx-only retry semantics") || strings.Contains(p, "sid-1") {
-		t.Errorf("review prompt must carry the PR description, no context, and no implementer session:\n%s", p)
+	if !strings.Contains(p, "## Review scope") || strings.Contains(p, "Retry 5xx only.") || strings.Contains(p, "5xx-only retry semantics") || strings.Contains(p, "sid-1") {
+		t.Errorf("competing review must see only the diff as task context:\n%s", p)
 	}
 	if got.Delegation.RunnerPID != 0 || got.LastOutcome.Status != "review_clean" {
 		t.Errorf("pid %d outcome %+v", got.Delegation.RunnerPID, got.LastOutcome)
@@ -70,20 +70,21 @@ func TestReviewLoopFixesFindingsThenReReviews(t *testing.T) {
 	if got.State != task.WaitingForCI || len(cr) != 2 || cr[0].Clean || !cr[1].Clean || cr[1].Round != 3 {
 		t.Fatalf("state %s reviews %+v", got.State, got.Reviews)
 	}
-	if len(f.claude.resumed) != 1 || !strings.Contains(f.claude.resumed[0], "sid-1: Review round 2 of PR #912") || !strings.Contains(f.claude.resumed[0], "retry.go:40") {
-		t.Errorf("implementer not resumed with findings: %q", f.claude.resumed)
+	if len(f.claude.prompts) != 2 || !strings.Contains(f.claude.prompts[1], "## Findings to correct") || !strings.Contains(f.claude.prompts[1], "retry.go:40") {
+		t.Errorf("correction did not start fresh with findings: %q", f.claude.prompts)
 	}
-	if !strings.Contains(f.codex.reviewed[1], "Round 2 (one problem)") {
-		t.Errorf("re-review lacks earlier round:\n%s", f.codex.reviewed[1])
+	if strings.Contains(f.codex.reviewed[1], "Round 2 (one problem)") {
+		t.Errorf("re-review leaked an earlier round:\n%s", f.codex.reviewed[1])
 	}
-	if !strings.Contains(f.codex.reviewed[0], "review_rounds to 3. This is the first review") || !strings.Contains(f.codex.reviewed[1], "This is a re-review") {
-		t.Errorf("reviews must carry review_rounds and say whether they re-review:\n%s", f.codex.reviewed)
+	if !strings.Contains(f.codex.reviewed[0], "Read the complete diff 3 times") || !strings.Contains(f.codex.reviewed[1], "Read the complete diff 3 times") {
+		t.Errorf("reviews must honor review_rounds:\n%s", f.codex.reviewed)
 	}
 }
 
 func TestReviewLoopEscalatesAfterRoundCapAndResumesOnAnswer(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
+	postedPlan(f, f.store.recs[key])
 	f.claude.turn = prTurn("sid-1")
 	f.codex.reviews = []agent.ReviewOutcome{findings("blocking"), findings("blocking"), findings("blocking"), findings("should_fix")}
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
@@ -96,8 +97,8 @@ func TestReviewLoopEscalatesAfterRoundCapAndResumesOnAnswer(t *testing.T) {
 	if got.State != task.NeedsDecision || len(got.CompetingReviews()) != 4 || q == nil || !strings.Contains(q.Question.Issue, "after 3 rounds of fixes") {
 		t.Fatalf("state %s reviews %d pending %+v", got.State, len(got.Reviews), q)
 	}
-	if len(f.claude.resumed) != 3 {
-		t.Errorf("implementer fix turns = %d, want 3", len(f.claude.resumed))
+	if f.claude.starts != 4 {
+		t.Errorf("fresh implementer and correction turns = %d, want 4", f.claude.starts)
 	}
 	if q.Question.Recommendation != "B" || !strings.Contains(q.Question.Context, "[should_fix] 4xx retried") {
 		t.Errorf("question = %+v", q.Question)
@@ -109,7 +110,7 @@ func TestReviewLoopEscalatesAfterRoundCapAndResumesOnAnswer(t *testing.T) {
 	if _, err := f.app.Respond(context.Background(), key, "B"); err != nil {
 		t.Fatal(err)
 	}
-	resumedBefore := len(f.claude.resumed)
+	startsBefore := f.claude.starts
 	if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -117,8 +118,8 @@ func TestReviewLoopEscalatesAfterRoundCapAndResumesOnAnswer(t *testing.T) {
 	if got.State != task.WaitingForCI || !got.LatestReview().Clean || len(got.CompetingReviews()) != 5 {
 		t.Fatalf("after answer: state %s reviews %d", got.State, len(got.Reviews))
 	}
-	if !strings.Contains(f.claude.resumed[resumedBefore], "Decision: B. Leave the code as is") || !strings.Contains(f.claude.resumed[resumedBefore], "Review round 5 of PR #912 requested these changes") {
-		t.Errorf("answer not delivered: %q", f.claude.resumed[resumedBefore:])
+	if f.claude.starts <= startsBefore || !strings.Contains(f.claude.prompts[len(f.claude.prompts)-1], "Answer: B. Leave the code as is") {
+		t.Errorf("answer not delivered to fresh correction turn: %q", f.claude.prompts)
 	}
 	// The reviewer judges the change by the PR description alone, not the developer's
 	// answers to the implementer.
@@ -137,10 +138,10 @@ func TestFixRoundsCapsTheLoopApartFromReviewRounds(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.NeedsDecision || len(got.CompetingReviews()) != 2 || len(f.claude.resumed) != 1 || !strings.Contains(got.Pending().Question.Issue, "after 1 round of fixes") {
+	if got.State != task.NeedsDecision || len(got.CompetingReviews()) != 2 || f.claude.starts != 2 || !strings.Contains(got.Pending().Question.Issue, "after 1 round of fixes") {
 		t.Fatalf("state %s reviews %d", got.State, len(got.Reviews))
 	}
-	if !strings.Contains(f.codex.reviewed[0], "review_rounds to 5.") {
+	if !strings.Contains(f.codex.reviewed[0], "Read the complete diff 5 times") {
 		t.Errorf("review passes must follow review_rounds:\n%s", f.codex.reviewed[0])
 	}
 }
@@ -224,7 +225,7 @@ func TestFreshTurnCarriesOpenFindingsWhenSessionIsGone(t *testing.T) {
 	f.claude.resumeErr = errors.Join(errors.New("gone"), agent.ErrNoSession)
 	f.codex.reviews = []agent.ReviewOutcome{findings("blocking")}
 	f.run(context.Background(), key, 4242, io.Discard)
-	if !strings.Contains(f.claude.prompt, "## Outstanding review findings") || !strings.Contains(f.claude.prompt, "[blocking] 4xx retried (retry.go)") {
+	if !strings.Contains(f.claude.prompt, "## Findings to correct") || !strings.Contains(f.claude.prompt, "[blocking] 4xx retried") {
 		t.Errorf("fresh prompt lacks findings:\n%s", f.claude.prompt)
 	}
 	if got := f.store.recs[key]; got.State != task.WaitingForCI || !got.LatestReview().Clean {
@@ -236,6 +237,7 @@ func TestFreshTurnCarriesOpenFindingsWhenSessionIsGone(t *testing.T) {
 func TestImplementationPromptGetsImplementAndPRInstructionsOnly(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
+	postedPlan(f, f.store.recs[key])
 	f.claude.turn = prTurn("sid-1")
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
@@ -272,6 +274,7 @@ func TestUnreadableStageInstructionsFailTheTask(t *testing.T) {
 func TestReviewPromptGetsOnlyReviewInstructions(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
+	postedPlan(f, f.store.recs[key])
 	f.claude.turn = prTurn("sid-1")
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
@@ -283,12 +286,12 @@ func TestReviewPromptGetsOnlyReviewInstructions(t *testing.T) {
 	if strings.Contains(p, "implement instructions") || strings.Contains(p, "pr instructions") {
 		t.Errorf("review prompt carries another stage's instructions:\n%s", p)
 	}
-	if got := f.stages.calls; len(got) != 5 || got[2] != "/wt/testorg-example/feat/825-provider-retries plan" || got[3] != "/wt/testorg-example/feat/825-provider-retries review" || got[4] != got[3] {
-		t.Errorf("lookups %q; want implement, pr, plan, then review for the self-review and the competing review, all at the worktree root", got)
+	if got := f.stages.calls; len(got) != 4 || got[0] != "/wt/testorg-example/feat/825-provider-retries implement" || got[1] != "/wt/testorg-example/feat/825-provider-retries pr" || got[2] != "/wt/testorg-example/feat/825-provider-retries review" || got[3] != got[2] {
+		t.Errorf("lookups %q; want implement, pr, then two review lookups", got)
 	}
 }
 
-func TestReviewPromptUsesPRBodyAndConfirmedScope(t *testing.T) {
+func TestCompetingReviewPromptOmitsPRBodyAndConfirmedScope(t *testing.T) {
 	f := newFixture()
 	f.gh.prComments = map[int][]PRComment{912: {{Kind: task.IssueComment, ID: 1, Author: "dev", Body: "Also handle 429."}}}
 	key := started(t, f, startReq(t))
@@ -297,9 +300,9 @@ func TestReviewPromptUsesPRBodyAndConfirmedScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := f.codex.reviewed[0]
-	for _, want := range []string{"> Retry 5xx only.", "> Also handle 429.", "## Confirmed triage scope", "> Retry failed requests.", "> Source: https://x/825"} {
-		if !strings.Contains(p, want) {
-			t.Errorf("review prompt missing %q:\n%s", want, p)
+	for _, excluded := range []string{"> Retry 5xx only.", "> Also handle 429.", "## Confirmed triage scope", "> Retry failed requests.", "> Source: https://x/825"} {
+		if strings.Contains(p, excluded) {
+			t.Errorf("review prompt leaked %q:\n%s", excluded, p)
 		}
 	}
 	// Context and the implementer's validation claim remain private to implementation.
@@ -347,8 +350,8 @@ func TestReviewRunsWhenPRCommentsCannotBeRead(t *testing.T) {
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.codex.reviewed) != 1 || !strings.Contains(f.codex.reviewed[0], "could not be loaded (gh: HTTP 502)") {
-		t.Errorf("review must run and name the missing comments: %q", f.codex.reviewed)
+	if len(f.codex.reviewed) != 1 || strings.Contains(f.codex.reviewed[0], "gh: HTTP 502") {
+		t.Errorf("review must run without PR comments: %q", f.codex.reviewed)
 	}
 }
 
@@ -383,6 +386,7 @@ func TestUnreadablePRInstructionsFailBeforeTheImplementerRuns(t *testing.T) {
 	f := newFixture()
 	f.app.Stages = &failingStage{stage: task.StagePR}
 	key := started(t, f, startReq(t))
+	postedPlan(f, f.store.recs[key])
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -506,21 +510,21 @@ func TestPlanIsPostedThenAFreshSessionImplementsIt(t *testing.T) {
 	if len(f.claude.prompts) != 2 || !strings.Contains(f.claude.prompts[0], "## Plan first") || !strings.Contains(f.claude.prompts[0], "plan instructions") {
 		t.Errorf("the first turn must plan: %q", f.claude.prompts)
 	}
-	if f.claude.starts != 2 || len(f.claude.resumed) != 0 || got.Delegation.Implementer.ID != "sid-2" || !strings.Contains(f.claude.prompt, "- Implementation plan: https://github.com/") || !strings.Contains(f.claude.prompt, "implement instructions") || strings.Contains(f.claude.prompt, "## Plan first") {
+	if f.claude.starts != 2 || len(f.claude.resumed) != 0 || got.Delegation.Implementer.ID != "sid-2" || !strings.Contains(f.claude.prompt, "### Task 1") || !strings.Contains(f.claude.prompt, "implement instructions") || strings.Contains(f.claude.prompt, "## Plan first") {
 		t.Errorf("implementation must start fresh with the posted plan and instructions: starts %d resumed %q session %q prompt %q", f.claude.starts, f.claude.resumed, got.Delegation.Implementer.ID, f.claude.prompt)
 	}
 	if !slices.Equal(f.claude.stages, []task.Stage{task.StagePlan, task.StageImplement}) {
 		t.Errorf("implementer stages = %v", f.claude.stages)
 	}
-	if !strings.Contains(f.codex.reviewed[0], "## Checked planning documents") || !strings.Contains(f.codex.reviewed[0], "R1. Retry 5xx.") {
-		t.Errorf("the review must carry the checked plan:\n%s", f.codex.reviewed[0])
+	if !strings.Contains(f.claude.reviewed[0], "## Implementation plan") || !strings.Contains(f.claude.reviewed[0], "### Task 1") || strings.Contains(f.codex.reviewed[0], "### Task 1") {
+		t.Errorf("the self-review needs the plan, competing review does not: self %q competing %q", f.claude.reviewed[0], f.codex.reviewed[0])
 	}
 	if got.Usage.ClaudeCostUSD != 0.5 || !strings.Contains(log.String(), "foreman: posted the PRD: https://") {
 		t.Errorf("usage %+v log %q", got.Usage, log.String())
 	}
 }
 
-func TestReviewFindingsResumeImplementationSessionAfterPlan(t *testing.T) {
+func TestReviewFindingsStartFreshCorrectionSessionAfterPlan(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2"), prTurn("sid-2")}
@@ -528,8 +532,8 @@ func TestReviewFindingsResumeImplementationSessionAfterPlan(t *testing.T) {
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if f.claude.starts != 2 || len(f.claude.resumed) != 1 || !strings.HasPrefix(f.claude.resumed[0], "sid-2: Review round 2 of PR #912") {
-		t.Errorf("review findings must resume the implementation session: starts %d resumed %q", f.claude.starts, f.claude.resumed)
+	if f.claude.starts != 3 || len(f.claude.resumed) != 0 || !strings.Contains(f.claude.prompts[2], "## Findings to correct") {
+		t.Errorf("review findings must start a correction session: starts %d resumed %q", f.claude.starts, f.claude.resumed)
 	}
 	if !slices.Equal(f.claude.stages, []task.Stage{task.StagePlan, task.StageImplement, task.StageImplement}) {
 		t.Errorf("implementer stages = %v", f.claude.stages)
@@ -585,12 +589,14 @@ func TestAnsweredPlanningQuestionResumesThePlanning(t *testing.T) {
 func TestATaskWithAPRSkipsPlanning(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
+	postedPlan(f, f.store.recs[key])
 	f.store.recs[key].Delegation.PR = 912
 	f.claude.turn = prTurn("sid-1")
+	comments := len(f.gh.comments)
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(f.claude.prompt, "## Plan first") || len(f.gh.comments) != 0 {
+	if strings.Contains(f.claude.prompt, "## Plan first") || len(f.gh.comments) != comments {
 		t.Errorf("planned a task that already has a PR")
 	}
 }
@@ -617,11 +623,11 @@ func TestCodexPlansAndClaudeReviewsWithoutThePRD(t *testing.T) {
 	if got.State != task.WaitingForCI || !got.PlanPosted() {
 		t.Fatalf("state %s plan %+v", got.State, got.Plan)
 	}
-	if len(f.codex.prompts) != 2 || !strings.Contains(f.codex.prompts[0], "## Plan first") || !strings.Contains(f.codex.prompt, "- Implementation plan: https://github.com/") || len(f.codex.resumed) != 0 || got.Delegation.Implementer.ID != "th-2" {
+	if len(f.codex.prompts) != 2 || !strings.Contains(f.codex.prompts[0], "## Plan first") || !strings.Contains(f.codex.prompt, "### Task 1") || len(f.codex.resumed) != 0 || got.Delegation.Implementer.ID != "th-2" {
 		t.Errorf("codex must implement in a fresh thread: prompts %q resumed %q session %q", f.codex.prompts, f.codex.resumed, got.Delegation.Implementer.ID)
 	}
-	if len(f.claude.reviewed) != 1 || !strings.Contains(f.claude.reviewed[0], "R1. Retry 5xx.") || !strings.Contains(f.claude.reviewed[0], "> Retry 5xx only.") {
-		t.Errorf("claude's review must carry the PR description and checked plan: %q", f.claude.reviewed)
+	if len(f.claude.reviewed) != 1 || strings.Contains(f.claude.reviewed[0], "R1. Retry 5xx.") || strings.Contains(f.claude.reviewed[0], "> Retry 5xx only.") {
+		t.Errorf("claude's competing review must see only the diff: %q", f.claude.reviewed)
 	}
 }
 

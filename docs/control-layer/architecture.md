@@ -69,18 +69,18 @@ runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR)
   if the verified PR head has no review (crash mid-review, or new commits):
     re-verify the PR, record its head, skip to the review below
   turn = implementer.Start(worktree, prompt)          # later: Resume(session, msg)
-  until every planning document is checked against current scope (or a legacy PR
-  has no plan), the turn plans
+  until every planning document is checked against current scope, the turn plans,
+  including when an open PR already exists
   (PLANNING, through the posting of the four comments; IMPLEMENTING after):
     planned      -> read-only checker must explicitly agree that all four documents
                     match confirmed scope; then post analysis, PRD, design, and plan
                     as four issue comments
                     (edit the earlier comments on a re-plan), record their ids and URLs,
-                    then turn = implementer.Start(new session, posted plan links)
+                    then turn = implementer.Start(new session, checked implementation plan text)
   while implementing before a PR exists, a turn may return checkpoint:
     verify the expected branch, a clean worktree, and a new descendant commit;
     save the commit and one short next objective, then Start a fresh session
-    from the issue, plan links, decisions, committed code, and that objective
+    from the checked implementation plan, committed code, and that objective
     (no prior transcript); after eight checkpoints, fail instead of looping
   switch turn.Outcome.Status
     blocked      -> save each of Questions as a decision, state NEEDS_DECISION, exit
@@ -98,21 +98,19 @@ runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR)
                       read the PRD comment, storing its digest (gone, unmarked, or
                       empty PRD -> FAILED)
                     SELF_REVIEW: self = implementer.Review(disposable read-only session,
-                                              PR description + current triage + checked
-                                              plan + git diff [+ PRD + claims]),
+                                              checked implementation plan + git diff
+                                              [+ PRD + claims]),
                                               until a clean one covers this head and
                                               description [and claims and PRD]
                     self error -> FAILED, exit (never falls back to the competing review)
                     self clean -> the competing review of the same change, in this run
                     ADVERSARIAL_REVIEW: review = reviewer.Review(disposable read-only
-                                             session, PR description + current triage +
-                                             checked plan + PR comments + git diff + earlier competing rounds
-                                             [+ PRD + claims])
+                                             session, git diff [+ PRD + claims])
                     clean    -> record review and the head it covered; WAITING_FOR_CI, exit
                                 (with the full-suite gate and no full result covering
                                 the head: final check first, see below)
-                    findings (either review) -> IMPLEMENTING; implementer.Resume(session,
-                                findings); agent pushes fixes and reports pr_opened
+                    findings (either review) -> IMPLEMENTING; implementer.Start(new session,
+                                latest findings); agent pushes fixes and reports pr_opened
                                 again; re-verify; self-review, then re-review
                     findings after fix_rounds reviewed fixes since the last answer ->
                       competing: NEEDS_DECISION (A: another round, B: accept remaining), exit
@@ -129,10 +127,9 @@ runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR)
                       git merge-tree HEAD origin/<base>
                       conflict -> implementer.Resume(session, merge the base locally, no
                                   push); after two turns still conflicting -> NEEDS_DECISION
-                    self = implementer.Review(proposed description + git diff), as above
-                    review = reviewer.Review(proposed description + git diff +
-                                             earlier competing rounds)
-                    findings -> IMPLEMENTING; implementer.Resume(session, findings); fix,
+                    self = implementer.Review(checked implementation plan + git diff), as above
+                    review = reviewer.Review(git diff [+ PRD + claims])
+                    findings -> IMPLEMENTING; implementer.Start(new session, latest findings); fix,
                                 commit locally,
                                 review_ready again with the updated description;
                                 self-review, then re-review
@@ -478,11 +475,12 @@ the same commit. The commit message records why it changed.
   PR lacks. The branch name
   proposal is skipped, and the run continues that PR. If it is closed or
   merged, the start proposes a new branch and refuses the old one, whose commits are
-  still on GitHub. Either way the delegation stores `prior_pr`, each fresh session's
-  prompt carries that PR's title, state, description, and comments, and the `reset`
+  still on GitHub. Either way the delegation stores `prior_pr` for reconciliation.
+  When the issue has a complete plan, Foreman rechecks and adopts it before the new
+  implementation session, which receives that plan as its task context. The `reset`
   block is cleared. The reset record keeps no plan links, attempts, decisions, or
-  session. A run without an open PR reads the planning comments on the issue again
-  before it plans, as any run does.
+  session. With an open PR and an absent or partial plan, the run plans before reviewing
+  that PR. Every run reads the issue's planning comments before it plans.
 - **Names are chosen once, before worktree creation.** The default branch is
   `<type>/<workName>`, with the type from the title prefix, the labels, then `feat`;
   `task.WorkName` is `<issue>-<slug>` (at most 5 words and 40 characters). A Linear
@@ -544,15 +542,22 @@ the same commit. The commit message records why it changed.
 - **The agent pushes and opens the PR.** Foreman then checks with `gh` that the PR is
   open, in the task's repo, from the task branch, against the task's base, and records
   the verified number and head. A PR the developer retargets keeps its new base.
-- **Resume first, rebuild only when the session is gone.** Answers, findings, and
-  comments resume the recorded session. Only `agent.ErrNoSession` falls back to a fresh
-  turn whose prompt carries the durable state; any other resume error fails the task.
-- **Planning is its own session.** Until the four planning documents are posted, and
-  while there is no PR, the turn plans. The runner, not the agent, posts them as issue
+- **Resume first for answers, rebuild for review findings.** Answers and human PR
+  comments resume the recorded session when one exists. Every set of self-review or
+  competing-review findings clears the implementer session and starts a fresh
+  correction session whose task context is only those findings. Repository access
+  remains available to locate the fix. Only `agent.ErrNoSession` falls back to a fresh
+  turn for a resumable step; any other resume error fails the task.
+- **Planning is its own session.** Until the four planning documents are posted, the
+  turn plans, including for an existing open PR. The runner, not the agent, posts them as issue
   comments with a `<!-- foreman:<doc> desc=<fingerprint> -->` marker and edits them on a
   re-plan. The fingerprint is the first 12 hex digits of the SHA-256 of the trimmed
   issue description. There is no approval gate. Implementation then starts a fresh
-  session, so it doesn't carry the planning context (about 200k tokens on one task).
+  session. Planning receives the issue description and confirmed triage decisions;
+  the implementation session receives the checked implementation plan text, not the
+  planning transcript or the other planning documents. The read-only checker also
+  verifies that the plan alone includes all applicable requirements, constraints,
+  and acceptance criteria from triage.
 - **The issue, not the record, says whether a plan exists.** A task record can lose its
   plan comments (a recreated task, another machine), so before a planning turn the
   runner reads the description and every comment from the task's source. Only a
@@ -561,10 +566,10 @@ the same commit. The commit message records why it changed.
   is changed. A recorded comment that is still marked wins; otherwise the newest marked
   comment per document wins. A recorded comment that lost its marker is left alone and
   its document is posted anew. A complete plan is recorded and the task implements it
-  without posting. A partial plan goes to the planning turn with the documents' text,
-  in the prompt or, for a resumed session, in the resume message; the turn returns an
-  empty document to keep a comment, and the runner edits revised ones and posts only
-  missing ones. After the turn the runner reads each target comment again: an edit
+  without posting. An absent or partial plan goes to the planning turn using only the issue and
+  confirmed triage as supplied task context. Existing document text stays out of the
+  prompt; the runner can still preserve a document returned empty, edit revised ones,
+  and post missing ones. After the turn the runner reads each target comment again: an edit
   whose comment is gone or unmarked becomes a new post, and a kept comment that is
   gone or unmarked fails the task before anything is posted. A document whose fingerprint differs from the current description
   blocks the task with a keep-or-revise decision before any turn. The answer covers
@@ -576,9 +581,9 @@ the same commit. The commit message records why it changed.
   next objective, and reported passing validation. Foreman accepts it only when the
   worktree is clean on the task branch and HEAD advances from the last accepted
   commit. It saves the commit, objective, and usage together, clears the old session,
-  and starts a fresh one. The new prompt includes the title and issue URL, plan links,
-  recorded decisions, developer context and stage instructions, commit, and objective;
-  it omits the issue body and previous transcript. A retry keeps the objective only
+  and starts a fresh one. The new prompt includes the checked implementation plan,
+  stage instructions, commit, and objective; it omits the issue body, triage,
+  other planning documents, and previous transcript. A retry keeps the objective only
   when the worktree still points at the accepted commit. Checkpoints are limited to
   eight per task. Planning, merge repair, and review fixes do not
   checkpoint. Validation remains agent reported; Foreman verifies Git state.
@@ -724,10 +729,10 @@ the same commit. The commit message records why it changed.
   before the competing review: a fresh, disposable, read-only session of the
   implementing agent with its review model, the reviewer budget, and `review_rounds`
   passes. It never resumes the implementer's session or an earlier self-review. Its
-  prompt carries the PR description (or the proposed one), current confirmed triage,
-  checked plan, and diff instructions, but no PR comments or earlier findings. Its
-  findings go to the implementer
-  like any review's. A self-review that errors fails the task; it never falls back to
+  prompt carries the checked implementation plan and diff instructions. With claim
+  verification it also carries the PRD and claims. Findings start a fresh correction
+  session, limited to the latest findings as task context. A self-review that errors
+  fails the task; it never falls back to
   the competing reviewer, which would skip it. Rejected: running the self-review inside
   the implementer's session, which shares the blind spots it is meant to catch.
 - **Review kinds live on the record.** Each review records its kind (`self`, or empty
@@ -745,9 +750,9 @@ the same commit. The commit message records why it changed.
   The gate, PR adoption, reopening, and those feedback paths read competing reviews
   of the current head and description only, so a clean self-review or a review of an
   earlier description never hands a task over.
-- **The competing review stays independent.** Its prompt lists only earlier competing
-  rounds; self-review rounds and findings never reach it. Claims and the PRD reach it
-  as statements to test, never as findings or verdicts.
+- **The competing review stays independent.** Its task context is the file diff;
+  neither earlier rounds nor PR discussion reach it. With claim verification, the
+  PRD and claims reach it as statements to test, never as findings or verdicts.
 - **The reviewer starts as the competing agent** in a disposable session
   (`--no-session-persistence` / `--ephemeral`) that never sees the implementer's
   session. Before each review, a fresh `quota-axi` report can move the review to
@@ -764,11 +769,13 @@ the same commit. The commit message records why it changed.
   behavior. If review permissions alone prevent rerunning it, the reviewer records a
   nonblocking limitation rather than requesting changes. A visible failure, a plausible
   untested failure path, or a concrete defect remains a finding.
-- **Confirmed triage and the checked plan are independent review requirements.** The
-  prompt carries them with source links, the PR description and comments,
-  `git diff origin/<base>...HEAD`, and earlier competing rounds. Ordinary issue
-  discussion and implementation validation add no requirements. A blank description
-  stops the review. A task with claim verification also adds the PRD as acceptance
+- **Confirmed triage is checked before implementation.** Foreman verifies the plan
+  against current triage and blocks a plan that omits a requirement. Self-review then
+  checks the change against that plan; competing review judges the diff independently.
+  Both use `git diff origin/<base>...HEAD` and may inspect surrounding code to verify
+  a concrete defect. A blank PR description still stops the review because Foreman
+  requires a usable PR, although reviewers do not receive its text. A task with claim
+  verification also adds the PRD as acceptance
   criteria and the implementer's claims. When screenshots are requested
   or the agent captured them, the opening agent attaches them in a PR comment after
   the PR exists, without editing the reviewed description. The comment carries the agent
@@ -848,10 +855,10 @@ the same commit. The commit message records why it changed.
 - **An unclean self-review is never accepted.** At the cap after a self-review, the
   options are another round or a stop. Before asking, one diagnosis turn of the
   implementer's agent, with the evaluator's tool-less restrictions and the reviewer
-  budget, reads the open findings and the context the implementer was given: issue,
-  plan documents, context file, answered decisions, PR or proposed description,
-  `AGENTS.md` and `CLAUDE.md`, the implement stage instructions, and the repository
-  knowledge in its prompt. It answers `practice_gap`,
+  budget, reads the open findings and stored evidence for diagnosing a conflict:
+  issue, plan documents, context file, answered decisions, PR or proposed description,
+  `AGENTS.md` and `CLAUDE.md`, the implement stage instructions, and repository
+  knowledge. This diagnostic evidence does not enter a correction prompt. It answers `practice_gap`,
   `conflict`, or `none`. Go keeps a conflict only when every quoted statement appears
   in its named source (whitespace runs compare equal), and otherwise reports none, so
   a model cannot invent one. A verified conflict lists each statement with its source
@@ -1090,15 +1097,11 @@ the same commit. The commit message records why it changed.
   still needs a second task or a maintainer citation.
 - **Time and cost are context, not a score.** The evaluator prompt says so, and says
   CI is not evidence. A long or expensive task is not a failure by itself.
-- **Prompts get a bounded selection.** Planning and implementation turns, including
-  fresh-session fallbacks and checkpoints, carry a `## Repository knowledge` section:
-  at most 8 active learnings and 2000 characters, heading and notice included, from
-  the task's repository, ranked
-  by word overlap with the issue title, body, and labels, then by task count, then by
-  recency. The section says the learnings may be wrong and lose to repository
-  instructions, the issue, decisions, context, and verified facts. Review, selector,
-  conflict, and merge prompts never carry it, so review stays independent. A read
-  error drops the section and logs a line.
+- **Repository knowledge informs triage and diagnosis.** The separate triage skill
+  researches relevant knowledge before publishing decisions. Foreman's diagnostic
+  turn may select up to 8 active learnings and 2000 characters from the task's
+  repository. Planning, implementation, correction, and review prompts do not carry
+  that selection, so their handoff context remains bounded by the stage contract.
 - **Knowledge moves between machines as one Markdown file.** `foreman knowledge
   export owner/repo` writes the rendered active guidance, then a fenced YAML payload
   after a `<!-- foreman-knowledge-payload -->` line: `format: foreman-knowledge/1`,
@@ -1179,7 +1182,8 @@ the same commit. The commit message records why it changed.
   output, a conflict, the lock held, or `--dry-run` writes nothing.
 - **Learning is a side job.** `learning.enabled: false` stops new evaluations, even
   from a learner spawned before the change, because `App.Learn` checks it too;
-  prompts still read the knowledge already stored. `learning.budget_usd` (default
+  triage and fix-limit diagnosis can still read knowledge already stored.
+  `learning.budget_usd` (default
   0.50) caps one Claude evaluation. Codex reports no cost, so its evaluations have no
   cap, like its other turns. Evaluation errors go to `learning.log` and never
   change a task, an alert, or an exit code.

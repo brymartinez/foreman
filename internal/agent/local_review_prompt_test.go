@@ -81,14 +81,14 @@ func TestResumeMessageBeforeReviewEndsWithReviewReady(t *testing.T) {
 	}
 }
 
-func TestReviewPromptForAProposedPRUsesTheProposedDescriptionAndLocalDiff(t *testing.T) {
-	p := ReviewPrompt(ReviewBrief{Key: task.Key{Repo: "a/b", Number: 7}, Proposed: true, PRTitle: "feat: retry 5xx", PRBody: "Retry 5xx only.", Branch: "feat/7", BaseBranch: "main", Passes: 3})
-	for _, want := range []string{"proposed pull request", "Title: feat: retry 5xx", "Retry 5xx only.", "git diff origin/main...HEAD", "not pushed"} {
+func TestReviewPromptForALocalChangeReadsTheDiff(t *testing.T) {
+	p := ReviewPrompt(ReviewBrief{Key: task.Key{Repo: "a/b", Number: 7}, Branch: "feat/7", BaseBranch: "main", Passes: 3})
+	for _, want := range []string{"competing reviewer", "git diff origin/main...HEAD", "Read the complete diff 3 times"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("prompt lacks %q", want)
 		}
 	}
-	for _, unwanted := range []string{"pull request #0", "## Pull request comments"} {
+	for _, unwanted := range []string{"pull request #0", "## Pull request comments", "Title: feat: retry 5xx", "Retry 5xx only."} {
 		if strings.Contains(p, unwanted) {
 			t.Errorf("prompt has %q", unwanted)
 		}

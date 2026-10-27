@@ -41,11 +41,14 @@ type TaskBrief struct {
 	// PlanInstructions is the developer's plan stage for it.
 	Planning         bool
 	PlanInstructions string
-	// ExistingPlans are planning documents a planning turn finds already on the issue,
-	// by document, without their marker and heading.
-	ExistingPlans map[task.PlanDoc]string
 	// Plan is the planning documents already posted on the issue.
 	Plan []task.PlanComment
+	// PlanText is the checked implementation plan, the sole task specification for
+	// implementation and self-review.
+	PlanText string
+	// Correction starts a fresh turn whose only task is the latest review findings.
+	Correction        bool
+	CorrectionAnswers []task.Decision
 	// PriorPR is the pull request of a run the developer reset, or nil.
 	PriorPR *PriorPR
 	// A checkpoint starts a new implementation session from committed work.
@@ -87,6 +90,9 @@ type MergeBrief struct {
 // ImplementationPrompt is the execution contract handed to the implementation agent.
 // It carries everything durable; the agent never depends on a prior conversation.
 func ImplementationPrompt(b TaskBrief) string {
+	if b.Correction {
+		return correctionPrompt(b)
+	}
 	var s strings.Builder
 	if b.Key.Source == task.Linear {
 		fmt.Fprintf(&s, "You are the implementation agent for Linear issue %s in %s. You are working unattended; nobody will answer questions during this turn.\n\n", b.Identifier, b.Key.Repo)
@@ -94,15 +100,15 @@ func ImplementationPrompt(b TaskBrief) string {
 		fmt.Fprintf(&s, "You are the implementation agent for GitHub issue %s#%d. You are working unattended; nobody will answer questions during this turn.\n\n", b.Key.Repo, b.Key.Number)
 	}
 
-	fmt.Fprintf(&s, "## Issue\n\n%s\n%s\n\n", b.Title, b.URL)
-	if b.NextObjective == "" {
+	if b.Planning {
+		fmt.Fprintf(&s, "## Issue\n\n%s\n%s\n\n", b.Title, b.URL)
 		body := strings.TrimSpace(b.IssueBody)
 		if body == "" {
 			body = "(The issue has no description.)"
 		}
 		s.WriteString(body + "\n\n")
 	}
-	if scope := strings.TrimSpace(b.ConfirmedScope); scope != "" {
+	if scope := strings.TrimSpace(b.ConfirmedScope); b.Planning && scope != "" {
 		s.WriteString("## Confirmed triage scope\n\nThis is the maintainer-confirmed scope. Planning documents, implementation, and PR description must agree with it. A later correction overrides an earlier decision on the same point.\n\n")
 		s.WriteString(scope + "\n\n")
 	}
@@ -114,27 +120,12 @@ func ImplementationPrompt(b TaskBrief) string {
 	}
 	if b.Planning {
 		planningSection(&s, b.PlanInstructions)
-		existingPlansSection(&s, b.ExistingPlans)
-	} else if len(b.Plan) > 0 {
-		s.WriteString("## The plan\n\nYour plan for this issue is posted on it:\n\n")
-		writePlanLinks(&s, b.Plan)
-		s.WriteString("\n")
+	} else if b.PlanText != "" {
+		s.WriteString("## Implementation plan\n\nThis checked plan is your complete task specification. Do not read the issue, triage, or other planning documents for requirements.\n\n")
+		s.WriteString(b.PlanText + "\n\n")
 	}
 	if b.NextObjective != "" {
-		fmt.Fprintf(&s, "## Continue from checkpoint\n\nThe branch is clean at commit %s. This is a new session; inspect the committed code and issue only as needed. Your next objective is: %s\n\nDo not reconstruct or request the earlier session transcript.\n\n", b.CheckpointHead, b.NextObjective)
-	}
-
-	if b.Conflict == nil && b.Merge == nil {
-		knowledgeSection(&s, b.Knowledge)
-	}
-
-	if ctx := strings.TrimSpace(b.Context); ctx != "" {
-		s.WriteString("## Implementation context\n\nThis context comes from the developer and is authoritative. Where it conflicts with the issue text, follow it.\n\n")
-		s.WriteString(ctx + "\n\n")
-	}
-
-	if b.PriorPR != nil {
-		priorPRSection(&s, *b.PriorPR)
+		fmt.Fprintf(&s, "## Continue from checkpoint\n\nThe branch is clean at commit %s. This is a new session; inspect the committed code as needed. Your next objective is: %s\n\nDo not reconstruct or request the earlier session transcript.\n\n", b.CheckpointHead, b.NextObjective)
 	}
 
 	if answered := answeredDecisions(b.Decisions); len(answered) > 0 {
@@ -182,7 +173,7 @@ func ImplementationPrompt(b TaskBrief) string {
 
 For a multi-part change, complete one coherent, testable part at a time. When that part is committed and more work remains, end this session with status "checkpoint". Ensure the worktree is clean, report the validation you ran, and set nextObjective to one short, concrete objective for a fresh session. Do not push or open a pull request at a checkpoint. When the whole change is ready, %s.
 
-The next session receives the commit and nextObjective, not this transcript. Keep nextObjective under 500 characters; the committed code, issue, and posted plan hold the details.
+The next session receives the commit, nextObjective, and checked implementation plan, not this transcript. Keep nextObjective under 500 characters; the committed code and plan hold the details.
 
 `, finish)
 	}
@@ -208,7 +199,7 @@ Only change files inside this worktree. Commit your work to %s. Do not switch br
 
 To ask, end your turn with status "blocked" and fill "questions", one entry per decision. Each entry has:
 - issue: the decision needed, as one question
-- context: what the code does today and what the issue says
+- context: what the code does today and what the task specification says
 - options: two or more, each with a short label (A, B, ...) and what it means
 - recommendation: the label of the option you recommend, and nothing else
 - impactIfWrong: what goes wrong if the recommendation is wrong
@@ -222,6 +213,34 @@ Reply with JSON matching the provided schema:
 - "failed" when you cannot complete the task: say why in summary.
 Set nextObjective to null except for "checkpoint". Set fields that do not apply to null, or [] for validation and questions. %s
 `, b.Worktree, b.Branch, b.BaseBranch, b.Branch, openingSection(b), prSection(b.PRInstructions), plannedStatus(b.Planning), finishedStatus(b), checkpointStatus(b), documentsRule(b.Planning))
+	return s.String()
+}
+
+// correctionPrompt starts a new session for one review's findings. The findings
+// are its complete task specification; repository access is for locating fixes.
+func correctionPrompt(b TaskBrief) string {
+	var s strings.Builder
+	fmt.Fprintf(&s, "You are correcting the latest review of %s in a fresh session. Make only the changes requested by the findings below. If a finding is ambiguous or requires another product decision, return blocked. Do not recover earlier agent transcripts, issue discussion, or planning documents.\n\n", b.Key.Repo)
+	s.WriteString("## Findings to correct\n\n")
+	writeFindings(&s, b.OpenFindings)
+	s.WriteString("\n")
+	for _, d := range answeredDecisions(b.CorrectionAnswers) {
+		fmt.Fprintf(&s, "Decision on these findings: %s\nAnswer: %s\n\n", d.Question.Issue, d.Answer)
+	}
+	silentWorkSection(&s)
+	stageSection(&s, b.StageInstructions)
+	testFirstSection(&s)
+	if b.FullSuite {
+		fullSuiteSection(&s, true)
+	}
+	if b.Claims {
+		claimsSection(&s)
+	}
+	fmt.Fprintf(&s, "## Workspace\n\nYou are in %s on branch %s, based on origin/%s. Change only what the findings require, run focused validation, commit, and update the same change.\n\n", b.Worktree, b.Branch, b.BaseBranch)
+	s.WriteString(openingSection(b))
+	s.WriteString(prSection(b.PRInstructions))
+	s.WriteString("\n## When you need a decision\n\nReturn blocked with questions when a finding is ambiguous or needs a product decision. Do not push or open a pull request while blocked.\n\n")
+	fmt.Fprintf(&s, "## Final response\n\nReply with JSON matching the provided schema. Set documents and nextObjective to null. Report validation and any claims required by the task. %s%s\n", finishedStatus(b), "Return blocked or failed when applicable.")
 	return s.String()
 }
 
@@ -273,7 +292,7 @@ func prIssueRule(b TaskBrief) string {
 func planningSection(s *strings.Builder, instructions string) {
 	s.WriteString(`## Plan first
 
-This turn is for planning only. Read the issue, its comments, and the code, then write four Markdown documents: analysis, prd, design, and plan (the implementation plan). foreman posts each one on the issue as its own comment under its own heading, so start each document with its content, not a title. Then foreman starts a fresh session to implement the plan. The sections below on the workspace and the pull request apply to that next turn.
+This turn is for planning only. Use the issue description and confirmed triage supplied above, inspect the code, then write four Markdown documents: analysis, prd, design, and plan (the implementation plan). foreman posts each one on the issue as its own comment under its own heading, so start each document with its content, not a title. Then foreman starts a fresh session with only the checked implementation plan as its task specification. The sections below on the workspace and the pull request apply to that next turn.
 
 Do not change, commit, or push anything in this turn. If writing the documents needs a decision from the developer, report "blocked" with the questions instead.
 
@@ -282,40 +301,6 @@ Do not change, commit, or push anything in this turn. If writing the documents n
 		s.WriteString("The developer's instructions for the documents:\n\n" + text + "\n\n")
 	}
 	planningTestRule(s)
-}
-
-// existingPlansSection gives a planning turn the documents foreman found on the issue.
-// An empty document keeps its comment untouched, so a valid plan is not reposted.
-func existingPlansSection(s *strings.Builder, existing map[task.PlanDoc]string) {
-	if len(existing) == 0 {
-		return
-	}
-	s.WriteString("## Documents already on the issue\n\nThese planning documents are already posted on the issue. Keep a document that is still valid by returning an empty string for it, and foreman leaves its comment as it is. Return the full revised text only for a document that needs revision; foreman edits its comment in place.")
-	var missing []string
-	for _, doc := range task.PlanDocs {
-		if _, ok := existing[doc]; !ok {
-			missing = append(missing, string(doc))
-		}
-	}
-	if len(missing) > 0 {
-		fmt.Fprintf(s, " Write every missing document: %s.", strings.Join(missing, ", "))
-	}
-	s.WriteString("\n\n")
-	for _, doc := range task.PlanDocs {
-		if text, ok := existing[doc]; ok {
-			fmt.Fprintf(s, "### %s\n\n%s\n\n", doc.Title(), strings.TrimSpace(text))
-		}
-	}
-}
-
-// ExistingPlansMessage adds the documents on the issue to a resumed planning turn.
-func ExistingPlansMessage(existing map[task.PlanDoc]string) string {
-	var s strings.Builder
-	if len(existing) > 0 {
-		s.WriteString("\n")
-	}
-	existingPlansSection(&s, existing)
-	return s.String()
 }
 
 // planningTestRule keeps the plan test-first. The plan names behavior, not tests, so it

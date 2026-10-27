@@ -50,6 +50,7 @@ func atSelfLimit(t *testing.T, raw string, diagErr error) (fixture, task.Key, *f
 	diag := &fakeDiagnoser{raw: raw, err: diagErr}
 	f.app.Diagnoser = diag
 	key := started(t, f, startReq(t))
+	postedPlan(f, f.store.recs[key])
 	wt := t.TempDir()
 	os.WriteFile(filepath.Join(wt, "AGENTS.md"), []byte("# Rules\n\n- Never retry a 4xx\n  response.\n"), 0o644)
 	f.store.recs[key].Delegation.Worktree = wt
@@ -156,9 +157,9 @@ func TestAnsweredContextDecisionReachesTheImplementerAndAFreshSelfReviewFollows(
 	if kinds(got) != "self! self! self competing" || got.State != task.WaitingForCI {
 		t.Fatalf("state %s reviews %s", got.State, kinds(got))
 	}
-	last := f.claude.resumed[len(f.claude.resumed)-1]
-	if !strings.Contains(last, "Decision: A.") || !strings.Contains(last, "Retry failed requests.") {
-		t.Errorf("answer turn = %q", last)
+	last := f.claude.prompts[len(f.claude.prompts)-1]
+	if !strings.Contains(last, "Answer: A.") || !strings.Contains(last, "## Findings to correct") {
+		t.Errorf("answer correction turn = %q", last)
 	}
 	if len(diag.inputs) != 1 {
 		t.Errorf("the answered decision was diagnosed again: %d calls", len(diag.inputs))

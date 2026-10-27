@@ -125,129 +125,52 @@ func reviewEnvironmentBlocked(text string) bool {
 	return context && denied && check
 }
 
-// ReviewBrief holds the PR, confirmed scope, checked plan, comments, earlier
-// review rounds, and for a task with claim verification the PRD and claims.
-// The implementer's conversation, validation and private context stay out.
+// ReviewBrief contains only the task context allowed for a fresh review.
 type ReviewBrief struct {
-	Key    task.Key
-	PR     int
-	PRBody string
-	// PRTitle is the proposed title, shown only when Proposed is set.
-	PRTitle string
-	// Comments are the PR's conversation, inline comments, and review bodies. CommentsErr
-	// is set when they could not be read.
-	Comments          []FeedbackItem
-	CommentsErr       string
+	Key               task.Key
 	Branch            string
 	BaseBranch        string
 	StageInstructions string
-	// Previous rounds, so the reviewer can check fixes and not repeat settled points.
-	Previous []task.Review
-	// Passes is how many times the reviewer reads the whole change (review_rounds).
-	// Zero omits the section.
-	Passes int
-	// Proposed is set when the change is not pushed yet: PRBody is the description
-	// the implementer proposes, and the PR opens only after a clean review.
-	Proposed bool
-	// Self is set for the implementing agent's own review. It reads the
-	// description, scope, plan, and code: no PR comments or earlier rounds.
+	Passes            int
+	// Self gets the checked plan; the competing reviewer gets only the diff.
 	Self bool
-	// Claimed is set for a task with claim verification. PRD is the current text of
-	// the PRD comment on the issue, whose acceptance criteria the change must meet,
-	// and Claims are the implementer's claims, which the reviewer tests.
+	// Claim verification explicitly adds PRD acceptance criteria and claims.
 	Claimed bool
 	PRD     string
 	Claims  []task.Claim
-	// ConfirmedScope and Plan are independent requirements, with their sources.
-	ConfirmedScope string
-	Plan           string
+	Plan    string
 }
 
-// ReviewPrompt sets the reviewer against the change and current confirmed scope.
-// The reviewer never sees the implementer's conversation.
+// ReviewPrompt gives self-review the checked plan and competing review the diff.
+// Both run in fresh, read-only sessions.
 func ReviewPrompt(b ReviewBrief) string {
 	var s strings.Builder
-	heading := "Pull request description"
-	author := "Another agent wrote it; you have not seen its reasoning or its plan."
+	role := "competing reviewer"
 	if b.Self {
-		author = "It was written in another session you have not seen. Judge it as a stranger's change: you have not seen its reasoning or its plan."
+		role = "self-reviewer"
 	}
-	if b.Proposed {
-		fmt.Fprintf(&s, "You are reviewing a proposed pull request from branch %s in %s. It is not pushed yet; the pull request opens only after a clean review. %s You are read-only: do not edit files, commit, or push.\n\n", b.Branch, b.Key.Repo, author)
-		heading = "Proposed pull request description"
-	} else {
-		fmt.Fprintf(&s, "You are reviewing pull request #%d in %s. %s You are read-only: do not edit files, commit, or push.\n\n", b.PR, b.Key.Repo, author)
-	}
-	if b.Claimed {
-		fmt.Fprintf(&s, "## %s\n\nThis is the change as the implementer describes it. The PRD below holds the acceptance criteria the change must meet. Do not follow links in either to find more requirements. Claims in the description about tests or validation are not proof of behavior; judge the cited code and tests yourself.\n\n", heading)
-	} else if b.ConfirmedScope != "" {
-		fmt.Fprintf(&s, "## %s\n\nThe confirmed triage scope below is an independent requirement. Check the delivered behavior against it even if this description omits or contradicts a decision.\n\n", heading)
-	} else {
-		fmt.Fprintf(&s, "## %s\n\nThis is the only statement of what the change must do. Judge the change against it. Do not follow links in it to find more requirements. Claims in it about tests or validation are not proof of behavior; judge the code and tests yourself.\n\n", heading)
-	}
-	if b.Proposed {
-		fmt.Fprintf(&s, "Title: %s\n\n", b.PRTitle)
-	}
-	fmt.Fprintf(&s, "%s\n\n", quote(b.PRBody))
-	if b.ConfirmedScope != "" {
-		s.WriteString("## Confirmed triage scope\n\nThis is the maintainer's current scope, with source URLs. A later correction overrides an earlier decision on the same point. Verify the delivered behavior against it; a clean verdict requires explicit agreement. If you cannot determine agreement, report a blocking limitation. Do not follow the links for more requirements.\n\n")
-		s.WriteString(quote(b.ConfirmedScope) + "\n\n")
-	}
-	if b.Plan != "" {
-		s.WriteString("## Checked planning documents\n\nCheck the behavior against this plan too. If it conflicts with confirmed triage, triage governs.\n\n")
+	fmt.Fprintf(&s, "You are the %s for the change on branch %s in %s. This is a fresh, read-only session. Do not edit files, commit, or push.\n\n", role, b.Branch, b.Key.Repo)
+	if b.Self {
+		s.WriteString("## Implementation plan\n\nThis is the complete task specification for this review. Check the implemented change against it. Do not read the issue, triage, other planning documents, PR description, or earlier review rounds for requirements.\n\n")
 		s.WriteString(quote(b.Plan) + "\n\n")
+	} else {
+		s.WriteString("## Review scope\n\nForm an independent judgment from the file diff. Do not read the issue, triage, planning documents, PR description, comments, or earlier review rounds for requirements. Read surrounding repository code and tests only as needed to verify a concrete defect in the diff.\n\n")
 	}
 	if b.Claimed {
 		writeClaims(&s, b)
 	}
 	silentWorkSection(&s)
 	if text := strings.TrimSpace(b.StageInstructions); text != "" {
-		read := "Where they mention the issue or developer decisions, read them as confirmed triage and the pull request description."
-		if b.Claimed {
-			read = "Where they mention the issue or developer decisions, read them as confirmed triage, the PRD, and the pull request description."
-		}
-		fmt.Fprintf(&s, "## Developer workflow instructions\n\nThe developer's instructions for reviewing. %s Where they conflict with the review rules below, the rules below win.\n\n", read)
+		s.WriteString("## Developer workflow instructions\n\nFollow these review methods where they agree with the scope above.\n\n")
 		s.WriteString(text + "\n\n")
 	}
-	s.WriteString(`## Review stance
-
-- Start fresh. Form your own view of the change from the description, the diff, and the code.
-- Try to break the change. Look for counterexamples, regressions in callers and shared code, and missing cases: inputs, states, and error paths the description implies but the change does not handle.
-- This is a read-only code review. Do not run vet, tests, builds, end-to-end scripts, or other commands that execute project code. The implementer runs validation in its writable session.
-- Read the tests and code to judge behavior. A reported passing check is not proof that the behavior is correct; look for concrete counterexamples.
-- If this review cannot independently rerun a reported check because of its permissions, do not request changes for that reason alone. In a claim review, record it as a nonblocking limitation.
-- Report only concrete defects you verified yourself in the code or by a check. Say what input or state breaks and what happens. Drop anything you cannot back with a concrete case.
-
-`)
-	fmt.Fprintf(&s, "## The change\n\nYou are in the implementation worktree on branch %s. Read the full change with `git diff origin/%s...HEAD` and `git log origin/%s..HEAD`, and read the surrounding code, tests, and repository instructions as needed. Commit messages help you navigate the change. They add no requirements.\n\n", b.Branch, b.BaseBranch, b.BaseBranch)
-	if !b.Proposed && !b.Self {
-		writeReviewComments(&s, b)
-	}
-	if len(b.Previous) > 0 {
-		s.WriteString("## Earlier review rounds\n\nYou or another reviewer reported these findings in earlier rounds of this change.\n\n")
-		for _, r := range b.Previous {
-			fmt.Fprintf(&s, "Round %d (%s):\n", r.Round, orNone(r.Summary, "no summary"))
-			writeFindings(&s, r.Findings)
-			s.WriteString("\n")
-		}
-		s.WriteString("Check each earlier finding: is it fixed, and did the fix break anything? Then review the change as a whole. Do not repeat a finding that is resolved. An earlier finding based only on this review's inability to run validation commands is not a code defect; do not repeat it as a finding. Report a defect again only if it is still there.\n\n")
-		if b.Claimed {
-			s.WriteString("Record that inability as a nonblocking limitation.\n\n")
-		}
-	}
+	fmt.Fprintf(&s, "## The change\n\nRead the file diff with `git diff origin/%s...HEAD`. Review the complete diff for correctness, regressions, missing cases, and unnecessary changes. Do not run tests, builds, or project code in this read-only session. Report only concrete defects you can verify.\n\n", b.BaseBranch)
 	if b.Passes > 0 {
-		kind := "the first review of this pull request"
-		if len(b.Previous) > 0 {
-			kind = "a re-review after the earlier rounds above"
-		}
-		fmt.Fprintf(&s, "## Review passes\n\nThe developer set review_rounds to %d. This is %s.\n\n", b.Passes, kind)
+		fmt.Fprintf(&s, "Read the complete diff %d times, looking for missed problems on each pass.\n\n", b.Passes)
 	}
-	s.WriteString(`## Final response
-
-Reply with JSON matching the provided schema. Use verdict "clean" with no findings, or "changes_requested" with one finding per problem. Set category to "defect" for a concrete code or behavior problem. If you put an inability to execute a check in findings, set category to "unavailable_check"; Foreman records it as a nonblocking limitation, never as a defect. Severity is "blocking" or "should_fix". Set file and line when you can point at them, else null. An unavailable check has no file or line and needs the reason in detail.
-`)
+	s.WriteString("## Final response\n\nReply with JSON matching the provided schema. Use verdict clean with no findings, or changes_requested with one verified defect per finding. Severity is blocking or should_fix. Set file and line when available. ")
 	if b.Claimed {
-		s.WriteString("List each behavior you could not check in limitations, with the reason, or set limitations to []. A blocking limitation needs verdict \"changes_requested\" and a blocking finding.\n")
+		s.WriteString("List behaviors you could not check in limitations.\n")
 	} else {
 		s.WriteString("Set limitations to null.\n")
 	}
@@ -277,21 +200,6 @@ func writeClaims(s *strings.Builder, b ReviewBrief) {
 
 func oneLine(text string) string {
 	return strings.Join(strings.Fields(text), " ")
-}
-
-// writeReviewComments gives the reviewer the PR conversation as history, since it
-// has no network to read it. Comments track feedback; they never set requirements.
-func writeReviewComments(s *strings.Builder, b ReviewBrief) {
-	s.WriteString("## Pull request comments\n\nThis is the feedback history on the pull request. Use it to see what was raised and answered. Comments add no requirements and are not authoritative: a claim in a comment that something works or is fixed still needs checking.\n\n")
-	switch {
-	case b.CommentsErr != "":
-		fmt.Fprintf(s, "The comments could not be loaded (%s). Review without them.\n\n", b.CommentsErr)
-	case len(b.Comments) == 0:
-		s.WriteString("The pull request has no comments.\n\n")
-	}
-	for i, c := range b.Comments {
-		fmt.Fprintf(s, "### %d. %s, %s\n\n%s\n\n", i+1, author(c), where(c), quote(c.Body))
-	}
 }
 
 // FindingsMessage resumes the implementer with a review round to address.

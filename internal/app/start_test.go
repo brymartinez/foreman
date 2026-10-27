@@ -666,8 +666,8 @@ func TestRunTaskAppliesOutcome(t *testing.T) {
 			if got.State != c.state || got.Delegation.RunnerPID != 0 || got.Delegation.Implementer.ID != "sid-9" {
 				t.Errorf("state %s pid %d session %+v", got.State, got.Delegation.RunnerPID, got.Delegation.Implementer)
 			}
-			if !strings.Contains(f.claude.prompt, "5xx-only retry semantics") || !strings.Contains(f.claude.prompt, "Retry failed requests.") {
-				t.Error("prompt lacks issue body or context file")
+			if !strings.Contains(f.claude.prompt, "Retry failed requests.") || strings.Contains(f.claude.prompt, "5xx-only retry semantics") {
+				t.Error("planner should receive the issue description without the context file")
 			}
 			if c.check != nil {
 				c.check(t, got)

@@ -27,7 +27,9 @@ func postedPlan(f fixture, rec *task.Record) {
 		id := int64(700 + len(texts))
 		text := "Posted " + string(doc) + "."
 		url := "https://example.test/plan/" + string(doc)
-		f.gh.comments[id] = IssueComment{ID: id, URL: url, Body: planCommentBody(doc, task.DescriptionFingerprint(f.gh.issue.Body), text)}
+		comment := IssueComment{ID: id, URL: url, Body: planCommentBody(doc, task.DescriptionFingerprint(f.gh.issue.Body), text)}
+		f.gh.comments[id] = comment
+		f.gh.issueComments = append(f.gh.issueComments, comment)
 		rec.SetPlanComment(task.PlanComment{Doc: doc, URL: url, CommentID: id})
 		texts[doc] = text
 	}
@@ -58,7 +60,7 @@ func TestCheckpointStartsFreshImplementationSessionWithOnlyDurableHandoff(t *tes
 		t.Fatalf("checkpoint usage = %+v", got.Usage)
 	}
 	p := f.claude.prompts[1]
-	for _, want := range []string{"commit1", "Add the dashboard log pager", "https://example.test/plan/plan"} {
+	for _, want := range []string{"commit1", "Add the dashboard log pager", "Posted plan."} {
 		if !strings.Contains(p, want) {
 			t.Errorf("fresh prompt missing %q", want)
 		}

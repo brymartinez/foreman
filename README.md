@@ -260,9 +260,9 @@ one, Foreman clones or reuses its source checkout under `repositories_dir`, then
 creates the agent worktree under `worktrees_dir`, so you can run `foreman` from any
 directory.
 
-The context file you can type after picking an agent is a Markdown file with extra
-instructions, for example "keep the 5xx-only retry behavior". The agent treats it as
-part of the task.
+The optional context file is available to routing and remains on the task record. It
+is not passed to planning or implementation; put requirements into the issue and
+confirmed triage decisions before delegation.
 
 ### What a start does
 
@@ -294,12 +294,13 @@ part of the task.
    could not. It uses the repository's documented setup and sample data when taking
    screenshots; Foreman does not create sample data. It leaves the PR description as
    written for review.
-4. The implementing agent first reviews its own PR in a fresh, read-only, throwaway
-   session that sees only the PR description and the code. Its findings go back to the
-   implementer's session, and the self-review repeats until it is clean for the
-   current commit and description. Then the other agent reviews the PR in its own
-   read-only, throwaway session, without the self-review's findings. Its findings go
-   back to the implementer too, and each fix gets a new self-review before the next
+4. The implementing agent first reviews its own PR in a fresh, read-only session
+   using the checked implementation plan and the file diff. The other agent reviews
+   the diff in its own fresh, read-only session. When claim verification is enabled,
+   both also receive the PRD and claims. Neither receives the PR description, triage
+   discussion, comments, or prior review rounds as review requirements. Findings
+   start a fresh correction session with only the latest findings as task context.
+   Each fix gets a new self-review before the next
    competing review. The loop repeats until the competing review is clean. A
    self-review that errors fails the task.
    Both reviews read code and tests without running validation commands. The
@@ -340,13 +341,15 @@ are none, the issue description is the confirmed scope. It gives that scope and 
 source links to the planner, checks the documents against it, then posts each as an
 issue comment. Existing plans receive the same check before adoption. A conflict
 pauses for a decision; an unreadable or inconclusive check fails with a reason.
-The implementer then receives the checked plan and scope. Both reviews compare the
-delivered behavior with the current scope and plan, even when the PR description
-omits a decision. A changed scope or plan invalidates earlier checks before handoff.
+The implementation plan must contain every requirement, constraint, and acceptance
+criterion needed without the other documents. Foreman checks that completeness
+against confirmed triage before posting. The implementer receives only that plan as
+task context. Self-review receives the plan and diff; the competing review receives
+the diff. A changed scope or plan invalidates earlier checks before handoff.
 
 The `s` view links the four comments. A task that plans again, for example after a
 failed run, edits the same comments instead of adding new ones. A task that already
-has a PR and no plan continues to review against the confirmed scope.
+has an open PR but no complete plan runs planning before reviewing that PR.
 
 ## Stage instructions
 
@@ -373,8 +376,8 @@ Foreman never reads or changes those files.
   specific rules.
 - The repository's `AGENTS.md` and PR template take precedence over the global
   `pr.md` defaults when they give different title or body rules.
-- The task's context file and your recorded decisions take precedence over stage
-  instructions.
+- The checked implementation plan is the implementer's task specification. Answers
+  to later blocking questions take precedence over stage instructions.
 - Tasks read `.foreman/` from their worktree, so only the version committed on the base
   branch counts.
 - A GitHub issue PR body includes `Closes #N`; a Linear issue PR links its issue URL.
@@ -421,9 +424,9 @@ In the dashboard, Enter on the `NEEDS_DECISION` task shows each waiting question
 turn: the issue, context, options, recommendation, and impact if wrong. You can type
 an option label, write your own answer, or press Enter to take the recommendation. Esc
 leaves the remaining questions waiting. Foreman saves each answer to the task file
-and, once all are answered, resumes
-the same agent session with them. If that session is gone, it starts a fresh turn that includes every
-decision so far. The answer also appears in the PR description.
+and, once all are answered, resumes the current stage's session when one exists.
+After review findings it starts a fresh correction session with the findings and
+your answer. The answer also appears in the PR description.
 
 The implementer and reviewers take turns: every fix is reviewed again. Fixes asked
 for by the self-review and the competing review share one limit (`fix_rounds`). If the
@@ -433,7 +436,7 @@ finding problems, foreman never offers to accept them. It first diagnoses why, t
 asks you to do another round or stop the task:
 
 - a missed generic practice: the findings also go to learning;
-- a conflict in what the implementer was told (issue, plan, context file, your
+- a conflict in the stored task evidence (issue, plan, context file, your
   answered decisions, PR description, `AGENTS.md` or `CLAUDE.md`, the implement stage
   file, repository knowledge): each statement is
   quoted with its source, and you pick which one governs. Foreman shows a conflict only
@@ -545,13 +548,13 @@ so only from a newer task. Learnings are short and generic: foreman drops any wi
 issue or PR numbers, issue keys such as `ABC-12`, commit hashes, URLs, emails, absolute paths, or secret-shaped
 text. Paths inside the repository are kept.
 
-Planning and implementation prompts carry up to 8 active learnings in a section of
-at most 2000 characters, from the task's repository only, under `## Repository knowledge`. The
-prompt says they may be wrong and that the repository's instructions, the issue, and
-your decisions win. Review prompts never carry them.
+The separate triage skill can use repository knowledge while researching an issue.
+Foreman's diagnostic turn at a self-review fix limit can also use up to 8 active
+learnings and 2000 characters from the task's repository. Planning, implementation,
+correction, and review prompts omit that knowledge.
 
-Set `learning.enabled: false` to stop new evaluations. Prompts still use what is
-already learned. To forget a repository's knowledge, delete its directory. To remove
+Set `learning.enabled: false` to stop new evaluations. Triage and fix-limit diagnosis
+can still use what is already learned. To forget a repository's knowledge, delete its directory. To remove
 one learning, delete its entry from `learnings.yaml`. Prompts read that file, and the
 next evaluation rewrites `knowledge.md`.
 

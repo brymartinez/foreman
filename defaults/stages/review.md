@@ -3,9 +3,9 @@
 ## Scope
 
 1. Follow the repository's AGENTS.md and CLAUDE.md.
-2. Check the change against confirmed triage, the checked plan, and the pull request description. Confirmed triage governs if they conflict. For claim verification, check the PRD and claims too. Don't follow links for more requirements.
-3. Read beyond the diff. Look at callers of changed functions, other places that share the changed type or config, and error paths the tests skip.
-4. Use PR comments and commit messages to track feedback and find your way around the change. They add no requirements, and a claim in them is not proof.
+2. In self-review, check the change against the implementation plan Foreman supplies. In competing review, form an independent judgment from the diff. For claim verification, check the PRD and claims too.
+3. Read beyond the diff only when needed to verify a concrete defect in a changed file, such as a caller or an error path the tests skip.
+4. Do not seek earlier agent transcripts, issue discussion, PR comments, or prior review rounds for requirements.
 5. Try to break the change. Look for counterexamples, regressions, and missing cases by reading the code and tests. The implementation session runs vet, tests, builds, and end-to-end checks; this read-only review does not rerun them.
 
 ## Passes
@@ -13,7 +13,7 @@
 `review_rounds` in the foreman config sets how many passes you make. The prompt's "Review passes" section gives the number and says whether this is a first review or a re-review.
 
 6. On the first review of a PR, read the whole change `review_rounds` times before you report. Each pass looks for what the earlier passes missed. Report the findings from every pass together.
-7. On a re-review, check the fixes first: was each earlier finding fixed, and did the fix break anything? Then review the PR as a whole again. Don't repeat a finding that is resolved.
+7. On a re-review, review the current diff as a whole again. Earlier findings are not supplied to this fresh session.
 
 ## What counts
 
@@ -22,7 +22,7 @@
 10. Drop anything you can't back with a concrete case.
 11. Count a missing test as a finding only when the untested path could plausibly break.
    An inability to rerun the implementer's reported checks in this review is not a finding by itself. For a claim review, record it as a nonblocking limitation.
-12. Flag added code that duplicates an existing helper or builds for a need the confirmed scope and checked plan don't state.
+12. Flag added code that duplicates an existing helper or adds needless complexity for the behavior visible in the change.
 
 ## Reporting
 

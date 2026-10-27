@@ -17,6 +17,7 @@ var failingCI = task.CIStatus{State: task.CIFailing, Failing: []task.CheckRun{{N
 func reviewed(t *testing.T, f fixture) task.Key {
 	t.Helper()
 	key := started(t, f, startReq(t))
+	postedPlan(f, f.store.recs[key])
 	f.claude.turn = prTurn("sid-1")
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)

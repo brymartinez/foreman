@@ -100,13 +100,13 @@ func TestMergeTurnDoesNotUseFixRound(t *testing.T) {
 	// Clean before the first review, conflicting before the review of the fix.
 	f.wt.conflicts = [][]string{nil, {"retry.go"}}
 	got := run(t, f, key)
-	if len(f.claude.resumed) != 2 || !strings.Contains(f.claude.resumed[1], "conflicts with the latest origin/main") {
-		t.Fatalf("want a fix turn then a merge turn: %q", f.claude.resumed)
+	if len(f.claude.prompts) != 2 || !strings.Contains(f.claude.prompts[1], "## Findings to correct") || len(f.claude.resumed) != 1 || !strings.Contains(f.claude.resumed[0], "conflicts with the latest origin/main") {
+		t.Fatalf("want a fresh correction then a merge turn: starts %q resumes %q", f.claude.prompts, f.claude.resumed)
 	}
 	if got.State != task.WaitingForCI || len(got.CompetingReviews()) != 2 || !got.LatestReview().Clean || got.ChangeRequestsSinceDecision() != 1 {
 		t.Fatalf("state %s reviews %d change requests %d", got.State, len(got.CompetingReviews()), got.ChangeRequestsSinceDecision())
 	}
-	if !strings.Contains(f.codex.reviewed[1], "review_rounds to 3.") {
+	if !strings.Contains(f.codex.reviewed[1], "Read the complete diff 3 times") {
 		t.Errorf("the review after a merge must use the normal settings:\n%s", f.codex.reviewed[1])
 	}
 }
@@ -114,6 +114,7 @@ func TestMergeTurnDoesNotUseFixRound(t *testing.T) {
 func TestConflictCheckBeforeEachPass(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
+	postedPlan(f, f.store.recs[key])
 	f.claude.turn = prTurn("sid-1")
 	f.codex.reviews = []agent.ReviewOutcome{findings("blocking")}
 	run(t, f, key)
@@ -187,6 +188,7 @@ func TestStillConflictingAfterRetryEscalates(t *testing.T) {
 func TestRespondAfterManualResolutionReviews(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
+	postedPlan(f, f.store.recs[key])
 	f.claude.turn = prTurn("sid-1")
 	f.wt.conflicts = [][]string{{"retry.go"}, {"retry.go"}, {"retry.go"}}
 	run(t, f, key)
@@ -234,6 +236,7 @@ func TestBaseOnlyChangeStartsNoRun(t *testing.T) {
 func TestRetargetedPRIsCheckedAgainstItsNewBase(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
+	postedPlan(f, f.store.recs[key])
 	f.claude.turn = prTurn("sid-1")
 	f.codex.reviewErr = errors.New("killed")
 	run(t, f, key)

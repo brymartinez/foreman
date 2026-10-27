@@ -82,7 +82,7 @@ func TestAFullPlanOnTheGitHubIssueIsAdoptedWithoutPosting(t *testing.T) {
 			t.Errorf("%s = %+v", doc, c)
 		}
 	}
-	if !slices.Equal(f.claude.stages, []task.Stage{task.StageImplement}) || !strings.Contains(f.claude.prompt, "- Implementation plan: https://github.com/x/issues/825#issuecomment-504") {
+	if !slices.Equal(f.claude.stages, []task.Stage{task.StageImplement}) || !strings.Contains(f.claude.prompt, "Posted plan.") || strings.Contains(f.claude.prompt, "issuecomment-504") {
 		t.Errorf("the task must implement the adopted plan: stages %v prompt %q", f.claude.stages, f.claude.prompt)
 	}
 }
@@ -127,8 +127,8 @@ func TestAPartialPlanOnTheGitHubIssueGoesToPlanningAndOnlyMissingDocumentsArePos
 	if f.gh.edits != 1 || len(f.gh.comments) != 4 || f.gh.comments[501].Body != planBody(task.Analysis, "") || !strings.Contains(f.gh.comments[502].Body, "R1. Retry 5xx.") {
 		t.Errorf("edits %d comments %+v", f.gh.edits, f.gh.comments)
 	}
-	if p := f.claude.prompts[0]; !strings.Contains(p, "## Documents already on the issue") || !strings.Contains(p, "### Analysis\n\nPosted analysis.") || !strings.Contains(p, "Write every missing document: design, plan.") {
-		t.Errorf("the planning prompt must carry the found documents:\n%s", p)
+	if p := f.claude.prompts[0]; strings.Contains(p, "## Documents already on the issue") || strings.Contains(p, "Posted analysis.") {
+		t.Errorf("the planning prompt leaked earlier documents:\n%s", p)
 	}
 }
 
@@ -240,8 +240,8 @@ func TestRevisingAConflictingPlanEditsItsCommentsForTheCurrentDescription(t *tes
 	if _, gotFP, _ := task.ParsePlanMarker(f.gh.comments[503].Body); gotFP != fp {
 		t.Errorf("revised design marker fingerprint %q, want %q", gotFP, fp)
 	}
-	if p := f.claude.prompts[0]; !strings.Contains(p, "## Documents already on the issue") || !strings.Contains(p, optionText(revisePlanOption)) {
-		t.Errorf("the planning prompt must carry the documents and the answer:\n%s", p)
+	if p := f.claude.prompts[0]; strings.Contains(p, "## Documents already on the issue") || !strings.Contains(p, optionText(revisePlanOption)) {
+		t.Errorf("the planning prompt must carry the answer without earlier documents:\n%s", p)
 	}
 }
 
@@ -329,7 +329,7 @@ func TestAKeepAnswerForAnEarlierDescriptionAsksAgain(t *testing.T) {
 	}
 }
 
-func TestAResumedPlanningTurnReceivesDocumentsFoundOnTheIssue(t *testing.T) {
+func TestAResumedPlanningTurnOmitsDocumentsFoundOnTheIssue(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	rec := f.store.recs[key]
@@ -340,7 +340,7 @@ func TestAResumedPlanningTurnReceivesDocumentsFoundOnTheIssue(t *testing.T) {
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.claude.resumed) != 1 || !strings.Contains(f.claude.resumed[0], "## Documents already on the issue") || !strings.Contains(f.claude.resumed[0], "### Analysis\n\nPosted analysis.") {
+	if len(f.claude.resumed) != 1 || strings.Contains(f.claude.resumed[0], "## Documents already on the issue") || strings.Contains(f.claude.resumed[0], "Posted analysis.") {
 		t.Fatalf("resumed %q", f.claude.resumed)
 	}
 	if got := f.store.recs[key]; !got.PlanPosted() || got.PlanComment(task.Analysis).CommentID != 501 || f.gh.edits != 0 {

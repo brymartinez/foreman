@@ -30,6 +30,7 @@ func TestReviewRecordsTheHeadItCovered(t *testing.T) {
 func TestRestartAfterAnInterruptedReviewSkipsImplementing(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
+	postedPlan(f, f.store.recs[key])
 	f.claude.turn = prTurn("sid-1")
 	f.codex.reviewErr = errors.New("killed")
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {

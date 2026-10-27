@@ -57,8 +57,8 @@ func TestSelfReviewRunsBeforeTheCompetingReviewOfAPR(t *testing.T) {
 		t.Errorf("self-review budget %v steps %v", f.claude.reviewBudgets, f.claude.steps)
 	}
 	p := f.claude.reviewed[0]
-	if !strings.Contains(p, "> Retry 5xx only.") || !strings.Contains(p, "git diff origin/main...HEAD") || !strings.Contains(p, "review_rounds to 2") {
-		t.Errorf("self-review prompt lacks the description, the diff, or the passes:\n%s", p)
+	if strings.Contains(p, "> Retry 5xx only.") || !strings.Contains(p, "git diff origin/main...HEAD") || !strings.Contains(p, "Read the complete diff 2 times") {
+		t.Errorf("self-review prompt must use the diff and pass count without the PR body:\n%s", p)
 	}
 	for _, leak := range []string{"sid-1", "Pull request comments", "Earlier review rounds"} {
 		if strings.Contains(p, leak) {
@@ -79,8 +79,8 @@ func TestSelfReviewFindingsGoToTheImplementerAndAFreshSelfReviewFollows(t *testi
 	if kinds(got) != "self! self competing" || got.State != task.WaitingForCI {
 		t.Fatalf("state %s reviews %s", got.State, kinds(got))
 	}
-	if len(f.claude.resumed) != 1 || !strings.Contains(f.claude.resumed[0], "no test covers the 4xx path") {
-		t.Errorf("implementer not resumed with the self-review findings: %q", f.claude.resumed)
+	if f.claude.starts != 2 || !strings.Contains(f.claude.prompts[1], "no test covers the 4xx path") {
+		t.Errorf("correction not started fresh with self-review findings: %q", f.claude.prompts)
 	}
 	if len(f.claude.reviewed) != 2 || strings.Contains(f.claude.reviewed[1], "no test covers the 4xx path") {
 		t.Errorf("the second self-review must start fresh, without earlier findings: %q", f.claude.reviewed)
@@ -98,10 +98,12 @@ func TestCompetingFindingsAreFixedThenSelfReviewedBeforeTheNextCompetingReview(t
 	f.codex.reviews = []agent.ReviewOutcome{findings("blocking")}
 	// Each fix pushes a new head, so the change the reviewers read is new.
 	heads := []string{"c0ffee2", "c0ffee3"}
-	f.claude.onResume = func() {
-		pr := f.gh.prs[912]
-		pr.HeadSHA, heads = heads[0], heads[1:]
-		f.gh.prs[912] = pr
+	f.claude.during = func() {
+		if f.claude.starts > 1 {
+			pr := f.gh.prs[912]
+			pr.HeadSHA, heads = heads[0], heads[1:]
+			f.gh.prs[912] = pr
+		}
 	}
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
@@ -111,8 +113,8 @@ func TestCompetingFindingsAreFixedThenSelfReviewedBeforeTheNextCompetingReview(t
 		t.Fatalf("reviews %s", kinds(got))
 	}
 	last := f.codex.reviewed[1]
-	if !strings.Contains(last, "Round 2 (one problem)") || strings.Contains(last, "no test covers the 4xx path") || strings.Contains(last, "own check") {
-		t.Errorf("the competing re-review must carry its own rounds alone:\n%s", last)
+	if strings.Contains(last, "Round 2 (one problem)") || strings.Contains(last, "no test covers the 4xx path") || strings.Contains(last, "own check") {
+		t.Errorf("the competing re-review must start from the diff alone:\n%s", last)
 	}
 }
 
@@ -144,14 +146,15 @@ func TestFixesFromBothReviewersShareTheFixLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.NeedsDecision || kinds(got) != "self! self competing!" || len(f.claude.resumed) != 1 {
-		t.Fatalf("state %s reviews %s fixes %d", got.State, kinds(got), len(f.claude.resumed))
+	if got.State != task.NeedsDecision || kinds(got) != "self! self competing!" || f.claude.starts != 2 {
+		t.Fatalf("state %s reviews %s fresh turns %d", got.State, kinds(got), f.claude.starts)
 	}
 }
 
 func TestRestartAfterACleanSelfReviewGoesStraightToTheCompetingReview(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
+	postedPlan(f, f.store.recs[key])
 	f.claude.turn = prTurn("sid-1")
 	f.codex.reviewErr = errors.New("codex exited 1")
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
@@ -183,6 +186,7 @@ func TestRestartSelfReviewsAgainWhenTheHeadOrDescriptionChanged(t *testing.T) {
 	} {
 		f := newFixture()
 		key := started(t, f, startReq(t))
+		postedPlan(f, f.store.recs[key])
 		f.claude.turn = prTurn("sid-1")
 		f.codex.reviewErr = errors.New("codex exited 1")
 		if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
@@ -227,11 +231,11 @@ func TestLocalChangeIsSelfReviewedBeforeTheCompetingReviewAndThePR(t *testing.T)
 		t.Errorf("local self-review = %+v", self)
 	}
 	p := f.claude.reviewed[0]
-	if !strings.Contains(p, "Proposed pull request description") || !strings.Contains(p, "Title: feat: retry 5xx") || !strings.Contains(p, "## Confirmed triage scope") {
+	if strings.Contains(p, "Proposed pull request description") || strings.Contains(p, "Title: feat: retry 5xx") || strings.Contains(p, "## Confirmed triage scope") || !strings.Contains(p, "## Implementation plan") {
 		t.Errorf("local self-review prompt:\n%s", p)
 	}
-	if !strings.Contains(f.claude.resumed[0], "no test covers the 4xx path") {
-		t.Errorf("local fix turn lacks the self-review findings: %q", f.claude.resumed[0])
+	if !strings.Contains(f.claude.prompts[1], "no test covers the 4xx path") {
+		t.Errorf("local correction turn lacks the self-review findings: %q", f.claude.prompts[1])
 	}
 }
 

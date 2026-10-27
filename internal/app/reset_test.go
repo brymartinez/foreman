@@ -347,6 +347,55 @@ func TestStartAfterResetContinuesAnOpenPRFromItsRemoteBranch(t *testing.T) {
 	}
 }
 
+func TestOpenPRWithoutPlanRunsPlanningBeforeReview(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		docs []task.PlanDoc
+	}{
+		{name: "no documents"},
+		{name: "partial documents", docs: []task.PlanDoc{task.Analysis, task.Design}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture()
+			key := started(t, f, startReq(t))
+			f.store.recs[key].Delegation.PR = 912
+			f.store.recs[key].Delegation.PRURL = f.gh.prs[912].URL
+			if len(tc.docs) > 0 {
+				f.gh.issueComments = githubPlanComments(f, task.DescriptionFingerprint(f.gh.issue.Body), tc.docs...)
+			}
+			f.claude.turn = plannedTurn("sid-plan")
+			if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			rec := f.store.recs[key]
+			if !rec.PlanPosted() {
+				t.Fatalf("plan %+v", rec.Plan)
+			}
+			if !slices.Equal(f.claude.stages, []task.Stage{task.StagePlan}) || !strings.Contains(f.claude.prompt, "## Plan first") {
+				t.Fatalf("implementer stages %v prompt %q", f.claude.stages, f.claude.prompt)
+			}
+			if rec.Delegation.PR != 912 || rec.LatestReview() == nil {
+				t.Fatalf("PR %d review %+v", rec.Delegation.PR, rec.LatestReview())
+			}
+		})
+	}
+}
+
+func TestOpenPRCannotSkipMissingPlanWithPROutcome(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	f.store.recs[key].Delegation.PR = 912
+	f.store.recs[key].Delegation.PRURL = f.gh.prs[912].URL
+	f.claude.turn = prTurn("sid-old")
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	rec := f.store.recs[key]
+	if rec.State != task.Failed || rec.PlanPosted() || len(rec.Reviews) != 0 {
+		t.Fatalf("state %s plan %+v reviews %+v", rec.State, rec.Plan, rec.Reviews)
+	}
+}
+
 func TestStartAfterResetOfAClosedPRUsesANewBranchFromTheBase(t *testing.T) {
 	for _, state := range []string{"closed", "merged"} {
 		t.Run(state, func(t *testing.T) {
@@ -399,7 +448,7 @@ func TestStartAfterResetWithNoPRStartsFromTheIssue(t *testing.T) {
 	}
 }
 
-func TestRunAfterResetPutsThePriorPRInAFreshSession(t *testing.T) {
+func TestRunAfterResetOmitsThePriorPRFromTheFreshSession(t *testing.T) {
 	f := newFixture()
 	resetTask(t, f, "closed")
 	req := startReq(t)
@@ -412,9 +461,9 @@ func TestRunAfterResetPutsThePriorPRInAFreshSession(t *testing.T) {
 	if f.claude.starts != 1 || len(f.claude.resumed) != 0 {
 		t.Fatalf("starts %d resumed %v", f.claude.starts, f.claude.resumed)
 	}
-	for _, want := range []string{"## Prior pull request", "#912", "Retry everything", "closed", "> Retry only 5xx."} {
-		if !strings.Contains(f.claude.prompt, want) {
-			t.Errorf("prompt missing %q", want)
+	for _, excluded := range []string{"## Prior pull request", "#912", "Retry everything", "> Retry only 5xx."} {
+		if strings.Contains(f.claude.prompt, excluded) {
+			t.Errorf("prompt leaked %q", excluded)
 		}
 	}
 }

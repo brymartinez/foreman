@@ -39,7 +39,7 @@ func TestDisabledPRFeedbackDoesNotStartReplyTurnAtHandover(t *testing.T) {
 	if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.claude.resumed) != 0 || f.gh.prCommentReads != 1 {
+	if len(f.claude.resumed) != 0 || f.gh.prCommentReads != 0 {
 		t.Fatalf("resumed turns %d, comment reads %d", len(f.claude.resumed), f.gh.prCommentReads)
 	}
 }
