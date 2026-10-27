@@ -207,8 +207,8 @@ func (r *taskRun) reconcilePlan() (bool, error) {
 		case adopt && !scopeCheck.Clean && len(scopeCheck.Findings) == 0:
 			failTask(cur, "plan agreement with confirmed triage is inconclusive; inspect the planning comments and retry", a.Now())
 		case adopt && !scopeCheck.Clean && strings.HasPrefix(scopeAnswer, "A."):
-			// The developer chose to revise; the next planning turn sees every
-			// existing document and must return corrected text.
+			// The developer chose to revise; the next planning turn writes
+			// corrected documents from the issue and confirmed triage.
 		case adopt && !scopeCheck.Clean && strings.HasPrefix(scopeAnswer, "B."):
 			failTask(cur, "confirmed triage has not changed; correct the triage comment and restart", a.Now())
 		case adopt && !scopeCheck.Clean:

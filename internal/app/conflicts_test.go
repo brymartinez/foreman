@@ -114,6 +114,7 @@ func TestMergeTurnDoesNotUseFixRound(t *testing.T) {
 func TestConflictCheckBeforeEachPass(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
+	postedPlan(f, f.store.recs[key])
 	f.claude.turn = prTurn("sid-1")
 	f.codex.reviews = []agent.ReviewOutcome{findings("blocking")}
 	run(t, f, key)
@@ -187,6 +188,7 @@ func TestStillConflictingAfterRetryEscalates(t *testing.T) {
 func TestRespondAfterManualResolutionReviews(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
+	postedPlan(f, f.store.recs[key])
 	f.claude.turn = prTurn("sid-1")
 	f.wt.conflicts = [][]string{{"retry.go"}, {"retry.go"}, {"retry.go"}}
 	run(t, f, key)
@@ -234,6 +236,7 @@ func TestBaseOnlyChangeStartsNoRun(t *testing.T) {
 func TestRetargetedPRIsCheckedAgainstItsNewBase(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
+	postedPlan(f, f.store.recs[key])
 	f.claude.turn = prTurn("sid-1")
 	f.codex.reviewErr = errors.New("killed")
 	run(t, f, key)

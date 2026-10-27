@@ -84,6 +84,7 @@ func TestReviewLoopFixesFindingsThenReReviews(t *testing.T) {
 func TestReviewLoopEscalatesAfterRoundCapAndResumesOnAnswer(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
+	postedPlan(f, f.store.recs[key])
 	f.claude.turn = prTurn("sid-1")
 	f.codex.reviews = []agent.ReviewOutcome{findings("blocking"), findings("blocking"), findings("blocking"), findings("should_fix")}
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
@@ -588,12 +589,14 @@ func TestAnsweredPlanningQuestionResumesThePlanning(t *testing.T) {
 func TestATaskWithAPRSkipsPlanning(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
+	postedPlan(f, f.store.recs[key])
 	f.store.recs[key].Delegation.PR = 912
 	f.claude.turn = prTurn("sid-1")
+	comments := len(f.gh.comments)
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(f.claude.prompt, "## Plan first") || len(f.gh.comments) != 0 {
+	if strings.Contains(f.claude.prompt, "## Plan first") || len(f.gh.comments) != comments {
 		t.Errorf("planned a task that already has a PR")
 	}
 }

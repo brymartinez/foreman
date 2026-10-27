@@ -27,7 +27,9 @@ func postedPlan(f fixture, rec *task.Record) {
 		id := int64(700 + len(texts))
 		text := "Posted " + string(doc) + "."
 		url := "https://example.test/plan/" + string(doc)
-		f.gh.comments[id] = IssueComment{ID: id, URL: url, Body: planCommentBody(doc, task.DescriptionFingerprint(f.gh.issue.Body), text)}
+		comment := IssueComment{ID: id, URL: url, Body: planCommentBody(doc, task.DescriptionFingerprint(f.gh.issue.Body), text)}
+		f.gh.comments[id] = comment
+		f.gh.issueComments = append(f.gh.issueComments, comment)
 		rec.SetPlanComment(task.PlanComment{Doc: doc, URL: url, CommentID: id})
 		texts[doc] = text
 	}

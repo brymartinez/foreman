@@ -69,8 +69,8 @@ runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR)
   if the verified PR head has no review (crash mid-review, or new commits):
     re-verify the PR, record its head, skip to the review below
   turn = implementer.Start(worktree, prompt)          # later: Resume(session, msg)
-  until every planning document is checked against current scope (or a legacy PR
-  has no plan), the turn plans
+  until every planning document is checked against current scope, the turn plans,
+  including when an open PR already exists
   (PLANNING, through the posting of the four comments; IMPLEMENTING after):
     planned      -> read-only checker must explicitly agree that all four documents
                     match confirmed scope; then post analysis, PRD, design, and plan
@@ -479,8 +479,8 @@ the same commit. The commit message records why it changed.
   When the issue has a complete plan, Foreman rechecks and adopts it before the new
   implementation session, which receives that plan as its task context. The `reset`
   block is cleared. The reset record keeps no plan links, attempts, decisions, or
-  session. A run without an open PR reads the planning comments on the issue again
-  before it plans, as any run does.
+  session. With an open PR and an absent or partial plan, the run plans before reviewing
+  that PR. Every run reads the issue's planning comments before it plans.
 - **Names are chosen once, before worktree creation.** The default branch is
   `<type>/<workName>`, with the type from the title prefix, the labels, then `feat`;
   `task.WorkName` is `<issue>-<slug>` (at most 5 words and 40 characters). A Linear
@@ -548,8 +548,8 @@ the same commit. The commit message records why it changed.
   correction session whose task context is only those findings. Repository access
   remains available to locate the fix. Only `agent.ErrNoSession` falls back to a fresh
   turn for a resumable step; any other resume error fails the task.
-- **Planning is its own session.** Until the four planning documents are posted, and
-  while there is no PR, the turn plans. The runner, not the agent, posts them as issue
+- **Planning is its own session.** Until the four planning documents are posted, the
+  turn plans, including for an existing open PR. The runner, not the agent, posts them as issue
   comments with a `<!-- foreman:<doc> desc=<fingerprint> -->` marker and edits them on a
   re-plan. The fingerprint is the first 12 hex digits of the SHA-256 of the trimmed
   issue description. There is no approval gate. Implementation then starts a fresh
@@ -566,7 +566,7 @@ the same commit. The commit message records why it changed.
   is changed. A recorded comment that is still marked wins; otherwise the newest marked
   comment per document wins. A recorded comment that lost its marker is left alone and
   its document is posted anew. A complete plan is recorded and the task implements it
-  without posting. A partial plan goes to the planning turn using only the issue and
+  without posting. An absent or partial plan goes to the planning turn using only the issue and
   confirmed triage as supplied task context. Existing document text stays out of the
   prompt; the runner can still preserve a document returned empty, edit revised ones,
   and post missing ones. After the turn the runner reads each target comment again: an edit

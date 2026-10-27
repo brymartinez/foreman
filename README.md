@@ -349,7 +349,7 @@ the diff. A changed scope or plan invalidates earlier checks before handoff.
 
 The `s` view links the four comments. A task that plans again, for example after a
 failed run, edits the same comments instead of adding new ones. A task that already
-has a PR and no plan continues to review against the confirmed scope.
+has an open PR but no complete plan runs planning before reviewing that PR.
 
 ## Stage instructions
 

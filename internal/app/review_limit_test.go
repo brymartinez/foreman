@@ -50,6 +50,7 @@ func atSelfLimit(t *testing.T, raw string, diagErr error) (fixture, task.Key, *f
 	diag := &fakeDiagnoser{raw: raw, err: diagErr}
 	f.app.Diagnoser = diag
 	key := started(t, f, startReq(t))
+	postedPlan(f, f.store.recs[key])
 	wt := t.TempDir()
 	os.WriteFile(filepath.Join(wt, "AGENTS.md"), []byte("# Rules\n\n- Never retry a 4xx\n  response.\n"), 0o644)
 	f.store.recs[key].Delegation.Worktree = wt

@@ -94,7 +94,8 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, token string, l
 		}))
 		return err
 	}
-	r := &taskRun{a: a, ctx: ctx, final: final, log: log, rec: rec, feedback: feedback}
+	r := &taskRun{a: a, ctx: ctx, final: final, log: log, rec: rec, feedback: feedback,
+		forcePlan: rec.Delegation.PR != 0 && !rec.PlanPosted()}
 	if err := r.loop(firstStep(rec, len(feedback))); err != nil {
 		return err
 	}
@@ -158,6 +159,7 @@ type taskRun struct {
 	rounds     int          // how many times this run has answered comments
 	plan       issuePlan    // the plan on the issue, read before a planning turn
 	scope      confirmedScope
+	forcePlan  bool // an open PR entered this run without planning documents
 	// selfPassed is set when this run's self-review just passed the change, so the
 	// competing review of the same change follows without a second conflict check.
 	selfPassed bool
@@ -196,14 +198,6 @@ func (r *taskRun) loop(next step) error {
 	return nil
 }
 
-func (r *taskRun) failBoundary(reason string) (step, bool, error) {
-	rec, err := r.a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
-		failTask(cur, reason, r.a.Now())
-	}))
-	r.rec = rec
-	return stepDone, true, err
-}
-
 // scopeBoundary re-reads triage before every stage. A changed scope invalidates
 // prior plan and code reviews; a removed label or unreadable source stops the run.
 func (r *taskRun) scopeBoundary(next step) (step, bool, error) {
@@ -229,37 +223,6 @@ func (r *taskRun) scopeBoundary(next step) (step, bool, error) {
 		}
 		r.rec = rec
 	}
-	// A reset keeps the PR but discards local plan links. Recover a complete plan
-	// from the issue before a new implementation or review session starts.
-	if !r.rec.PlanPosted() && r.rec.Delegation.PR != 0 {
-		plan, err := r.a.readIssuePlan(r.ctx, r.rec)
-		if err != nil {
-			return r.failBoundary(fmt.Sprintf("reading planning documents for the open PR failed: %v", err))
-		}
-		if len(plan.found) > 0 && (!plan.complete() || len(plan.conflicts) > 0) {
-			return r.failBoundary("planning documents on the issue are incomplete or no longer match the issue description; reconcile them before continuing the open PR")
-		}
-		if plan.complete() && len(plan.conflicts) == 0 {
-			check, err := r.a.checkPlan(r.ctx, r.rec, scope, plan.texts(), plan, r.log)
-			if err != nil {
-				return r.failBoundary(fmt.Sprintf("checking planning documents for the open PR failed: %v", err))
-			}
-			if !check.Clean {
-				return r.failBoundary("planning documents on the issue no longer agree with confirmed triage")
-			}
-			rec, err := r.a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
-				for _, doc := range task.PlanDocs {
-					cur.SetPlanComment(plan.found[doc].comment)
-				}
-				cur.Delegation.PlanScopeDigest = scope.digest
-				cur.Delegation.PlanDigest = planDigest(plan.texts())
-			}))
-			if err != nil {
-				return stepDone, true, err
-			}
-			r.rec = rec
-		}
-	}
 	if r.rec.PlanPosted() && r.rec.Delegation.PlanDigest != "" {
 		plan, err := r.a.readIssuePlan(r.ctx, r.rec)
 		if err != nil {
@@ -281,17 +244,30 @@ func (r *taskRun) scopeBoundary(next step) (step, bool, error) {
 			r.rec = rec
 		}
 	}
-	if next != stepImplement && r.a.needsPlan(r.rec) {
+	if next != stepImplement && r.planNeeded() {
 		return stepImplement, false, nil
 	}
 	return next, false, nil
+}
+
+func (r *taskRun) planNeeded() bool {
+	return r.a.needsPlan(r.rec) || (r.forcePlan && !r.rec.PlanPosted())
 }
 
 // implement runs an implementer turn with the open findings, if any. A posted plan
 // goes straight on to an implementation turn; a PR goes to review.
 func (r *taskRun) implement() (step, error) {
 	a := r.a
-	if a.needsPlan(r.rec) {
+	if r.forcePlan && !r.rec.PlanPosted() && r.rec.Delegation.Implementer.ID != "" {
+		rec, err := a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
+			cur.Delegation.Implementer.ID = ""
+		}))
+		if err != nil {
+			return stepDone, err
+		}
+		r.rec = rec
+	}
+	if r.planNeeded() {
 		if err := r.enter(task.Planning); err != nil {
 			return stepDone, err
 		}
@@ -300,14 +276,17 @@ func (r *taskRun) implement() (step, error) {
 		}
 	}
 	during, stage := "implementation", task.Implementing
-	req := turnRequest{findings: r.findings}
-	if a.needsPlan(r.rec) {
+	req := turnRequest{findings: r.findings, forcePlan: r.forcePlan && !r.rec.PlanPosted()}
+	if r.planNeeded() {
 		during, stage = "planning", task.Planning
 	}
 	if err := r.enter(stage); err != nil {
 		return stepDone, err
 	}
 	res := a.runTurn(r.ctx, r.rec, req, a.verifiedPR(r.log), r.log)
+	if req.forcePlan && res.err == nil && res.turn.Outcome.Status != agent.Planned && res.turn.Outcome.Status != agent.Blocked && res.turn.Outcome.Status != agent.FailedRun {
+		res.err = fmt.Errorf("planning turn returned %s instead of planned, blocked, or failed", res.turn.Outcome.Status)
+	}
 	rec, err := a.finishTurn(r.ctx, r.final, r.rec.Key, during, res, func(cur *task.Record) {
 		applyTurnResult(cur, res, a.Now())
 		if res.err == nil && res.turn.Outcome.Status == agent.Checkpoint {
@@ -325,6 +304,9 @@ func (r *taskRun) implement() (step, error) {
 	if res.err == nil && res.turn.Outcome.Status == agent.Planned {
 		if r.rec, err = a.postPlan(r.ctx, r.final, rec, res.turn.Outcome.Documents, r.plan, r.log); err != nil || r.rec.State != task.Planning {
 			return stepDone, err
+		}
+		if r.rec.Delegation.PR != 0 {
+			return stepReview, nil
 		}
 		return stepImplement, nil
 	}
@@ -579,7 +561,7 @@ func (a App) reviewRounds() int {
 }
 
 // needsPlan is true until every planning document is on the issue. A task that
-// already has a PR, from before planning existed, goes on without one.
+// already has a PR is handled by taskRun.forcePlan at the start of its next run.
 func (a App) needsPlan(rec *task.Record) bool {
 	return (!rec.PlanPosted() && rec.Delegation.PR == 0) ||
 		(rec.PlanPosted() && rec.Delegation.ScopeDigest != "" && rec.Delegation.PlanScopeDigest != rec.Delegation.ScopeDigest)
@@ -595,7 +577,7 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 	if !ok {
 		return agent.Turn{}, fmt.Errorf("agent %s is not configured", d.Implementer.Agent)
 	}
-	planning := a.needsPlan(rec)
+	planning := a.needsPlan(rec) || req.forcePlan
 	local := d.BeforePR() && !planning
 	stage, step := task.StageImplement, agent.StepImplement
 	switch {

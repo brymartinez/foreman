@@ -154,6 +154,7 @@ func TestFixesFromBothReviewersShareTheFixLimit(t *testing.T) {
 func TestRestartAfterACleanSelfReviewGoesStraightToTheCompetingReview(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
+	postedPlan(f, f.store.recs[key])
 	f.claude.turn = prTurn("sid-1")
 	f.codex.reviewErr = errors.New("codex exited 1")
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
@@ -185,6 +186,7 @@ func TestRestartSelfReviewsAgainWhenTheHeadOrDescriptionChanged(t *testing.T) {
 	} {
 		f := newFixture()
 		key := started(t, f, startReq(t))
+		postedPlan(f, f.store.recs[key])
 		f.claude.turn = prTurn("sid-1")
 		f.codex.reviewErr = errors.New("codex exited 1")
 		if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
