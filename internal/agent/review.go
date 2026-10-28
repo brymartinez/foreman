@@ -165,6 +165,7 @@ func ReviewPrompt(b ReviewBrief) string {
 		s.WriteString(text + "\n\n")
 	}
 	fmt.Fprintf(&s, "## The change\n\nRead the file diff with `git diff origin/%s...HEAD`. Review the complete diff for correctness, regressions, missing cases, and unnecessary changes. Do not run tests, builds, or project code in this read-only session. Report only concrete defects you can verify.\n\n", b.BaseBranch)
+	s.WriteString("Use Read to inspect cited files and line ranges, Grep to find symbols and fixture setup, and Glob to locate test files. These tools are available even when other Bash commands are denied. Verify line-number claims and relevant test fixtures yourself before deciding whether the evidence supports a finding. Do not hand verification commands to the developer in place of checking the repository.\n\n")
 	if b.Passes > 0 {
 		fmt.Fprintf(&s, "Read the complete diff %d times, looking for missed problems on each pass.\n\n", b.Passes)
 	}

@@ -291,9 +291,8 @@ func TestCodexStageModelsAndEffortOnStartResumeAndReview(t *testing.T) {
 	}
 }
 
-// A linked worktree's git data lives in the main clone. Codex protects a .git
-// root even when workspace-write names it as writable, so the permission profile
-// must grant the paths Git actually updates.
+// A linked worktree's git data lives in the main clone. Grant its metadata
+// directories, including top-level files that may already exist.
 func TestCodexStartAndResumeGrantLinkedWorktreeGitWrites(t *testing.T) {
 	dir := t.TempDir()
 	clone, wt := filepath.Join(dir, "clone"), filepath.Join(dir, "wt")
@@ -315,18 +314,7 @@ func TestCodexStartAndResumeGrantLinkedWorktreeGitWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	gitDir, common := strings.TrimSpace(string(gitDirOut)), strings.TrimSpace(string(commonOut))
-	wantPaths := []string{
-		gitDir,
-		filepath.Join(common, "objects"),
-		filepath.Join(common, "refs"),
-		filepath.Join(common, "logs"),
-		filepath.Join(common, "config"),
-		filepath.Join(common, "config.lock"),
-		filepath.Join(common, "packed-refs"),
-		filepath.Join(common, "packed-refs.lock"),
-		filepath.Join(common, "FETCH_HEAD"),
-		filepath.Join(common, "ORIG_HEAD"),
-	}
+	wantPaths := []string{gitDir, common}
 
 	var got Command
 	run := func(_ context.Context, c Command) error {
@@ -354,6 +342,11 @@ func checkCodexGitPermissions(t *testing.T, args, paths []string) {
 	for _, path := range paths {
 		if !strings.Contains(joined, fmt.Sprintf("%q=\"write\"", path)) {
 			t.Errorf("codex argv does not grant Git path %q: %q", path, args)
+		}
+	}
+	for _, name := range []string{"FETCH_HEAD", "ORIG_HEAD", "config", "packed-refs"} {
+		if strings.Contains(joined, fmt.Sprintf("%q=\"write\"", filepath.Join(paths[1], name))) {
+			t.Errorf("codex argv grants Git file %q as a permission root: %q", name, args)
 		}
 	}
 	if strings.Contains(joined, "sandbox_workspace_write.writable_roots") || strings.Contains(joined, `sandbox_mode="workspace-write"`) || slices.Contains(args, "-s") {

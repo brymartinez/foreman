@@ -45,13 +45,18 @@ func TestCodexGitProfileStagesCommitsAndPushesInALinkedWorktree(t *testing.T) {
 			t.Fatalf("git %v: %v %s", args, err, out)
 		}
 	}
+	for _, name := range []string{"FETCH_HEAD", "ORIG_HEAD"} {
+		if err := os.WriteFile(filepath.Join(clone, ".git", name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := os.WriteFile(filepath.Join(wt, "test.txt"), []byte("test\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	preview := exec.Command(codex, append(append([]string{"debug", "prompt-input"}, gitPermissionArgs(wt)...), "probe")...)
 	preview.Dir = wt
 	out, err := preview.CombinedOutput()
-	gitGranted := bytes.Contains(out, []byte(filepath.Join(clone, ".git", "objects")))
+	gitGranted := bytes.Contains(out, []byte(filepath.Join(clone, ".git")))
 	networkGranted := bytes.Contains(out, []byte("Network access is enabled"))
 	if err != nil || !gitGranted || !networkGranted {
 		t.Fatalf("effective Codex permissions: error %v, Git write %t, network %t", err, gitGranted, networkGranted)

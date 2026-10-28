@@ -20,7 +20,7 @@ func TestCompetingReviewUsesDiffOnly(t *testing.T) {
 			t.Errorf("competing review leaked %q", leaked)
 		}
 	}
-	for _, want := range []string{"competing reviewer", "git diff origin/main...HEAD", "read-only", "file diff", "Set limitations to null"} {
+	for _, want := range []string{"competing reviewer", "git diff origin/main...HEAD", "read-only", "file diff", "Set limitations to null", "Use Read to inspect cited files and line ranges", "Grep to find symbols and fixture setup", "Glob to locate test files", "Do not hand verification commands to the developer"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("competing review missing %q", want)
 		}

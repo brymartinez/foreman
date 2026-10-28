@@ -537,8 +537,9 @@ the same commit. The commit message records why it changed.
   `acceptEdits` and the fixed `Bash,WebFetch,WebSearch` tool list; the list is not
   configurable, because removing `Bash` broke every task. Codex implementation turns
   use a `foreman-git` permission profile with worktree writes and network access. The
-  profile grants the linked worktree's Git directory and the clone's Git object, ref,
-  log, and top-level files used by add, commit, fetch, and push. Reviews stay read-only.
+  profile grants the linked worktree's Git directory and the clone's shared Git
+  directory for add, commit, fetch, and push. Permission roots are directories,
+  including when Git's top-level files already exist. Reviews stay read-only.
 - **The agent pushes and opens the PR.** Foreman then checks with `gh` that the PR is
   open, in the task's repo, from the task branch, against the task's base, and records
   the verified number and head. A PR the developer retargets keeps its new base.
@@ -768,7 +769,10 @@ the same commit. The commit message records why it changed.
   check is still a claim about execution, not proof that the tests establish the
   behavior. If review permissions alone prevent rerunning it, the reviewer records a
   nonblocking limitation rather than requesting changes. A visible failure, a plausible
-  untested failure path, or a concrete defect remains a finding.
+  untested failure path, or a concrete defect remains a finding. Reviewers use Read for
+  cited line ranges, Grep for symbols and fixture setup, and Glob for test files. They
+  check the repository themselves rather than asking the developer to run commands
+  that the review session cannot run.
 - **Confirmed triage is checked before implementation.** Foreman verifies the plan
   against current triage and blocks a plan that omits a requirement. Self-review then
   checks the change against that plan; competing review judges the diff independently.

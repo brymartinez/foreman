@@ -53,24 +53,16 @@ func (c Codex) Resume(ctx context.Context, s task.Session, in StartInput) (Turn,
 	}, s.ID, func(task.Session) {})
 }
 
-// gitPermissionArgs grants the exact metadata paths Git updates. Codex protects a
-// .git root even when legacy writable_roots names it, so a profile must grant its
-// child paths and root files explicitly.
+// gitPermissionArgs grants the Git metadata directories used by a linked worktree.
+// Files cannot be permission roots: Codex's sandbox creates a .git mount beneath
+// each writable root, which fails when the root is an existing file.
 func gitPermissionArgs(worktree string) []string {
 	gitdir, common := gitDirs(worktree)
-	paths := []string{
-		gitdir,
-		filepath.Join(common, "objects"),
-		filepath.Join(common, "refs"),
-		filepath.Join(common, "logs"),
-		filepath.Join(common, "config"),
-		filepath.Join(common, "config.lock"),
-		filepath.Join(common, "packed-refs"),
-		filepath.Join(common, "packed-refs.lock"),
-		filepath.Join(common, "FETCH_HEAD"),
-		filepath.Join(common, "ORIG_HEAD"),
-	}
 	rules := []string{`":root"="read"`, `":workspace_roots"={"."="write",".git"="write"}`, `":slash_tmp"="write"`, `":tmpdir"="write"`}
+	paths := []string{common}
+	if gitdir != common {
+		paths = append(paths, gitdir)
+	}
 	for _, path := range paths {
 		rules = append(rules, fmt.Sprintf("%q=\"write\"", path))
 	}
