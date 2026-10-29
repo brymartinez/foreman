@@ -63,7 +63,7 @@ func planDigest(texts map[task.PlanDoc]string) string {
 }
 
 // checkPlan asks a fresh read-only agent to compare all four documents with the
-// confirmed scope. A limitation or an error is not agreement.
+// confirmed scope. A blocking limitation or an error is not agreement.
 func (a App) checkPlan(ctx context.Context, rec *task.Record, scope confirmedScope, texts map[task.PlanDoc]string, sources issuePlan, log io.Writer) (agent.ReviewOutcome, error) {
 	checker, ok := a.Agents[rec.Delegation.Implementer.Agent]
 	if !ok {
@@ -84,8 +84,10 @@ func (a App) checkPlan(ctx context.Context, rec *task.Record, scope confirmedSco
 	if err != nil {
 		return out, fmt.Errorf("checking the plan against confirmed scope failed: %w", err)
 	}
-	if len(out.Limitations) > 0 {
-		return out, fmt.Errorf("plan agreement could not be verified: %s: %s", out.Limitations[0].Behavior, out.Limitations[0].Reason)
+	for _, limitation := range out.Limitations {
+		if limitation.Blocking {
+			return out, fmt.Errorf("plan agreement could not be verified: %s: %s", limitation.Behavior, limitation.Reason)
+		}
 	}
 	return out, nil
 }

@@ -73,7 +73,9 @@ runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR)
   including when an open PR already exists
   (PLANNING, through the posting of the four comments; IMPLEMENTING after):
     planned      -> read-only checker must explicitly agree that all four documents
-                    match confirmed scope; then post analysis, PRD, design, and plan
+                    match confirmed scope; concrete findings resume the same planning
+                    session for up to three revisions, checking each revision;
+                    then post analysis, PRD, design, and plan
                     as four issue comments
                     (edit the earlier comments on a re-plan), record their ids and URLs,
                     then turn = implementer.Start(new session, checked implementation plan text)
@@ -558,7 +560,12 @@ the same commit. The commit message records why it changed.
   the implementation session receives the checked implementation plan text, not the
   planning transcript or the other planning documents. The read-only checker also
   verifies that the plan alone includes all applicable requirements, constraints,
-  and acceptance criteria from triage.
+  and acceptance criteria from triage. A clean check may report nonblocking
+  limitations; only blocking limitations prevent agreement. Concrete findings on a
+  new plan go back to the same planning session with a short correction prompt. The
+  planner returns changed documents only, and the runner checks the combined set
+  before posting. After three revisions with remaining findings, the task asks for a
+  decision.
 - **The issue, not the record, says whether a plan exists.** A task record can lose its
   plan comments (a recreated task, another machine), so before a planning turn the
   runner reads the description and every comment from the task's source. Only a

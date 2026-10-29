@@ -38,18 +38,76 @@ func TestConfirmedScopeUsesOrderedTriageCommentsForBothSources(t *testing.T) {
 	}
 }
 
-func TestConflictingNewPlanIsNotPosted(t *testing.T) {
+func TestConflictingNewPlanIsRevisedInPlanningSession(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	f.gh.issueComments = []IssueComment{{ID: 1, URL: "https://example.test/triage", Body: "## Triage decisions\nUse the activity table."}}
-	f.claude.turns = []agent.Turn{plannedTurn("sid-1")}
+	revised := plannedTurn("sid-1")
+	revised.Outcome.Documents = map[task.PlanDoc]string{task.PRD: "R1. Use the activity table."}
+	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), revised, prTurn("sid-2")}
 	f.claude.scopeReviews = []agent.ReviewOutcome{{Clean: false, Findings: []task.Finding{{Severity: "blocking", Summary: "PRD selects recipients", Detail: "The PRD selects the recipients table; triage https://example.test/triage selects activity."}}}}
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	rec := f.store.recs[key]
-	if rec.State != task.NeedsDecision || rec.Pending() == nil || len(f.gh.comments) != 0 || len(f.claude.scopeReviewed) != 1 {
-		t.Fatalf("state %s pending %+v posted %d checks %d", rec.State, rec.Pending(), len(f.gh.comments), len(f.claude.scopeReviewed))
+	if rec.State == task.NeedsDecision || len(f.gh.comments) != 4 || len(f.claude.scopeReviewed) != 2 || len(f.claude.resumed) != 1 {
+		t.Fatalf("state %s posted %d checks %d resumed %d", rec.State, len(f.gh.comments), len(f.claude.scopeReviewed), len(f.claude.resumed))
+	}
+	if !strings.Contains(f.claude.resumed[0], "PRD selects recipients") || strings.Contains(f.claude.resumed[0], "## Confirmed scope") {
+		t.Fatalf("planning revision prompt = %q", f.claude.resumed[0])
+	}
+	var keptAnalysis, revisedPRD bool
+	for _, comment := range f.gh.comments {
+		keptAnalysis = keptAnalysis || strings.Contains(comment.Body, "Retries 5xx only today.")
+		revisedPRD = revisedPRD || strings.Contains(comment.Body, "R1. Use the activity table.")
+	}
+	if !keptAnalysis || !revisedPRD {
+		t.Fatal("the posted documents did not combine unchanged and revised text")
+	}
+}
+
+func TestNonblockingPlanLimitationDoesNotStopPosting(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2")}
+	f.claude.scopeReviews = []agent.ReviewOutcome{{Clean: true, Limitations: []task.Limitation{{Behavior: "unrelated code identifiers", Reason: "not needed for scope comparison", Blocking: false}}}}
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if rec := f.store.recs[key]; !rec.PlanPosted() || len(f.gh.comments) != 4 {
+		t.Fatalf("state %s plan posted %t comments %d", rec.State, rec.PlanPosted(), len(f.gh.comments))
+	}
+}
+
+func TestPlanRevisionStopsAfterThreeAttempts(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), plannedTurn("sid-1"), plannedTurn("sid-1"), plannedTurn("sid-1")}
+	finding := agent.ReviewOutcome{Clean: false, Findings: []task.Finding{{Severity: "blocking", Summary: "Missing requirement", Detail: "The plan still omits it."}}}
+	f.claude.scopeReviews = []agent.ReviewOutcome{finding, finding, finding, finding}
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	rec := f.store.recs[key]
+	if rec.State != task.NeedsDecision || len(f.claude.resumed) != 3 || len(f.claude.scopeReviewed) != 4 || len(f.gh.comments) != 0 {
+		t.Fatalf("state %s resumed %d checks %d posted %d", rec.State, len(f.claude.resumed), len(f.claude.scopeReviewed), len(f.gh.comments))
+	}
+}
+
+func TestTriageChangeDuringPlanRevisionStopsBeforePosting(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	f.gh.issueComments = []IssueComment{{ID: 1, URL: "https://example.test/triage", Body: "## Triage decisions\nUse activity."}}
+	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), plannedTurn("sid-1")}
+	f.claude.scopeReviews = []agent.ReviewOutcome{{Findings: []task.Finding{{Severity: "blocking", Summary: "Missing activity", Detail: "Add the activity table."}}}}
+	f.claude.onResume = func() {
+		f.gh.issueComments = append(f.gh.issueComments, IssueComment{ID: 2, URL: "https://example.test/correction", Body: "## Triage correction\nAlso use the date filter."})
+	}
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if rec := f.store.recs[key]; rec.State != task.Failed || !strings.Contains(rec.LastOutcome.Summary, "triage changed during planning") || len(f.gh.comments) != 0 {
+		t.Fatalf("state %s outcome %+v posted %d", rec.State, rec.LastOutcome, len(f.gh.comments))
 	}
 }
 

@@ -339,8 +339,12 @@ and an implementation plan. `plan.md` sets what each one covers. Foreman reads
 `## Triage decisions` and later `## Triage correction` comments in order; if there
 are none, the issue description is the confirmed scope. It gives that scope and its
 source links to the planner, checks the documents against it, then posts each as an
-issue comment. Existing plans receive the same check before adoption. A conflict
-pauses for a decision; an unreadable or inconclusive check fails with a reason.
+issue comment. If the checker finds a concrete mismatch in a new plan, Foreman sends
+the findings back to the same planning session for up to three revisions. Only changed
+documents need to be returned; Foreman checks the combined set each time. Remaining
+findings then pause for a decision. Existing plans receive the same check before
+adoption. An unreadable or inconclusive check fails with a reason; a nonblocking
+limitation on a clean check does not stop planning.
 The implementation plan must contain every requirement, constraint, and acceptance
 criterion needed without the other documents. Foreman checks that completeness
 against confirmed triage before posting. The implementer receives only that plan as

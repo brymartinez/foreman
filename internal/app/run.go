@@ -1204,7 +1204,51 @@ func (a App) postPlan(ctx, final context.Context, rec *task.Record, docs map[tas
 			texts[doc] = text
 		}
 	}
-	checked, checkErr := a.checkPlan(ctx, rec, scope, texts, onIssue, log)
+	const maxPlanRevisions = 3
+	var checked agent.ReviewOutcome
+	var checkErr error
+	for revision := 0; ; revision++ {
+		checked, checkErr = a.checkPlan(ctx, rec, scope, texts, onIssue, log)
+		if checkErr != nil || checked.Clean || len(checked.Findings) == 0 || revision == maxPlanRevisions {
+			break
+		}
+		planner := a.Agents[rec.Delegation.Implementer.Agent]
+		var message strings.Builder
+		message.WriteString("The read-only plan check found these contradictions or omissions. Revise the four documents in this planning session using the confirmed scope you already received. Return planned with only changed documents; use an empty string for each unchanged document. Do not repeat repository research unless a finding requires it. End with the same JSON outcome: planned, blocked, or failed.\n\n")
+		for _, finding := range checked.Findings {
+			fmt.Fprintf(&message, "- %s: %s\n", finding.Summary, finding.Detail)
+		}
+		fmt.Fprintln(log, "foreman: resuming the planner to correct the plan check")
+		turn, turnErr := planner.Resume(ctx, rec.Delegation.Implementer, agent.StartInput{
+			Worktree: rec.Delegation.Worktree, Log: log, Prompt: message.String(),
+			Stage: task.StagePlan, Step: agent.StepPlan, Profile: rec.Delegation.Profile,
+			MaxBudgetUSD: a.ImplementerBudgetUSD,
+		})
+		if turnErr == nil && turn.Outcome.Status != agent.Planned && turn.Outcome.Status != agent.Blocked && turn.Outcome.Status != agent.FailedRun {
+			turnErr = fmt.Errorf("planning revision returned %s instead of planned, blocked, or failed", turn.Outcome.Status)
+		}
+		result := turnResult{turn: turn, err: turnErr}
+		var updateErr error
+		rec, updateErr = a.finishTurn(ctx, final, rec.Key, "planning", result, func(cur *task.Record) {
+			applyTurnResult(cur, result, a.Now())
+		}, log)
+		if updateErr != nil || rec.State != task.Planning {
+			return rec, updateErr
+		}
+		for doc, text := range turn.Outcome.Documents {
+			if strings.TrimSpace(text) != "" {
+				docs[doc] = text
+				texts[doc] = text
+			}
+		}
+		current, err := a.readScope(ctx, rec.Key)
+		if err == nil && current.digest != scope.digest {
+			err = errors.New("confirmed triage changed during planning; restart to revise the documents")
+		}
+		if err != nil {
+			return a.update(final, rec.Key, existing(func(cur *task.Record) { failTask(cur, err.Error(), a.Now()) }))
+		}
+	}
 	if checkErr != nil || !checked.Clean {
 		return a.update(final, rec.Key, existing(func(cur *task.Record) {
 			switch {
