@@ -18,7 +18,7 @@ import (
 const DefaultFixRounds = 3
 
 // DefaultReviewRounds is how many passes the reviewer makes over a PR.
-const DefaultReviewRounds = 3
+const DefaultReviewRounds = 1
 
 // RunTask is the body of the detached runner. It drives implement → verify PR →
 // review → fix until the review is clean, the task needs the developer, or it fails.
@@ -879,9 +879,11 @@ func (a App) selfReview(ctx context.Context, rec *task.Record, title, body, prd 
 	if err := a.startAttempt(ctx, rec); err != nil {
 		return agent.ReviewOutcome{}, err
 	}
+	brief = a.prepareReview(ctx, rec, task.SelfReview, d.Implementer.Agent, brief, log)
 	in := agent.StartInput{Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ReviewerBudgetUSD, Prompt: agent.ReviewPrompt(brief), Step: agent.StepReview, Purpose: "self_review"}
 	fmt.Fprintf(log, "foreman: %s self-reviewing %s (round %d)\n", adapter.Name(), reviewTarget(rec), len(rec.Reviews)+1)
-	return adapter.Review(ctx, in)
+	out, reviewErr := adapter.Review(ctx, in)
+	return reviewContext(out, brief), reviewErr
 }
 
 // review runs the competing agent's fresh, read-only session. When the competing
@@ -929,6 +931,8 @@ func (a App) review(ctx context.Context, rec *task.Record, title, body, prd stri
 		Step:         agent.StepReview,
 	}
 	fmt.Fprintf(log, "foreman: %s reviewing %s (round %d)\n", reviewer.Name(), target, len(rec.Reviews)+1)
+	brief = a.prepareReview(ctx, rec, task.CompetingReview, chosen, brief, log)
+	in.Prompt = agent.ReviewPrompt(brief)
 	out, err := reviewer.Review(ctx, in)
 	if errors.Is(err, agent.ErrUnavailable) && chosen != d.Implementer.Agent {
 		chosen = d.Implementer.Agent
@@ -938,9 +942,11 @@ func (a App) review(ctx context.Context, rec *task.Record, title, body, prd stri
 		}
 		fmt.Fprintf(log, "foreman: %s unavailable; using %s for review\n", d.Reviewer, chosen)
 		fmt.Fprintf(log, "foreman: %s reviewing %s (round %d)\n", reviewer.Name(), target, len(rec.Reviews)+1)
+		brief = a.prepareReview(ctx, rec, task.CompetingReview, chosen, brief, log)
+		in.Prompt = agent.ReviewPrompt(brief)
 		out, err = reviewer.Review(ctx, in)
 	}
-	return out, chosen, err
+	return reviewContext(out, brief), chosen, err
 }
 
 func (a App) reviewRequirements(ctx context.Context, rec *task.Record) (confirmedScope, string, error) {
@@ -1222,6 +1228,7 @@ func applyReview(rec *task.Record, kind task.ReviewKind, reviewer task.Agent, r 
 	}
 	head, proposal := rec.CurrentChange()
 	review := task.Review{
+		BaseRef: r.BaseRef, BaseHead: r.BaseHead, FromHead: r.FromHead,
 		Round:    len(rec.Reviews) + 1,
 		Kind:     kind,
 		Reviewer: reviewer,

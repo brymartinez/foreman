@@ -652,3 +652,27 @@ func TestRemoteBranchHeadReportsOnlyPushedBranches(t *testing.T) {
 		t.Fatalf("unpushed branch head = %q, %v; want none", got, err)
 	}
 }
+
+func TestReviewRangeChecksLocalBaseAndAncestry(t *testing.T) {
+	dir, base := repoWithOrigin(t)
+	run(t, dir, "fetch", "origin")
+	run(t, dir, "merge", "--ff-only", "origin/main")
+	ctx := context.Background()
+	before, err := (Git{}).ReviewRange(ctx, dir, "origin/main", "HEAD", "")
+	if err != nil || before.BaseHead != base || before.PreviousIsAncestor {
+		t.Fatalf("first %+v %v", before, err)
+	}
+	run(t, dir, "commit", "-q", "--allow-empty", "-m", "fix")
+	after, err := (Git{}).ReviewRange(ctx, dir, "origin/main", "HEAD", base)
+	if err != nil || !after.PreviousIsAncestor || after.BaseHead != base {
+		t.Fatalf("fix %+v %v", after, err)
+	}
+	newer := run(t, dir, "rev-parse", "HEAD")
+	rewritten, err := (Git{}).ReviewRange(ctx, dir, "origin/main", base, newer)
+	if err != nil || rewritten.PreviousIsAncestor {
+		t.Fatalf("rewritten %+v %v", rewritten, err)
+	}
+	if _, err := (Git{}).ReviewRange(ctx, dir, "origin/missing", "HEAD", base); err == nil {
+		t.Fatal("missing base accepted")
+	}
+}

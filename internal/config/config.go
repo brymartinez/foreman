@@ -25,7 +25,7 @@ type Config struct {
 	LogDir          string `yaml:"log_dir"`
 	// KnowledgeDir holds what foreman learns, one directory per repository.
 	KnowledgeDir string `yaml:"knowledge_dir"`
-	ReviewRounds int    `yaml:"review_rounds"` // reviewer passes per review; 0 means 3
+	ReviewRounds int    `yaml:"review_rounds"` // reviewer passes per review; 0 means 1
 	FixRounds    int    `yaml:"fix_rounds"`    // fix and re-review cycles before asking; 0 means 3
 	// ReviewBeforePR has the agent review finish on the local branch before the PR
 	// opens. A task keeps the value it started with.
@@ -136,7 +136,7 @@ func Load() (Config, error) {
 		RepositoriesDir: filepath.Join(data, "repositories"),
 		LogDir:          filepath.Join(data, "logs"),
 		KnowledgeDir:    filepath.Join(data, "knowledge"),
-		ReviewRounds:    3,
+		ReviewRounds:    1,
 		FixRounds:       3,
 		Mentions:        true,
 		DefaultSource:   task.GitHub,

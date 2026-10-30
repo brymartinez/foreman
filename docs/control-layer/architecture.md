@@ -560,7 +560,11 @@ the same commit. The commit message records why it changed.
   session. Planning receives the issue description and confirmed triage decisions;
   the implementation session receives the checked Requirements and Work plan text,
   not the planning transcript. Requirements states each rule and check once; Work
-  plan maps its tasks to requirement IDs. Both documents use short, plain English.
+  plan maps its tasks to requirement IDs. Both documents use short, plain English. Writing
+  advice uses the `writing_advice` review category and is saved locally in
+  `planning_advice`, shown in the task view. Advice cannot become a blocking finding,
+  trigger a correction turn, or add tracker comments. Real missing or unclear
+  requirements still block. Drafts retain this advice across partial-post retries.
   The planner and checker share the same rule: a later correction replaces an earlier
   decision on the same point; other earlier decisions still apply. Neither should
   require both values of a corrected rule. The read-only checker verifies that
@@ -771,7 +775,8 @@ the same commit. The commit message records why it changed.
   implementing agent with its review model, the reviewer budget, and `review_rounds`
   passes. It never resumes the implementer's session or an earlier self-review. Its
   prompt carries the checked Requirements and Work plan and diff instructions. With claim
-  verification it also carries the claims. Findings start a fresh correction
+  verification it also carries the claims. It checks requirements and test evidence
+  before the competing reviewer checks defects and regressions. Findings start a fresh correction
   session, limited to the latest findings as task context. A self-review that errors
   fails the task; it never falls back to
   the competing reviewer, which would skip it. Rejected: running the self-review inside
@@ -784,9 +789,19 @@ the same commit. The commit message records why it changed.
   Publishing a locally reviewed change still verifies that the actual PR holds the
   exact proposed title and description. A clean self-review newer than the latest
   competing review leaves the competing review pending, so a restart finishes it.
-- **The competing review stays independent.** Its task context is the file diff;
-  neither earlier rounds nor PR discussion reach it. With claim verification, the
-  PRD and claims reach it as statements to test, never as findings or verdicts.
+- **Reviews start full, then focus on fixes.** The first review reads the whole diff.
+  A later review starts with changes since the same reviewer's previous head and its
+  own earlier findings. The reviewer may inspect the whole change for wider effects.
+  Self-review findings never enter competing review, and a fallback agent does not
+  receive another agent's earlier findings. Both sessions stay fresh and read-only.
+  A focused review requires the same base ref and base commit, unchanged scope and
+  plan, the same Requirements digest for claim verification, and proof that the old
+  review head is an ancestor of the current head. Missing commits, rewritten history,
+  changed requirements or bases, and old records without this metadata get a full
+  review. `WorktreeManager.ReviewRange` reads the already fetched local refs and
+  checks ancestry without another fetch. Each review saves the base ref, base commit,
+  and focused starting head for audit. The PRD and current claims remain statements
+  to test; PR discussion and the other reviewer's verdicts stay out of the prompt.
 - **The reviewer starts as the competing agent** in a disposable session
   (`--no-session-persistence` / `--ephemeral`) that never sees the implementer's
   session. Before each review, a fresh `quota-axi` report can move the review to
@@ -883,7 +898,7 @@ the same commit. The commit message records why it changed.
   GitHub's `mergeable` was rejected for this: it reads UNKNOWN after a push and names no
   files. The implementer merges the base, never rebases or force-pushes. After two
   turns that still conflict, the developer is asked.
-- **Two round settings.** `review_rounds` (3) is how many passes each review, self or
+- **Two round settings.** `review_rounds` (1) is how many passes each review, self or
   competing, makes over a PR or a local change. `fix_rounds` (3) is how many reviewed
   fixes run before the developer is asked; fixes requested by either review count
   against it. The cap is checked after a review, so no fix reaches the developer

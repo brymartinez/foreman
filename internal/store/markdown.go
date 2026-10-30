@@ -211,6 +211,7 @@ type frontmatter struct {
 	LastGitHubSync      *time.Time             `yaml:"last_github_sync,omitempty"`
 	Decisions           []decisionFM           `yaml:"decisions,omitempty"`
 	LastOutcome         *outcomeFM             `yaml:"last_outcome,omitempty"`
+	PlanningAdvice      []task.Advice          `yaml:"planning_advice,omitempty"`
 	Calls               []task.ModelCall       `yaml:"calls,omitempty"`
 	Usage               usageFM                `yaml:"usage,omitempty"`
 	Validation          []task.Check           `yaml:"validation,omitempty"`
@@ -251,6 +252,9 @@ type ciFM struct {
 }
 
 type reviewFM struct {
+	BaseRef  string          `yaml:"base_ref,omitempty"`
+	BaseHead string          `yaml:"base_head,omitempty"`
+	FromHead string          `yaml:"from_head,omitempty"`
 	Round    int             `yaml:"round"`
 	Kind     task.ReviewKind `yaml:"kind,omitempty"`
 	Reviewer task.Agent      `yaml:"reviewer"`
@@ -466,7 +470,7 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 		if r.Kind != task.CompetingReview && r.Kind != task.SelfReview {
 			return nil, fmt.Errorf("review round %d has unknown kind %q", r.Round, r.Kind)
 		}
-		rec.Reviews = append(rec.Reviews, task.Review{Round: r.Round, Kind: r.Kind, Reviewer: r.Reviewer, PR: r.PR, Clean: r.Verdict == "clean", Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head, Proposal: r.Proposal,
+		rec.Reviews = append(rec.Reviews, task.Review{BaseRef: r.BaseRef, BaseHead: r.BaseHead, FromHead: r.FromHead, Round: r.Round, Kind: r.Kind, Reviewer: r.Reviewer, PR: r.PR, Clean: r.Verdict == "clean", Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head, Proposal: r.Proposal,
 			Claims: r.Claims, PRD: r.PRD, Scope: r.Scope, Plan: r.Plan, Limitations: r.Limitations})
 	}
 	if c := fm.CI; c != nil {
@@ -491,6 +495,7 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 	if o := fm.LastOutcome; o != nil {
 		rec.LastOutcome = &task.Outcome{Status: o.Status, Summary: o.Summary, At: o.At}
 	}
+	rec.PlanningAdvice = fm.PlanningAdvice
 	rec.Calls = fm.Calls
 	rec.Usage = task.Usage{ClaudeInputTokens: fm.Usage.ClaudeInputTokens, ClaudeCachedTokens: fm.Usage.ClaudeCachedTokens, ClaudeOutputTokens: fm.Usage.ClaudeOutputTokens, ClaudeCostUSD: fm.Usage.ClaudeCostUSD, CodexInputTokens: fm.Usage.CodexInputTokens, CodexCachedTokens: fm.Usage.CodexCachedTokens, CodexOutputTokens: fm.Usage.CodexOutputTokens, CodexReasoningTokens: fm.Usage.CodexReasoningTokens, ClaudeTurns: fm.Usage.ClaudeTurns, CodexTurns: fm.Usage.CodexTurns, ToolCalls: fm.Usage.ToolCalls}
 	for _, d := range fm.Decisions {
@@ -580,7 +585,7 @@ func fromRecord(rec *task.Record) frontmatter {
 		if r.Clean {
 			verdict = "clean"
 		}
-		fm.Reviews = append(fm.Reviews, reviewFM{Round: r.Round, Kind: r.Kind, Reviewer: r.Reviewer, PR: r.PR, Verdict: verdict, Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head, Proposal: r.Proposal,
+		fm.Reviews = append(fm.Reviews, reviewFM{BaseRef: r.BaseRef, BaseHead: r.BaseHead, FromHead: r.FromHead, Round: r.Round, Kind: r.Kind, Reviewer: r.Reviewer, PR: r.PR, Verdict: verdict, Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head, Proposal: r.Proposal,
 			Claims: r.Claims, PRD: r.PRD, Scope: r.Scope, Plan: r.Plan, Limitations: r.Limitations})
 	}
 	if c := rec.CI; c != nil {
@@ -589,6 +594,7 @@ func fromRecord(rec *task.Record) frontmatter {
 	if o := rec.LastOutcome; o != nil {
 		fm.LastOutcome = &outcomeFM{Status: o.Status, Summary: o.Summary, At: o.At}
 	}
+	fm.PlanningAdvice = rec.PlanningAdvice
 	fm.Calls = rec.Calls
 	fm.Usage = usageFM{ClaudeInputTokens: rec.Usage.ClaudeInputTokens, ClaudeCachedTokens: rec.Usage.ClaudeCachedTokens, ClaudeOutputTokens: rec.Usage.ClaudeOutputTokens, ClaudeCostUSD: rec.Usage.ClaudeCostUSD, CodexInputTokens: rec.Usage.CodexInputTokens, CodexCachedTokens: rec.Usage.CodexCachedTokens, CodexOutputTokens: rec.Usage.CodexOutputTokens, CodexReasoningTokens: rec.Usage.CodexReasoningTokens, ClaudeTurns: rec.Usage.ClaudeTurns, CodexTurns: rec.Usage.CodexTurns, ToolCalls: rec.Usage.ToolCalls}
 	for _, d := range rec.Decisions {

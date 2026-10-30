@@ -135,3 +135,22 @@ func TestUnavailableReviewCheckNeedsAReasonAndNoCodeLocation(t *testing.T) {
 		}
 	}
 }
+
+func TestWritingAdviceNeverBecomesABlockingFinding(t *testing.T) {
+	for _, verdict := range []string{"clean", "changes_requested"} {
+		raw := `{"verdict":"` + verdict + `","summary":"Clear requirements","findings":[{"category":"writing_advice","severity":"blocking","file":null,"line":null,"summary":"Use shorter sentences","detail":"Split R1 into two sentences."}],"limitations":[]}`
+		out, err := ParseReview([]byte(raw))
+		if err != nil || !out.Clean || len(out.Findings) != 0 || len(out.Advice) != 1 {
+			t.Fatalf("advice %+v error %v", out, err)
+		}
+	}
+	mixed := `{"verdict":"changes_requested","findings":[{"category":"writing_advice","severity":"should_fix","summary":"Shorten R1"},{"category":"defect","severity":"blocking","summary":"Missing retention rule"}]}`
+	out, err := ParseReview([]byte(mixed))
+	if err != nil || out.Clean || len(out.Findings) != 1 || out.Findings[0].Summary != "Missing retention rule" || len(out.Advice) != 1 {
+		t.Fatalf("mixed %+v error %v", out, err)
+	}
+	unclear := `{"verdict":"clean","findings":[{"category":"writing_advice","severity":"should_fix","summary":"Shorten R1"}],"limitations":[{"behavior":"Retention period","reason":"No period is given","blocking":true}]}`
+	if _, err := ParseReview([]byte(unclear)); err == nil {
+		t.Fatal("unclear requirement was accepted")
+	}
+}

@@ -18,6 +18,11 @@ import (
 var ReviewSchema []byte
 
 type ReviewOutcome struct {
+	// These fields are set by the runner, never parsed from model output.
+	BaseRef  string
+	BaseHead string
+	FromHead string
+	Advice   []task.Advice
 	Clean    bool
 	Summary  string
 	Findings []task.Finding
@@ -58,6 +63,9 @@ func ParseReview(raw []byte) (ReviewOutcome, error) {
 			f.Category = "unavailable_check"
 		}
 		switch f.Category {
+		case "writing_advice":
+			out.Advice = append(out.Advice, task.Advice{Summary: f.Summary, Detail: f.Detail})
+			continue
 		case "unavailable_check":
 			if f.File != nil || f.Line != nil || strings.TrimSpace(f.Detail) == "" {
 				return ReviewOutcome{}, errors.New("unavailable check needs a reason and no code location")
@@ -99,9 +107,12 @@ func ParseReview(raw []byte) (ReviewOutcome, error) {
 		out.Clean = true
 	case "changes_requested":
 		if len(out.Findings) == 0 {
-			if unavailable && !blocked {
+			if (unavailable || len(out.Advice) > 0) && !blocked {
 				out.Clean = true
 				out.Summary = "No code defect found; unavailable checks recorded as nonblocking limitations"
+				if len(out.Advice) > 0 {
+					out.Summary = "No defect found; writing advice recorded without blocking"
+				}
 				break
 			}
 			return ReviewOutcome{}, errors.New("review requests changes but lists no findings")
@@ -132,6 +143,9 @@ type ReviewBrief struct {
 	BaseBranch        string
 	StageInstructions string
 	Passes            int
+	BaseHead          string
+	PreviousHead      string
+	PreviousFindings  []task.Finding
 	// Self gets the checked requirements and work plan; the competing reviewer gets only the diff.
 	Self bool
 	// Claim verification explicitly adds PRD acceptance criteria and claims.
@@ -151,10 +165,10 @@ func ReviewPrompt(b ReviewBrief) string {
 	}
 	fmt.Fprintf(&s, "You are the %s for the change on branch %s in %s. This is a fresh, read-only session. Do not edit files, commit, or push.\n\n", role, b.Branch, b.Key.Repo)
 	if b.Self {
-		s.WriteString("## Checked work\n\nThese requirements and work plan are the complete task for this review. Check the change against them. Do not read the issue, triage, other planning comments, PR description, or earlier review rounds for requirements.\n\n")
+		s.WriteString("## Checked work\n\nThese requirements and work plan are the complete task for this review. Check the requirements and test evidence against the change. Do not read the issue, triage, other planning comments, PR description, or earlier review rounds for requirements.\n\n")
 		s.WriteString(quote(b.Plan) + "\n\n")
 	} else {
-		s.WriteString("## Review scope\n\nForm an independent judgment from the file diff. Do not read the issue, triage, planning documents, PR description, comments, or earlier review rounds for requirements. Read surrounding repository code and tests only as needed to verify a concrete defect in the diff.\n\n")
+		s.WriteString("## Review scope\n\nForm an independent judgment from the file diff. Do not read the issue, triage, planning documents, PR description, comments, or the other reviewer's findings for requirements. Read surrounding repository code and tests only as needed to verify a concrete defect in the diff.\n\n")
 	}
 	if b.Claimed {
 		writeClaims(&s, b)
@@ -164,10 +178,25 @@ func ReviewPrompt(b ReviewBrief) string {
 		s.WriteString("## Developer workflow instructions\n\nFollow these review methods where they agree with the scope above.\n\n")
 		s.WriteString(text + "\n\n")
 	}
-	fmt.Fprintf(&s, "## The change\n\nRead the file diff with `git diff origin/%s...HEAD`. Review the complete diff for correctness, regressions, missing cases, and unnecessary changes. Do not run tests, builds, or project code in this read-only session. Report only concrete defects you can verify.\n\n", b.BaseBranch)
+	s.WriteString("## The change\n\n")
+	if b.PreviousHead != "" {
+		fmt.Fprintf(&s, "Start with `git diff %s..HEAD`. Review the changes since your previous review and verify each of your earlier findings below. Check for regressions caused by the fix. Read surrounding code or the complete diff with `git diff origin/%s...HEAD` when needed to judge a wider effect. Do not repeat a full review of unchanged code without a concrete reason. These findings are checks to verify, not facts to trust.\n\n", b.PreviousHead, b.BaseBranch)
+		for _, finding := range b.PreviousFindings {
+			fmt.Fprintf(&s, "- %s:%d %s: %s\n", finding.File, finding.Line, finding.Summary, finding.Detail)
+		}
+	} else {
+		fmt.Fprintf(&s, "Read the file diff with `git diff origin/%s...HEAD`. Review the complete diff for correctness, regressions, missing cases, and unnecessary changes.\n\n", b.BaseBranch)
+	}
+	s.WriteString("Do not run tests, builds, or project code in this read-only session. Report only concrete defects you can verify.\n\n")
 	s.WriteString("Use Read to inspect cited files and line ranges, Grep to find symbols and fixture setup, and Glob to locate test files. These tools are available even when other Bash commands are denied. Verify line-number claims and relevant test fixtures yourself before deciding whether the evidence supports a finding. Do not hand verification commands to the developer in place of checking the repository.\n\n")
 	if b.Passes > 0 {
-		fmt.Fprintf(&s, "Read the complete diff %d times, looking for missed problems on each pass.\n\n", b.Passes)
+		if b.PreviousHead != "" {
+			fmt.Fprintf(&s, "Make %d focused review pass(es).\n\n", b.Passes)
+		} else if b.Passes == 1 {
+			s.WriteString("Read the complete diff once.\n\n")
+		} else {
+			fmt.Fprintf(&s, "Read the complete diff %d times, looking for missed problems on each pass.\n\n", b.Passes)
+		}
 	}
 	s.WriteString("## Final response\n\nReply with JSON matching the provided schema. Use verdict clean with no findings, or changes_requested with one verified defect per finding. Severity is blocking or should_fix. Set file and line when available. ")
 	if b.Claimed {

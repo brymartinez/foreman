@@ -76,7 +76,7 @@ func TestReviewLoopFixesFindingsThenReReviews(t *testing.T) {
 	if strings.Contains(f.codex.reviewed[1], "Round 2 (one problem)") {
 		t.Errorf("re-review leaked an earlier round:\n%s", f.codex.reviewed[1])
 	}
-	if !strings.Contains(f.codex.reviewed[0], "Read the complete diff 3 times") || !strings.Contains(f.codex.reviewed[1], "Read the complete diff 3 times") {
+	if !strings.Contains(f.codex.reviewed[0], "Read the complete diff once") || !strings.Contains(f.codex.reviewed[1], "Read the complete diff once") {
 		t.Errorf("reviews must honor review_rounds:\n%s", f.codex.reviewed)
 	}
 }

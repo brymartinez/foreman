@@ -12,7 +12,7 @@
         "additionalProperties": false,
         "required": ["category", "severity", "file", "line", "summary", "detail"],
         "properties": {
-          "category": { "type": "string", "enum": ["defect", "unavailable_check"] },
+          "category": { "type": "string", "enum": ["defect", "unavailable_check", "writing_advice"] },
           "severity": { "type": "string", "enum": ["blocking", "should_fix"] },
           "file": { "type": ["string", "null"] },
           "line": { "type": ["integer", "null"] },

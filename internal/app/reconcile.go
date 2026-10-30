@@ -189,16 +189,21 @@ func (r *taskRun) reconcilePlan() (bool, error) {
 	}
 	var scopeCheckErr error
 	var scopeCheck agent.ReviewOutcome
+	checkedNow := false
 	if adopt {
 		if r.rec.Delegation.PlanScopeDigest == r.scope.digest && r.rec.Delegation.PlanDigest == planDigest(p.texts()) {
 			scopeCheck.Clean = true
 			fmt.Fprintln(r.log, "foreman: reusing the plan agreement check for unchanged scope and documents")
 		} else {
+			checkedNow = true
 			scopeCheck, scopeCheckErr = a.checkPlan(r.ctx, r.rec, r.scope, p.texts(), p, r.log)
 		}
 	}
 	scopeAnswer := scopePlanAnswer(r.rec, r.scope.digest, planDigest(p.texts()))
 	rec, err := a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
+		if checkedNow && scopeCheckErr == nil {
+			cur.PlanningAdvice = append([]task.Advice(nil), scopeCheck.Advice...)
+		}
 		switch {
 		case readErr != nil:
 			failTask(cur, fmt.Sprintf("reading the issue to reconcile its plan failed: %v", readErr), a.Now())

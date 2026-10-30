@@ -242,6 +242,10 @@ if [[ "$*" == *"You merge two machines' learnings"* ]]; then
 fi
 if [[ " $* " == *" --no-session-persistence "* ]]; then
 	echo "claude review" >>"$E2E_STATE/agents.log"
+ if [[ "$2" == "You are checking planning documents"* && -f "$E2E_STATE/writing-advice" ]]; then
+ echo '{"type":"result","session_id":"r1","subtype":"success","total_cost_usd":0.05,"structured_output":{"verdict":"changes_requested","summary":"Clear rules, long wording","findings":[{"category":"writing_advice","severity":"blocking","file":null,"line":null,"summary":"Shorten R1","detail":"Use two short sentences."}],"limitations":[]}}'
+ exit 0
+ fi
 	echo '{"type":"result","session_id":"r1","subtype":"success","total_cost_usd":0.05,"structured_output":{"verdict":"clean","summary":"looks right","findings":[]}}'
 	exit 0
 fi
@@ -532,7 +536,8 @@ scenario_review_before_pr() {
 	check "the findings were fixed locally" contains "$state/agents.log" "claude local-fix"
 	check "two reviews ran" test "$(grep -c '^codex review' "$state/agents.log")" = 2
 	check "no review saw the branch on origin" bash -c "test \"\$(sort -u '$state/review-origin.log')\" = local"
-	check "the re-review is directed to the changed diff" contains "$state/review-prompt.txt" "git diff origin/main...HEAD"
+	check "the re-review starts with the fix diff" contains "$state/review-prompt.txt" 'Start with `git diff '
+	check "the task records a focused starting commit" grep -q 'from_head:' "$task_file"
 	check "the review omits the proposed description" bash -c "! grep -qF 'Retry 5xx and 429.' '$state/review-prompt.txt'"
 	check "the branch was pushed once" test "$(wc -l <"$state/pushes.log" | tr -d ' ')" = 1
 	head=$(git --git-dir="$sandbox/origin.git" rev-parse "$(sed -n 's/^branch: *//p' "$task_file")")
@@ -558,6 +563,18 @@ scenario_full_check() {
 	check "the full result covers the pushed commit" bash -c "grep -A1 '^full_result:' '$task_file' | grep -qF 'head: $head'"
 	task 42 sd >"$sandbox/show.txt"
 	check "show reports the covering full result" contains "$sandbox/show.txt" "Full suite: covers ${head:0:7}"
+}
+
+scenario_planning_advice() {
+ echo "planning_advice: clear requirements pass with local writing advice"
+ setup planning_advice
+ touch "$state/writing-advice"
+ start 42 >/dev/null
+ check "writing advice does not block the run" wait_status "review ✓"
+ check "one planning turn ran" test "$(grep -c '^claude plan$' "$state/agents.log")" = 1
+ check "writing advice is saved locally" contains "$sandbox/tasks/acme-widgets-42.md" 'planning_advice:'
+ check "the note is saved" contains "$sandbox/tasks/acme-widgets-42.md" 'Shorten R1'
+ check "advice is absent from tracker comments" bash -c "! grep -qF 'Shorten R1' '$state'/comment-*.md"
 }
 
 scenario_plan_reuse() {
@@ -1338,7 +1355,7 @@ scenario_account() {
 	unset E2E_CLONE_URL
 }
 
-scenarios=${*:-runner review_before_pr full_check plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui routing history linear account learning knowledge_transfer}
+scenarios=${*:-runner review_before_pr full_check planning_advice plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui routing history linear account learning knowledge_transfer}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"

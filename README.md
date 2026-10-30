@@ -625,7 +625,7 @@ worktrees_dir: ~/.local/share/foreman/worktrees
 repositories_dir: ~/.local/share/foreman/repositories # source checkouts for delegated work
 log_dir: ~/.local/share/foreman/logs
 knowledge_dir: ~/.local/share/foreman/knowledge # what foreman learns, per repository
-review_rounds: 3                     # passes over the whole PR per self-review and per review
+review_rounds: 1                     # passes per review; first full, then focused on fixes
 fix_rounds: 3                        # fixes asked by either review before foreman asks you
 review_before_pr: false              # open the PR before review; set true to review locally first
 mentions: true                       # show items found only because they mention you
@@ -672,6 +672,13 @@ values beginning with `~/` expand to your home directory. The `stages/` director
 and `routing.yaml` sit beside the selected config file; neither has a separate
 config key. Auto mode's on/off choice lives in
 `~/.local/share/foreman/state.json`, outside `config.yaml`.
+
+Each reviewer starts with one full pass. Later reviews start with the changes since
+that reviewer's previous commit and its own findings. The reviewer can read more
+when needed. Changed requirements or bases, rewritten history, and missing saved
+context cause a full review. Existing explicit `review_rounds` settings keep their
+value; set it to `1` to use one pass. B1 writing advice is recorded locally and never
+adds a correction turn. Missing or unclear requirements still block.
 
 Planning drafts and their checks are saved in the local task file. A restart can
 finish posting a checked draft without planning again. If a revision changes no

@@ -31,11 +31,15 @@ func clonePlanDraft(d *task.PlanDraft) *task.PlanDraft {
 	out.Documents = maps.Clone(d.Documents)
 	out.Sources = maps.Clone(d.Sources)
 	out.Findings = slices.Clone(d.Findings)
+	out.Advice = slices.Clone(d.Advice)
 	return &out
 }
 
 func (a App) savePlanDraft(ctx context.Context, key task.Key, draft *task.PlanDraft) (*task.Record, error) {
-	return a.update(ctx, key, existing(func(cur *task.Record) { cur.Delegation.PlanDraft = clonePlanDraft(draft) }))
+	return a.update(ctx, key, existing(func(cur *task.Record) {
+		cur.Delegation.PlanDraft = clonePlanDraft(draft)
+		cur.PlanningAdvice = slices.Clone(draft.Advice)
+	}))
 }
 
 // restorePlanDraft continues local planning work only while triage, the issue

@@ -249,6 +249,8 @@ type WorktreeManager interface {
 	// Contains fetches origin into the worktree at dir, then reports whether ancestor
 	// is an ancestor of descendant, or the same commit.
 	Contains(ctx context.Context, dir, ancestor, descendant string) (bool, error)
+	// ReviewRange reads the local base commit and checks the prior review ancestry.
+	ReviewRange(ctx context.Context, dir, baseRef, head, previous string) (ReviewRange, error)
 	// MergeConflicts fetches Base and Branch from origin and lists the files that
 	// conflict when origin/Base merges into origin/Branch. None means a clean merge. It
 	// changes neither the branch nor the worktree. A Local check fetches only Base and
@@ -269,6 +271,11 @@ type WorktreeManager interface {
 	// which must have branch checked out with no uncommitted changes. It never
 	// overwrites local work; anything it cannot fast-forward safely is an error.
 	SyncDefaultBranch(ctx context.Context, dir, branch string) error
+}
+
+type ReviewRange struct {
+	BaseHead           string
+	PreviousIsAncestor bool
 }
 
 // MergeCheck names the worktree to fetch in, the PR's head branch, and its base branch.

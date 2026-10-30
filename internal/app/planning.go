@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/brymartinez/foreman/internal/agent"
-	"github.com/brymartinez/foreman/internal/task"
 	"io"
 	"strconv"
 	"strings"
+
+	"github.com/brymartinez/foreman/internal/agent"
+	"github.com/brymartinez/foreman/internal/task"
 )
 
 // postPlan puts each planning document on the issue as its own comment, editing the
@@ -77,11 +78,12 @@ func (a App) postPlan(ctx, final context.Context, rec *task.Record, docs map[tas
 	var checkErr error
 	for {
 		if draft.CheckedDigest == planDigest(texts) && (draft.Clean || len(draft.Findings) > 0) {
-			checked = agent.ReviewOutcome{Clean: draft.Clean, Findings: draft.Findings}
+			checked = agent.ReviewOutcome{Clean: draft.Clean, Findings: draft.Findings, Advice: draft.Advice}
 		} else {
 			checked, checkErr = a.checkPlan(ctx, rec, scope, texts, onIssue, log)
 			if checkErr == nil {
 				draft.CheckedDigest, draft.Clean, draft.Findings = planDigest(texts), checked.Clean, checked.Findings
+				draft.Advice = checked.Advice
 				rec, draftErr = a.savePlanDraft(final, rec.Key, draft)
 				if draftErr != nil {
 					return rec, draftErr

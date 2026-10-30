@@ -283,6 +283,12 @@ func Show(w io.Writer, r *task.Record) {
 		Blocked(w, p.Question)
 		fmt.Fprintln(w, "\nAnswer it: press Enter on the task in the dashboard.")
 	}
+	if len(r.PlanningAdvice) > 0 {
+		fmt.Fprintln(w, "\nPlanning advice (does not block)")
+		for _, advice := range r.PlanningAdvice {
+			fmt.Fprintf(w, "  - %s: %s\n", advice.Summary, advice.Detail)
+		}
+	}
 	if len(r.Calls) > 0 {
 		fmt.Fprintln(w, "\nCalls by stage")
 		counts := map[string]int{}

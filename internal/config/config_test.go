@@ -57,7 +57,7 @@ func TestAgentSettingsOverlayDefaults(t *testing.T) {
 	if cfg.Claude.Model != "haiku" || cfg.Claude.Command != "claude" {
 		t.Errorf("claude: %+v", cfg.Claude)
 	}
-	if cfg.ReviewRounds != 3 || cfg.FixRounds != 3 {
+	if cfg.ReviewRounds != 1 || cfg.FixRounds != 3 {
 		t.Errorf("rounds must load as their defaults so a materialized file shows them: %d %d", cfg.ReviewRounds, cfg.FixRounds)
 	}
 	if cfg.Codex.Command != "/opt/codex" || cfg.Codex.Model != "gpt-6-sol" {

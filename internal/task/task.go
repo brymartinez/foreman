@@ -178,7 +178,13 @@ type Profile struct {
 	ReasoningEffort     string `yaml:"reasoning_effort,omitempty"`
 }
 
+type Advice struct {
+	Summary string `yaml:"summary"`
+	Detail  string `yaml:"detail,omitempty"`
+}
+
 type PlanDraft struct {
+	Advice        []Advice           `yaml:"advice,omitempty"`
 	Scope         string             `yaml:"scope"`
 	Fingerprint   string             `yaml:"fingerprint"`
 	Documents     map[PlanDoc]string `yaml:"documents"`
@@ -570,6 +576,7 @@ type Record struct {
 	LastGitHubSync time.Time
 	Decisions      []Decision
 	LastOutcome    *Outcome
+	PlanningAdvice []Advice
 	Calls          []ModelCall
 	Usage          Usage
 	// Validation is what the implementation agent reported with its PR.
@@ -689,6 +696,9 @@ const (
 )
 
 type Review struct {
+	BaseRef  string
+	BaseHead string
+	FromHead string
 	Round    int
 	Kind     ReviewKind
 	Reviewer Agent

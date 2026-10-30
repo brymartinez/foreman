@@ -487,6 +487,7 @@ func TestStoreRoundTripsToolCallCounts(t *testing.T) {
 	s := Markdown{Dir: t.TempDir()}
 	want := delegated()
 	want.Delegation.PlanDraft = &task.PlanDraft{Scope: "scope", Fingerprint: "description", Documents: map[task.PlanDoc]string{task.PRD: "R1. Retry calls."}, CheckedDigest: "checked", Findings: []task.Finding{{Summary: "Missing step"}}, Revisions: 2}
+	want.PlanningAdvice = []task.Advice{{Summary: "Short sentences", Detail: "Split R1."}}
 	want.Calls = []task.ModelCall{{Agent: task.Claude, Step: "plan_check", Model: "sonnet", Usage: task.Usage{ClaudeInputTokens: 120, ClaudeOutputTokens: 10}}}
 	want.Usage = task.Usage{ClaudeInputTokens: 120, ClaudeCachedTokens: 20, ClaudeOutputTokens: 10, CodexTurns: 2, ToolCalls: map[string]int{"command_execution": 4, "file_change": 2}}
 	if err := s.Save(ctx, want); err != nil {
@@ -498,6 +499,9 @@ func TestStoreRoundTripsToolCallCounts(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Delegation.PlanDraft, want.Delegation.PlanDraft) {
 		t.Fatalf("draft %+v, want %+v", got.Delegation.PlanDraft, want.Delegation.PlanDraft)
+	}
+	if !reflect.DeepEqual(got.PlanningAdvice, want.PlanningAdvice) {
+		t.Fatalf("advice %+v", got.PlanningAdvice)
 	}
 	if !reflect.DeepEqual(got.Calls, want.Calls) {
 		t.Fatalf("calls = %+v, want %+v", got.Calls, want.Calls)
@@ -867,5 +871,22 @@ func TestOldFileLoadsWithoutAFullResult(t *testing.T) {
 	}
 	if got.FullResult != nil || got.FullResult.Covers("c0ffee1") || got.Validation[0].Scope != "" {
 		t.Fatalf("full result = %+v, validation %+v", got.FullResult, got.Validation)
+	}
+}
+
+func TestStoreRoundTripsFocusedReviewContext(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	want := delegated()
+	want.Reviews = []task.Review{{Round: 1, Kind: task.SelfReview, Reviewer: task.Claude, Head: "new", BaseRef: "origin/main", BaseHead: "base", FromHead: "old", Clean: true}}
+	if err := s.Save(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, want.Key)
+	if err != nil || len(got.Reviews) != 1 {
+		t.Fatalf("record %+v %v", got, err)
+	}
+	r := got.Reviews[0]
+	if r.BaseRef != "origin/main" || r.BaseHead != "base" || r.FromHead != "old" {
+		t.Fatalf("review %+v", r)
 	}
 }

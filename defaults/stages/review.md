@@ -10,10 +10,10 @@
 
 ## Passes
 
-`review_rounds` in the foreman config sets how many passes you make. The prompt's "Review passes" section gives the number and says whether this is a first review or a re-review.
+`review_rounds` sets the passes per review. The default is one.
 
-6. On the first review of a PR, read the whole change `review_rounds` times before you report. Each pass looks for what the earlier passes missed. Report the findings from every pass together.
-7. On a re-review, review the current diff as a whole again. Earlier findings are not supplied to this fresh session.
+6. On the first review, check the full change. Self-review checks the requirements and test evidence. Competing review checks defects and regressions independently.
+7. For a focused review, start with the changes since your last review and check your own earlier findings. Read the full change when the fix may have wider effects. A missing baseline, changed requirements or base branch, or rewritten history starts a full review.
 
 ## What counts
 

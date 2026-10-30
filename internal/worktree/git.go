@@ -354,3 +354,29 @@ func git(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	}
 	return stdout.Bytes(), nil
 }
+
+// ReviewRange reads the refs already fetched for the review's conflict check.
+func (Git) ReviewRange(ctx context.Context, dir, baseRef, head, previous string) (app.ReviewRange, error) {
+	base, err := git(ctx, dir, "rev-parse", "--verify", baseRef+"^{commit}")
+	if err != nil {
+		return app.ReviewRange{}, err
+	}
+	result := app.ReviewRange{BaseHead: strings.TrimSpace(string(base))}
+	if previous == "" {
+		return result, nil
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "merge-base", "--is-ancestor", previous, head)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err = cmd.Run()
+	var exit *exec.ExitError
+	switch {
+	case err == nil:
+		result.PreviousIsAncestor = true
+		return result, nil
+	case errors.As(err, &exit) && exit.ExitCode() == 1:
+		return result, nil
+	default:
+		return app.ReviewRange{}, fmt.Errorf("review ancestry: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+}

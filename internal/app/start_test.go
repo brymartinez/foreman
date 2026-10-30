@@ -16,6 +16,8 @@ import (
 )
 
 type fakeWorktrees struct {
+	reviewBase      string
+	reviewRangeErr  error
 	reqs            []WorktreeRequest
 	head            string
 	checkpointHeads []string
@@ -125,6 +127,19 @@ func (f *fakeWorktrees) committedHead(prior string, allowSame bool) (string, err
 
 func (f *fakeWorktrees) RemoteBranchHead(_ context.Context, _, branch string) (string, error) {
 	return f.remoteHeads[branch], nil
+}
+
+func (f *fakeWorktrees) ReviewRange(ctx context.Context, dir, baseRef, head, previous string) (ReviewRange, error) {
+	if f.reviewRangeErr != nil {
+		return ReviewRange{}, f.reviewRangeErr
+	}
+	result := ReviewRange{BaseHead: f.reviewBase}
+	if previous != "" {
+		var err error
+		result.PreviousIsAncestor, err = f.Contains(ctx, dir, previous, head)
+		return result, err
+	}
+	return result, nil
 }
 
 func (f *fakeWorktrees) Contains(_ context.Context, dir, ancestor, descendant string) (bool, error) {

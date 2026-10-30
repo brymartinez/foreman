@@ -295,3 +295,11 @@ func TestShowListsCheckScopesAndTheFullSuiteState(t *testing.T) {
 		}
 	}
 }
+
+func TestShowKeepsWritingAdviceSeparateFromBlockingFindings(t *testing.T) {
+	var b bytes.Buffer
+	Show(&b, &task.Record{PlanningAdvice: []task.Advice{{Summary: "Shorten R1", Detail: "Use two sentences."}}})
+	if !strings.Contains(b.String(), "Planning advice (does not block)") || !strings.Contains(b.String(), "Shorten R1: Use two sentences.") {
+		t.Fatalf("show %s", b.String())
+	}
+}
