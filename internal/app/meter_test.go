@@ -16,6 +16,7 @@ func TestRunnerCountsPlanChecksAndRevisionsOnce(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	f.claude.turns = []agent.Turn{plannedTurn("sid"), plannedTurn("sid"), prTurn("next")}
+	f.claude.turns[1].Outcome.Documents[task.PRD] += " Fixed rule."
 	f.claude.scopeReviews = []agent.ReviewOutcome{
 		{Usage: task.Usage{ClaudeInputTokens: 100, ClaudeOutputTokens: 20, ClaudeCostUSD: .1, ClaudeTurns: 1}, Findings: []task.Finding{{Summary: "missing rule"}}},
 		{Clean: true, Usage: task.Usage{ClaudeInputTokens: 80, ClaudeCostUSD: .2, ClaudeTurns: 1}},

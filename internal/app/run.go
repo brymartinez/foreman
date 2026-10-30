@@ -70,12 +70,12 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, token string, l
 		if err != nil || done {
 			return err
 		}
-	} else if len(rec.UnhandledFeedback()) > 0 && rec.Delegation.PR != 0 && reviewCovers(rec, rec.Delegation.PRHead, rec.Delegation.PRDigest) {
+	} else if len(rec.UnhandledFeedback()) > 0 && rec.Delegation.PR != 0 && reviewCovers(rec, rec.Delegation.PRHead) {
 		var current bool
 		if rec, current, err = a.currentPR(ctx, final, rec); err != nil {
 			return err
 		}
-		if current && reviewCovers(rec, rec.Delegation.PRHead, rec.Delegation.PRDigest) && !rec.FinalCheckPending() {
+		if current && reviewCovers(rec, rec.Delegation.PRHead) && !rec.FinalCheckPending() {
 			// A task left by the old feedback flow already passed review. Hand it
 			// back without resuming the implementer on the same comments.
 			_, err = a.update(final, rec.Key, existing(func(cur *task.Record) {
@@ -272,7 +272,7 @@ func (r *taskRun) planNeeded() bool {
 // goes straight on to an implementation turn; a PR goes to review.
 func (r *taskRun) implement() (step, error) {
 	a := r.a
-	if r.forcePlan && !r.rec.PlanPosted() && r.rec.Delegation.Implementer.ID != "" {
+	if r.forcePlan && !r.rec.PlanPosted() && r.rec.Delegation.PlanDraft == nil && r.rec.Delegation.Implementer.ID != "" {
 		rec, err := a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
 			cur.Delegation.Implementer.ID = ""
 		}))
@@ -284,6 +284,9 @@ func (r *taskRun) implement() (step, error) {
 	if r.planNeeded() {
 		if err := r.enter(task.Planning); err != nil {
 			return stepDone, err
+		}
+		if restored, next, err := r.restorePlanDraft(); restored || err != nil {
+			return next, err
 		}
 		if ok, err := r.reconcilePlan(); err != nil || !ok {
 			return stepDone, err
@@ -303,6 +306,9 @@ func (r *taskRun) implement() (step, error) {
 	}
 	rec, err := a.finishTurn(r.ctx, r.final, r.rec.Key, during, res, func(cur *task.Record) {
 		applyTurnResult(cur, res, a.Now())
+		if res.err == nil && res.turn.Outcome.Status == agent.Planned {
+			cur.Delegation.PlanDraft = &task.PlanDraft{Scope: r.scope.digest, Fingerprint: r.plan.fingerprint, Documents: mergePlanTexts(r.plan.texts(), res.turn.Outcome.Documents), Sources: r.plan.texts()}
+		}
 		if res.err == nil && res.turn.Outcome.Status == agent.Checkpoint {
 			cur.Delegation.CheckpointHead = res.checkpointHead
 			cur.Delegation.CheckpointNext = res.turn.Outcome.NextObjective
@@ -413,8 +419,8 @@ func (r *taskRun) review() (step, error) {
 			reviewErr = errors.New("the change has no claim set to verify")
 		}
 	}
-	// The PR description and the PRD can change without a new head. Storing what the
-	// review reads makes an edit need a new self-review, before and after a restart.
+	// Keep PR text for audit and publication checks. Requirements changes still
+	// invalidate code reviews even when the commit did not change.
 	if reviewErr == nil {
 		d, digest := rec.Delegation, task.ProposalDigest(title, body)
 		setPR := !rec.LocalReview() && d.PRDigest != digest
@@ -766,6 +772,10 @@ func applyFeedbackTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runEr
 		return
 	}
 	rec.CI = ci
+	if strings.TrimSpace(pr.Body) == "" {
+		failTask(rec, "the pull request description is empty; restore it before handoff", now)
+		return
+	}
 	d := rec.Delegation
 	// The turn's PR is the newest read of the description. Storing it makes an edit
 	// made while the agent answered need its reviews before the run hands over.
@@ -773,7 +783,7 @@ func applyFeedbackTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runEr
 	rec.State = rec.ReviewStage()
 	// The same bar the gate applies: a clean review of this head and CI that finished.
 	// A clean review alone waits for CI, and the gate hands the task over.
-	if !reviewCovers(rec, pr.HeadSHA, task.ProposalDigest(pr.Title, pr.Body)) {
+	if !reviewCovers(rec, pr.HeadSHA) {
 		return
 	}
 	rec.State = task.WaitingForCI
@@ -784,8 +794,8 @@ func applyFeedbackTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runEr
 	}
 }
 
-// reviewDescription is the description a review judges the change by: the PR's, or
-// the proposed one for a local commit. A review without one cannot pass.
+// reviewDescription checks that the PR has text and reads it for audit.
+// Code reviews receive checked requirements and code, rather than this text.
 func (a App) reviewDescription(ctx context.Context, rec *task.Record) (title, body string, err error) {
 	d, target := rec.Delegation, reviewTarget(rec)
 	if rec.LocalReview() {
@@ -1177,205 +1187,6 @@ func applyStop(ctx context.Context, rec *task.Record, during string, log io.Writ
 	fmt.Fprintf(log, "foreman: stopped during %s: %v\n", during, context.Cause(ctx))
 	rec.State = task.Failed
 	rec.LastOutcome = &task.Outcome{Status: Cancelled, Summary: fmt.Sprintf("run cancelled during %s (%v)", during, context.Cause(ctx)), At: now}
-}
-
-// postPlan puts each planning document on the issue as its own comment, editing the
-// marked comment found on the issue when there is one. A document the turn left empty
-// keeps the comment found on the issue as it is. Each comment is recorded as soon as
-// it is posted. A failed post fails the task; restarting it plans again.
-func (a App) postPlan(ctx, final context.Context, rec *task.Record, docs map[task.PlanDoc]string, onIssue issuePlan, log io.Writer) (*task.Record, error) {
-	// Every kept document is checked before anything is posted, so a plan that can't
-	// be completed leaves the issue as it was.
-	for _, doc := range task.PlanDocs {
-		if strings.TrimSpace(docs[doc]) != "" {
-			continue
-		}
-		found, ok := onIssue.found[doc]
-		reason := fmt.Sprintf("the planning turn wrote no %s", doc.Title())
-		if ok {
-			// The comment may have been deleted or unmarked while the turn ran, and
-			// the turn left no text to post in its place.
-			id := found.comment.ExternalCommentID
-			if rec.IssueSource() != task.Linear {
-				id = strconv.FormatInt(found.comment.CommentID, 10)
-			}
-			kept, err := a.stillPlanComment(ctx, rec.Key, doc, id)
-			switch {
-			case err != nil:
-				reason = fmt.Sprintf("reading the %s on the issue failed: %v", doc.Title(), err)
-			case kept == "":
-				reason = fmt.Sprintf("the %s left on the issue was removed during planning; restart the task to plan it again", doc.Title())
-			default:
-				continue
-			}
-		}
-		return a.update(final, rec.Key, existing(func(cur *task.Record) {
-			failTask(cur, reason, a.Now())
-			applyStop(ctx, cur, "planning", log, a.Now())
-		}))
-	}
-	scope, scopeErr := a.readScope(ctx, rec.Key)
-	if scopeErr == nil && scope.digest != rec.Delegation.ScopeDigest {
-		scopeErr = errors.New("confirmed triage changed during planning; restart to revise the documents")
-	}
-	if scopeErr != nil {
-		return a.update(final, rec.Key, existing(func(cur *task.Record) { failTask(cur, scopeErr.Error(), a.Now()) }))
-	}
-	texts := onIssue.texts()
-	if texts == nil {
-		texts = map[task.PlanDoc]string{}
-	}
-	for doc, text := range docs {
-		if strings.TrimSpace(text) != "" {
-			texts[doc] = text
-		}
-	}
-	const maxPlanRevisions = 3
-	var checked agent.ReviewOutcome
-	var checkErr error
-	for revision := 0; ; revision++ {
-		checked, checkErr = a.checkPlan(ctx, rec, scope, texts, onIssue, log)
-		if checkErr != nil || checked.Clean || len(checked.Findings) == 0 || revision == maxPlanRevisions {
-			break
-		}
-		planner := a.Agents[rec.Delegation.Implementer.Agent]
-		var message strings.Builder
-		message.WriteString("The read-only plan check found gaps or disagreements. Fix Requirements and Work plan in this planning session using the confirmed scope you already received. Return planned with only changed documents; use an empty string for an unchanged document. Do not repeat code research unless a finding needs it. End with the same JSON outcome: planned, blocked, or failed.\n\n")
-		for _, finding := range checked.Findings {
-			fmt.Fprintf(&message, "- %s: %s\n", finding.Summary, finding.Detail)
-		}
-		fmt.Fprintln(log, "foreman: resuming the planner to correct the plan check")
-		turn, turnErr := planner.Resume(ctx, rec.Delegation.Implementer, agent.StartInput{
-			Worktree: rec.Delegation.Worktree, Log: log, Prompt: message.String(),
-			Stage: task.StagePlan, Step: agent.StepPlan, Profile: rec.Delegation.Profile,
-			MaxBudgetUSD: a.ImplementerBudgetUSD,
-		})
-		if turnErr == nil && turn.Outcome.Status != agent.Planned && turn.Outcome.Status != agent.Blocked && turn.Outcome.Status != agent.FailedRun {
-			turnErr = fmt.Errorf("planning revision returned %s instead of planned, blocked, or failed", turn.Outcome.Status)
-		}
-		result := turnResult{turn: turn, err: turnErr}
-		var updateErr error
-		rec, updateErr = a.finishTurn(ctx, final, rec.Key, "planning", result, func(cur *task.Record) {
-			applyTurnResult(cur, result, a.Now())
-		}, log)
-		if updateErr != nil || rec.State != task.Planning {
-			return rec, updateErr
-		}
-		for doc, text := range turn.Outcome.Documents {
-			if strings.TrimSpace(text) != "" {
-				docs[doc] = text
-				texts[doc] = text
-			}
-		}
-		current, err := a.readScope(ctx, rec.Key)
-		if err == nil && current.digest != scope.digest {
-			err = errors.New("confirmed triage changed during planning; restart to revise the documents")
-		}
-		if err != nil {
-			return a.update(final, rec.Key, existing(func(cur *task.Record) { failTask(cur, err.Error(), a.Now()) }))
-		}
-	}
-	if checkErr != nil || !checked.Clean {
-		return a.update(final, rec.Key, existing(func(cur *task.Record) {
-			switch {
-			case checkErr != nil:
-				failTask(cur, checkErr.Error(), a.Now())
-			case len(checked.Findings) == 0:
-				failTask(cur, "plan agreement with confirmed triage is inconclusive; revise and restart", a.Now())
-			default:
-				proposed := onIssue
-				proposed.found = make(map[task.PlanDoc]foundPlan, len(texts))
-				for doc, text := range texts {
-					f := onIssue.found[doc]
-					f.text = text
-					proposed.found[doc] = f
-				}
-				askScopePlanConflict(cur, scope, proposed, checked, a.Now())
-			}
-		}))
-	}
-	for _, doc := range task.PlanDocs {
-		found, isFound := onIssue.found[doc]
-		if strings.TrimSpace(docs[doc]) == "" {
-			var err error
-			if rec, err = a.update(final, rec.Key, existing(func(cur *task.Record) { cur.SetPlanComment(found.comment) })); err != nil {
-				return rec, err
-			}
-			fmt.Fprintf(log, "foreman: kept the %s: %s\n", doc.Title(), found.comment.URL)
-			continue
-		}
-		// Only a comment still marked as this document is edited. A recorded one that
-		// lost its marker belongs to someone else now, so the document is posted anew.
-		var id string
-		if isFound {
-			if rec.IssueSource() == task.Linear {
-				id = found.comment.ExternalCommentID
-			} else if found.comment.CommentID > 0 {
-				id = strconv.FormatInt(found.comment.CommentID, 10)
-			}
-		}
-		body := planCommentBody(doc, onIssue.fingerprint, docs[doc])
-		var posted TrackerComment
-		var err error
-		if id != "" {
-			// The marker may have been removed while the planning turn ran.
-			id, err = a.stillPlanComment(ctx, rec.Key, doc, id)
-		}
-		if err == nil {
-			posted, err = a.postIssueComment(ctx, rec.Key, id, body)
-		}
-		if errors.Is(err, ErrGone) && id != "" {
-			posted, err = a.postIssueComment(ctx, rec.Key, "", body)
-		}
-		var updateErr error
-		if rec, updateErr = a.update(final, rec.Key, existing(func(cur *task.Record) {
-			if err != nil {
-				failTask(cur, fmt.Sprintf("posting the %s on the issue failed: %v", doc.Title(), err), a.Now())
-				applyStop(ctx, cur, "planning", log, a.Now())
-				return
-			}
-			cur.SetPlanComment(planCommentFor(rec.IssueSource(), doc, posted))
-		})); updateErr != nil || err != nil {
-			return rec, updateErr
-		}
-		fmt.Fprintf(log, "foreman: posted the %s: %s\n", doc.Title(), posted.URL)
-	}
-	return a.update(final, rec.Key, existing(func(cur *task.Record) {
-		cur.Delegation.PlanScopeDigest = scope.digest
-		cur.Delegation.PlanDigest = planDigest(texts)
-	}))
-}
-
-// stillPlanComment returns id when the comment still starts with doc's marker, and
-// an empty id, which posts a new comment, when it was deleted or lost the marker.
-func (a App) stillPlanComment(ctx context.Context, key task.Key, doc task.PlanDoc, id string) (string, error) {
-	c, err := a.issueComment(ctx, key, id)
-	if errors.Is(err, ErrGone) {
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	if got, _, ok := task.ParsePlanMarker(c.Body); !ok || got != doc {
-		return "", nil
-	}
-	return id, nil
-}
-
-// maxCommentChars is GitHub's limit on an issue comment's length.
-const maxCommentChars = 65536
-
-// planCommentBody is one document's comment: a marker foreman can recognize, with the
-// fingerprint of the description the plan was written for, the document's heading,
-// and the agent's text, cut to fit GitHub's limit.
-func planCommentBody(doc task.PlanDoc, fingerprint, text string) string {
-	head := task.PlanMarker(doc, fingerprint) + "\n## " + doc.Title() + "\n\n"
-	const cut = "\n\n_Truncated at GitHub's comment length limit._"
-	text = strings.TrimSpace(text)
-	if r := []rune(text); len([]rune(head))+len(r) > maxCommentChars {
-		text = string(r[:maxCommentChars-len([]rune(head))-len([]rune(cut))]) + cut
-	}
-	return head + text
 }
 
 // applyPRHead records the PR head a resumed run is about to review.

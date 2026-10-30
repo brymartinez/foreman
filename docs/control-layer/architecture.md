@@ -102,8 +102,8 @@ runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR)
                     SELF_REVIEW: self = implementer.Review(disposable read-only session,
                                               checked Requirements and Work plan + git diff
                                               [+ claims]),
-                                              until a clean one covers this head and
-                                              description [and claims and PRD]
+                                              until a clean one covers this head, scope,
+                                              and plan [and claims and PRD]
                     self error -> FAILED, exit (never falls back to the competing review)
                     self clean -> the competing review of the same change, in this run
                     ADVERSARIAL_REVIEW: review = reviewer.Review(disposable read-only
@@ -235,7 +235,7 @@ app.InboxView         -> runner pid dead in a stage -> FAILED
                          readiness gate (gate.go), per task with a PR:
                            PR closed  -> stop the runner, PR_CLOSED
                            PR reopened -> READY_FOR_HUMAN or WAITING_FOR_CI with a clean
-                             review of its head and description, else the stage it needs
+                             review of its head and requirements, else the stage it needs
                            review stage, no runner, clean review of an earlier head or
                              description (reopened, or a pre-stage file) -> spawn a
                              runner that reviews it
@@ -572,7 +572,15 @@ the same commit. The commit message records why it changed.
   new plan go back to the same planning session with a short correction prompt. The
   planner returns changed documents only, and the runner checks the combined set
   before posting. After three revisions with remaining findings, the task asks for a
-  decision. Older four-comment plans keep their Analysis and Design comments on the
+  decision. Draft documents, source fingerprints, check results, and the revision
+  count are saved locally after each completed call. A restart reuses the draft only
+  when triage, the issue description, and existing planning comments still match. A clean
+  check is reused while finishing partial comment posts; unchanged comments are
+  kept. Changed requirements or comments invalidate the saved draft. A missing
+  planner session starts a correction with only the draft, findings, and confirmed
+  scope. An unchanged revision stops before another model check and asks for a
+  decision. Revision limits survive restarts; an explicit choice to revise grants a
+  new set of attempts. Older four-comment plans keep their Analysis and Design comments on the
   issue. Foreman reads their legacy digest once; if all four comments and triage still
   match the clean check, it saves the two-document digest without a model turn. A
   changed comment or triage still needs a new check.
@@ -769,20 +777,13 @@ the same commit. The commit message records why it changed.
   the competing reviewer, which would skip it. Rejected: running the self-review inside
   the implementer's session, which shares the blind spots it is meant to catch.
 - **Review kinds live on the record.** Each review records its kind (`self`, or empty
-  for competing, so older task files read as competing), the head, and the digest of
-  the title and description it read. A clean self-review counts only while the stored
-  head and description digest match, so a restart, a new commit, or a description-only
-  edit needs a new self-review. The review step re-reads the PR description and stores
-  its digest before choosing. A competing review covers the head and description it
-  read; one from before descriptions were recorded covers its head alone. A clean
-  self-review newer than the latest competing review leaves the competing review
-  pending, so a restart finishes it. The digest ignores line endings and surrounding
-  space, which GitHub may change. A restart keeps the digest with the PR, and a
-  feedback path that would skip review reads the PR's head and description from GitHub
-  first.
-  The gate, PR adoption, reopening, and those feedback paths read competing reviews
-  of the current head and description only, so a clean self-review or a review of an
-  earlier description never hands a task over.
+  for competing), head, requirement and claim digests, and the PR text digest for
+  audit. Code review coverage depends on the commit, confirmed scope, plan, and
+  claims. A title or description edit alone does not start model reviews again.
+  Empty PR descriptions still block review and handoff through local checks.
+  Publishing a locally reviewed change still verifies that the actual PR holds the
+  exact proposed title and description. A clean self-review newer than the latest
+  competing review leaves the competing review pending, so a restart finishes it.
 - **The competing review stays independent.** Its task context is the file diff;
   neither earlier rounds nor PR discussion reach it. With claim verification, the
   PRD and claims reach it as statements to test, never as findings or verdicts.
@@ -855,8 +856,8 @@ the same commit. The commit message records why it changed.
   alters a started task; only a reset takes the current value. A task that has a PR
   follows the PR workflow. The implementer commits, validates,
   and returns `review_ready` with a proposed title and description; nothing is pushed. The
-  proposed description is the reviewer's requirements, and each fix comes back with an
-  updated description, so the description and the code are reviewed together. Reviews,
+  proposed description is saved for the publishing step. Reviewers use the checked
+  requirements and code. Reviews,
   reviewer selection, and both round settings work as for a PR. At the fix cap, B stops
   the task without a PR instead of accepting the findings: only a clean review opens one.
   The agent still pushes and runs `gh pr create`, because Foreman's GitHub port is read
@@ -864,14 +865,14 @@ the same commit. The commit message records why it changed.
   PR's head, title, and body are the ones reviewed. The clean review becomes the review
   of the PR's head, so the gate goes straight to CI. Each local review records the
   commit and a digest of the title and description it read, and a restart resumes from the record:
-  a commit or description without a review goes to review, a clean pair to the PR step.
+  an unreviewed commit goes to review; a clean commit goes to the PR step.
   The opening turn may capture requested screenshots after the PR exists and post them
   as a marked comment. Screenshot uploads never relax the exact title and body
   comparison with the clean review.
-- **A review covers one PR head and description.** Each review records the head and
-  description it read, and with claim verification the claim set and PRD digests too;
+- **A code review covers one commit and its requirements.** Each review records its
+  head, scope, and plan, and with claim verification the claim set and PRD digests too;
   a review of other claims or another PRD does not cover the change. A WAITING_FOR_CI
-  task whose head, description, or PRD changed is reviewed again, self-review first
+  task whose head, scope, plan, claims, or PRD changed is reviewed again, self-review first
   (the gate reads the PRD of such a task, and of a claim-verified PR it finds
   reopened, on each refresh before CI, and fails the task when it cannot load it; paths
   that answer comments leave a claim-verified task in WAITING_FOR_CI for that check); new commits on a READY_FOR_HUMAN PR are only

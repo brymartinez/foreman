@@ -486,6 +486,7 @@ func TestStoreRejectsAnUnknownPhase(t *testing.T) {
 func TestStoreRoundTripsToolCallCounts(t *testing.T) {
 	s := Markdown{Dir: t.TempDir()}
 	want := delegated()
+	want.Delegation.PlanDraft = &task.PlanDraft{Scope: "scope", Fingerprint: "description", Documents: map[task.PlanDoc]string{task.PRD: "R1. Retry calls."}, CheckedDigest: "checked", Findings: []task.Finding{{Summary: "Missing step"}}, Revisions: 2}
 	want.Calls = []task.ModelCall{{Agent: task.Claude, Step: "plan_check", Model: "sonnet", Usage: task.Usage{ClaudeInputTokens: 120, ClaudeOutputTokens: 10}}}
 	want.Usage = task.Usage{ClaudeInputTokens: 120, ClaudeCachedTokens: 20, ClaudeOutputTokens: 10, CodexTurns: 2, ToolCalls: map[string]int{"command_execution": 4, "file_change": 2}}
 	if err := s.Save(ctx, want); err != nil {
@@ -494,6 +495,9 @@ func TestStoreRoundTripsToolCallCounts(t *testing.T) {
 	got, err := s.Get(ctx, want.Key)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Delegation.PlanDraft, want.Delegation.PlanDraft) {
+		t.Fatalf("draft %+v, want %+v", got.Delegation.PlanDraft, want.Delegation.PlanDraft)
 	}
 	if !reflect.DeepEqual(got.Calls, want.Calls) {
 		t.Fatalf("calls = %+v, want %+v", got.Calls, want.Calls)

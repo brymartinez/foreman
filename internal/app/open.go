@@ -25,6 +25,11 @@ func (r *taskRun) openPR() (step, error) {
 	if err := r.enter(task.OpeningPR); err != nil {
 		return stepDone, err
 	}
+	if _, _, textErr := a.reviewDescription(r.ctx, r.rec); textErr != nil {
+		rec, err := a.update(r.final, r.rec.Key, existing(func(cur *task.Record) { failTask(cur, textErr.Error(), a.Now()) }))
+		r.rec = rec
+		return stepDone, err
+	}
 	if next, err := r.checkPRDBeforeOpening(); err != nil || next != stepOpenPR {
 		return next, err
 	}

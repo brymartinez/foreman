@@ -294,7 +294,7 @@ func TestCancelledFeedbackTurnIsRecordedAsCancelled(t *testing.T) {
 	}
 }
 
-func TestFeedbackRestartDoesNotHandOverAnEditedDescriptionWithoutReviews(t *testing.T) {
+func TestFeedbackRestartKeepsCodeReviewsAfterADescriptionEdit(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		replies bool
@@ -329,7 +329,7 @@ func TestFeedbackRestartDoesNotHandOverAnEditedDescriptionWithoutReviews(t *test
 				t.Fatal(err)
 			}
 			got := f.store.recs[key]
-			if len(got.Reviews) != reviews+2 || !strings.HasSuffix(kinds(got), "self competing") || got.LatestCompeting().Proposal != task.ProposalDigest(pr.Title, pr.Body) {
+			if len(got.Reviews) != reviews || got.Delegation.PRDigest != task.ProposalDigest(pr.Title, pr.Body) {
 				t.Fatalf("state %s reviews %s; want a self-review and a competing review of the new description", got.State, kinds(got))
 			}
 		})
@@ -361,7 +361,7 @@ func TestFeedbackRestartDoesNotHandOverANewCommitWithoutReviews(t *testing.T) {
 	}
 }
 
-func TestADescriptionEditedDuringAnAnswerIsReviewedInTheSameRun(t *testing.T) {
+func TestADescriptionEditedDuringAnAnswerKeepsCodeReviews(t *testing.T) {
 	f := newFixture()
 	key := waiting(t, f)
 	reviews, starts := len(f.store.recs[key].Reviews), f.claude.starts
@@ -376,7 +376,7 @@ func TestADescriptionEditedDuringAnAnswerIsReviewedInTheSameRun(t *testing.T) {
 	}
 	rec := resumeRun(t, f, key)
 	pr := f.gh.prs[912]
-	if len(rec.Reviews) != reviews+2 || !strings.HasSuffix(kinds(rec), "self competing") || rec.LatestCompeting().Proposal != task.ProposalDigest(pr.Title, pr.Body) {
+	if len(rec.Reviews) != reviews || rec.Delegation.PRDigest != task.ProposalDigest(pr.Title, pr.Body) {
 		t.Fatalf("state %s reviews %s; want a self-review and a competing review of the edited description", rec.State, kinds(rec))
 	}
 	if rec.State.Reviewing() || len(f.claude.resumed) != 1 || f.claude.starts != starts {

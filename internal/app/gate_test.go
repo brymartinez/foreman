@@ -520,7 +520,7 @@ func TestGateReopenedPRReturnsToTheActiveList(t *testing.T) {
 		// A review from before heads were recorded cannot be shown to cover the
 		// reopened PR, so it must not hand the task to the developer.
 		{"clean review with no recorded head", func(r *task.Review) { r.Head = "" }, task.AdversarialReviewing, true},
-		{"clean review of an earlier description", func(r *task.Review) { r.Proposal = task.ProposalDigest("", "Retry everything.") }, task.AdversarialReviewing, true},
+		{"clean review survives an earlier description", func(r *task.Review) { r.Proposal = task.ProposalDigest("", "Retry everything.") }, task.ReadyForHuman, false},
 	} {
 		f := newFixture()
 		key := reviewed(t, f)
@@ -682,28 +682,20 @@ func TestAReviewStageWithoutARunnerAfterACleanReviewIsReviewedAgain(t *testing.T
 	}
 }
 
-func TestARestartedReviewReadsThePRsCurrentDescription(t *testing.T) {
+func TestARestartedReviewKeepsCleanCodeReviewsAfterATextEdit(t *testing.T) {
 	f := newFixture()
 	key := reviewed(t, f)
 	pr := f.gh.prs[912]
 	pr.Body = "Retry 5xx and 429.\n\nCloses #825"
 	f.gh.prs[912] = pr
 	setCI(f, task.CIStatus{State: task.CIPassing})
-	// A run ended in a review stage on the description the record still holds.
 	f.store.recs[key].State = task.AdversarialReviewing
 	if _, _, err := f.app.Status(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.Delegation.PRDigest != task.ProposalDigest(pr.Title, pr.Body) || got.State != task.SelfReviewing || len(f.runners.spawned) != 2 {
-		t.Fatalf("digest stored %t, state %s, spawned %d; want the edit stored and a self-review run", got.Delegation.PRDigest == task.ProposalDigest(pr.Title, pr.Body), got.State, len(f.runners.spawned))
-	}
-	starts := f.claude.starts
-	if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	if got := f.store.recs[key]; f.claude.starts != starts || len(f.claude.resumed) != 0 || got.LatestCompeting().Proposal != got.Delegation.PRDigest {
-		t.Fatalf("implementer turns %d/%d, reviews %s; want only the reviews of the edited description", f.claude.starts-starts, len(f.claude.resumed), kinds(got))
+	if got.Delegation.PRDigest != task.ProposalDigest(pr.Title, pr.Body) || got.State != task.WaitingForCI || len(f.runners.spawned) != 1 {
+		t.Fatalf("state %s spawned %d", got.State, len(f.runners.spawned))
 	}
 }
 

@@ -24,8 +24,8 @@ func TestNextReviewIsTheSelfReviewUntilItPassesTheCurrentChange(t *testing.T) {
 		"a clean self-review of an older head does not pass": {
 			rec: onPR("h2", desc, Review{Kind: SelfReview, PR: 7, Head: "h1", Proposal: desc, Clean: true}), want: SelfReview,
 		},
-		"a clean self-review of another PR description does not pass": {
-			rec: onPR("h1", desc, Review{Kind: SelfReview, PR: 7, Head: "h1", Proposal: other, Clean: true}), want: SelfReview,
+		"a clean self-review of another PR description still passes": {
+			rec: onPR("h1", desc, Review{Kind: SelfReview, PR: 7, Head: "h1", Proposal: other, Clean: true}), want: CompetingReview,
 		},
 		"a self-review with findings does not pass": {
 			rec: onPR("h1", desc, Review{Kind: SelfReview, PR: 7, Head: "h1", Proposal: desc}), want: SelfReview,
@@ -38,8 +38,8 @@ func TestNextReviewIsTheSelfReviewUntilItPassesTheCurrentChange(t *testing.T) {
 		"a clean local self-review of the commit and proposal passes": {
 			rec: local("h1", Review{Kind: SelfReview, Head: "h1", Proposal: desc, Clean: true}), want: CompetingReview,
 		},
-		"a clean local self-review of another proposal does not pass": {
-			rec: local("h1", Review{Kind: SelfReview, Head: "h1", Proposal: other, Clean: true}), want: SelfReview,
+		"a clean local self-review of another proposal still passes": {
+			rec: local("h1", Review{Kind: SelfReview, Head: "h1", Proposal: other, Clean: true}), want: CompetingReview,
 		},
 	} {
 		if got := tc.rec.NextReview(); got != tc.want {

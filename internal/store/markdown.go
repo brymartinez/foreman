@@ -205,6 +205,7 @@ type frontmatter struct {
 	PRDDigest           string                 `yaml:"prd_digest,omitempty"`
 	ScopeDigest         string                 `yaml:"scope_digest,omitempty"`
 	PlanScopeDigest     string                 `yaml:"plan_scope_digest,omitempty"`
+	PlanDraft           *task.PlanDraft        `yaml:"plan_draft,omitempty"`
 	PlanDigest          string                 `yaml:"plan_digest,omitempty"`
 	GitHub              *snapshot              `yaml:"github,omitempty"`
 	LastGitHubSync      *time.Time             `yaml:"last_github_sync,omitempty"`
@@ -419,6 +420,7 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 			ScopeDigest:       fm.ScopeDigest,
 			PlanScopeDigest:   fm.PlanScopeDigest,
 			PlanDigest:        fm.PlanDigest,
+			PlanDraft:         fm.PlanDraft,
 		}
 		if fm.StartedAt != nil {
 			rec.Delegation.StartedAt = *fm.StartedAt
@@ -550,6 +552,7 @@ func fromRecord(rec *task.Record) frontmatter {
 		fm.ClaimVerification, fm.Claims, fm.PRDDigest = d.ClaimVerification, d.Claims, d.PRDDigest
 		fm.FullSuiteGate, fm.FinalChecks = d.FullSuiteGate, d.FinalChecks
 		fm.ScopeDigest, fm.PlanScopeDigest, fm.PlanDigest = d.ScopeDigest, d.PlanScopeDigest, d.PlanDigest
+		fm.PlanDraft = d.PlanDraft
 	}
 	if s := rec.GitHub; s != nil {
 		fm.GitHub = &snapshot{UpdatedAt: s.UpdatedAt, State: s.State, Reasons: s.Reasons}

@@ -540,7 +540,7 @@ func TestReviewFindingsStartFreshCorrectionSessionAfterPlan(t *testing.T) {
 	}
 }
 
-func TestReplanningEditsTheSameComments(t *testing.T) {
+func TestRestartPostsSavedDraftWithoutReplanningOrRechecking(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	f.gh.postErr, f.gh.postOK = errors.New("gh: HTTP 502"), 1
@@ -552,16 +552,17 @@ func TestReplanningEditsTheSameComments(t *testing.T) {
 	if got.State != task.Failed || !strings.Contains(got.LastOutcome.Summary, "posting the Work plan on the issue failed") || len(got.Plan) != 1 {
 		t.Fatalf("state %s outcome %+v plan %+v", got.State, got.LastOutcome, got.Plan)
 	}
-	// Restarting plans again edits Requirements and posts the missing Work plan.
+	// Restarting posts only the missing comment from the checked draft.
+	starts, checks := f.claude.starts, len(f.claude.scopeReviewed)
 	f.gh.postErr = nil
 	started(t, f, startReq(t))
-	f.claude.turns = []agent.Turn{plannedTurn("sid-2"), prTurn("sid-3")}
+	f.claude.turns = []agent.Turn{prTurn("sid-3")}
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got = f.store.recs[key]
-	if !got.PlanPosted() || got.Plan[0].CommentID != 1001 || f.gh.edits != 1 {
-		t.Errorf("plan %+v edits %d; want Requirements edited in place", got.Plan, f.gh.edits)
+	if !got.PlanPosted() || got.Plan[0].CommentID != 1001 || f.gh.edits != 0 || f.claude.starts != starts+1 || len(f.claude.scopeReviewed) != checks || got.Delegation.PlanDraft != nil {
+		t.Errorf("plan %+v edits %d state %s outcome %+v draft %+v starts %d/%d checks %d/%d", got.Plan, f.gh.edits, got.State, got.LastOutcome, got.Delegation.PlanDraft, f.claude.starts, starts, len(f.claude.scopeReviewed), checks)
 	}
 }
 

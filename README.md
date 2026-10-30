@@ -673,6 +673,11 @@ and `routing.yaml` sit beside the selected config file; neither has a separate
 config key. Auto mode's on/off choice lives in
 `~/.local/share/foreman/state.json`, outside `config.yaml`.
 
+Planning drafts and their checks are saved in the local task file. A restart can
+finish posting a checked draft without planning again. If a revision changes no
+planning text, Foreman asks for a decision before spending another check. PR title
+and description edits keep existing code reviews; empty descriptions block handoff.
+
 Runner limits live under `budgets`: `task_tokens` (2,000,000), `planning_tokens`
 (400,000), and `call_timeout_seconds` (1,800). Zero disables a limit. Token limits
 count reported input and output, including cached input, and are checked between

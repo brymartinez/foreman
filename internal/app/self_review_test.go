@@ -179,7 +179,7 @@ func TestRestartAfterACleanSelfReviewGoesStraightToTheCompetingReview(t *testing
 	}
 }
 
-func TestRestartSelfReviewsAgainWhenTheHeadOrDescriptionChanged(t *testing.T) {
+func TestRestartSelfReviewsOnlyWhenTheHeadChanged(t *testing.T) {
 	for name, change := range map[string]func(pr *PullRequest){
 		"new head":        func(pr *PullRequest) { pr.HeadSHA = "c0ffee2" },
 		"new description": func(pr *PullRequest) { pr.Body = "Retry 5xx and 429.\n\nCloses #825" },
@@ -202,10 +202,14 @@ func TestRestartSelfReviewsAgainWhenTheHeadOrDescriptionChanged(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := f.store.recs[key]
-		if kinds(got) != "self self competing" || len(f.claude.reviewed) != 2 {
+		wantReviews, wantCount := "self self competing", 2
+		if name == "new description" {
+			wantReviews, wantCount = "self competing", 1
+		}
+		if kinds(got) != wantReviews || len(f.claude.reviewed) != wantCount {
 			t.Errorf("%s: reviews %s self-reviews %d", name, kinds(got), len(f.claude.reviewed))
 		}
-		if last := got.Reviews[1]; last.Head != pr.HeadSHA || last.Proposal != task.ProposalDigest(pr.Title, pr.Body) {
+		if last := got.LatestSelf(); last.Head != pr.HeadSHA {
 			t.Errorf("%s: the second self-review recorded %+v", name, last)
 		}
 	}
@@ -239,19 +243,19 @@ func TestLocalChangeIsSelfReviewedBeforeTheCompetingReviewAndThePR(t *testing.T)
 	}
 }
 
-func TestLocalRestartSelfReviewsAProposalThatChangedOnTheSameCommit(t *testing.T) {
+func TestLocalRestartKeepsSelfReviewAfterAProposalEdit(t *testing.T) {
 	f := newFixture()
 	key := localTask(t, f)
 	rec := f.store.recs[key]
 	d := rec.Delegation
 	d.LocalHead, d.ProposedTitle, d.ProposedBody = "commit1", proposedTitle, "Retry 5xx and 429.\n\nCloses #825"
-	rec.Reviews = []task.Review{{Round: 1, Kind: task.SelfReview, Reviewer: task.Claude, Head: "commit1", Proposal: task.ProposalDigest(proposedTitle, proposedBody), Clean: true, At: now}}
+	rec.Reviews = []task.Review{{Round: 1, Kind: task.SelfReview, Reviewer: task.Claude, Head: "commit1", Scope: d.ScopeDigest, Plan: d.PlanDigest, Proposal: task.ProposalDigest(proposedTitle, proposedBody), Clean: true, At: now}}
 	f.codex.reviews = []agent.ReviewOutcome{findings("blocking")}
 	f.claude.turn = agent.Turn{Session: task.Session{Agent: task.Claude, ID: "sid-1"}, Outcome: agent.Outcome{Status: agent.Blocked, Questions: []task.Question{{Issue: "?", Options: []task.Option{{Label: "A"}, {Label: "B"}}}}}}
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.store.recs[key]; kinds(got) != "self self competing!" || len(f.claude.reviewed) != 1 {
+	if got := f.store.recs[key]; kinds(got) != "self competing!" || len(f.claude.reviewed) != 0 {
 		t.Fatalf("reviews %s self-reviews %d", kinds(got), len(f.claude.reviewed))
 	}
 }

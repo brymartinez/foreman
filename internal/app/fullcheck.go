@@ -173,7 +173,7 @@ func (r *taskRun) finalCheck() (step, error) {
 // it, on to the readiness gate without another review.
 func handOffIfReviewed(rec *task.Record) {
 	d := rec.Delegation
-	if !reviewCovers(rec, d.PRHead, d.PRDigest) || !rec.FullResult.Covers(d.PRHead) {
+	if !reviewCovers(rec, d.PRHead) || !rec.FullResult.Covers(d.PRHead) {
 		return
 	}
 	rec.State = task.WaitingForCI

@@ -178,8 +178,21 @@ type Profile struct {
 	ReasoningEffort     string `yaml:"reasoning_effort,omitempty"`
 }
 
+type PlanDraft struct {
+	Scope         string             `yaml:"scope"`
+	Fingerprint   string             `yaml:"fingerprint"`
+	Documents     map[PlanDoc]string `yaml:"documents"`
+	Sources       map[PlanDoc]string `yaml:"sources,omitempty"`
+	CheckedDigest string             `yaml:"checked_digest,omitempty"`
+	Clean         bool               `yaml:"clean,omitempty"`
+	Findings      []Finding          `yaml:"findings,omitempty"`
+	Revisions     int                `yaml:"revisions,omitempty"`
+	Stopped       bool               `yaml:"stopped,omitempty"`
+}
+
 // Delegation exists once the user has run start; tracked-only items have none.
 type Delegation struct {
+	PlanDraft   *PlanDraft
 	Implementer Session
 	// Profile is set when routing chose the implementer; RouteReason says why.
 	// RouteLogged is set once the runner has written the route line to the log.
@@ -213,8 +226,8 @@ type Delegation struct {
 	PriorPR int
 	// PRHead is the PR's head commit when foreman last read it. A review covers one head.
 	PRHead string
-	// PRDigest is the ProposalDigest of the PR title and description the review step
-	// last read. A self-review covers one head with one description.
+	// PRDigest records the last title and description read from GitHub.
+	// It is kept for audit; code review coverage does not depend on PR wording.
 	PRDigest string
 	// CheckpointHead is the last accepted implementation commit, or the head when
 	// the worktree was prepared. The commit and CheckpointNext cross to a fresh session.
@@ -685,9 +698,8 @@ type Review struct {
 	Findings []Finding
 	At       time.Time
 	Head     string // the PR head commit reviewed; empty on records from before heads were recorded
-	// Proposal is the ProposalDigest of the title and description the review read with
-	// Head: the proposed ones for a local review, the PR's for a self-review of a PR.
-	// A fix may keep the commit and change only those.
+	// Proposal records the PR text at review time for audit and publish checks.
+	// A wording edit does not invalidate a code review.
 	Proposal string
 	// Claims and PRD are the ClaimsDigest and the PRD digest the review read, for a
 	// task with claim verification.
@@ -747,15 +759,13 @@ func (r *Record) CurrentChange() (head, proposal string) {
 	return d.PRHead, d.PRDigest
 }
 
-// selfCovers reports whether a self-review read the current change and description.
-// Coverage is derived from the stored values alone, so a restart never treats a pass
-// of another head or description as current.
+// selfCovers checks the commit, requirements, and claims that self-review covered.
 func (r *Record) selfCovers(review *Review) bool {
-	head, proposal := r.CurrentChange()
-	return review != nil && review.Kind == SelfReview && review.PR == r.Delegation.PR && review.Head == head && review.Proposal == proposal && r.ClaimsCovered(review) && r.ScopeCovered(review)
+	head, _ := r.CurrentChange()
+	return review != nil && review.Kind == SelfReview && review.PR == r.Delegation.PR && review.Head == head && r.ClaimsCovered(review) && r.ScopeCovered(review)
 }
 
-// SelfReviewPassed reports a clean self-review of the current change and description.
+// SelfReviewPassed reports a clean self-review of the current code and requirements.
 func (r *Record) SelfReviewPassed() bool {
 	latest := r.LatestSelf()
 	return r.selfCovers(latest) && latest.Clean
@@ -865,10 +875,7 @@ func (r *Record) newer(a, b *Review) bool {
 	return false
 }
 
-// competingCovers reports whether a competing review read the current change: the
-// local commit with its proposal, or the PR head with its description. A review or a
-// task from before descriptions were recorded has no digest, and covers its head
-// alone, so older tasks are not reviewed again.
+// competingCovers checks the commit, requirements, and claims that review covered.
 func (r *Record) competingCovers(review *Review) bool {
 	d := r.Delegation
 	if review == nil || review.Kind != CompetingReview {
@@ -883,7 +890,7 @@ func (r *Record) competingCovers(review *Review) bool {
 	if r.LocalReview() {
 		return r.coversLocal(review)
 	}
-	return review.PR == d.PR && review.Head == d.PRHead && (review.Proposal == "" || d.PRDigest == "" || review.Proposal == d.PRDigest)
+	return review.PR == d.PR && review.Head == d.PRHead
 }
 
 func (r *Record) ScopeCovered(review *Review) bool {
@@ -932,11 +939,10 @@ func (r *Record) FinalCheckPending() bool {
 	return latest != nil && latest.Clean && r.competingCovers(latest) && !r.FullResult.Covers(head)
 }
 
-// coversLocal reports whether review read the stored local commit together with its
-// current proposed title and description.
+// coversLocal checks the stored local commit. PR text is checked when published.
 func (r *Record) coversLocal(review *Review) bool {
 	d := r.Delegation
-	return review != nil && review.Head == d.LocalHead && review.Proposal == ProposalDigest(d.ProposedTitle, d.ProposedBody)
+	return review != nil && review.Head == d.LocalHead
 }
 
 // ProposalDigest identifies a proposed PR title and description, so a review records

@@ -222,6 +222,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			cur.Delegation.ScopeDigest = prev.ScopeDigest
 			cur.Delegation.PlanScopeDigest = prev.PlanScopeDigest
 			cur.Delegation.PlanDigest = prev.PlanDigest
+			cur.Delegation.PlanDraft = clonePlanDraft(prev.PlanDraft)
 		}
 		// The pin belongs to the task, not the agent, so every restart keeps it.
 		if prev != nil {

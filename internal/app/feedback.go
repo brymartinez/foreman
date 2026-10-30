@@ -163,12 +163,12 @@ func (a App) unanswered(ctx, final context.Context, rec *task.Record, log io.Wri
 		return waiting, updated, false, nil
 	}
 	current := false
-	if reviewCovers(updated, d.PRHead, d.PRDigest) {
+	if reviewCovers(updated, d.PRHead) {
 		if updated, current, err = a.currentPR(ctx, final, updated); err != nil {
 			return nil, updated, false, err
 		}
 	}
-	if !current || !reviewCovers(updated, updated.Delegation.PRHead, updated.Delegation.PRDigest) {
+	if !current || !reviewCovers(updated, updated.Delegation.PRHead) {
 		// Open findings or an unreviewed head: the run has that work to do anyway, and
 		// the comments are picked up before it hands over.
 		if readErr != nil {
@@ -198,7 +198,7 @@ func (a App) unanswered(ctx, final context.Context, rec *task.Record, log io.Wri
 }
 
 // currentPR stores the head and description digest the PR has on GitHub now, so a path
-// that skips review judges coverage by them, not by what a refresh stored earlier.
+// that skips review checks the current commit and keeps the current PR text for audit.
 // current is false when the PR could not be read, and the run then reviews instead of
 // handing over.
 func (a App) currentPR(ctx, final context.Context, rec *task.Record) (updated *task.Record, current bool, err error) {
@@ -223,15 +223,10 @@ func handsOverNow(rec *task.Record, ci *task.CIStatus) bool {
 	return ci != nil && ci.State != task.CIPending && !rec.Delegation.ClaimVerification && !rec.FinalCheckPending()
 }
 
-// reviewCovers reports a clean competing review of head and of the description with
-// digest on the task's current PR, which is the review bar the gate applies before it
-// hands a task over. A review or digest from before descriptions were recorded is
-// empty, and the review then covers its head alone. A task with claim verification
-// also needs the review of its current claims and PRD.
-func reviewCovers(rec *task.Record, head, digest string) bool {
+// reviewCovers requires a clean competing review of the commit, scope, and claims.
+func reviewCovers(rec *task.Record, head string) bool {
 	latest := rec.LatestCompeting()
-	described := latest != nil && (latest.Proposal == "" || digest == "" || latest.Proposal == digest)
-	return described && rec.ClaimsCovered(latest) && rec.ScopeCovered(latest) && latest.Clean && latest.PR == rec.Delegation.PR && head != "" && latest.Head == head
+	return latest != nil && rec.ClaimsCovered(latest) && rec.ScopeCovered(latest) && latest.Clean && latest.PR == rec.Delegation.PR && head != "" && latest.Head == head
 }
 
 // beforeHandover answers comments that arrived while the run worked, so the developer

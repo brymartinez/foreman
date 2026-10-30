@@ -407,9 +407,9 @@ func closePR(rec *task.Record, now time.Time) string {
 }
 
 // reopen returns a PR_CLOSED task to delegated work once its PR is open again. The
-// review it already has decides where: a clean review of this head and description
+// review it already has decides where: a clean review of this commit and requirements
 // waits for CI, or hands the task to the developer once CI finished. Anything else is
-// the stage the change needs; with a clean review of an earlier head or description,
+// the stage the change needs; with a clean review of an earlier commit,
 // the gate starts a runner for that review. The review must name the head GitHub
 // reports now.
 // A review from before heads were recorded has none, and cannot be shown to
@@ -421,12 +421,14 @@ func reopen(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) s
 	}
 	rec.CI = &ci
 	latest := rec.LatestCompeting()
-	reviewed := latest != nil && latest.Clean && latest.PR == d.PR && latest.Head != "" && latest.Head == pr.HeadSHA && describedAsReviewed(rec, pr) && rec.ClaimsCovered(latest) && rec.ScopeCovered(latest)
-	// The stage follows the PR as GitHub reports it now: a clean review of its head
-	// and description waits for CI, and anything else is the stage the change needs.
-	if !describedAsReviewed(rec, pr) {
-		d.PRDigest = task.ProposalDigest(pr.Title, pr.Body)
+	reviewed := latest != nil && latest.Clean && latest.PR == d.PR && latest.Head != "" && latest.Head == pr.HeadSHA && rec.ClaimsCovered(latest) && rec.ScopeCovered(latest)
+	if reviewed && strings.TrimSpace(pr.Body) == "" {
+		failTask(rec, "the pull request description is empty; restore it before handoff", now)
+		return rec.LastOutcome.Summary
 	}
+	// The stage follows the PR as GitHub reports it now: a clean review of its head
+	// waits for CI, and anything else is the stage the change needs.
+	d.PRDigest = task.ProposalDigest(pr.Title, pr.Body)
 	rec.State = rec.NextStage()
 	// A change no full result covers goes to its final check, which the gate launches.
 	if reviewed && !rec.FinalCheckPending() {
@@ -446,14 +448,6 @@ func reopen(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) s
 	return summary
 }
 
-// describedAsReviewed reports whether the PR's title and description are the ones its
-// latest competing review read. A review from before descriptions were recorded has
-// no digest and covers its head alone.
-func describedAsReviewed(rec *task.Record, pr PullRequest) bool {
-	latest := rec.LatestCompeting()
-	return latest == nil || latest.Proposal == "" || latest.Proposal == task.ProposalDigest(pr.Title, pr.Body)
-}
-
 // gated tasks wait on GitHub alone: the review is clean, or the developer has the PR.
 func gated(r *task.Record) bool {
 	d := r.Delegation
@@ -471,7 +465,7 @@ func gated(r *task.Record) bool {
 }
 
 // rereview tasks are in a review stage with no runner, while their PR has a clean
-// competing review of an earlier head or description: a reopened PR, or a task file
+// competing review of an earlier commit: a reopened PR, or a task file
 // from before the stages. The gate starts the runner that reviews the change, as it
 // does for new commits on a waiting PR.
 func rereview(r *task.Record) bool {
@@ -492,7 +486,7 @@ func restartReview(rec *task.Record, pr PullRequest, now time.Time) string {
 		d.PRHead = pr.HeadSHA
 	}
 	d.PRDigest, rec.CI = task.ProposalDigest(pr.Title, pr.Body), nil
-	if reviewCovers(rec, d.PRHead, d.PRDigest) {
+	if reviewCovers(rec, d.PRHead) {
 		rec.State = task.WaitingForCI
 		return ""
 	}
@@ -537,13 +531,11 @@ func advance(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) 
 			return outcome("re_review", fmt.Sprintf("PR #%d has new commits since its clean review; %s is reviewing them", d.PR, d.Reviewer))
 		}
 	}
-	if rec.State == task.WaitingForCI && !describedAsReviewed(rec, pr) {
-		// The description is the reviews' requirements, so an edit needs a new
-		// self-review and competing review before handing over.
-		d.PRDigest = task.ProposalDigest(pr.Title, pr.Body)
-		rec.State, rec.CI = rec.NextStage(), nil
-		return outcome("re_review", fmt.Sprintf("PR #%d has a new description since its clean review; it is being reviewed again", d.PR))
+	if rec.State == task.WaitingForCI && d.PRDigest != "" && strings.TrimSpace(pr.Body) == "" {
+		failTask(rec, "the pull request description is empty; restore it before handoff", now)
+		return rec.LastOutcome.Summary
 	}
+	d.PRDigest = task.ProposalDigest(pr.Title, pr.Body)
 	if rec.State == task.WaitingForCI && rec.FinalCheckPending() {
 		// A task that reached WAITING_FOR_CI without a covering full result, such as one
 		// whose runner stopped after the clean review, is not handed to the developer.

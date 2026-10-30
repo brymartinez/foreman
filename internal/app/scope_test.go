@@ -86,6 +86,9 @@ func TestPlanRevisionStopsAfterThreeAttempts(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), plannedTurn("sid-1"), plannedTurn("sid-1"), plannedTurn("sid-1")}
+	for i := 1; i < len(f.claude.turns); i++ {
+		f.claude.turns[i].Outcome.Documents[task.PRD] += strings.Repeat("x", i)
+	}
 	finding := agent.ReviewOutcome{Clean: false, Findings: []task.Finding{{Severity: "blocking", Summary: "Missing requirement", Detail: "The plan still omits it."}}}
 	f.claude.scopeReviews = []agent.ReviewOutcome{finding, finding, finding, finding}
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {

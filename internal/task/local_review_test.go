@@ -26,17 +26,17 @@ func TestLocalReviewHelpersFollowTheStoredCommitAndItsReviews(t *testing.T) {
 		"a reviewed commit with findings does not wait": {
 			rec: local("h1", Review{Head: "h1", Proposal: reviewed}), localReview: true,
 		},
-		"the same commit with a new description waits for review": {
-			rec: local("h1", Review{Head: "h1", Proposal: ProposalDigest("feat: x", "Closes #7, retries 5xx")}), localReview: true, pending: true,
+		"a description edit preserves the review result": {
+			rec: local("h1", Review{Head: "h1", Proposal: ProposalDigest("feat: x", "Closes #7, retries 5xx")}), localReview: true,
 		},
-		"the same commit and description with a new title waits for review": {
-			rec: local("h1", Review{Head: "h1", Proposal: ProposalDigest("feat: y", "Closes #7"), Clean: true}), localReview: true, pending: true,
+		"a title edit keeps the clean review": {
+			rec: local("h1", Review{Head: "h1", Proposal: ProposalDigest("feat: y", "Closes #7"), Clean: true}), localReview: true, open: true,
 		},
 		"a clean review of the commit waits for the PR": {
 			rec: local("h1", Review{Head: "h1", Proposal: reviewed, Clean: true}), localReview: true, open: true,
 		},
-		"a clean review of another description does not open": {
-			rec: local("h1", Review{Head: "h1", Proposal: ProposalDigest("feat: x", "Closes #7, retries 5xx"), Clean: true}), localReview: true, pending: true,
+		"a clean review still opens after a description edit": {
+			rec: local("h1", Review{Head: "h1", Proposal: ProposalDigest("feat: x", "Closes #7, retries 5xx"), Clean: true}), localReview: true, open: true,
 		},
 		"a clean review of an older commit does not open": {
 			rec: local("h2", Review{Head: "h1", Proposal: reviewed, Clean: true}), localReview: true, pending: true,
