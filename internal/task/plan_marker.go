@@ -62,10 +62,6 @@ func ParsePlanMarker(body string) (PlanDoc, string, bool) {
 }
 
 func (d PlanDoc) valid() bool {
-	for _, doc := range PlanDocs {
-		if d == doc {
-			return true
-		}
-	}
-	return false
+	// Read old analysis and design markers so they remain identifiable on issues.
+	return d == Analysis || d == PRD || d == Design || d == ImplementationPlan
 }

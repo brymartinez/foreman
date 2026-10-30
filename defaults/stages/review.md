@@ -3,7 +3,7 @@
 ## Scope
 
 1. Follow the repository's AGENTS.md and CLAUDE.md.
-2. In self-review, check the change against the implementation plan Foreman supplies. In competing review, form an independent judgment from the diff. For claim verification, check the PRD and claims too.
+2. In self-review, check the change against the Requirements and Work plan Foreman supplies. In competing review, form an independent judgment from the diff. For claim verification, check the Requirements and claims too.
 3. Read beyond the diff only when needed to verify a concrete defect in a changed file, such as a caller or an error path the tests skip.
 4. Do not seek earlier agent transcripts, issue discussion, PR comments, or prior review rounds for requirements.
 5. Try to break the change. Look for counterexamples, regressions, and missing cases by reading the code and tests. The implementation session runs vet, tests, builds, and end-to-end checks; this read-only review does not rerun them.

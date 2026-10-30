@@ -232,7 +232,20 @@ func (r *taskRun) scopeBoundary(next step) (step, bool, error) {
 			r.rec = rec
 			return stepDone, true, saveErr
 		}
-		if !plan.complete() || planDigest(plan.texts()) != r.rec.Delegation.PlanDigest {
+		if plan.complete() && r.rec.Delegation.PlanScopeDigest == scope.digest && legacyPlanDigest(plan) == r.rec.Delegation.PlanDigest {
+			// The old four-document check still covers the same triage and comments.
+			// Save the two-document digest without starting a new planning turn.
+			rec, err := r.a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
+				cur.Delegation.PlanDigest = planDigest(plan.texts())
+				cur.Plan = slices.DeleteFunc(cur.Plan, func(c task.PlanComment) bool {
+					return !slices.Contains(task.PlanDocs, c.Doc)
+				})
+			}))
+			if err != nil {
+				return stepDone, true, err
+			}
+			r.rec = rec
+		} else if !plan.complete() || planDigest(plan.texts()) != r.rec.Delegation.PlanDigest {
 			rec, err := r.a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
 				cur.Delegation.PlanScopeDigest = ""
 				cur.Delegation.PlanDigest = ""
@@ -928,7 +941,7 @@ func (a App) reviewRequirements(ctx context.Context, rec *task.Record) (confirme
 	if !plan.complete() || planDigest(plan.texts()) != rec.Delegation.PlanDigest || rec.Delegation.PlanScopeDigest != scope.digest {
 		return confirmedScope{}, "", errors.New("planning documents changed or have not been checked against current triage; restart to reconcile them")
 	}
-	return scope, plan.found[task.ImplementationPlan].text, nil
+	return scope, "## Requirements\n\n" + plan.found[task.PRD].text + "\n\n## Work plan\n\n" + plan.found[task.ImplementationPlan].text, nil
 }
 
 func addUsage(total *task.Usage, turn task.Usage) {
@@ -1214,7 +1227,7 @@ func (a App) postPlan(ctx, final context.Context, rec *task.Record, docs map[tas
 		}
 		planner := a.Agents[rec.Delegation.Implementer.Agent]
 		var message strings.Builder
-		message.WriteString("The read-only plan check found these contradictions or omissions. Revise the four documents in this planning session using the confirmed scope you already received. Return planned with only changed documents; use an empty string for each unchanged document. Do not repeat repository research unless a finding requires it. End with the same JSON outcome: planned, blocked, or failed.\n\n")
+		message.WriteString("The read-only plan check found gaps or disagreements. Fix Requirements and Work plan in this planning session using the confirmed scope you already received. Return planned with only changed documents; use an empty string for an unchanged document. Do not repeat code research unless a finding needs it. End with the same JSON outcome: planned, blocked, or failed.\n\n")
 		for _, finding := range checked.Findings {
 			fmt.Fprintf(&message, "- %s: %s\n", finding.Summary, finding.Detail)
 		}

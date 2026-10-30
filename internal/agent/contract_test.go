@@ -41,8 +41,8 @@ func TestParseOutcomePROpened(t *testing.T) {
 
 func TestParseOutcomePlanned(t *testing.T) {
 	got, err := ParseOutcome([]byte(`{"status":"planned","summary":"s","prNumber":null,"prUrl":null,"validation":[],"questions":[],
-"documents":{"analysis":"a","prd":"p","design":"d","plan":"### Task 1"}}`))
-	if err != nil || got.Status != Planned || got.Documents[task.Analysis] != "a" || got.Documents[task.ImplementationPlan] != "### Task 1" {
+"documents":{"prd":"p","plan":"### Task 1"}}`))
+	if err != nil || got.Status != Planned || got.Documents[task.PRD] != "p" || got.Documents[task.ImplementationPlan] != "### Task 1" {
 		t.Fatalf("got %+v, %v", got, err)
 	}
 	if _, err := ParseOutcome([]byte(`{"status":"planned","summary":"s","documents":null}`)); err == nil || !strings.Contains(err.Error(), "no documents") {
@@ -53,8 +53,8 @@ func TestParseOutcomePlanned(t *testing.T) {
 // A document already on the issue may come back empty to keep its comment. The runner
 // knows which documents exist, so it rejects an empty one that has no comment.
 func TestParseOutcomePlannedKeepsAnEmptyDocumentForTheRunner(t *testing.T) {
-	got, err := ParseOutcome([]byte(`{"status":"planned","summary":"s","documents":{"analysis":"a","prd":" ","design":"d","plan":"p"}}`))
-	if err != nil || got.Documents[task.PRD] != " " || got.Documents[task.Design] != "d" {
+	got, err := ParseOutcome([]byte(`{"status":"planned","summary":"s","documents":{"prd":" ","plan":"p"}}`))
+	if err != nil || got.Documents[task.PRD] != " " || got.Documents[task.ImplementationPlan] != "p" {
 		t.Fatalf("got %+v, %v", got, err)
 	}
 }

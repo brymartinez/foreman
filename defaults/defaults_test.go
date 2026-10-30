@@ -46,15 +46,11 @@ func readStage(t *testing.T, name string) string {
 	return string(b)
 }
 
-func TestDefaultPlanStageKeepsFourDocumentsAndOmitsLineLevelDetail(t *testing.T) {
+func TestDefaultPlanStageKeepsTwoPlainEnglishDocuments(t *testing.T) {
 	plan := readStage(t, "plan.md")
 	for _, want := range []string{
-		"## Analysis", "## PRD", "## Design", "## Implementation plan",
-		"The implementation plan must stand alone",
-		"about 200 words each",
-		"No line numbers",
-		"no commit messages",
-		"Do not list every test by name",
+		"## Requirements", "## Work plan", "B1 English",
+		"No line numbers", "commit messages", "Do not copy the rules",
 	} {
 		if !strings.Contains(plan, want) {
 			t.Errorf("plan.md lacks %q", want)

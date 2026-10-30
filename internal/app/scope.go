@@ -62,7 +62,21 @@ func planDigest(texts map[task.PlanDoc]string) string {
 	return task.Digest(s.String())
 }
 
-// checkPlan asks a fresh read-only agent to compare all four documents with the
+// legacyPlanDigest identifies a clean four-comment plan made before Requirements
+// and Work plan became the only required documents.
+func legacyPlanDigest(plan issuePlan) string {
+	var s strings.Builder
+	for _, doc := range []task.PlanDoc{task.Analysis, task.PRD, task.Design, task.ImplementationPlan} {
+		found, ok := plan.found[doc]
+		if !ok {
+			return ""
+		}
+		fmt.Fprintf(&s, "%s\n%s\n", doc, strings.TrimSpace(found.text))
+	}
+	return task.Digest(s.String())
+}
+
+// checkPlan asks a fresh read-only agent to compare both documents with the
 // confirmed scope. A blocking limitation or an error is not agreement.
 func (a App) checkPlan(ctx context.Context, rec *task.Record, scope confirmedScope, texts map[task.PlanDoc]string, sources issuePlan, log io.Writer) (agent.ReviewOutcome, error) {
 	checker, ok := a.Agents[rec.Delegation.Implementer.Agent]
@@ -70,7 +84,7 @@ func (a App) checkPlan(ctx context.Context, rec *task.Record, scope confirmedSco
 		return agent.ReviewOutcome{}, fmt.Errorf("scope checker %s is not configured", rec.Delegation.Implementer.Agent)
 	}
 	var prompt strings.Builder
-	prompt.WriteString("You are checking planning documents against confirmed maintainer triage. Compare only the supplied scope and documents; do not inspect the repository, run commands, or follow links. Return the review JSON schema. A clean verdict means every document agrees with every applicable triage decision and the implementation plan alone contains all requirements, constraints, and acceptance criteria needed to implement and self-review the change. The plan must not require reading the issue, triage, analysis, PRD, or design to recover an essential requirement. If a document conflicts or the plan omits a requirement, return changes_requested with a concrete finding naming the decision, document, disagreement or omission, and source URLs. If agreement or completeness cannot be determined from the supplied text, report a blocking limitation; never guess. Ordinary discussion is not a requirement. Keep output terse: for a clean check set summary to one short sentence and findings to []; for changes_requested give one short summary and only actionable findings. Do not restate matching decisions, repeat triage text, or include praise.\n\n## Confirmed scope\n\n")
+	prompt.WriteString("You are checking planning documents against confirmed triage. Compare only the supplied text; do not inspect code, run commands, or follow links. Return the review JSON schema. A clean verdict means Requirements states every confirmed rule and check, and Work plan gives a clear step for each requirement ID. Both documents must use short, plain English; exact code names are fine. Together, the documents must be enough to build and review the change without the issue or triage. If a rule is missing or the documents disagree, return changes_requested with a short finding that names the rule, document, gap, and source URL. If the supplied text is unclear, report a blocking limitation; never guess. Ordinary discussion is not a requirement. Keep output short: one sentence in summary and only findings that need action. Do not repeat rules that match.\n\n## Confirmed scope\n\n")
 	prompt.WriteString(scope.text)
 	prompt.WriteString("\n\n## Planning documents\n\n")
 	for _, doc := range task.PlanDocs {

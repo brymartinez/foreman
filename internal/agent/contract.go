@@ -85,10 +85,8 @@ func (e *CheckpointValidationError) Error() string {
 }
 
 type wireDocuments struct {
-	Analysis string `json:"analysis"`
-	PRD      string `json:"prd"`
-	Design   string `json:"design"`
-	Plan     string `json:"plan"`
+	PRD  string `json:"prd"`
+	Plan string `json:"plan"`
 }
 
 type wireOutcome struct {
@@ -145,8 +143,7 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 			return Outcome{}, errors.New("planned outcome has no documents")
 		}
 		out.Documents = map[task.PlanDoc]string{
-			task.Analysis: w.Documents.Analysis, task.PRD: w.Documents.PRD,
-			task.Design: w.Documents.Design, task.ImplementationPlan: w.Documents.Plan,
+			task.PRD: w.Documents.PRD, task.ImplementationPlan: w.Documents.Plan,
 		}
 	case PROpened:
 		if len(w.Validation) == 0 {

@@ -19,9 +19,9 @@ func TestClaimedReviewPromptCarriesThePRDAndTheClaimsToTest(t *testing.T) {
 	for _, self := range []bool{false, true} {
 		b := claimedReviewBrief()
 		b.Self = self
-		b.Plan = "R1. Retry only 5xx."
+		b.Plan = "## Requirements\n\n- AC1. 5xx responses are retried.\n- AC2. 4xx responses are not.\n\n## Work plan\n\nR1. Retry only 5xx."
 		p := ReviewPrompt(b)
-		for _, want := range []string{"## PRD", "> - AC1. 5xx responses are retried.", "acceptance criteria",
+		for _, want := range []string{"## Requirements", "> - AC1. 5xx responses are retried.", "acceptance criterion",
 			"## Implementer's claims", "only 5xx is retried", "retry.go:40, retry_test.go TestRetry", "go test ./... passed",
 			"criterion no claim covers", "counterexample", "not proof", "limitation", "blocking", "nonblocking",
 			"belongs to implementation validation", "Do not run tests, builds"} {
@@ -35,12 +35,15 @@ func TestClaimedReviewPromptCarriesThePRDAndTheClaimsToTest(t *testing.T) {
 		if strings.Contains(p, "Retry 5xx responses only.") {
 			t.Errorf("self %t: the PR description leaked into review", self)
 		}
+		if self && strings.Count(p, "AC1. 5xx responses are retried.") != 1 {
+			t.Errorf("self-review repeated Requirements: %s", p)
+		}
 	}
 }
 
 func TestReviewPromptWithoutClaimsOmitsClaimRequirements(t *testing.T) {
 	p := ReviewPrompt(reviewBrief())
-	for _, unwanted := range []string{"## PRD", "## Implementer's claims", "counterexample to each claim"} {
+	for _, unwanted := range []string{"## Requirements", "## Implementer's claims", "counterexample to each claim"} {
 		if strings.Contains(p, unwanted) {
 			t.Errorf("review prompt of a task without claims has %q", unwanted)
 		}

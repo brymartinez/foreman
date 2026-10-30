@@ -134,7 +134,7 @@ func TestLinearRouteReadsIssueAndCommentsFromLinear(t *testing.T) {
 	}
 }
 
-func TestLinearRunnerReadsStoredSourceAndPostsFourPlanningComments(t *testing.T) {
+func TestLinearRunnerReadsStoredSourceAndPostsTwoPlanningComments(t *testing.T) {
 	f := newFixture()
 	key := task.Key{Repo: f.gh.repo.Repo, Source: task.Linear, ExternalID: "uuid-42"}
 	tracker := &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", Body: "Use bounded retries.", URL: "https://linear.app/acme/issue/WEB-42", State: "open", Labels: []string{"triaged"}}}
@@ -145,7 +145,7 @@ func TestLinearRunnerReadsStoredSourceAndPostsFourPlanningComments(t *testing.T)
 		t.Fatal(err)
 	}
 	rec := f.store.recs[key]
-	if !rec.PlanPosted() || len(tracker.posted) != 4 || len(f.gh.comments) != 0 {
+	if !rec.PlanPosted() || len(tracker.posted) != 2 || len(f.gh.comments) != 0 {
 		t.Fatalf("plan = %+v, Linear posts = %d, GitHub posts = %d", rec.Plan, len(tracker.posted), len(f.gh.comments))
 	}
 	for i, doc := range task.PlanDocs {
@@ -153,7 +153,7 @@ func TestLinearRunnerReadsStoredSourceAndPostsFourPlanningComments(t *testing.T)
 			t.Errorf("comment %d = %+v, post %+v", i, rec.Plan[i], tracker.posted[i])
 		}
 	}
-	if len(tracker.reads) < 2 || !strings.Contains(f.claude.prompts[0], "WEB-42") || !strings.Contains(f.claude.prompts[1], "### Task 1") || strings.Contains(f.claude.prompts[1], tracker.posted[3].URL) {
+	if len(tracker.reads) < 2 || !strings.Contains(f.claude.prompts[0], "WEB-42") || !strings.Contains(f.claude.prompts[1], "### Task 1") || strings.Contains(f.claude.prompts[1], tracker.posted[1].URL) {
 		t.Errorf("reads = %+v, prompts = %+v", tracker.reads, f.claude.prompts)
 	}
 }
@@ -165,17 +165,15 @@ func TestLinearReplanningRepostsDeletedCommentAndEditsOtherComments(t *testing.T
 	f.app.Linear = tracker
 	started(t, f, StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude})
 	tracker.comments = []TrackerComment{
-		{ID: "old-analysis", URL: "https://linear.app/comment/old-analysis", Body: planCommentBody(task.Analysis, "", "Earlier analysis.")},
-		{ID: "old-prd", URL: "https://linear.app/comment/old-prd", Body: planCommentBody(task.PRD, "", "Earlier PRD.")},
+		{ID: "old-prd", URL: "https://linear.app/comment/old-prd", Body: planCommentBody(task.PRD, "", "Earlier requirements.")},
 	}
-	f.store.recs[key].SetPlanComment(task.PlanComment{Doc: task.Analysis, ExternalCommentID: "old-analysis", URL: "https://linear.app/comment/old-analysis"})
 	f.store.recs[key].SetPlanComment(task.PlanComment{Doc: task.PRD, ExternalCommentID: "old-prd", URL: "https://linear.app/comment/old-prd"})
 	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2")}
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	// The deleted PRD is found missing before the edit, so it is posted anew.
-	if !f.store.recs[key].PlanPosted() || !slices.Equal(tracker.postIDs, []string{"old-analysis", "", "", ""}) {
+	if !f.store.recs[key].PlanPosted() || !slices.Equal(tracker.postIDs, []string{"", ""}) {
 		t.Fatalf("plan = %+v, post IDs = %v", f.store.recs[key].Plan, tracker.postIDs)
 	}
 }

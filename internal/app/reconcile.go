@@ -27,7 +27,12 @@ type issuePlan struct {
 
 // complete reports whether every planning document is on the issue.
 func (p issuePlan) complete() bool {
-	return len(p.found) == len(task.PlanDocs)
+	for _, doc := range task.PlanDocs {
+		if _, ok := p.found[doc]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // texts are the found documents for the planning prompt.
@@ -36,8 +41,10 @@ func (p issuePlan) texts() map[task.PlanDoc]string {
 		return nil
 	}
 	out := map[task.PlanDoc]string{}
-	for doc, f := range p.found {
-		out[doc] = f.text
+	for _, doc := range task.PlanDocs {
+		if f, ok := p.found[doc]; ok {
+			out[doc] = f.text
+		}
 	}
 	return out
 }
@@ -97,6 +104,11 @@ func planText(doc task.PlanDoc, body string) string {
 	_, rest, _ := strings.Cut(strings.TrimSpace(body), "\n")
 	rest = strings.TrimSpace(rest)
 	rest = strings.TrimPrefix(rest, "## "+doc.Title())
+	if doc == task.PRD {
+		rest = strings.TrimPrefix(rest, "## PRD")
+	} else if doc == task.ImplementationPlan {
+		rest = strings.TrimPrefix(rest, "## Implementation plan")
+	}
 	return strings.TrimSpace(rest)
 }
 

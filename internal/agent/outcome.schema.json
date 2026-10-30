@@ -129,19 +129,11 @@
       ],
       "additionalProperties": false,
       "required": [
-        "analysis",
         "prd",
-        "design",
         "plan"
       ],
       "properties": {
-        "analysis": {
-          "type": "string"
-        },
         "prd": {
-          "type": "string"
-        },
-        "design": {
           "type": "string"
         },
         "plan": {

@@ -43,7 +43,7 @@ type TaskBrief struct {
 	PlanInstructions string
 	// Plan is the planning documents already posted on the issue.
 	Plan []task.PlanComment
-	// PlanText is the checked implementation plan, the sole task specification for
+	// PlanText is the checked requirements and work plan, the task specification for
 	// implementation and self-review.
 	PlanText string
 	// Correction starts a fresh turn whose only task is the latest review findings.
@@ -121,7 +121,7 @@ func ImplementationPrompt(b TaskBrief) string {
 	if b.Planning {
 		planningSection(&s, b.PlanInstructions)
 	} else if b.PlanText != "" {
-		s.WriteString("## Implementation plan\n\nThis checked plan is your complete task specification. Do not read the issue, triage, or other planning documents for requirements.\n\n")
+		s.WriteString("## Checked work\n\nThe requirements and work plan below are your complete task. Do not read the issue, triage, or other planning comments for requirements.\n\n")
 		s.WriteString(b.PlanText + "\n\n")
 	}
 	if b.NextObjective != "" {
@@ -173,7 +173,7 @@ func ImplementationPrompt(b TaskBrief) string {
 
 For a multi-part change, complete one coherent, testable part at a time. When that part is committed and more work remains, end this session with status "checkpoint". Ensure the worktree is clean, report the validation you ran, and set nextObjective to one short, concrete objective for a fresh session. Do not push or open a pull request at a checkpoint. When the whole change is ready, %s.
 
-The next session receives the commit, nextObjective, and checked implementation plan, not this transcript. Keep nextObjective under 500 characters; the committed code and plan hold the details.
+The next session receives the commit, nextObjective, and checked requirements and work plan, not this transcript. Keep nextObjective under 500 characters; the committed code and documents hold the details.
 
 `, finish)
 	}
@@ -300,9 +300,9 @@ func prIssueRule(b TaskBrief) string {
 func planningSection(s *strings.Builder, instructions string) {
 	s.WriteString(`## Plan first
 
-This turn is for planning only. Use the issue description and confirmed triage supplied above, inspect the code, then write four Markdown documents: analysis, prd, design, and plan (the implementation plan). foreman posts each one on the issue as its own comment under its own heading, so start each document with its content, not a title. Then foreman starts a fresh session with only the checked implementation plan as its task specification. Pull request work belongs to that later session.
+This turn is for planning only. Use the issue and confirmed triage above, inspect the code, then write two Markdown documents: prd (Requirements) and plan (Work plan). foreman posts each as an issue comment. Start each document with its content, not a title. Then foreman starts a fresh session with both checked documents as its task. Pull request work belongs to that later session.
 
-Keep the issue comments short. Analysis, PRD, and Design should each aim for about 200 words and contain only their distinct job; do not copy the triage decisions or repeat another document's requirement list. The implementation plan must stand alone, but state requirements once in concise language and group related work into a few tasks. Include every binding constraint and acceptance criterion without repeating background or code excerpts.
+Write in B1 English: short sentences, common words, and one idea per sentence. Explain a needed code term once. Keep both comments short. Requirements says what must work and how to check it. Work plan says where and in what order to make the change. Use requirement IDs in the work plan; do not copy the requirements. Together, they must include every confirmed rule and check. Do not copy background or code excerpts.
 
 Do not change, commit, or push anything in this turn. If writing the documents needs a decision from the developer, report "blocked" with the questions instead.
 
@@ -370,7 +370,7 @@ func plannedStatus(planning bool) string {
 	if !planning {
 		return ""
 	}
-	return `- "planned" once the four documents are written: set documents, with prNumber and prUrl null and validation and questions [].
+	return `- "planned" once the two documents are written: set documents, with prNumber and prUrl null and validation and questions [].
 `
 }
 

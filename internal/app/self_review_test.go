@@ -231,7 +231,7 @@ func TestLocalChangeIsSelfReviewedBeforeTheCompetingReviewAndThePR(t *testing.T)
 		t.Errorf("local self-review = %+v", self)
 	}
 	p := f.claude.reviewed[0]
-	if strings.Contains(p, "Proposed pull request description") || strings.Contains(p, "Title: feat: retry 5xx") || strings.Contains(p, "## Confirmed triage scope") || !strings.Contains(p, "## Implementation plan") {
+	if strings.Contains(p, "Proposed pull request description") || strings.Contains(p, "Title: feat: retry 5xx") || strings.Contains(p, "## Confirmed triage scope") || !strings.Contains(p, "## Checked work") {
 		t.Errorf("local self-review prompt:\n%s", p)
 	}
 	if !strings.Contains(f.claude.prompts[1], "no test covers the 4xx path") {

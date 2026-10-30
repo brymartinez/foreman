@@ -348,7 +348,7 @@ if [ -f "$E2E_STATE/block-once" ]; then
 	exit 0
 fi
 if [ -n "$planning" ]; then
-	echo '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.02,"structured_output":{"status":"planned","summary":"four documents","prNumber":null,"prUrl":null,"validation":[],"questions":[],"documents":{"analysis":"Retries are missing.","prd":"R1. Retry 5xx responses.","design":"Wrap the client.","plan":"### Task 1: retries"}}}'
+	echo '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.02,"structured_output":{"status":"planned","summary":"two documents","prNumber":null,"prUrl":null,"validation":[],"questions":[],"documents":{"prd":"R1. Retry 5xx responses.","plan":"### Task 1: retries (R1)"}}}'
 	exit 0
 fi
 echo "$$" >"$E2E_STATE/implement-agent.pid"
@@ -494,10 +494,10 @@ scenario_runner() {
 	check "the clean review starts the learner" eventually 10 test -f "$sandbox/knowledge/acme/widgets/evaluations/42.yaml"
 	check "the learner evaluates with the implementer's agent" contains "$state/evaluations.log" "claude evaluate"
 	check "the learner logs to learning.log" contains "$sandbox/logs/learning.log" "learn: evaluated acme/widgets task 42"
-	check "planning carries the plan stage file" contains "$state/prompt.txt" "Write four documents before any code."
+	check "planning carries the plan stage file" contains "$state/prompt.txt" "Write two short documents before changing code."
 	check "the first turn plans" contains "$state/prompt.txt" "## Plan first"
-	check "the four documents are posted on the issue" test "$(grep -c 'api --method POST repos/acme/widgets/issues/42/comments' "$state/gh.log")" = 4
-	check "the PRD comment has its heading" contains "$state/comment-3002.md" "## PRD"
+	check "the two documents are posted on the issue" test "$(grep -c 'api --method POST repos/acme/widgets/issues/42/comments' "$state/gh.log")" = 2
+	check "the Requirements comment has its heading" contains "$state/comment-3001.md" "## Requirements"
 	check "a fresh session implements the posted plan text" contains "$state/plan-posted-prompt.txt" "### Task 1: retries"
 	check "planning uses its Claude model" contains "$state/models.log" "claude model=sonnet"
 	check "implementation uses its Claude model" contains "$state/models.log" "claude model=opus"
@@ -512,7 +512,7 @@ scenario_runner() {
 	check "no claim reaches GitHub" bash -c "! grep -rqF 'the client retries 5xx responses' '$state/gh.log' '$state'/comment-*.md '$state'/pr-*.json"
 	check "no claim reaches git" bash -c "! git --git-dir='$sandbox/origin.git' log --all -p | grep -qF 'the client retries 5xx responses'"
 	task 42 sd >"$sandbox/show.txt"
-	check "the show pane lists the plan" contains "$sandbox/show.txt" "Analysis https://github.com/acme/widgets/issues/42#issuecomment-3001"
+	check "the show pane lists the plan" contains "$sandbox/show.txt" "Requirements https://github.com/acme/widgets/issues/42#issuecomment-3001"
 	rm "$sandbox/stages/pr.md"
 	check "a missing stage file stops foreman" bash -c "! dash -- 2>'$sandbox/err.txt'"
 	check "and names the file" contains "$sandbox/err.txt" "stages/pr.md"
@@ -562,7 +562,7 @@ scenario_plan_reuse() {
 	echo "plan_reuse: a task whose record lost its plan adopts the plan on the issue"
 	setup plan_reuse
 	local comments='' entry i=0 doc title
-	for doc in analysis:Analysis prd:PRD design:Design "plan:Implementation plan"; do
+	for doc in prd:Requirements "plan:Work plan"; do
 		i=$((i + 1)); title=${doc#*:}
 		entry=$(printf '{"id":%s,"html_url":"https://github.com/acme/widgets/issues/42#issuecomment-%s","body":"<!-- foreman:%s -->\\n## %s\\n\\nPosted earlier.","updated_at":"2026-09-20T10:00:00Z","user":{"login":"brymartinez"}}' "$((2000 + i))" "$((2000 + i))" "${doc%%:*}" "$title")
 		comments="$comments${comments:+,}$entry"
@@ -762,7 +762,7 @@ EOF
 	fi
 	check "the Linear task keeps its issue ID" grep -q '11111111-1111-4111-8111-111111111111' "$sandbox/tasks/acme-linear-linear-11111111-1111-4111-8111-111111111111.md"
 	check "the Linear task uses the name supplied by Linear" grep -q '^branch: bryan/lin-7-add-search' "$sandbox/tasks/acme-linear-linear-11111111-1111-4111-8111-111111111111.md"
-	check "the runner posts planning comments to Linear" eventually 10 test -f "$state/linear-comment-4"
+	check "the runner posts planning comments to Linear" eventually 10 test -f "$state/linear-comment-2"
 	check "the Linear task reaches a clean GitHub PR review" eventually 15 grep -q 'verdict: clean' "$sandbox/tasks/acme-linear-linear-11111111-1111-4111-8111-111111111111.md"
 	check "the Linear PR stays in its GitHub repository and links its issue" bash -c "grep -qF 'github.com/acme/linear/pull/947' '$state/pr-947.json' && grep -qF 'LIN-7/add-search' '$state/pr-947.json' && ! grep -qF 'Closes #' '$state/pr-947.json'"
 	check "the Linear PR prompt names its issue link rule" contains "$state/plan-posted-prompt.txt" "Put LIN-7 in the pull request title"

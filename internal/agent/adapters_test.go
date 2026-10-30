@@ -464,7 +464,7 @@ func TestResumeArgvAndMissingSession(t *testing.T) {
 
 func TestPlanningPromptWritesDocumentsOnly(t *testing.T) {
 	p := ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}, Planning: true, PlanInstructions: "Write a PRD with goals.", Branch: "feat/7-x", BaseBranch: "main"})
-	for _, want := range []string{"## Plan first", "Do not change, commit, or push anything in this turn", "Write a PRD with goals.", `"planned" once the four documents are written`, "about 200 words"} {
+	for _, want := range []string{"## Plan first", "Do not change, commit, or push anything in this turn", "Write a PRD with goals.", `"planned" once the two documents are written`, "B1 English"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("planning prompt missing %q", want)
 		}
@@ -475,7 +475,7 @@ func TestPlanningPromptWritesDocumentsOnly(t *testing.T) {
 		}
 	}
 	p = ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}, PlanText: "R1. Retry 5xx."})
-	if strings.Contains(p, "## Plan first") || strings.Contains(p, `"planned"`) || !strings.Contains(p, "## Implementation plan") || !strings.Contains(p, "R1. Retry 5xx.") {
+	if strings.Contains(p, "## Plan first") || strings.Contains(p, `"planned"`) || !strings.Contains(p, "## Checked work") || !strings.Contains(p, "R1. Retry 5xx.") {
 		t.Errorf("a turn after the plan must follow it, not write it:\n%s", p)
 	}
 }
@@ -564,7 +564,7 @@ func TestFindingsMessageCarriesEachFinding(t *testing.T) {
 
 func TestImplementationPromptStageInstructions(t *testing.T) {
 	p := ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 1}, StageInstructions: "Write the failing test first.", PlanText: "Keep 5xx-only."})
-	stage, plan := strings.Index(p, "## Developer workflow instructions"), strings.Index(p, "## Implementation plan")
+	stage, plan := strings.Index(p, "## Developer workflow instructions"), strings.Index(p, "## Checked work")
 	if stage < 0 || plan < stage || !strings.Contains(p, "Write the failing test first.") {
 		t.Errorf("stage instructions must appear before the plan:\n%s", p)
 	}

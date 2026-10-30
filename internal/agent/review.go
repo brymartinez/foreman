@@ -132,7 +132,7 @@ type ReviewBrief struct {
 	BaseBranch        string
 	StageInstructions string
 	Passes            int
-	// Self gets the checked plan; the competing reviewer gets only the diff.
+	// Self gets the checked requirements and work plan; the competing reviewer gets only the diff.
 	Self bool
 	// Claim verification explicitly adds PRD acceptance criteria and claims.
 	Claimed bool
@@ -151,7 +151,7 @@ func ReviewPrompt(b ReviewBrief) string {
 	}
 	fmt.Fprintf(&s, "You are the %s for the change on branch %s in %s. This is a fresh, read-only session. Do not edit files, commit, or push.\n\n", role, b.Branch, b.Key.Repo)
 	if b.Self {
-		s.WriteString("## Implementation plan\n\nThis is the complete task specification for this review. Check the implemented change against it. Do not read the issue, triage, other planning documents, PR description, or earlier review rounds for requirements.\n\n")
+		s.WriteString("## Checked work\n\nThese requirements and work plan are the complete task for this review. Check the change against them. Do not read the issue, triage, other planning comments, PR description, or earlier review rounds for requirements.\n\n")
 		s.WriteString(quote(b.Plan) + "\n\n")
 	} else {
 		s.WriteString("## Review scope\n\nForm an independent judgment from the file diff. Do not read the issue, triage, planning documents, PR description, comments, or earlier review rounds for requirements. Read surrounding repository code and tests only as needed to verify a concrete defect in the diff.\n\n")
@@ -178,10 +178,12 @@ func ReviewPrompt(b ReviewBrief) string {
 	return s.String()
 }
 
-// writeClaims gives the reviewer the PRD and the implementer's claims, and sets it to
-// test each claim rather than trust it.
+// writeClaims gives the competing reviewer the requirements and both reviewers the
+// implementer's claims, without repeating requirements already in the self-review.
 func writeClaims(s *strings.Builder, b ReviewBrief) {
-	fmt.Fprintf(s, "## PRD\n\nThe PRD posted on the issue, as it reads now. Its acceptance criteria are what the change must meet.\n\n%s\n\n", quote(b.PRD))
+	if !b.Self {
+		fmt.Fprintf(s, "## Requirements\n\nThese are the acceptance criteria posted on the issue.\n\n%s\n\n", quote(b.PRD))
+	}
 	s.WriteString("## Implementer's claims\n\nThe implementer claims the change delivers these behaviors. Claims and the checks they report are not proof.\n\n")
 	for i, c := range b.Claims {
 		fmt.Fprintf(s, "%d. Criteria: %s\n   Behavior: %s\n   Evidence: %s\n   Check: %s\n", i+1, strings.Join(c.Criteria, "; "), oneLine(c.Behavior), oneLine(c.Evidence), oneLine(c.Check))
@@ -189,7 +191,7 @@ func writeClaims(s *strings.Builder, b ReviewBrief) {
 	s.WriteString(`
 ## Claim verification
 
-- Match every acceptance criterion in the PRD to a claim. A criterion no claim covers is a finding.
+- Match every acceptance criterion in Requirements to a claim. A criterion no claim covers is a finding.
 - For each claim, read the cited code and tests and decide whether they establish the behavior. A reported passing check is the implementer's validation record, not proof that its tests establish the claimed behavior. Use CI results where you can read them.
 - Try to find a counterexample to each claim: an input, state, or path where the claimed behavior fails.
 - A material claim the evidence does not support is a finding. Say what the evidence shows and what is missing.

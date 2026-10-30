@@ -144,7 +144,7 @@ func TestShowPlanLinks(t *testing.T) {
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex}, Reviewer: task.Claude},
 		Plan:       []task.PlanComment{{Doc: task.Analysis, URL: "https://x/1"}, {Doc: task.PRD, URL: "https://x/2"}},
 	})
-	if !strings.Contains(buf.String(), "Plan          Analysis https://x/1\n              PRD https://x/2\n") {
+	if !strings.Contains(buf.String(), "Plan          Analysis https://x/1\n              Requirements https://x/2\n") {
 		t.Errorf("missing plan links in:\n%s", buf.String())
 	}
 }

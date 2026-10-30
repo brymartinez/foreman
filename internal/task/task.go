@@ -581,7 +581,7 @@ const (
 )
 
 // PlanDocs lists the documents in the order they are written and posted.
-var PlanDocs = []PlanDoc{Analysis, PRD, Design, ImplementationPlan}
+var PlanDocs = []PlanDoc{PRD, ImplementationPlan}
 
 // Title is the document's heading in its issue comment.
 func (d PlanDoc) Title() string {
@@ -589,11 +589,11 @@ func (d PlanDoc) Title() string {
 	case Analysis:
 		return "Analysis"
 	case PRD:
-		return "PRD"
+		return "Requirements"
 	case Design:
 		return "Design"
 	case ImplementationPlan:
-		return "Implementation plan"
+		return "Work plan"
 	}
 	return string(d)
 }

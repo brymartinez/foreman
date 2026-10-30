@@ -50,21 +50,21 @@ func TestConflictingNewPlanIsRevisedInPlanningSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := f.store.recs[key]
-	if rec.State == task.NeedsDecision || len(f.gh.comments) != 4 || len(f.claude.scopeReviewed) != 2 || len(f.claude.resumed) != 1 {
+	if rec.State == task.NeedsDecision || len(f.gh.comments) != 2 || len(f.claude.scopeReviewed) != 2 || len(f.claude.resumed) != 1 {
 		t.Fatalf("state %s posted %d checks %d resumed %d", rec.State, len(f.gh.comments), len(f.claude.scopeReviewed), len(f.claude.resumed))
 	}
-	if prompt := f.claude.scopeReviewed[0]; !strings.Contains(prompt, "Compare only the supplied scope and documents") || !strings.Contains(prompt, "Keep output terse") || !strings.Contains(prompt, "Source: https://example.test/triage") {
+	if prompt := f.claude.scopeReviewed[0]; !strings.Contains(prompt, "Compare only the supplied text") || !strings.Contains(prompt, "Keep output short") || !strings.Contains(prompt, "Source: https://example.test/triage") {
 		t.Fatalf("plan checker prompt does not limit its task: %q", prompt)
 	}
 	if !strings.Contains(f.claude.resumed[0], "PRD selects recipients") || strings.Contains(f.claude.resumed[0], "## Confirmed scope") {
 		t.Fatalf("planning revision prompt = %q", f.claude.resumed[0])
 	}
-	var keptAnalysis, revisedPRD bool
+	var keptPlan, revisedPRD bool
 	for _, comment := range f.gh.comments {
-		keptAnalysis = keptAnalysis || strings.Contains(comment.Body, "Retries 5xx only today.")
+		keptPlan = keptPlan || strings.Contains(comment.Body, "### Task 1: Wrap the client (R1)")
 		revisedPRD = revisedPRD || strings.Contains(comment.Body, "R1. Use the activity table.")
 	}
-	if !keptAnalysis || !revisedPRD {
+	if !keptPlan || !revisedPRD {
 		t.Fatal("the posted documents did not combine unchanged and revised text")
 	}
 }
@@ -77,7 +77,7 @@ func TestNonblockingPlanLimitationDoesNotStopPosting(t *testing.T) {
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if rec := f.store.recs[key]; !rec.PlanPosted() || len(f.gh.comments) != 4 {
+	if rec := f.store.recs[key]; !rec.PlanPosted() || len(f.gh.comments) != 2 {
 		t.Fatalf("state %s plan posted %t comments %d", rec.State, rec.PlanPosted(), len(f.gh.comments))
 	}
 }

@@ -295,7 +295,7 @@ confirmed triage decisions before delegation.
    screenshots; Foreman does not create sample data. It leaves the PR description as
    written for review.
 4. The implementing agent first reviews its own PR in a fresh, read-only session
-   using the checked implementation plan and the file diff. The other agent reviews
+   using the checked Requirements and Work plan and the file diff. The other agent reviews
    the diff in its own fresh, read-only session. When claim verification is enabled,
    both also receive the PRD and claims. Neither receives the PR description, triage
    discussion, comments, or prior review rounds as review requirements. Findings
@@ -334,8 +334,9 @@ confirmed triage decisions before delegation.
 
 ## Planning
 
-Before any code, the implementer writes four documents: an analysis, a PRD, a design,
-and an implementation plan. `plan.md` sets what each one covers. Foreman reads
+Before any code, the implementer writes two short documents: Requirements (`prd`)
+and Work plan (`plan`). `plan.md` sets what each one covers and asks for B1 English:
+common words and short sentences. Foreman reads
 `## Triage decisions` and later `## Triage correction` comments in order; if there
 are none, the issue description is the confirmed scope. It gives that scope and its
 source links to the planner, checks the documents against it, then posts each as an
@@ -346,16 +347,14 @@ findings then pause for a decision. Existing plans are checked before adoption u
 the exact scope and document texts already passed the check. The checker compares the
 supplied text without reading the repository and reports only mismatches. An unreadable
 or inconclusive check fails with a reason; a nonblocking limitation on a clean
-check does not stop planning.
-The implementation plan must contain every requirement, constraint, and acceptance
-criterion needed without the other documents. Foreman checks that completeness
-against confirmed triage before posting. The implementer receives only that plan as
-task context. The other three comments aim for about 200 words each and avoid
-repeating triage or each other. Self-review receives the plan and diff; the competing
-review receives the diff. A changed scope or plan invalidates earlier checks before
-handoff.
+check does not stop planning. Requirements says what must work and how to check it.
+Work plan gives ordered tasks that refer to requirement IDs without copying the rules.
+Foreman checks the two documents together against triage. The implementer and
+self-review receive both; the competing reviewer receives the diff (and Requirements
+when claim verification is on). A changed scope or document invalidates earlier
+checks before handoff.
 
-The `s` view links the four comments. A task that plans again, for example after a
+The `s` view links the two comments. A task that plans again, for example after a
 failed run, edits the same comments instead of adding new ones. A task that already
 has an open PR but no complete plan runs planning before reviewing that PR.
 
@@ -371,7 +370,7 @@ Foreman never reads or changes those files.
 
 | Stage | Given to | Global file | Repo file (committed) |
 |---|---|---|---|
-| `plan` | the implementer, for the four planning documents | `~/.config/foreman/stages/plan.md` | `.foreman/plan.md` |
+| `plan` | the implementer, for the two planning documents | `~/.config/foreman/stages/plan.md` | `.foreman/plan.md` |
 | `implement` | the implementer | `~/.config/foreman/stages/implement.md` | `.foreman/implement.md` |
 | `review` | the self-review and the competing reviewer | `~/.config/foreman/stages/review.md` | `.foreman/review.md` |
 | `pr` | the implementer, for the PR description | `~/.config/foreman/stages/pr.md` | `.foreman/pr.md` |
@@ -384,7 +383,7 @@ Foreman never reads or changes those files.
   specific rules.
 - The repository's `AGENTS.md` and PR template take precedence over the global
   `pr.md` defaults when they give different title or body rules.
-- The checked implementation plan is the implementer's task specification. Answers
+- The checked Requirements and Work plan are the implementer's task specification. Answers
   to later blocking questions take precedence over stage instructions.
 - Tasks read `.foreman/` from their worktree, so only the version committed on the base
   branch counts.
@@ -489,7 +488,7 @@ every refresh tries again.
 
 | State | Meaning | Your move |
 |---|---|---|
-| `PLANNING` | The implementer writes the Analysis, PRD, Design, and Implementation plan, and foreman posts them | Wait, or `c` on the task to stop it |
+| `PLANNING` | The implementer writes Requirements and Work plan, and foreman posts them | Wait, or `c` on the task to stop it |
 | `IMPLEMENTING` | The implementer changes the branch: code, review fixes, answers, or a merge | Wait, or `c` on the task to stop it |
 | `SELF_REVIEW` | The implementer reviews its own change in a fresh session | Wait, or `c` on the task to stop it |
 | `ADVERSARIAL_REVIEW` | The competing agent reviews the change | Wait, or `c` on the task to stop it |

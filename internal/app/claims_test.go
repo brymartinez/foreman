@@ -206,7 +206,7 @@ func TestBothReviewsReadThePRDAndTheClaims(t *testing.T) {
 		t.Fatalf("state %s reviews %s", got.State, kinds(got))
 	}
 	for name, p := range map[string]string{"self-review": f.claude.reviewed[0], "competing review": f.codex.reviewed[0]} {
-		for _, want := range []string{"## PRD", "> R1. Retry 5xx.", "## Implementer's claims", "the client retries 5xx responses", "retry.go:40, retry_test.go TestRetry5xx", "counterexample"} {
+		for _, want := range []string{"## Requirements", "> R1. Retry 5xx.", "## Implementer's claims", "the client retries 5xx responses", "retry.go:40, retry_test.go TestRetry5xx", "counterexample"} {
 			if !strings.Contains(p, want) {
 				t.Errorf("%s prompt lacks %q:\n%s", name, want, p)
 			}
@@ -397,7 +397,7 @@ func TestALocalChangeIsReviewedWithItsClaimsAndOpensWithThem(t *testing.T) {
 	if task.ClaimsDigest(got.Delegation.Claims) != task.ClaimsDigest(retryClaims) {
 		t.Fatalf("claims = %+v", got.Delegation.Claims)
 	}
-	if p := f.codex.reviewed[0]; !strings.Contains(p, "the client retries 5xx responses") || !strings.Contains(p, "## PRD") {
+	if p := f.codex.reviewed[0]; !strings.Contains(p, "the client retries 5xx responses") || !strings.Contains(p, "## Requirements") {
 		t.Errorf("the local review lacks the claims or the PRD:\n%s", p)
 	}
 	if open := f.claude.resumed[len(f.claude.resumed)-1]; !strings.Contains(open, `"claims"`) || !strings.Contains(open, "the client retries 5xx responses") {

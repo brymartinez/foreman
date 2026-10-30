@@ -484,7 +484,7 @@ func TestAFailedTurnWithoutACancelIsNotCancelled(t *testing.T) {
 func plannedTurn(id string) agent.Turn {
 	return agent.Turn{Session: task.Session{Agent: task.Claude, ID: id}, Usage: task.Usage{ClaudeCostUSD: 0.5, ClaudeTurns: 1}, Outcome: agent.Outcome{
 		Status: agent.Planned, Summary: "planned",
-		Documents: map[task.PlanDoc]string{task.Analysis: "Retries 5xx only today.", task.PRD: "R1. Retry 5xx.", task.Design: "Wrap the client.", task.ImplementationPlan: "### Task 1"},
+		Documents: map[task.PlanDoc]string{task.PRD: "R1. Retry 5xx.", task.ImplementationPlan: "### Task 1: Wrap the client (R1)"},
 	}}
 }
 
@@ -497,7 +497,7 @@ func TestPlanIsPostedThenAFreshSessionImplementsIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.WaitingForCI || !got.PlanPosted() || len(got.Plan) != 4 {
+	if got.State != task.WaitingForCI || !got.PlanPosted() || len(got.Plan) != 2 {
 		t.Fatalf("state %s plan %+v", got.State, got.Plan)
 	}
 	for i, doc := range task.PlanDocs {
@@ -516,10 +516,10 @@ func TestPlanIsPostedThenAFreshSessionImplementsIt(t *testing.T) {
 	if !slices.Equal(f.claude.stages, []task.Stage{task.StagePlan, task.StageImplement}) {
 		t.Errorf("implementer stages = %v", f.claude.stages)
 	}
-	if !strings.Contains(f.claude.reviewed[0], "## Implementation plan") || !strings.Contains(f.claude.reviewed[0], "### Task 1") || strings.Contains(f.codex.reviewed[0], "### Task 1") {
+	if !strings.Contains(f.claude.reviewed[0], "## Requirements") || !strings.Contains(f.claude.reviewed[0], "### Task 1") || strings.Contains(f.codex.reviewed[0], "### Task 1") {
 		t.Errorf("the self-review needs the plan, competing review does not: self %q competing %q", f.claude.reviewed[0], f.codex.reviewed[0])
 	}
-	if got.Usage.ClaudeCostUSD != 0.5 || !strings.Contains(log.String(), "foreman: posted the PRD: https://") {
+	if got.Usage.ClaudeCostUSD != 0.5 || !strings.Contains(log.String(), "foreman: posted the Requirements: https://") {
 		t.Errorf("usage %+v log %q", got.Usage, log.String())
 	}
 }
@@ -543,19 +543,17 @@ func TestReviewFindingsStartFreshCorrectionSessionAfterPlan(t *testing.T) {
 func TestReplanningEditsTheSameComments(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
-	f.gh.postErr, f.gh.postOK = errors.New("gh: HTTP 502"), 2
+	f.gh.postErr, f.gh.postOK = errors.New("gh: HTTP 502"), 1
 	f.claude.turns = []agent.Turn{plannedTurn("sid-1")}
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.Failed || !strings.Contains(got.LastOutcome.Summary, "posting the Design on the issue failed") || len(got.Plan) != 2 {
+	if got.State != task.Failed || !strings.Contains(got.LastOutcome.Summary, "posting the Work plan on the issue failed") || len(got.Plan) != 1 {
 		t.Fatalf("state %s outcome %+v plan %+v", got.State, got.LastOutcome, got.Plan)
 	}
-	// Restarting plans again: it edits the analysis comment, and posts the PRD anew
-	// because the developer deleted its comment.
+	// Restarting plans again edits Requirements and posts the missing Work plan.
 	f.gh.postErr = nil
-	delete(f.gh.comments, 1002)
 	started(t, f, startReq(t))
 	f.claude.turns = []agent.Turn{plannedTurn("sid-2"), prTurn("sid-3")}
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
@@ -563,7 +561,7 @@ func TestReplanningEditsTheSameComments(t *testing.T) {
 	}
 	got = f.store.recs[key]
 	if !got.PlanPosted() || got.Plan[0].CommentID != 1001 || f.gh.edits != 1 {
-		t.Errorf("plan %+v edits %d; want the analysis comment edited in place", got.Plan, f.gh.edits)
+		t.Errorf("plan %+v edits %d; want Requirements edited in place", got.Plan, f.gh.edits)
 	}
 }
 
@@ -634,16 +632,16 @@ func TestCodexPlansAndClaudeReviewsWithoutThePRD(t *testing.T) {
 func TestPlanIsPostedAgainWhenItsCommentWasDeleted(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
-	// An earlier plan's analysis comment that the developer has since deleted.
-	f.store.recs[key].SetPlanComment(task.PlanComment{Doc: task.Analysis, CommentID: 77, URL: "https://github.com/x/issues/825#issuecomment-77"})
+	// An earlier Requirements comment that the developer has since deleted.
+	f.store.recs[key].SetPlanComment(task.PlanComment{Doc: task.PRD, CommentID: 77, URL: "https://github.com/x/issues/825#issuecomment-77"})
 	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2")}
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	c := got.PlanComment(task.Analysis)
+	c := got.PlanComment(task.PRD)
 	if !got.PlanPosted() || c == nil || c.CommentID == 77 || f.gh.edits != 0 {
-		t.Fatalf("plan %+v edits %d; want the analysis posted as a new comment", got.Plan, f.gh.edits)
+		t.Fatalf("plan %+v edits %d; want Requirements posted as a new comment", got.Plan, f.gh.edits)
 	}
 	if _, ok := f.gh.comments[c.CommentID]; !ok {
 		t.Errorf("comment %d was not posted", c.CommentID)
@@ -659,7 +657,7 @@ func TestFailedPlanPostNamesTheDocument(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	want := "posting the Analysis on the issue failed: gh: HTTP 502"
+	want := "posting the Requirements on the issue failed: gh: HTTP 502"
 	if got.State != task.Failed || got.LastOutcome.Status != "failed" || got.LastOutcome.Summary != want || len(got.Plan) != 0 {
 		t.Fatalf("state %s outcome %+v plan %+v", got.State, got.LastOutcome, got.Plan)
 	}
