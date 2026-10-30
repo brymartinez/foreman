@@ -8,6 +8,9 @@ refresh: 60
 mentions: false
 default_source: github
 budgets:
+  task_tokens: 2000000
+  planning_tokens: 400000
+  call_timeout_seconds: 1800
   implementer_usd: 25
   reviewer_usd: 10
 notifications:

@@ -532,3 +532,27 @@ func TestMaterializedDefaultsLoadUnderStrictKeys(t *testing.T) {
 		t.Fatalf("the materialized config does not load: %v", err)
 	}
 }
+
+func TestRunnerBudgetDefaultsOverridesAndValidation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("FOREMAN_CONFIG", path)
+	cfg, err := Load()
+	if err != nil || cfg.Budgets.TaskTokens != 2000000 || cfg.Budgets.PlanningTokens != 400000 || cfg.Budgets.CallTimeoutSeconds != 1800 {
+		t.Fatalf("defaults %+v %v", cfg.Budgets, err)
+	}
+	for _, key := range []string{"task_tokens", "planning_tokens", "call_timeout_seconds", "implementer_usd", "reviewer_usd"} {
+		if err := os.WriteFile(path, []byte("budgets:\n  "+key+": -1\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(); err == nil {
+			t.Fatalf("accepted negative %s", key)
+		}
+	}
+	if err := os.WriteFile(path, []byte("budgets:\n  task_tokens: 0\n  planning_tokens: 0\n  call_timeout_seconds: 0\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load()
+	if err != nil || cfg.Budgets.TaskTokens != 0 || cfg.Budgets.PlanningTokens != 0 || cfg.Budgets.CallTimeoutSeconds != 0 {
+		t.Fatalf("overrides %+v %v", cfg.Budgets, err)
+	}
+}

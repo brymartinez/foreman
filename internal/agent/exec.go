@@ -19,6 +19,8 @@ type StartInput struct {
 	Stage    task.Stage
 	// Step names the work for the turn's agent:model:step log line; "" logs no line.
 	Step string
+	// Purpose gives the call a more specific name in task usage, without changing CLI log steps.
+	Purpose string
 	// Log receives the agent's stderr and progress events; the runner points it at the task log.
 	Log          io.Writer
 	MaxBudgetUSD float64

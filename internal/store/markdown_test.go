@@ -486,13 +486,17 @@ func TestStoreRejectsAnUnknownPhase(t *testing.T) {
 func TestStoreRoundTripsToolCallCounts(t *testing.T) {
 	s := Markdown{Dir: t.TempDir()}
 	want := delegated()
-	want.Usage = task.Usage{CodexTurns: 2, ToolCalls: map[string]int{"command_execution": 4, "file_change": 2}}
+	want.Calls = []task.ModelCall{{Agent: task.Claude, Step: "plan_check", Model: "sonnet", Usage: task.Usage{ClaudeInputTokens: 120, ClaudeOutputTokens: 10}}}
+	want.Usage = task.Usage{ClaudeInputTokens: 120, ClaudeCachedTokens: 20, ClaudeOutputTokens: 10, CodexTurns: 2, ToolCalls: map[string]int{"command_execution": 4, "file_change": 2}}
 	if err := s.Save(ctx, want); err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.Get(ctx, want.Key)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Calls, want.Calls) {
+		t.Fatalf("calls = %+v, want %+v", got.Calls, want.Calls)
 	}
 	if !reflect.DeepEqual(got.Usage, want.Usage) {
 		t.Fatalf("usage\n got: %+v\nwant: %+v", got.Usage, want.Usage)

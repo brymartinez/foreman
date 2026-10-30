@@ -458,7 +458,7 @@ func TestRunTaskRecordsACancelledReview(t *testing.T) {
 	key := started(t, f, startReq(t))
 	ctx, cancel := context.WithCancel(context.Background())
 	f.claude.turn = prTurn("sid-1")
-	f.claude.during = cancel
+	f.codex.onReview = cancel
 	f.codex.reviewErr = errors.New("codex never started a thread")
 	if err := f.run(ctx, key, 4242, io.Discard); err != nil {
 		t.Fatal(err)

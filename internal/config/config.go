@@ -68,8 +68,11 @@ const (
 )
 
 type Budgets struct {
-	ImplementerUSD float64 `yaml:"implementer_usd"`
-	ReviewerUSD    float64 `yaml:"reviewer_usd"`
+	TaskTokens         int64   `yaml:"task_tokens"`
+	PlanningTokens     int64   `yaml:"planning_tokens"`
+	CallTimeoutSeconds int     `yaml:"call_timeout_seconds"`
+	ImplementerUSD     float64 `yaml:"implementer_usd"`
+	ReviewerUSD        float64 `yaml:"reviewer_usd"`
 }
 
 // Learning controls the evaluation of finished tasks. Off stops new evaluations;
@@ -141,7 +144,7 @@ func Load() (Config, error) {
 		Claude:          Claude{Command: "claude", Model: "claude-opus-5"},
 		Codex:           Codex{Command: "codex", Model: "gpt-6-sol"},
 		Cleanup:         Cleanup{OnDone: true, DeleteMergedBranch: true},
-		Budgets:         Budgets{ImplementerUSD: 3, ReviewerUSD: 1},
+		Budgets:         Budgets{ImplementerUSD: 3, ReviewerUSD: 1, TaskTokens: 2000000, PlanningTokens: 400000, CallTimeoutSeconds: 1800},
 		Learning:        Learning{Enabled: true, BudgetUSD: 0.5},
 		Notifications:   Notifications{Enabled: true},
 		Auto:            Auto{Agent: task.Claude, MaxConcurrent: 3},
@@ -194,6 +197,9 @@ func Load() (Config, error) {
 	}
 	if err := ValidSource(cfg.DefaultSource); err != nil {
 		return Config{}, fmt.Errorf("%s: default_source: %w", path, err)
+	}
+	if cfg.Budgets.TaskTokens < 0 || cfg.Budgets.PlanningTokens < 0 || cfg.Budgets.CallTimeoutSeconds < 0 || cfg.Budgets.ImplementerUSD < 0 || cfg.Budgets.ReviewerUSD < 0 {
+		return Config{}, fmt.Errorf("%s: budgets cannot be negative", path)
 	}
 	if cfg.Learning.BudgetUSD < 0 {
 		return Config{}, fmt.Errorf("%s: learning.budget_usd is %g; it cannot be negative", path, cfg.Learning.BudgetUSD)

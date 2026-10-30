@@ -508,6 +508,8 @@ scenario_runner() {
 	check "the review omits the issue description" bash -c "! grep -qF 'do it' '$state/review-prompt.txt'"
 	check "the review carries the PRD" contains "$state/review-prompt.txt" "> R1. Retry 5xx responses."
 	check "the review carries the claims to test" contains "$state/review-prompt.txt" "the client retries 5xx responses"
+	check "the task records plan-check usage" contains "$sandbox/tasks/acme-widgets-42.md" "step: plan_check"
+	check "the task records self-review usage" contains "$sandbox/tasks/acme-widgets-42.md" "step: self_review"
 	check "the task file holds the claims" contains "$sandbox/tasks/acme-widgets-42.md" "the client retries 5xx responses"
 	check "no claim reaches GitHub" bash -c "! grep -rqF 'the client retries 5xx responses' '$state/gh.log' '$state'/comment-*.md '$state'/pr-*.json"
 	check "no claim reaches git" bash -c "! git --git-dir='$sandbox/origin.git' log --all -p | grep -qF 'the client retries 5xx responses'"
@@ -647,7 +649,7 @@ scenario_logs() {
 	check "R marks the pane raw" contains "$sandbox/raw.txt" "LOG · raw · acme/widgets#42"
 	check "raw keeps Codex JSON" contains "$sandbox/raw.txt" '"type":"turn.completed"'
 	task 42 sd >"$sandbox/show.txt"
-	check "the show pane reports usage" contains "$sandbox/show.txt" 'Claude $0.32 (3 turns) · Codex 125 tokens (1 turn)'
+	check "the show pane reports usage" contains "$sandbox/show.txt" 'Claude $0.37 (4 turns) · Codex 120 tokens (1 turn)'
 
 	# Far more than one bounded read of the log, so g must load older chunks.
 	local log first

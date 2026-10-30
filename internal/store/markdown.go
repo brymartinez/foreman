@@ -210,6 +210,7 @@ type frontmatter struct {
 	LastGitHubSync      *time.Time             `yaml:"last_github_sync,omitempty"`
 	Decisions           []decisionFM           `yaml:"decisions,omitempty"`
 	LastOutcome         *outcomeFM             `yaml:"last_outcome,omitempty"`
+	Calls               []task.ModelCall       `yaml:"calls,omitempty"`
 	Usage               usageFM                `yaml:"usage,omitempty"`
 	Validation          []task.Check           `yaml:"validation,omitempty"`
 	FullResult          *task.FullResult       `yaml:"full_result,omitempty"`
@@ -274,6 +275,9 @@ type outcomeFM struct {
 }
 
 type usageFM struct {
+	ClaudeInputTokens    int64          `yaml:"claude_input_tokens,omitempty"`
+	ClaudeCachedTokens   int64          `yaml:"claude_cached_tokens,omitempty"`
+	ClaudeOutputTokens   int64          `yaml:"claude_output_tokens,omitempty"`
 	ClaudeCostUSD        float64        `yaml:"claude_cost_usd,omitempty"`
 	CodexInputTokens     int64          `yaml:"codex_input_tokens,omitempty"`
 	CodexCachedTokens    int64          `yaml:"codex_cached_tokens,omitempty"`
@@ -485,7 +489,8 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 	if o := fm.LastOutcome; o != nil {
 		rec.LastOutcome = &task.Outcome{Status: o.Status, Summary: o.Summary, At: o.At}
 	}
-	rec.Usage = task.Usage{ClaudeCostUSD: fm.Usage.ClaudeCostUSD, CodexInputTokens: fm.Usage.CodexInputTokens, CodexCachedTokens: fm.Usage.CodexCachedTokens, CodexOutputTokens: fm.Usage.CodexOutputTokens, CodexReasoningTokens: fm.Usage.CodexReasoningTokens, ClaudeTurns: fm.Usage.ClaudeTurns, CodexTurns: fm.Usage.CodexTurns, ToolCalls: fm.Usage.ToolCalls}
+	rec.Calls = fm.Calls
+	rec.Usage = task.Usage{ClaudeInputTokens: fm.Usage.ClaudeInputTokens, ClaudeCachedTokens: fm.Usage.ClaudeCachedTokens, ClaudeOutputTokens: fm.Usage.ClaudeOutputTokens, ClaudeCostUSD: fm.Usage.ClaudeCostUSD, CodexInputTokens: fm.Usage.CodexInputTokens, CodexCachedTokens: fm.Usage.CodexCachedTokens, CodexOutputTokens: fm.Usage.CodexOutputTokens, CodexReasoningTokens: fm.Usage.CodexReasoningTokens, ClaudeTurns: fm.Usage.ClaudeTurns, CodexTurns: fm.Usage.CodexTurns, ToolCalls: fm.Usage.ToolCalls}
 	for _, d := range fm.Decisions {
 		dec := task.Decision{AskedAt: d.AskedAt, Question: d.Question, Answer: d.Answer, Diagnosis: d.Diagnosis}
 		if d.AnsweredAt != nil {
@@ -581,7 +586,8 @@ func fromRecord(rec *task.Record) frontmatter {
 	if o := rec.LastOutcome; o != nil {
 		fm.LastOutcome = &outcomeFM{Status: o.Status, Summary: o.Summary, At: o.At}
 	}
-	fm.Usage = usageFM{ClaudeCostUSD: rec.Usage.ClaudeCostUSD, CodexInputTokens: rec.Usage.CodexInputTokens, CodexCachedTokens: rec.Usage.CodexCachedTokens, CodexOutputTokens: rec.Usage.CodexOutputTokens, CodexReasoningTokens: rec.Usage.CodexReasoningTokens, ClaudeTurns: rec.Usage.ClaudeTurns, CodexTurns: rec.Usage.CodexTurns, ToolCalls: rec.Usage.ToolCalls}
+	fm.Calls = rec.Calls
+	fm.Usage = usageFM{ClaudeInputTokens: rec.Usage.ClaudeInputTokens, ClaudeCachedTokens: rec.Usage.ClaudeCachedTokens, ClaudeOutputTokens: rec.Usage.ClaudeOutputTokens, ClaudeCostUSD: rec.Usage.ClaudeCostUSD, CodexInputTokens: rec.Usage.CodexInputTokens, CodexCachedTokens: rec.Usage.CodexCachedTokens, CodexOutputTokens: rec.Usage.CodexOutputTokens, CodexReasoningTokens: rec.Usage.CodexReasoningTokens, ClaudeTurns: rec.Usage.ClaudeTurns, CodexTurns: rec.Usage.CodexTurns, ToolCalls: rec.Usage.ToolCalls}
 	for _, d := range rec.Decisions {
 		dec := decisionFM{AskedAt: d.AskedAt, Question: d.Question, Answer: d.Answer, Diagnosis: d.Diagnosis}
 		if !d.AnsweredAt.IsZero() {

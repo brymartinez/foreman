@@ -41,6 +41,7 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, token string, l
 		return err
 	}
 	final := context.WithoutCancel(ctx)
+	a = a.meterAgents(key)
 	defer a.update(final, key, existing(func(cur *task.Record) {
 		if cur.Delegation.RunnerPID == pid {
 			cur.Delegation.RunnerPID = 0
@@ -477,8 +478,10 @@ func (r *taskRun) review() (step, error) {
 		if reviewErr != nil {
 			applyStop(r.ctx, cur, "review", r.log, a.Now())
 		}
-		addUsage(&cur.Usage, review.Usage)
-		addUsage(&cur.Usage, diagnosisUsage)
+		if !a.metered {
+			addUsage(&cur.Usage, review.Usage)
+			addUsage(&cur.Usage, diagnosisUsage)
+		}
 		// Findings put the task back to IMPLEMENTING; only they can reach the limit.
 		if atLimit && cur.State == task.Implementing && cur.ChangeRequestsSinceDecision() > a.fixRounds() {
 			if kind == task.SelfReview {
@@ -602,7 +605,13 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 		step = agent.StepFeedback
 	}
 	in := agent.StartInput{Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD, Stage: stage, Step: step, Profile: d.Profile}
+	if req.finalCheck != nil {
+		in.Purpose = "final_check"
+	} else if !planning && findings != nil {
+		in.Purpose = "correction"
+	}
 	if req.openBodyFile != "" {
+		in.Purpose = "open_pr"
 		return a.openTurn(ctx, rec, adapter, in, req.openBodyFile, log)
 	}
 	resume := ""
@@ -860,7 +869,7 @@ func (a App) selfReview(ctx context.Context, rec *task.Record, title, body, prd 
 	if err := a.startAttempt(ctx, rec); err != nil {
 		return agent.ReviewOutcome{}, err
 	}
-	in := agent.StartInput{Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ReviewerBudgetUSD, Prompt: agent.ReviewPrompt(brief), Step: agent.StepReview}
+	in := agent.StartInput{Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ReviewerBudgetUSD, Prompt: agent.ReviewPrompt(brief), Step: agent.StepReview, Purpose: "self_review"}
 	fmt.Fprintf(log, "foreman: %s self-reviewing %s (round %d)\n", adapter.Name(), reviewTarget(rec), len(rec.Reviews)+1)
 	return adapter.Review(ctx, in)
 }
@@ -906,6 +915,7 @@ func (a App) review(ctx context.Context, rec *task.Record, title, body, prd stri
 		Log:          log,
 		MaxBudgetUSD: a.ReviewerBudgetUSD,
 		Prompt:       agent.ReviewPrompt(brief),
+		Purpose:      "competing_review",
 		Step:         agent.StepReview,
 	}
 	fmt.Fprintf(log, "foreman: %s reviewing %s (round %d)\n", reviewer.Name(), target, len(rec.Reviews)+1)
@@ -945,6 +955,9 @@ func (a App) reviewRequirements(ctx context.Context, rec *task.Record) (confirme
 }
 
 func addUsage(total *task.Usage, turn task.Usage) {
+	total.ClaudeInputTokens += turn.ClaudeInputTokens
+	total.ClaudeCachedTokens += turn.ClaudeCachedTokens
+	total.ClaudeOutputTokens += turn.ClaudeOutputTokens
 	total.ClaudeCostUSD += turn.ClaudeCostUSD
 	total.CodexInputTokens += turn.CodexInputTokens
 	total.CodexCachedTokens += turn.CodexCachedTokens

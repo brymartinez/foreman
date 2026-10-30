@@ -343,7 +343,9 @@ func (a App) finishTurn(ctx, final context.Context, key task.Key, during string,
 		if res.err != nil {
 			applyStop(ctx, cur, during, log, a.Now())
 		}
-		addUsage(&cur.Usage, res.turn.Usage)
+		if !a.metered {
+			addUsage(&cur.Usage, res.turn.Usage)
+		}
 	}))
 }
 

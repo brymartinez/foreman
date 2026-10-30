@@ -135,16 +135,35 @@ type Session struct {
 	ID    string
 }
 
+type ModelCall struct {
+	Agent      Agent     `yaml:"agent"`
+	Step       string    `yaml:"step"`
+	Model      string    `yaml:"model"`
+	StartedAt  time.Time `yaml:"started_at"`
+	FinishedAt time.Time `yaml:"finished_at"`
+	Error      string    `yaml:"error,omitempty"`
+	Usage      Usage     `yaml:"usage"`
+}
+
+// Tokens counts reported input and output, including cached input.
+func (u Usage) Tokens() int64 {
+	return u.ClaudeInputTokens + u.ClaudeOutputTokens + u.CodexInputTokens + u.CodexOutputTokens
+}
+
 type Usage struct {
-	ClaudeCostUSD        float64
-	CodexInputTokens     int64
-	CodexCachedTokens    int64
-	CodexOutputTokens    int64
-	CodexReasoningTokens int64
-	ClaudeTurns          int
-	CodexTurns           int
+	Model                string  `yaml:"model,omitempty"`
+	ClaudeInputTokens    int64   `yaml:"claude_input_tokens,omitempty"`
+	ClaudeCachedTokens   int64   `yaml:"claude_cached_tokens,omitempty"`
+	ClaudeOutputTokens   int64   `yaml:"claude_output_tokens,omitempty"`
+	ClaudeCostUSD        float64 `yaml:"claude_cost_usd,omitempty"`
+	CodexInputTokens     int64   `yaml:"codex_input_tokens,omitempty"`
+	CodexCachedTokens    int64   `yaml:"codex_cached_tokens,omitempty"`
+	CodexOutputTokens    int64   `yaml:"codex_output_tokens,omitempty"`
+	CodexReasoningTokens int64   `yaml:"codex_reasoning_tokens,omitempty"`
+	ClaudeTurns          int     `yaml:"claude_turns,omitempty"`
+	CodexTurns           int     `yaml:"codex_turns,omitempty"`
 	// ToolCalls counts tool calls by name: Claude tool names, or Codex item types.
-	ToolCalls map[string]int
+	ToolCalls map[string]int `yaml:"tool_calls,omitempty"`
 }
 
 // Profile is the agent, models, and effort routing chose for a task. It is stored
@@ -538,6 +557,7 @@ type Record struct {
 	LastGitHubSync time.Time
 	Decisions      []Decision
 	LastOutcome    *Outcome
+	Calls          []ModelCall
 	Usage          Usage
 	// Validation is what the implementation agent reported with its PR.
 	Validation []Check

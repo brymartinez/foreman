@@ -71,6 +71,10 @@ type App struct {
 	ReviewBeforePR       bool
 	ImplementerBudgetUSD float64
 	ReviewerBudgetUSD    float64
+	TaskTokenLimit       int64
+	PlanningTokenLimit   int64
+	CallTimeout          time.Duration
+	metered              bool
 	Notifier             Notifier
 	// CleanOnDone removes a DONE task's worktree when inbox runs.
 	CleanOnDone bool

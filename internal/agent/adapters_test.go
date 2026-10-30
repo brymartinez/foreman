@@ -30,7 +30,7 @@ func TestClaudeStart(t *testing.T) {
 	var got Command
 	exec := func(_ context.Context, c Command) error {
 		got = c
-		fmt.Fprintf(c.Stdout, `{"type":"result","subtype":"success","is_error":false,"session_id":"sid-1","result":"...","structured_output":%s,"permission_denials":[],"total_cost_usd":0.12}`, prOpened)
+		fmt.Fprintf(c.Stdout, `{"type":"result","subtype":"success","is_error":false,"session_id":"sid-1","result":"...","structured_output":%s,"permission_denials":[],"total_cost_usd":0.12,"usage":{"input_tokens":100,"cache_creation_input_tokens":30,"cache_read_input_tokens":50,"output_tokens":20}}`, prOpened)
 		return nil
 	}
 	var sessions []task.Session
@@ -54,7 +54,7 @@ func TestClaudeStart(t *testing.T) {
 	if !strings.Contains(log.String(), "cost=$0.12") {
 		t.Errorf("log = %q", log.String())
 	}
-	if turn.Usage.ClaudeCostUSD != 0.12 || turn.Usage.ClaudeTurns != 1 {
+	if turn.Usage.ClaudeCostUSD != 0.12 || turn.Usage.ClaudeTurns != 1 || turn.Usage.ClaudeInputTokens != 180 || turn.Usage.ClaudeCachedTokens != 50 || turn.Usage.ClaudeOutputTokens != 20 || turn.Usage.Model != "haiku" {
 		t.Errorf("usage = %+v", turn.Usage)
 	}
 }
@@ -905,5 +905,20 @@ func TestCodexUsesProfileModelsAndEfforts(t *testing.T) {
 		if !slices.Contains(commands[i].Args, fmt.Sprintf("model_reasoning_effort=%q", want.effort)) {
 			t.Errorf("command %d missing %s effort: %q", i, want.effort, commands[i].Args)
 		}
+	}
+}
+
+func TestClaudeKeepsReportedUsageWhenOutcomeFails(t *testing.T) {
+	c := Claude{Bin: "claude", Model: "sonnet", NewSessionID: func() string { return "sid" }, Exec: func(_ context.Context, cmd Command) error {
+		fmt.Fprintln(cmd.Stdout, `{"type":"result","subtype":"error_max_budget_usd","is_error":true,"num_turns":1,"total_cost_usd":0.7,"usage":{"input_tokens":10,"output_tokens":4}}`)
+		return errors.New("exit 1")
+	}}
+	turn, err := c.Start(context.Background(), StartInput{}, func(task.Session) {})
+	if err == nil || turn.Usage.ClaudeCostUSD != .7 || turn.Usage.ClaudeInputTokens != 10 {
+		t.Fatalf("turn %+v error %v", turn, err)
+	}
+	review, err := c.Review(context.Background(), StartInput{})
+	if err == nil || review.Usage.ClaudeCostUSD != .7 || review.Usage.ClaudeOutputTokens != 4 {
+		t.Fatalf("review %+v error %v", review, err)
 	}
 }

@@ -35,7 +35,21 @@ func (a App) diagnoseLimit(ctx context.Context, rec *task.Record, title, body st
 	}
 	in := agent.EvaluateInput{Agent: rec.Delegation.Implementer.Agent, Prompt: agent.DiagnosisPrompt(findings, sources), MaxBudgetUSD: a.ReviewerBudgetUSD, Log: log}
 	fmt.Fprintf(log, "foreman: %s diagnosing the self-review at the fix limit\n", in.Agent)
-	out, err := a.Diagnoser.Diagnose(ctx, in, sources)
+	callCtx := ctx
+	if a.metered {
+		var cancel context.CancelFunc
+		callCtx, cancel, err = a.callContext(ctx, rec.Key, "diagnosis")
+		if err != nil {
+			return unavailable(err), task.Usage{}
+		}
+		defer cancel()
+	}
+	started := a.Now()
+	out, err := a.Diagnoser.Diagnose(callCtx, in, sources)
+	if a.metered {
+		err = errors.Join(err, callCtx.Err())
+		err = errors.Join(err, a.saveCall(ctx, rec.Key, in.Agent, "diagnosis", started, out.Usage, err))
+	}
 	if err != nil {
 		return unavailable(err), out.Usage
 	}

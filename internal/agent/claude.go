@@ -76,7 +76,7 @@ func (c Claude) run(ctx context.Context, in StartInput, session task.Session, se
 	}
 	raw, usage, err := c.exec(ctx, in, args)
 	if err != nil {
-		return Turn{Session: session}, err
+		return Turn{Session: session, Usage: usage}, err
 	}
 	outcome, err := ParseOutcome(raw)
 	return Turn{Session: session, Outcome: outcome, Usage: usage}, err
@@ -105,7 +105,7 @@ func (c Claude) Review(ctx context.Context, in StartInput) (ReviewOutcome, error
 	}
 	raw, usage, err := c.exec(ctx, in, args)
 	if err != nil {
-		return ReviewOutcome{}, err
+		return ReviewOutcome{Usage: usage}, err
 	}
 	out, err := ParseReview(raw)
 	out.Usage = usage
@@ -127,7 +127,7 @@ func (c Claude) exec(ctx context.Context, in StartInput, args []string) (json.Ra
 	pw.Close()
 	<-done
 	if result == nil {
-		return nil, task.Usage{}, fmt.Errorf("claude printed no result (%v): %w", runErr, ErrNoSession)
+		return nil, task.Usage{Model: c.Model, ToolCalls: tools}, fmt.Errorf("claude printed no result (%v): %w", runErr, ErrNoSession)
 	}
 	var r claudeResult
 	_ = json.Unmarshal(result, &r)
@@ -135,7 +135,7 @@ func (c Claude) exec(ctx context.Context, in StartInput, args []string) (json.Ra
 	if r.IsError && r.NumTurns == 0 && r.Subtype == "error_during_execution" {
 		return nil, task.Usage{}, fmt.Errorf("claude ran no turn (%v): %w", runErr, ErrNoSession)
 	}
-	usage := task.Usage{ClaudeCostUSD: r.TotalCostUSD, ClaudeTurns: 1, ToolCalls: tools}
+	usage := task.Usage{Model: c.Model, ClaudeInputTokens: r.Usage.InputTokens + r.Usage.CacheCreationInputTokens + r.Usage.CacheReadInputTokens, ClaudeCachedTokens: r.Usage.CacheReadInputTokens, ClaudeOutputTokens: r.Usage.OutputTokens, ClaudeCostUSD: r.TotalCostUSD, ClaudeTurns: 1, ToolCalls: tools}
 	raw, err := parseClaudeResult(result, in.Log)
 	if err != nil && runErr != nil {
 		return nil, usage, fmt.Errorf("claude exited: %w (%w)", runErr, err)
@@ -210,6 +210,12 @@ type claudeResult struct {
 	PermissionDenials []json.RawMessage `json:"permission_denials"`
 	TotalCostUSD      float64           `json:"total_cost_usd"`
 	NumTurns          int               `json:"num_turns"`
+	Usage             struct {
+		InputTokens              int64 `json:"input_tokens"`
+		CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+		OutputTokens             int64 `json:"output_tokens"`
+	} `json:"usage"`
 }
 
 func parseClaudeResult(result []byte, log io.Writer) (json.RawMessage, error) {

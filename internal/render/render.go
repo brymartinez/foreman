@@ -4,6 +4,8 @@ package render
 import (
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -207,8 +209,9 @@ func Show(w io.Writer, r *task.Record) {
 		row("Last outcome", fmt.Sprintf("%s · %s · %s", o.Status, o.At.Local().Format(time.DateTime), o.Summary))
 	}
 	if r.Usage.ClaudeTurns > 0 || r.Usage.CodexTurns > 0 {
-		row("Usage", fmt.Sprintf("Claude $%.2f (%d %s) · Codex %d tokens (%d %s)", r.Usage.ClaudeCostUSD, r.Usage.ClaudeTurns, plural(r.Usage.ClaudeTurns, "turn", "turns"), r.Usage.CodexInputTokens+r.Usage.CodexOutputTokens+r.Usage.CodexReasoningTokens, r.Usage.CodexTurns, plural(r.Usage.CodexTurns, "turn", "turns")))
+		row("Usage", fmt.Sprintf("Claude $%.2f (%d %s) · Codex %d tokens (%d %s)", r.Usage.ClaudeCostUSD, r.Usage.ClaudeTurns, plural(r.Usage.ClaudeTurns, "turn", "turns"), r.Usage.CodexInputTokens+r.Usage.CodexOutputTokens, r.Usage.CodexTurns, plural(r.Usage.CodexTurns, "turn", "turns")))
 	}
+
 	tw.Flush()
 	if r.CI != nil && len(r.CI.Failing) > 0 {
 		fmt.Fprintln(w, "\nFailing checks")
@@ -279,6 +282,18 @@ func Show(w io.Writer, r *task.Record) {
 		}
 		Blocked(w, p.Question)
 		fmt.Fprintln(w, "\nAnswer it: press Enter on the task in the dashboard.")
+	}
+	if len(r.Calls) > 0 {
+		fmt.Fprintln(w, "\nCalls by stage")
+		counts := map[string]int{}
+		tokens := map[string]int64{}
+		for _, call := range r.Calls {
+			counts[call.Step]++
+			tokens[call.Step] += call.Usage.Tokens()
+		}
+		for _, step := range slices.Sorted(maps.Keys(counts)) {
+			fmt.Fprintf(w, "  %s: %d calls, %d tokens\n", step, counts[step], tokens[step])
+		}
 	}
 }
 

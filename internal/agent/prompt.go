@@ -87,6 +87,8 @@ type MergeBrief struct {
 	Files []string
 }
 
+const ConfirmedScopeRule = "A later correction overrides an earlier decision on the same point. Earlier decisions on other points still apply. Do not require both the old and new values of a corrected rule. If the correction is unclear, ask for a decision."
+
 // ImplementationPrompt is the execution contract handed to the implementation agent.
 // It carries everything durable; the agent never depends on a prior conversation.
 func ImplementationPrompt(b TaskBrief) string {
@@ -109,7 +111,7 @@ func ImplementationPrompt(b TaskBrief) string {
 		s.WriteString(body + "\n\n")
 	}
 	if scope := strings.TrimSpace(b.ConfirmedScope); b.Planning && scope != "" {
-		s.WriteString("## Confirmed triage scope\n\nThis is the maintainer-confirmed scope. Planning documents, implementation, and PR description must agree with it. A later correction overrides an earlier decision on the same point.\n\n")
+		s.WriteString("## Confirmed triage scope\n\nThis is the maintainer-confirmed scope. Planning documents, implementation, and PR description must agree with it. " + ConfirmedScopeRule + "\n\n")
 		s.WriteString(scope + "\n\n")
 	}
 

@@ -119,7 +119,7 @@ func (c Codex) Review(ctx context.Context, in StartInput) (ReviewOutcome, error)
 		}
 	}, "", func(task.Session) {})
 	if err != nil {
-		return ReviewOutcome{}, err
+		return ReviewOutcome{Usage: usage}, err
 	}
 	out, err := ParseReview(raw)
 	out.Usage = usage
@@ -173,7 +173,10 @@ func (c Codex) exec(ctx context.Context, in StartInput, schema []byte, baseArgs 
 	}
 	args = append(args, in.Prompt)
 
-	events := &codexEvents{log: logOrDiscard(in.Log), onSession: func(id string) {
+	if in.MaxBudgetUSD > 0 {
+		fmt.Fprintln(logOrDiscard(in.Log), "foreman: Codex cannot enforce a dollar budget; task token limits apply between calls")
+	}
+	events := &codexEvents{usage: task.Usage{Model: c.Model}, log: logOrDiscard(in.Log), onSession: func(id string) {
 		onSession(task.Session{Agent: task.Codex, ID: id})
 	}}
 	pr, pw := io.Pipe()

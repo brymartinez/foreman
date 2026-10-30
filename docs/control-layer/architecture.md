@@ -561,8 +561,10 @@ the same commit. The commit message records why it changed.
   the implementation session receives the checked Requirements and Work plan text,
   not the planning transcript. Requirements states each rule and check once; Work
   plan maps its tasks to requirement IDs. Both documents use short, plain English.
-  The read-only checker verifies that Requirements covers triage and every rule has
-  a task in Work plan. It compares only the supplied text and returns
+  The planner and checker share the same rule: a later correction replaces an earlier
+  decision on the same point; other earlier decisions still apply. Neither should
+  require both values of a corrected rule. The read-only checker verifies that
+  Requirements covers triage and every rule has a task in Work plan. It compares only the supplied text and returns
   concise findings. A complete issue plan skips this check on adoption when its
   document digest and the current scope digest match the last clean check. A clean
   check may report nonblocking
@@ -651,7 +653,22 @@ the same commit. The commit message records why it changed.
 - Rejected: routing inside `app.Start` (a manual start could not confirm first) and in
   the runner (the task is already running, so it could neither wait nor change agents).
 - **Dollar budgets cap Claude only.** Codex reports no cost and its tokens arrive only
-  when a turn ends, so foreman records Codex tokens and never invents a price.
+  when a turn ends, so foreman records Codex tokens and never invents a price. The
+  Codex log states that the per-call dollar setting is unsupported. Each runner call
+  (including plan checks, revisions, self-review, competing review, and limit diagnosis)
+  saves its stage, model, times, reported usage, and error before processing its outcome.
+  Totals include failed calls when usage was reported. Claude input includes cache
+  creation and cache reads; cached input is also shown separately. Codex reasoning is
+  a detail of output, so input plus output is the token total. Older totals cannot be
+  reconstructed from missing usage. Calls with no final provider usage keep what is
+  known; Foreman does not estimate missing tokens or cost.
+- **Runner limits apply across restarts.** `budgets.task_tokens` (2,000,000) caps reported
+  task input plus output; `budgets.planning_tokens` (400,000) covers planning turns and
+  plan checks recorded after this feature. Limits are checked before each call and
+  can be exceeded by the last call. Cached input counts. Reaching a limit fails the
+  task with the setting to change. `budgets.call_timeout_seconds` (1,800) cancels a
+  call and its process group. Zero disables each limit; negative values are invalid.
+  These limits use the current config. Learning runs separately under its own budget.
 - **Validation is self-reported.** Foreman records what the agent ran and doesn't re-run
   it, because that would run untrusted commands outside the sandbox. CI is the
   independent check. Each check carries a scope, `focused` or `full` (absent reads as

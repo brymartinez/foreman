@@ -634,7 +634,10 @@ refresh: 60                          # seconds between dashboard issue-source re
 auto:                                # on/off is not here; press a or launch with -a
   agent: claude                      # claude or codex
   max_concurrent: 3                  # active runs, manual ones included
-budgets:                             # Claude only: Codex reports no cost, so it has no cap
+budgets:
+  task_tokens: 2000000               # reported input + output across task calls
+  planning_tokens: 400000            # planning and plan checks
+  call_timeout_seconds: 1800         # cancels one call; 0 disables each limit
   implementer_usd: 3.00              # Claude maximum per implementation turn
   reviewer_usd: 1.00                 # Claude maximum per review, self-review, or diagnosis turn
 learning:
@@ -669,6 +672,14 @@ values beginning with `~/` expand to your home directory. The `stages/` director
 and `routing.yaml` sit beside the selected config file; neither has a separate
 config key. Auto mode's on/off choice lives in
 `~/.local/share/foreman/state.json`, outside `config.yaml`.
+
+Runner limits live under `budgets`: `task_tokens` (2,000,000), `planning_tokens`
+(400,000), and `call_timeout_seconds` (1,800). Zero disables a limit. Token limits
+count reported input and output, including cached input, and are checked between
+calls. One call can exceed the remaining tokens. Task totals survive restarts;
+planning totals use the saved call history. Older missing usage is not backfilled.
+Dollar limits apply to Claude only. The task file stores each runner call with its
+stage, model, usage, times, and error; the task view shows calls and tokens by stage.
 
 To use Linear issues for a repository, map it to one Linear project URL and set a
 personal API key before starting Foreman:
