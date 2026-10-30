@@ -464,9 +464,14 @@ func TestResumeArgvAndMissingSession(t *testing.T) {
 
 func TestPlanningPromptWritesDocumentsOnly(t *testing.T) {
 	p := ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}, Planning: true, PlanInstructions: "Write a PRD with goals.", Branch: "feat/7-x", BaseBranch: "main"})
-	for _, want := range []string{"## Plan first", "Do not change, commit, or push anything in this turn", "Write a PRD with goals.", `"planned" once the four documents are written`, "## Opening the pull request"} {
+	for _, want := range []string{"## Plan first", "Do not change, commit, or push anything in this turn", "Write a PRD with goals.", `"planned" once the four documents are written`, "about 200 words"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("planning prompt missing %q", want)
+		}
+	}
+	for _, unwanted := range []string{"## Opening the pull request", "Commit your work", `"pr_opened"`} {
+		if strings.Contains(p, unwanted) {
+			t.Errorf("planning prompt contains implementation instruction %q", unwanted)
 		}
 	}
 	p = ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}, PlanText: "R1. Retry 5xx."})

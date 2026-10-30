@@ -185,14 +185,19 @@ The next session receives the commit, nextObjective, and checked implementation 
 	if b.Claims && !b.Planning {
 		claimsSection(&s)
 	}
-	if b.Key.Source == task.Linear {
+	if b.Key.Source == task.Linear && !b.Planning {
 		s.WriteString("GitHub hosts the pull request. Put " + b.Identifier + " in the pull request title and " + b.URL + " in the pull request body. Do not add a GitHub Closes #N line. These issue link rules override conflicting developer PR instructions below.\n\n")
+	}
+	opening, pr := openingSection(b), prSection(b.PRInstructions)
+	workspace := fmt.Sprintf("You are in a dedicated git worktree at %s on branch %s, created from origin/%s.\nOnly change files inside this worktree. Commit your work to %s. Do not switch branches.", b.Worktree, b.Branch, b.BaseBranch, b.Branch)
+	if b.Planning {
+		opening, pr = "", ""
+		workspace = fmt.Sprintf("You are in a dedicated git worktree at %s on branch %s. Inspect the repository there. Do not change files or switch branches.", b.Worktree, b.Branch)
 	}
 
 	fmt.Fprintf(&s, `## Workspace
 
-You are in a dedicated git worktree at %s on branch %s, created from origin/%s.
-Only change files inside this worktree. Commit your work to %s. Do not switch branches.
+%s
 
 %s%s
 ## When you need a decision
@@ -212,7 +217,7 @@ Reply with JSON matching the provided schema:
 %s%s%s- "blocked" when you need a decision, as described above.
 - "failed" when you cannot complete the task: say why in summary.
 Set nextObjective to null except for "checkpoint". Set fields that do not apply to null, or [] for validation and questions. %s
-`, b.Worktree, b.Branch, b.BaseBranch, b.Branch, openingSection(b), prSection(b.PRInstructions), plannedStatus(b.Planning), finishedStatus(b), checkpointStatus(b), documentsRule(b.Planning))
+`, workspace, opening, pr, plannedStatus(b.Planning), finishedStatus(b), checkpointStatus(b), documentsRule(b.Planning))
 	return s.String()
 }
 
@@ -274,6 +279,9 @@ func screenshotCommentInstructions(firstPR bool) string {
 }
 
 func finishedStatus(b TaskBrief) string {
+	if b.Planning {
+		return ""
+	}
 	if b.LocalReview {
 		return "- \"review_ready\" once the change is committed and validated, and not pushed: set prTitle, prBody, and validation (each command you ran and whether it passed). Every check must pass. Set prNumber and prUrl to null.\n"
 	}
@@ -292,7 +300,9 @@ func prIssueRule(b TaskBrief) string {
 func planningSection(s *strings.Builder, instructions string) {
 	s.WriteString(`## Plan first
 
-This turn is for planning only. Use the issue description and confirmed triage supplied above, inspect the code, then write four Markdown documents: analysis, prd, design, and plan (the implementation plan). foreman posts each one on the issue as its own comment under its own heading, so start each document with its content, not a title. Then foreman starts a fresh session with only the checked implementation plan as its task specification. The sections below on the workspace and the pull request apply to that next turn.
+This turn is for planning only. Use the issue description and confirmed triage supplied above, inspect the code, then write four Markdown documents: analysis, prd, design, and plan (the implementation plan). foreman posts each one on the issue as its own comment under its own heading, so start each document with its content, not a title. Then foreman starts a fresh session with only the checked implementation plan as its task specification. Pull request work belongs to that later session.
+
+Keep the issue comments short. Analysis, PRD, and Design should each aim for about 200 words and contain only their distinct job; do not copy the triage decisions or repeat another document's requirement list. The implementation plan must stand alone, but state requirements once in concise language and group related work into a few tasks. Include every binding constraint and acceptance criterion without repeating background or code excerpts.
 
 Do not change, commit, or push anything in this turn. If writing the documents needs a decision from the developer, report "blocked" with the questions instead.
 

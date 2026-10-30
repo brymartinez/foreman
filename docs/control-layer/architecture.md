@@ -478,8 +478,9 @@ the same commit. The commit message records why it changed.
   proposal is skipped, and the run continues that PR. If it is closed or
   merged, the start proposes a new branch and refuses the old one, whose commits are
   still on GitHub. Either way the delegation stores `prior_pr` for reconciliation.
-  When the issue has a complete plan, Foreman rechecks and adopts it before the new
-  implementation session, which receives that plan as its task context. The `reset`
+  When the issue has a complete plan, Foreman reuses a matching clean check or
+  checks it before adopting it for the new implementation session, which receives
+  that plan as its task context. The `reset`
   block is cleared. The reset record keeps no plan links, attempts, decisions, or
   session. With an open PR and an absent or partial plan, the run plans before reviewing
   that PR. Every run reads the issue's planning comments before it plans.
@@ -560,7 +561,10 @@ the same commit. The commit message records why it changed.
   the implementation session receives the checked implementation plan text, not the
   planning transcript or the other planning documents. The read-only checker also
   verifies that the plan alone includes all applicable requirements, constraints,
-  and acceptance criteria from triage. A clean check may report nonblocking
+  and acceptance criteria from triage. It compares only the supplied text and returns
+  concise findings. A complete issue plan skips this check on adoption when its
+  document digest and the current scope digest match the last clean check. A clean
+  check may report nonblocking
   limitations; only blocking limitations prevent agreement. Concrete findings on a
   new plan go back to the same planning session with a short correction prompt. The
   planner returns changed documents only, and the runner checks the combined set

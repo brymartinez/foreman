@@ -53,6 +53,9 @@ func TestConflictingNewPlanIsRevisedInPlanningSession(t *testing.T) {
 	if rec.State == task.NeedsDecision || len(f.gh.comments) != 4 || len(f.claude.scopeReviewed) != 2 || len(f.claude.resumed) != 1 {
 		t.Fatalf("state %s posted %d checks %d resumed %d", rec.State, len(f.gh.comments), len(f.claude.scopeReviewed), len(f.claude.resumed))
 	}
+	if prompt := f.claude.scopeReviewed[0]; !strings.Contains(prompt, "Compare only the supplied scope and documents") || !strings.Contains(prompt, "Keep output terse") || !strings.Contains(prompt, "Source: https://example.test/triage") {
+		t.Fatalf("plan checker prompt does not limit its task: %q", prompt)
+	}
 	if !strings.Contains(f.claude.resumed[0], "PRD selects recipients") || strings.Contains(f.claude.resumed[0], "## Confirmed scope") {
 		t.Fatalf("planning revision prompt = %q", f.claude.resumed[0])
 	}

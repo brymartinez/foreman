@@ -51,6 +51,7 @@ func TestDefaultPlanStageKeepsFourDocumentsAndOmitsLineLevelDetail(t *testing.T)
 	for _, want := range []string{
 		"## Analysis", "## PRD", "## Design", "## Implementation plan",
 		"The implementation plan must stand alone",
+		"about 200 words each",
 		"No line numbers",
 		"no commit messages",
 		"Do not list every test by name",

@@ -342,14 +342,18 @@ source links to the planner, checks the documents against it, then posts each as
 issue comment. If the checker finds a concrete mismatch in a new plan, Foreman sends
 the findings back to the same planning session for up to three revisions. Only changed
 documents need to be returned; Foreman checks the combined set each time. Remaining
-findings then pause for a decision. Existing plans receive the same check before
-adoption. An unreadable or inconclusive check fails with a reason; a nonblocking
-limitation on a clean check does not stop planning.
+findings then pause for a decision. Existing plans are checked before adoption unless
+the exact scope and document texts already passed the check. The checker compares the
+supplied text without reading the repository and reports only mismatches. An unreadable
+or inconclusive check fails with a reason; a nonblocking limitation on a clean
+check does not stop planning.
 The implementation plan must contain every requirement, constraint, and acceptance
 criterion needed without the other documents. Foreman checks that completeness
 against confirmed triage before posting. The implementer receives only that plan as
-task context. Self-review receives the plan and diff; the competing review receives
-the diff. A changed scope or plan invalidates earlier checks before handoff.
+task context. The other three comments aim for about 200 words each and avoid
+repeating triage or each other. Self-review receives the plan and diff; the competing
+review receives the diff. A changed scope or plan invalidates earlier checks before
+handoff.
 
 The `s` view links the four comments. A task that plans again, for example after a
 failed run, edits the same comments instead of adding new ones. A task that already

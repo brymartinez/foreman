@@ -5,8 +5,8 @@ Write four documents before any code. Each is posted on the issue as its own com
 ## Style
 
 1. Start each document with `**Summary.**` and one or two plain sentences. A reader who stops there knows what the document decides.
-2. Write only what the document's job needs. Cut background the issue already gives and long reasons for choices with no real alternative.
-3. Analysis, PRD, and Design may refer to earlier comments instead of repeating them. The implementation plan must stand alone.
+2. Aim for about 200 words each for Analysis, PRD, and Design. Exceed that only when a distinct requirement or meaningful trade-off needs it. Cut background and triage prose the issue already gives.
+3. Analysis, PRD, and Design may refer to earlier comments instead of repeating them. Do not repeat one document's requirement list in another. The implementation plan must stand alone, but state each requirement only once.
 
 ## Analysis
 

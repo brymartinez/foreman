@@ -178,7 +178,12 @@ func (r *taskRun) reconcilePlan() (bool, error) {
 	var scopeCheckErr error
 	var scopeCheck agent.ReviewOutcome
 	if adopt {
-		scopeCheck, scopeCheckErr = a.checkPlan(r.ctx, r.rec, r.scope, p.texts(), p, r.log)
+		if r.rec.Delegation.PlanScopeDigest == r.scope.digest && r.rec.Delegation.PlanDigest == planDigest(p.texts()) {
+			scopeCheck.Clean = true
+			fmt.Fprintln(r.log, "foreman: reusing the plan agreement check for unchanged scope and documents")
+		} else {
+			scopeCheck, scopeCheckErr = a.checkPlan(r.ctx, r.rec, r.scope, p.texts(), p, r.log)
+		}
 	}
 	scopeAnswer := scopePlanAnswer(r.rec, r.scope.digest, planDigest(p.texts()))
 	rec, err := a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {

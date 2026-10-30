@@ -110,6 +110,44 @@ func TestAFullLegacyPlanOnTheLinearIssueIsAdoptedWithoutPosting(t *testing.T) {
 	}
 }
 
+func TestAdoptingAnUnchangedCheckedPlanReusesAgreementForBothTrackers(t *testing.T) {
+	for _, source := range []task.Source{task.GitHub, task.Linear} {
+		t.Run(string(source), func(t *testing.T) {
+			f := newFixture()
+			var key task.Key
+			if source == task.Linear {
+				var tracker *lifecycleTracker
+				key, tracker = linearTask(t, &f)
+				tracker.comments = linearPlanComments(task.DescriptionFingerprint(tracker.issue.Body), task.PlanDocs...)
+			} else {
+				key = started(t, f, startReq(t))
+				f.gh.issueComments = githubPlanComments(f, task.DescriptionFingerprint(f.gh.issue.Body), task.PlanDocs...)
+			}
+			scope, err := f.app.readScope(context.Background(), key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := f.app.readIssuePlan(context.Background(), f.store.recs[key])
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.store.recs[key].Delegation.PlanScopeDigest = scope.digest
+			f.store.recs[key].Delegation.ScopeDigest = scope.digest
+			f.store.recs[key].Delegation.PlanDigest = planDigest(plan.texts())
+			f.claude.turns = []agent.Turn{prTurn("sid-1")}
+			if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			if got := len(f.claude.scopeReviewed); got != 0 {
+				t.Fatalf("scope checks = %d, want none for unchanged digests", got)
+			}
+			if !f.store.recs[key].PlanPosted() {
+				t.Fatal("the checked issue plan was not adopted")
+			}
+		})
+	}
+}
+
 func TestAPartialPlanOnTheGitHubIssueGoesToPlanningAndOnlyMissingDocumentsArePosted(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
