@@ -1,22 +1,16 @@
 # Plan
 
-Write two short documents before changing code. Foreman posts each one as an issue comment. They must help a person read the work and help the next agent build it.
+Write two short Markdown documents before changing code. Foreman posts each as an issue comment for a person to read and the next agent to use.
 
-## Style
-
-- Use B1 English: common words, short sentences, and one idea per sentence. Keep code names when needed, but explain them once.
-- Start each document with `**Summary.**` and one plain sentence.
-- State each rule once. Do not copy the issue or triage notes.
-- Use exact file paths only when they help the next agent find the work. No line numbers, code listings, or commit messages.
+- Use B1 English: short sentences, common words, one idea per sentence. Explain needed code terms once.
+- Start each document with `**Summary.**` and one plain sentence. State each rule once; do not copy the issue or triage notes. Include file paths only when useful. Omit line numbers, code listings, and commit messages.
 
 ## Requirements (`prd`)
 
-Say what must work, for whom, and how to check it. Give each rule a short ID such as R1. Include limits and cases that must stay the same. Use the confirmed triage rules that Foreman gives you. Do not treat ordinary discussion as a new rule.
+State what must work, for whom, and how to check it. Give each rule an ID such as R1. Include limits and behavior that must stay the same. Use Foreman's confirmed triage rules, not ordinary discussion.
 
 ## Work plan (`plan`)
 
-Give a few ordered tasks. For each task, name the code area, the change, the requirement IDs it serves, and the behavior to test first. Do not copy the rules from Requirements. Include a brief reason only when a real choice matters.
+List ordered tasks. For each, name the code area, change, requirement IDs, and behavior to test first. Do not repeat the Requirements. Explain a choice only when its reason matters.
 
-## Before you report
-
-Check that every confirmed triage rule is in Requirements and each requirement ID has a task. Fix gaps and disagreements between the two documents. If a needed product choice is missing, report `blocked` with a clear question.
+Before reporting, check that every confirmed rule appears in Requirements and every requirement has a task. Resolve gaps between the documents. Report `blocked` with a clear question if a product choice is missing.
