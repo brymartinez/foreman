@@ -787,7 +787,8 @@ the same commit. The commit message records why it changed.
   claims. A title or description edit alone does not start model reviews again.
   Empty PR descriptions still block review and handoff through local checks.
   Publishing a locally reviewed change still verifies that the actual PR holds the
-  exact proposed title and description. A clean self-review newer than the latest
+  exact proposed title and description, allowing only a trailing codesmith-marked
+  footer added after publication. A clean self-review newer than the latest
   competing review leaves the competing review pending, so a restart finishes it.
 - **Reviews start full, then focus on fixes.** The first review reads the whole diff.
   A later review starts with changes since the same reviewer's previous head and its

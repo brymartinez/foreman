@@ -470,7 +470,7 @@ func TestReviewBeforePRAdoptsAMatchingPRWithoutAnotherTurn(t *testing.T) {
 	rec.Reviews = []task.Review{{Round: 1, Reviewer: task.Codex, Head: "commit1", Proposal: task.ProposalDigest(proposedTitle, proposedBody), Clean: true, At: now}}
 	rec.Reviews[0].Scope, rec.Reviews[0].Plan = rec.Delegation.ScopeDigest, rec.Delegation.PlanDigest
 	pr := fixturePR()
-	pr.HeadSHA, pr.Title, pr.Body = "commit1", proposedTitle, proposedBody+"\n"
+	pr.HeadSHA, pr.Title, pr.Body = "commit1", proposedTitle, proposedBody+"\n\n<!-- codesmith:footer -->\nAutomated links\n<!-- /codesmith:footer -->"
 	f.gh.prs[912] = pr
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
@@ -483,9 +483,15 @@ func TestReviewBeforePRAdoptsAMatchingPRWithoutAnotherTurn(t *testing.T) {
 
 func TestReviewBeforePRFailsWhenThePRDoesNotMatchTheReview(t *testing.T) {
 	for name, change := range map[string]func(pr *PullRequest){
-		"another head":        func(pr *PullRequest) { pr.HeadSHA = "commit9" },
-		"an edited title":     func(pr *PullRequest) { pr.Title = "feat: something else" },
-		"an edited body":      func(pr *PullRequest) { pr.Body = "Retry everything.\n\nCloses #825" },
+		"another head":    func(pr *PullRequest) { pr.HeadSHA = "commit9" },
+		"an edited title": func(pr *PullRequest) { pr.Title = "feat: something else" },
+		"an edited body":  func(pr *PullRequest) { pr.Body = "Retry everything.\n\nCloses #825" },
+		"an edited body with footer": func(pr *PullRequest) {
+			pr.Body = "Retry everything.\n\nCloses #825\n\n<!-- codesmith:footer -->\nAutomated links\n<!-- /codesmith:footer -->"
+		},
+		"text after footer": func(pr *PullRequest) {
+			pr.Body += "\n\n<!-- codesmith:footer -->\nAutomated links\n<!-- /codesmith:footer -->\nMore text"
+		},
 		"a closed PR (state)": func(pr *PullRequest) { pr.State = "closed" },
 	} {
 		t.Run(name, func(t *testing.T) {

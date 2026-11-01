@@ -154,7 +154,7 @@ func (a App) checkOpenedPR(ctx context.Context, rec *task.Record, o agent.Outcom
 		err = fmt.Errorf("its head is %s, not the reviewed commit %s", short(pr.HeadSHA), short(d.LocalHead))
 	case strings.TrimSpace(pr.Title) != strings.TrimSpace(d.ProposedTitle):
 		err = fmt.Errorf("its title %q is not the reviewed title %q", pr.Title, d.ProposedTitle)
-	case normalizeBody(pr.Body) != normalizeBody(d.ProposedBody):
+	case !matchesReviewedBody(pr.Body, d.ProposedBody):
 		err = errors.New("its description is not the reviewed description")
 	}
 	if err != nil {
@@ -165,6 +165,20 @@ func (a App) checkOpenedPR(ctx context.Context, rec *task.Record, o agent.Outcom
 
 func normalizeBody(s string) string {
 	return strings.TrimSpace(strings.ReplaceAll(s, "\r\n", "\n"))
+}
+
+// codesmith appends its own marked footer after GitHub creates a PR. The
+// reviewed description must remain byte-for-byte the same after normalization.
+func matchesReviewedBody(actual, reviewed string) bool {
+	actual, reviewed = normalizeBody(actual), normalizeBody(reviewed)
+	if actual == reviewed {
+		return true
+	}
+	suffix, ok := strings.CutPrefix(actual, reviewed)
+	return ok && strings.HasPrefix(suffix, "\n\n<!-- codesmith:footer -->\n") &&
+		strings.HasSuffix(suffix, "\n<!-- /codesmith:footer -->") &&
+		strings.Count(suffix, "<!-- codesmith:footer -->") == 1 &&
+		strings.Count(suffix, "<!-- /codesmith:footer -->") == 1
 }
 
 // adoptOpenedPR records a PR that already holds the reviewed commit, as a pr_opened
