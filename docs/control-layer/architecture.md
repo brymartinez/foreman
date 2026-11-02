@@ -28,8 +28,11 @@ internal/task         the durable model: Record, State, Delegation, Decision, At
 `app` depends only on the interfaces in `internal/app/ports.go`. Presentation stays in
 `cmd/foreman`, and process handling stays in `runner` and the adapters.
 `IssueTracker` carries source display identifiers and string comment IDs. Linear
-queries resolve configured project URLs to project IDs, then page through issues
-assigned to the authenticated user. Issue state types `completed` and `canceled`
+queries resolve `linear_teams` URLs to team IDs within the authenticated workspace,
+then page through open issues assigned to the authenticated user in each team,
+across every project and including issues without a project. Each team maps to one
+GitHub repository. Config accepts team URLs with an optional `/overview` or `/issues`
+suffix and rejects the retired `linear_projects` key. Issue state types `completed` and `canceled`
 map to closed; Linear's `Entity not found` errors map to `ErrGone` for tracked
 issues and planning comments. Repository and PR operations remain on `GitHubClient`.
 The detached runner receives `owner/repo#linear:<issue ID>` for Linear tasks and

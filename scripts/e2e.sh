@@ -753,8 +753,8 @@ scenario_linear() {
 	export LINEAR_API_KEY=e2e-personal-key
 	export FOREMAN_LINEAR_ENDPOINT="http://127.0.0.1:$(cat "$state/linear-port")/graphql"
 	cat >>"$sandbox/config.yaml" <<'EOF'
-linear_projects:
-  acme/linear: https://linear.app/acme/project/linear-work-123
+linear_teams:
+  acme/linear: https://linear.app/acme/team/LIN
 EOF
 	issue 43 "GitHub work" '[{"name":"triaged"}]'
 	echo "[$(hit acme/widgets 43 'GitHub work'),$(hit acme/linear 44 'Mapped GitHub work')]" >"$state/search-issues-assignee.json"

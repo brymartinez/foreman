@@ -114,7 +114,7 @@ func run(argv []string) int {
 		Store:             store.Markdown{Dir: cfg.TasksDir},
 		GitHub:            github.New(),
 		Linear:            linearClient,
-		LinearProjects:    cfg.LinearProjects,
+		LinearTeams:       cfg.LinearTeams,
 		Repositories:      github.New(),
 		Worktrees:         worktree.Git{},
 		Accounts:          github.New(),
@@ -246,14 +246,14 @@ func requireLinearKey(cfg config.Config, source task.Source, key string) error {
 	if source == "" {
 		shown = "all"
 	}
-	return fmt.Errorf("issue source %s needs LINEAR_API_KEY for the repositories mapped in linear_projects; set it, or use -s github or default_source: github for GitHub only", shown)
+	return fmt.Errorf("issue source %s needs LINEAR_API_KEY for the repositories mapped in linear_teams; set it, or use -s github or default_source: github for GitHub only", shown)
 }
 
 func linearSelected(cfg config.Config, source task.Source) bool {
 	if source == task.GitHub {
 		return false
 	}
-	for repo := range cfg.LinearProjects {
+	for repo := range cfg.LinearTeams {
 		if len(cfg.IncludedRepos) > 0 {
 			for _, included := range cfg.IncludedRepos {
 				if included == repo {

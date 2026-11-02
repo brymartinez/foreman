@@ -615,7 +615,7 @@ The built-in defaults are not the same file as the shipped `defaults/config.yaml
 which `make setup` installs when you have no config. The shipped file chooses some
 different values on purpose: `mentions: false`, `opus` and `sonnet` Claude models,
 Codex plan and reasoning settings, and $25 and $10 budgets. It leaves the webhook
-URL, repository filters, and Linear project mappings empty.
+URL, repository filters, and Linear team mappings empty.
 
 Built-in defaults:
 
@@ -661,7 +661,7 @@ codex:
   review_reasoning_effort: ""        # "" uses reasoning_effort
 include_repositories: []             # exact owner/name; when set, the inbox shows only these
 exclude_repositories: []             # exact owner/name hidden from the inbox when include is empty
-linear_projects: {}                   # GitHub owner/name -> Linear project URL
+linear_teams: {}                      # GitHub owner/name -> Linear team URL
 cleanup:
   on_done: true                   # each refresh removes DONE tasks' worktrees
   delete_merged_branch: true      # and the local branch, once the PR is merged
@@ -693,12 +693,12 @@ planning totals use the saved call history. Older missing usage is not backfille
 Dollar limits apply to Claude only. The task file stores each runner call with its
 stage, model, usage, times, and error; the task view shows calls and tokens by stage.
 
-To use Linear issues for a repository, map it to one Linear project URL and set a
+To use Linear issues for a repository, map it to one Linear team URL and set a
 personal API key before starting Foreman:
 
 ```yaml
-linear_projects:
-  acme/web: https://linear.app/acme/project/web-site-123
+linear_teams:
+  acme/web: https://linear.app/kubbly-ai/team/KUB/overview
 ```
 
 ```bash
@@ -706,8 +706,14 @@ export LINEAR_API_KEY=your-personal-linear-api-key
 foreman
 ```
 
-Repositories without a mapping continue to use GitHub issues. A Linear project can
-belong to only one repository. Set `default_source: linear` or `all` to show Linear
+Replace any existing `linear_projects` setting with `linear_teams` and replace
+each project URL with its team URL. The old setting is no longer accepted. Team
+URLs can end in `/overview` or `/issues`, or stop at the team key.
+
+Repositories without a mapping continue to use GitHub issues. A Linear team can
+belong to only one repository. Foreman discovers your assigned open issues across
+all projects in that team, including issues without a project. The API key must
+have access to the team. Set `default_source: linear` or `all` to show Linear
 issues by default, or pass `-s linear` or `-s all` for one launch. `foreman -s github`
 does not need `LINEAR_API_KEY`. If the selected source is `linear` or `all` and a
 visible repository is mapped, foreman stops at startup until the key is set.

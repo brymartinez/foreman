@@ -180,7 +180,7 @@ type TrackerComment struct {
 
 // IssueTracker owns issue operations. Repository and PR operations stay on GitHubClient.
 type IssueTracker interface {
-	AssignedIssues(ctx context.Context, projects map[task.Repo]string) ([]InboxItem, error)
+	AssignedIssues(ctx context.Context, teams map[task.Repo]string) ([]InboxItem, error)
 	GetIssue(ctx context.Context, key task.Key) (Issue, error)
 	IssueComments(ctx context.Context, key task.Key) ([]TrackerComment, error)
 	GetIssueComment(ctx context.Context, id string) (TrackerComment, error)

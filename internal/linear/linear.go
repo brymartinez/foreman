@@ -47,9 +47,9 @@ type issueNode struct {
 	Assignee    *struct {
 		ID string `json:"id"`
 	} `json:"assignee"`
-	Project *struct {
+	Team *struct {
 		ID string `json:"id"`
-	} `json:"project"`
+	} `json:"team"`
 	State *struct {
 		Type string `json:"type"`
 	} `json:"state"`
@@ -83,58 +83,65 @@ func (n issueNode) state() string {
 	}
 }
 
-func (c Client) AssignedIssues(ctx context.Context, projects map[task.Repo]string) ([]app.InboxItem, error) {
-	if len(projects) == 0 {
+func (c Client) AssignedIssues(ctx context.Context, teams map[task.Repo]string) ([]app.InboxItem, error) {
+	if len(teams) == 0 {
 		return nil, nil
 	}
 	var viewer struct {
 		Viewer struct {
-			ID string `json:"id"`
+			ID           string `json:"id"`
+			Organization struct {
+				URLKey string `json:"urlKey"`
+			} `json:"organization"`
 		} `json:"viewer"`
 	}
-	if err := c.query(ctx, `query { viewer { id } }`, nil, &viewer); err != nil {
+	if err := c.query(ctx, `query { viewer { id organization { urlKey } } }`, nil, &viewer); err != nil {
 		return nil, err
 	}
 	if viewer.Viewer.ID == "" {
 		return nil, errors.New("Linear viewer has no ID")
 	}
-	projectRepos := make(map[string]task.Repo, len(projects))
-	for repo, projectURL := range projects {
-		projectRepos[strings.TrimRight(projectURL, "/")] = repo
+	teamRepos := make(map[string]task.Repo, len(teams))
+	for repo, teamURL := range teams {
+		parts := strings.Split(strings.TrimRight(teamURL, "/"), "/")
+		if len(parts) != 6 || parts[3] != viewer.Viewer.Organization.URLKey {
+			return nil, fmt.Errorf("configured Linear team %s does not belong to the authenticated workspace", teamURL)
+		}
+		teamRepos[parts[5]] = repo
 	}
-	resolved := make(map[string]task.Repo, len(projects))
+	resolved := make(map[string]task.Repo, len(teams))
 	cursor := ""
 	for {
 		var data struct {
-			Projects struct {
+			Teams struct {
 				Nodes []struct {
 					ID  string `json:"id"`
-					URL string `json:"url"`
+					Key string `json:"key"`
 				} `json:"nodes"`
 				PageInfo pageInfo `json:"pageInfo"`
-			} `json:"projects"`
+			} `json:"teams"`
 		}
-		if err := c.query(ctx, `query($after:String){ projects(first:50,after:$after){ nodes{id url} pageInfo{hasNextPage endCursor} } }`, after(cursor), &data); err != nil {
+		if err := c.query(ctx, `query($after:String){ teams(first:50,after:$after){ nodes{id key} pageInfo{hasNextPage endCursor} } }`, after(cursor), &data); err != nil {
 			return nil, err
 		}
-		for _, p := range data.Projects.Nodes {
-			if repo, ok := projectRepos[strings.TrimRight(p.URL, "/")]; ok {
+		for _, p := range data.Teams.Nodes {
+			if repo, ok := teamRepos[p.Key]; ok {
 				resolved[p.ID] = repo
 			}
 		}
-		if len(resolved) == len(projects) || !data.Projects.PageInfo.HasNextPage {
+		if len(resolved) == len(teams) || !data.Teams.PageInfo.HasNextPage {
 			break
 		}
-		if data.Projects.PageInfo.EndCursor == "" || data.Projects.PageInfo.EndCursor == cursor {
-			return nil, errors.New("Linear projects pagination did not advance")
+		if data.Teams.PageInfo.EndCursor == "" || data.Teams.PageInfo.EndCursor == cursor {
+			return nil, errors.New("Linear teams pagination did not advance")
 		}
-		cursor = data.Projects.PageInfo.EndCursor
+		cursor = data.Teams.PageInfo.EndCursor
 	}
-	if len(resolved) != len(projects) {
-		return nil, fmt.Errorf("found %d of %d configured Linear projects", len(resolved), len(projects))
+	if len(resolved) != len(teams) {
+		return nil, fmt.Errorf("found %d of %d configured Linear teams", len(resolved), len(teams))
 	}
 	var items []app.InboxItem
-	for projectID, repo := range resolved {
+	for teamID, repo := range resolved {
 		cursor = ""
 		for {
 			var data struct {
@@ -144,13 +151,13 @@ func (c Client) AssignedIssues(ctx context.Context, projects map[task.Repo]strin
 				} `json:"issues"`
 			}
 			vars := after(cursor)
-			vars["filter"] = map[string]any{"assignee": map[string]any{"id": map[string]string{"eq": viewer.Viewer.ID}}, "project": map[string]any{"id": map[string]string{"eq": projectID}}}
-			query := `query($filter:IssueFilter,$after:String){ issues(first:50,after:$after,filter:$filter){ nodes{id identifier title description url createdAt updatedAt assignee{id} project{id} state{type} labels(first:250){nodes{name}}} pageInfo{hasNextPage endCursor} } }`
+			vars["filter"] = map[string]any{"assignee": map[string]any{"id": map[string]string{"eq": viewer.Viewer.ID}}, "team": map[string]any{"id": map[string]string{"eq": teamID}}}
+			query := `query($filter:IssueFilter,$after:String){ issues(first:50,after:$after,filter:$filter){ nodes{id identifier title description url createdAt updatedAt assignee{id} team{id} state{type} labels(first:250){nodes{name}}} pageInfo{hasNextPage endCursor} } }`
 			if err := c.query(ctx, query, vars, &data); err != nil {
 				return nil, err
 			}
 			for _, n := range data.Issues.Nodes {
-				if n.Assignee == nil || n.Assignee.ID != viewer.Viewer.ID || n.Project == nil || n.Project.ID != projectID || n.state() != "open" {
+				if n.Assignee == nil || n.Assignee.ID != viewer.Viewer.ID || n.Team == nil || n.Team.ID != teamID || n.state() != "open" {
 					continue
 				}
 				if n.ID == "" || n.Identifier == "" {

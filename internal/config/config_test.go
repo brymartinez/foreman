@@ -144,11 +144,11 @@ func TestLoadValidatesRepositoryLists(t *testing.T) {
 	}
 }
 
-func TestLinearProjectsSelectMappedRepositories(t *testing.T) {
+func TestLinearTeamsSelectMappedRepositories(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	t.Setenv("FOREMAN_CONFIG", path)
 	t.Setenv("FOREMAN_TASKS_DIR", "")
-	if err := os.WriteFile(path, []byte("linear_projects:\n  acme/web: https://linear.app/acme/project/web-site-123/overview\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("linear_teams:\n  acme/web: https://linear.app/acme/team/WEB/overview\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := Load()
@@ -161,19 +161,21 @@ func TestLinearProjectsSelectMappedRepositories(t *testing.T) {
 	if got := cfg.IssueSource("acme/api"); got != task.GitHub {
 		t.Errorf("unmapped repo source = %q, want github", got)
 	}
-	if got := cfg.LinearProjects["acme/web"]; got != "https://linear.app/acme/project/web-site-123" {
-		t.Errorf("normalized project URL = %q", got)
+	if got := cfg.LinearTeams["acme/web"]; got != "https://linear.app/acme/team/WEB" {
+		t.Errorf("normalized team URL = %q", got)
 	}
 }
 
-func TestLinearProjectsRejectInvalidRepositoriesAndDuplicateProjects(t *testing.T) {
+func TestLinearTeamsRejectInvalidRepositoriesAndDuplicateTeams(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	t.Setenv("FOREMAN_CONFIG", path)
 	t.Setenv("FOREMAN_TASKS_DIR", "")
 	for _, tc := range []struct{ name, body, want string }{
-		{"invalid repository", "linear_projects:\n  invalid: https://linear.app/acme/project/web-site-123\n", "invalid repo"},
-		{"duplicate project", "linear_projects:\n  acme/web: https://linear.app/acme/project/web-site-123\n  acme/api: https://linear.app/acme/project/web-site-123/overview\n", "mapped to both"},
-		{"non project URL", "linear_projects:\n  acme/web: https://linear.app/acme/issue/ABC-123\n", "project URL"},
+		{"invalid repository", "linear_teams:\n  invalid: https://linear.app/acme/team/WEB\n", "invalid repo"},
+		{"duplicate team", "linear_teams:\n  acme/web: https://linear.app/acme/team/WEB\n  acme/api: https://linear.app/acme/team/WEB/overview\n", "mapped to both"},
+		{"retired project setting", "linear_projects:\n  acme/web: https://linear.app/acme/project/web-site-123\n", "linear_projects"},
+		{"project URL", "linear_teams:\n  acme/web: https://linear.app/acme/project/web-site-123\n", "team URL"},
+		{"non team URL", "linear_teams:\n  acme/web: https://linear.app/acme/issue/ABC-123\n", "team URL"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
@@ -505,8 +507,8 @@ auto:
   max_concurrent: 2
 include_repositories: [acme/web]
 exclude_repositories: [acme/api]
-linear_projects:
-  acme/web: https://linear.app/acme/project/web-123
+linear_teams:
+  acme/web: https://linear.app/acme/team/WEB
 `
 	cfg, err := autoConfig(t, body)
 	if err != nil || cfg.DefaultSource != SourceAll || cfg.Auto.MaxConcurrent != 2 || cfg.Codex.ReviewReasoningEffort != "low" {

@@ -6,7 +6,7 @@ import os
 import sys
 
 state = sys.argv[1]
-project_url = "https://linear.app/acme/project/linear-work-123"
+team_key = "LIN"
 issue_id = "11111111-1111-4111-8111-111111111111"
 issue_url = "https://linear.app/acme/issue/LIN-7/add-search"
 
@@ -22,10 +22,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_response(503)
             self.end_headers()
             return
-        if "viewer { id }" in query:
-            data = {"viewer": {"id": "viewer-1"}}
-        elif "projects(first:" in query:
-            data = {"projects": {"nodes": [{"id": "project-1", "url": project_url}], "pageInfo": {"hasNextPage": False}}}
+        if "viewer { id" in query:
+            data = {"viewer": {"id": "viewer-1", "organization": {"urlKey": "acme"}}}
+        elif "teams(first:" in query:
+            data = {"teams": {"nodes": [{"id": "team-1", "key": team_key}], "pageInfo": {"hasNextPage": False}}}
         elif "issues(first:" in query:
             data = {"issues": {"nodes": [self.issue(True)], "pageInfo": {"hasNextPage": False}}}
         elif "comments(first:" in query:
@@ -61,7 +61,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def issue(self, discovery):
         issue = {"id": issue_id, "identifier": "LIN-7", "branchName": "bryan/lin-7-add-search", "title": "Add search", "description": "Add search to the widget list", "url": issue_url, "updatedAt": "2026-10-01T10:00:00Z", "state": {"type": "unstarted"}, "labels": {"nodes": [{"name": "triaged"}]}}
         if discovery:
-            issue.update(createdAt="2026-09-25T10:00:00Z", assignee={"id": "viewer-1"}, project={"id": "project-1"})
+            issue.update(createdAt="2026-09-25T10:00:00Z", assignee={"id": "viewer-1"}, team={"id": "team-1"})
         return issue
 
     def log_message(self, *args):

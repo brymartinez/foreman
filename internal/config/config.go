@@ -46,9 +46,9 @@ type Config struct {
 	Auto          Auto          `yaml:"auto"`
 	// IncludedRepos, when nonempty, limits the inbox to these repositories and
 	// overrides ExcludedRepos.
-	IncludedRepos  []task.Repo          `yaml:"include_repositories"`
-	ExcludedRepos  []task.Repo          `yaml:"exclude_repositories"`
-	LinearProjects map[task.Repo]string `yaml:"linear_projects"`
+	IncludedRepos []task.Repo          `yaml:"include_repositories"`
+	ExcludedRepos []task.Repo          `yaml:"exclude_repositories"`
+	LinearTeams   map[task.Repo]string `yaml:"linear_teams"`
 	// Path is the resolved config file used by config show/edit.
 	Path string `yaml:"-"`
 	// StagesDir holds the global stage instructions: stages/ next to the config file,
@@ -216,20 +216,20 @@ func Load() (Config, error) {
 	if err := parseRepoList("exclude_repositories", cfg.ExcludedRepos); err != nil {
 		return Config{}, err
 	}
-	seenProjects := make(map[string]task.Repo)
-	for repo, projectURL := range cfg.LinearProjects {
+	seenTeams := make(map[string]task.Repo)
+	for repo, teamURL := range cfg.LinearTeams {
 		if _, err := task.ParseRepo(string(repo)); err != nil {
-			return Config{}, fmt.Errorf("linear_projects: %w", err)
+			return Config{}, fmt.Errorf("linear_teams: %w", err)
 		}
-		canonical, err := linearProjectURL(projectURL)
+		canonical, err := linearTeamURL(teamURL)
 		if err != nil {
-			return Config{}, fmt.Errorf("linear_projects[%s]: %w", repo, err)
+			return Config{}, fmt.Errorf("linear_teams[%s]: %w", repo, err)
 		}
-		if other, ok := seenProjects[canonical]; ok {
-			return Config{}, fmt.Errorf("linear project %s mapped to both %s and %s", canonical, other, repo)
+		if other, ok := seenTeams[canonical]; ok {
+			return Config{}, fmt.Errorf("linear team %s mapped to both %s and %s", canonical, other, repo)
 		}
-		seenProjects[canonical] = repo
-		cfg.LinearProjects[repo] = canonical
+		seenTeams[canonical] = repo
+		cfg.LinearTeams[repo] = canonical
 	}
 	return cfg, nil
 }
@@ -251,20 +251,20 @@ func ValidSource(s task.Source) error {
 }
 
 func (c Config) IssueSource(repo task.Repo) task.Source {
-	if _, ok := c.LinearProjects[repo]; ok {
+	if _, ok := c.LinearTeams[repo]; ok {
 		return task.Linear
 	}
 	return task.GitHub
 }
 
-func linearProjectURL(raw string) (string, error) {
+func linearTeamURL(raw string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != "https" || u.Host != "linear.app" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return "", fmt.Errorf("invalid Linear project URL %q", raw)
+		return "", fmt.Errorf("invalid Linear team URL %q", raw)
 	}
 	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
-	if len(parts) < 3 || len(parts) > 4 || parts[0] == "" || parts[1] != "project" || parts[2] == "" || (len(parts) == 4 && parts[3] != "overview" && parts[3] != "issues") {
-		return "", fmt.Errorf("invalid Linear project URL %q", raw)
+	if len(parts) < 3 || len(parts) > 4 || parts[0] == "" || parts[1] != "team" || parts[2] == "" || strings.ContainsAny(parts[2], "%?# ") || (len(parts) == 4 && parts[3] != "overview" && parts[3] != "issues") {
+		return "", fmt.Errorf("invalid Linear team URL %q", raw)
 	}
 	return "https://linear.app/" + strings.Join(parts[:3], "/"), nil
 }

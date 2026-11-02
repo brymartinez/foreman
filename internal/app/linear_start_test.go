@@ -183,7 +183,7 @@ func TestClosedLinearIssueFinishesDelegatedTaskInGitHubOnlyView(t *testing.T) {
 	key := task.Key{Repo: f.gh.repo.Repo, Source: task.Linear, ExternalID: "uuid-42"}
 	tracker := &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", State: "open", Labels: []string{"triaged"}}}
 	f.app.Linear = tracker
-	f.app.LinearProjects = map[task.Repo]string{key.Repo: "https://linear.app/acme/project/web-123"}
+	f.app.LinearTeams = map[task.Repo]string{key.Repo: "https://linear.app/acme/team/WEB"}
 	started(t, f, StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude})
 	f.store.recs[key].State = task.Failed
 	f.store.recs[key].Delegation.RunnerPID = 0
@@ -205,7 +205,7 @@ func TestLinearTaskRefreshesAndResumesAfterGitHubOnlyLaunch(t *testing.T) {
 	key := task.Key{Repo: f.gh.repo.Repo, Source: task.Linear, ExternalID: "uuid-42"}
 	tracker := &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", State: "open", Labels: []string{"triaged"}}}
 	f.app.Linear = tracker
-	f.app.LinearProjects = map[task.Repo]string{key.Repo: "https://linear.app/acme/project/web-123"}
+	f.app.LinearTeams = map[task.Repo]string{key.Repo: "https://linear.app/acme/team/WEB"}
 	started(t, f, StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude})
 	rec := f.store.recs[key]
 	rec.State = task.Reviewed

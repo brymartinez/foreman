@@ -34,4 +34,4 @@ cleanup:
   delete_merged_branch: true
 exclude_repositories: []
 include_repositories: []
-linear_projects: {}
+linear_teams: {}

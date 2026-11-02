@@ -55,7 +55,7 @@ type App struct {
 	ClaimVerification bool
 	FullSuiteGate     bool // enabled in the CLI; every task copies it when it starts
 	Linear            IssueTracker
-	LinearProjects    map[task.Repo]string
+	LinearTeams       map[task.Repo]string
 	Repositories      RepositoryManager
 	Worktrees         WorktreeManager
 	Agents            map[task.Agent]AgentAdapter
@@ -247,7 +247,7 @@ func (a App) discoverSources(ctx context.Context, source task.Source, allRepos b
 			available[task.GitHub] = true
 			truncated = search.Truncated
 			for _, item := range search.Items {
-				_, mapped := a.LinearProjects[item.Key.Repo]
+				_, mapped := a.LinearTeams[item.Key.Repo]
 				if (item.Kind != task.Issue || !mapped) && a.repoVisible(item.Key.Repo, allRepos) {
 					items = append(items, item)
 				}
@@ -255,16 +255,16 @@ func (a App) discoverSources(ctx context.Context, source task.Source, allRepos b
 		}
 	}
 	if source == "" || source == task.Linear {
-		projects := map[task.Repo]string{}
-		for repo, url := range a.LinearProjects {
+		teams := map[task.Repo]string{}
+		for repo, url := range a.LinearTeams {
 			if a.repoVisible(repo, allRepos) {
-				projects[repo] = url
+				teams[repo] = url
 			}
 		}
-		if len(projects) > 0 {
+		if len(teams) > 0 {
 			if a.Linear == nil {
 				warnings = append(warnings, errors.New("Linear refresh: set LINEAR_API_KEY to use Linear issues"))
-			} else if found, err := a.Linear.AssignedIssues(ctx, projects); err != nil {
+			} else if found, err := a.Linear.AssignedIssues(ctx, teams); err != nil {
 				warnings = append(warnings, fmt.Errorf("Linear refresh: %w", err))
 			} else {
 				available[task.Linear] = true
