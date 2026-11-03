@@ -122,12 +122,8 @@ func (a App) checkChange(ctx context.Context, rec *task.Record, req turnRequest,
 	return turnResult{turn: turn, pr: pr, err: err}
 }
 
-// checkReviewReady verifies a review_ready turn: only a task reviewed before its PR
-// returns it, outside planning, and it must leave a clean worktree on the task branch
-// with a commit at or after the last accepted checkpoint. An unchanged head is
-// allowed only after a checkpoint; an untouched initial branch still fails.
-// Nothing is pushed yet, so a fix turn that keeps the commit is reviewed again
-// like a PR whose head did not move.
+// checkReviewReady verifies a clean committed change on the task branch. A retry
+// may hand in existing work without another commit; an untouched base branch may not.
 func (a App) checkReviewReady(ctx context.Context, rec *task.Record, req turnRequest, turn agent.Turn, log io.Writer) turnResult {
 	d := rec.Delegation
 	if req.openBodyFile != "" {
@@ -136,18 +132,29 @@ func (a App) checkReviewReady(ctx context.Context, rec *task.Record, req turnReq
 	if !d.BeforePR() || a.needsPlan(rec) {
 		return turnResult{turn: turn, err: errors.New("review_ready is only allowed for a task reviewed before its pull request, once the plan is posted")}
 	}
-	var head string
-	var err error
+	prior := d.CheckpointHead
 	if req.finalCheck != nil && d.LocalHead != "" {
-		// A final check that only verifies the reviewed commit keeps it.
-		head, err = a.Worktrees.ReviewHead(ctx, d.Worktree, d.Branch, d.LocalHead)
-	} else if d.Checkpoints > 0 {
-		head, err = a.Worktrees.ReviewHead(ctx, d.Worktree, d.Branch, d.CheckpointHead)
-	} else {
-		head, err = a.Worktrees.Checkpoint(ctx, d.Worktree, d.Branch, d.CheckpointHead)
+		prior = d.LocalHead
 	}
+	head, err := a.Worktrees.ReviewHead(ctx, d.Worktree, d.Branch, prior)
 	if err != nil {
 		return turnResult{turn: turn, err: fmt.Errorf("verify the change for review: %w", err)}
+	}
+	if head == d.CheckpointHead && d.LocalHead == "" && d.Checkpoints == 0 {
+		base, err := a.Worktrees.ReviewRange(ctx, d.Worktree, d.BaseRef, head, "")
+		if err != nil {
+			return turnResult{turn: turn, err: fmt.Errorf("read the review base: %w", err)}
+		}
+		if base.BaseHead == "" {
+			return turnResult{turn: turn, err: errors.New("read the review base: no base commit")}
+		}
+		contained, err := a.Worktrees.Contains(ctx, d.Worktree, head, base.BaseHead)
+		if err != nil {
+			return turnResult{turn: turn, err: fmt.Errorf("verify existing branch work: %w", err)}
+		}
+		if contained {
+			return turnResult{turn: turn, err: fmt.Errorf("review_ready has no commits beyond %s", d.BaseRef)}
+		}
 	}
 	if err := a.checkUnpublished(ctx, rec); err != nil {
 		return turnResult{turn: turn, err: err}

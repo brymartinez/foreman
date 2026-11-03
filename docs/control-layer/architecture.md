@@ -123,8 +123,8 @@ runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR)
                                  invalid findings or ask the developer, exit
   with review_before_pr captured on the task and no PR yet, a finished turn returns
   review_ready instead of pr_opened (pr_opened there fails the task):
-    review_ready -> verify the branch, a clean worktree, and a descendant commit
-                    (the last accepted checkpoint itself is allowed),
+    review_ready -> verify the branch, a clean worktree, and committed branch work
+                    (an existing commit is allowed after a checkpoint or retry),
                     and that no PR is open and origin has no such branch (else FAILED);
                     save the commit with the proposed PR title and description
                     before every review: git fetch base, then
@@ -799,12 +799,19 @@ the same commit. The commit message records why it changed.
   claims, decisions, transcript, or earlier findings. It reports concrete code
   defects and regressions; product decisions belong to the implementing agent.
   Review errors fail the task.
+- **Review-ready work need not advance on every turn.** Checkpoints still require
+  a new commit. A `review_ready` turn may reuse an existing clean commit, including
+  work committed before a previous turn's output failed validation. When that commit
+  is only the starting head and has no prior verified handoff, Foreman verifies it
+  has commits beyond the base branch. An untouched or behind-base branch fails.
+  A retry may assess the latest old finding, but changed code needs fresh self-review.
 - **The implementer assesses findings in its retained session.** Valid findings get
   focused fixes and another independent self-review. Invalid self-review findings
   may be rejected through `reviewAssessment`, naming the current review round and
   unique one-based finding numbers with concrete reasons. An empty rejection list
-  means all findings were fixed; it does not waive another review. Go checks that the round
-  and reviewed commit match the current task and that the findings exist. Reasons
+  means all findings were fixed; it does not waive another review. Go checks the
+  latest self-review round and that the findings exist. The assessment stays bound
+  to the original reviewed commit; it cannot waive review of newer code. Reasons
   are saved as `rejected_findings` on the original review without changing its
   verdict. Rejecting every finding on an unchanged reviewed commit ends self-review
   early. Partial rejections or changed commits need another self-review. Rejected

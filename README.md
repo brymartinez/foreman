@@ -303,6 +303,8 @@ confirmed triage decisions before delegation.
    and Work plan, your answered decisions, claims, and reported verification.
    Later decisions override earlier requirements on the same point. This review
    cannot fall back to the implementing agent. Either review failing stops the task.
+   Retries can reuse completed commits after a failed output; no empty commit is
+   required. An assessment of an older finding cannot waive review of newer code.
    Both reviews read code and tests without running validation commands. The
    implementer runs those commands; inability to rerun them in review alone does not
    request changes.

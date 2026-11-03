@@ -258,6 +258,11 @@ if [[ " $* " == *" --no-session-persistence "* ]]; then
 	echo '{"type":"result","session_id":"r1","subtype":"success","total_cost_usd":0.05,"structured_output":{"verdict":"clean","summary":"looks right","findings":[]}}'
 	exit 0
 fi
+if [[ -f "$E2E_STATE/correction-committed" && "$2" != *"Push it and open the pull request now"* && "$2" != *"## Final full check"* ]]; then
+	echo "claude reuse-correction" >>"$E2E_STATE/agents.log"
+	echo '{"type":"result","session_id":"s1","subtype":"success","structured_output":{"status":"review_ready","summary":"The old finding is already fixed in this commit","reviewAssessment":{"round":1,"rejected":[{"finding":1,"reason":"Already fixed in the committed correction; no further edit is needed."}]},"nextObjective":null,"prNumber":null,"prUrl":null,'"$(full)"',"questions":[],"documents":null,"prTitle":"feat: add retries","prBody":"Retry 5xx and 429.\n\nCloses #42","claims":[{"criteria":["R1. Retry 5xx responses."],"behavior":"the client retries 5xx responses","evidence":"widgets.go","check":"go test ./... passed"}]}}'
+	exit 0
+fi
 # A planning turn starts with "## Plan first", or resumes one with its answers.
 planning=
 if [[ " $* " == *" --resume "* || "$2" == *"You are correcting the latest review"* || "$2" == *"## Final full check"* || "$2" == *"Push it and open the pull request now"* ]]; then
@@ -292,6 +297,12 @@ if [[ " $* " == *" --resume "* || "$2" == *"You are correcting the latest review
 			echo "claude local-fix" >>"$E2E_STATE/agents.log"
 			echo "// retry 429" >>widgets.go
 			git commit -qam "fix: retry 429"
+			if [ -f "$E2E_STATE/fail-correction-output-once" ]; then
+				rm "$E2E_STATE/fail-correction-output-once"
+				touch "$E2E_STATE/correction-committed"
+				echo '{"type":"result","session_id":"s1","subtype":"success","structured_output":{"status":"review_ready","summary":"Committed the correction but returned an invalid assessment","reviewAssessment":{"round":0,"rejected":[]}}}'
+				exit 0
+			fi
 			# focused-fixes: the fix runs focused checks only and reports no full result.
 			v=$(full)
 			[ ! -f "$E2E_STATE/focused-fixes" ] || v='"validation":[{"command":"go test ./widgets","passed":true,"scope":"focused"}],"fullSuite":null'
@@ -558,6 +569,29 @@ scenario_review_before_pr() {
 	check "the task records the pushed commit as the PR head" contains "$task_file" "pr_head: $head"
 	check "the last review covered the pushed commit" contains "$task_file" "head: $head"
 	check "the PR has the reviewed description" contains "$state/pr-942.json" "Retry 5xx and 429."
+}
+
+scenario_retry_committed_correction() {
+	echo "retry_committed_correction: retry reviews existing work after a committed correction returned invalid output"
+	setup retry_committed_correction
+	echo "review_before_pr: true" >>"$sandbox/config.yaml"
+	touch "$state/self-findings-once" "$state/fail-correction-output-once"
+	check "the first run starts" start 42
+	local task_file="$sandbox/tasks/acme-widgets-42.md" log="$sandbox/logs/acme-widgets-42.log" tree head
+	check "the first run records its output failure" eventually 10 grep -q '^state: FAILED' "$task_file"
+	check "the failure occurred after the correction was committed" contains "$state/agents.log" "claude local-fix"
+	tree=$(sed -n 's/^worktree: //p' "$task_file")
+	head=$(git -C "$tree" rev-parse HEAD)
+	check "the retry starts with the existing branch" start 42
+	check "the retry reaches a clean review" wait_status "review ✓"
+	if grep -q "^state: FAILED" "$task_file"; then tail -1 "$log"; fi
+	check "the retry keeps the completed commit" test "$(git -C "$tree" rev-parse HEAD)" = "$head"
+	check "the implementer reused the correction" contains "$state/agents.log" "claude reuse-correction"
+	check "both the old and corrected commits were independently reviewed" test "$(grep -c '^claude self-review$' "$state/agents.log")" = 2
+	check "adversarial review ran once" test "$(grep -c '^codex review$' "$state/agents.log")" = 1
+	check "the original finding's rejection reason is retained" contains "$task_file" "Already fixed in the committed correction"
+	check "the recorded review covers the unchanged retry commit" grep -qE "^[[:space:]]+head: $head$" "$task_file"
+	check "the PR opened" contains "$state/agents.log" "claude open-pr"
 }
 
 scenario_self_assessment() {
@@ -1388,7 +1422,7 @@ scenario_account() {
 	unset E2E_CLONE_URL
 }
 
-scenarios=${*:-runner review_before_pr self_assessment full_check planning_advice plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui routing history linear account learning knowledge_transfer}
+scenarios=${*:-runner review_before_pr retry_committed_correction self_assessment full_check planning_advice plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui routing history linear account learning knowledge_transfer}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"

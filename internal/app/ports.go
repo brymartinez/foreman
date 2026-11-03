@@ -233,8 +233,8 @@ type WorktreeManager interface {
 	Head(ctx context.Context, dir string) (string, error)
 	// Checkpoint accepts a clean worktree on branch whose HEAD advances from prior.
 	Checkpoint(ctx context.Context, dir, branch, prior string) (string, error)
-	// ReviewHead applies the same checks while allowing HEAD to equal the prior
-	// accepted checkpoint.
+	// ReviewHead applies the same checks while allowing HEAD to equal prior.
+	// Existing committed work may already be ready for review after a retry.
 	ReviewHead(ctx context.Context, dir, branch, prior string) (string, error)
 	// ChangedPaths lists the paths that differ between from and to, both sides of a
 	// rename included. It fails when from is not a commit SHA, or is neither to nor

@@ -31,8 +31,8 @@ func (g Git) Checkpoint(ctx context.Context, dir, branch, prior string) (string,
 	return g.committedHead(ctx, dir, branch, prior, false)
 }
 
-// ReviewHead also accepts the last checkpoint itself: that commit may contain
-// the entire change, even if a later turn only validated it.
+// ReviewHead also accepts existing committed work: the checkpoint or retry
+// starting head may already contain the entire change.
 func (g Git) ReviewHead(ctx context.Context, dir, branch, prior string) (string, error) {
 	return g.committedHead(ctx, dir, branch, prior, true)
 }

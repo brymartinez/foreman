@@ -13,9 +13,8 @@ func validateReviewAssessment(rec *task.Record, res turnResult) error {
 		return nil
 	}
 	review := rec.LatestReview()
-	head, _ := rec.CurrentChange()
-	if review == nil || review.Kind != task.SelfReview || review.Clean || review.Round != assessment.Round || review.Head != head {
-		return errors.New("reviewAssessment must address the current self-review round and commit")
+	if review == nil || review.Kind != task.SelfReview || review.Clean || review.Round != assessment.Round || review.Head == "" {
+		return errors.New("reviewAssessment must address the latest self-review round with a recorded commit")
 	}
 	for _, rejection := range assessment.Rejected {
 		if rejection.Finding > len(review.Findings) {

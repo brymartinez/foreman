@@ -43,7 +43,6 @@ func TestAssessmentCannotWaiveAnotherRoundOrAdversarialReview(t *testing.T) {
 		{"stale round", task.SelfReview, 2, 1, "c0ffee1"},
 		{"unknown finding", task.SelfReview, 1, 2, "c0ffee1"},
 		{"adversarial", task.CompetingReview, 1, 1, "c0ffee1"},
-		{"stale head", task.SelfReview, 1, 1, "other"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture()
@@ -175,7 +174,7 @@ func TestFullCheckRepairCannotIntroduceAStaleReviewAssessment(t *testing.T) {
 	f.claude.turns = []agent.Turn{first, second}
 	f.wt.checkpointHeads = []string{"commit1", "commit1"}
 	res := f.app.runTurn(context.Background(), rec, turnRequest{finalCheck: &agent.FinalCheck{Head: "commit1", Local: true}}, f.app.verifiedPR(io.Discard), io.Discard)
-	if res.err == nil || !strings.Contains(res.err.Error(), "current self-review round") {
+	if res.err == nil || !strings.Contains(res.err.Error(), "latest self-review round") {
 		t.Fatalf("stale assessment from repair was accepted: %v", res.err)
 	}
 }
@@ -198,5 +197,40 @@ func TestAllFindingsFixedStillGetsAFreshSelfReview(t *testing.T) {
 	}
 	if got.Reviews[0].AllFindingsRejected() {
 		t.Fatal("all-fixed assessment waived self-review")
+	}
+}
+
+func TestRetryAfterRejectedOutputReviewsCommittedCorrectionWithoutAnotherCommit(t *testing.T) {
+	f := newFixture()
+	key := localTask(t, f)
+	rec := f.store.recs[key]
+	rec.State = task.Failed
+	rec.Delegation.LocalHead = "commit1"
+	rec.Delegation.ProposedTitle = proposedTitle
+	rec.Delegation.ProposedBody = proposedBody
+	rec.Reviews = []task.Review{{Round: 1, Kind: task.SelfReview, Head: "commit1", Findings: selfFindings().Findings, At: now}}
+	// The correction committed commit2 before Foreman rejected its output.
+	f.wt.head = "commit2"
+	f.wt.reviewBase = "basehead"
+	f.wt.contains = func(_ string, ancestor, descendant string) (bool, error) {
+		return ancestor == descendant || ancestor == "basehead", nil
+	}
+	if _, err := f.app.Start(context.Background(), startReq(t)); err != nil {
+		t.Fatal(err)
+	}
+	retry := reviewReadyTurn("retry-session", proposedBody)
+	retry.Outcome.ReviewAssessment = &task.ReviewAssessment{Round: 1, Rejected: []task.RejectedFinding{{Finding: 1, Reason: "Already fixed in commit2 before the failed output."}}}
+	f.claude.turns = []agent.Turn{retry, prTurn("retry-session")}
+	f.wt.checkpointHeads = []string{"commit2"}
+	opensPR(t, f, "commit2", proposedTitle, proposedBody, 1)
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.WaitingForCI || got.Delegation.PRHead != "commit2" || kinds(got) != "self! self competing" {
+		t.Fatalf("state %s head %s reviews %s outcome %+v", got.State, got.Delegation.PRHead, kinds(got), got.LastOutcome)
+	}
+	if got.Reviews[0].Head != "commit1" || got.LatestSelf().Head != "commit2" {
+		t.Fatal("the old finding assessment waived review of the new commit")
 	}
 }

@@ -148,9 +148,10 @@ func TestReviewReadyStillRequiresAnInitialCommit(t *testing.T) {
 	f := newFixture()
 	key := localTask(t, f)
 	f.wt.checkpointHeads = []string{"basehead"}
+	f.wt.reviewBase = "basehead"
 	f.claude.turn = reviewReadyTurn("sid-1", "Closes #825")
 	res := f.app.runTurn(context.Background(), f.store.recs[key], turnRequest{}, f.app.verifiedPR(io.Discard), io.Discard)
-	if res.err == nil || !strings.Contains(res.err.Error(), "no new commit") {
+	if res.err == nil || !strings.Contains(res.err.Error(), "no commits beyond origin/main") {
 		t.Fatalf("unchanged initial branch: %v", res.err)
 	}
 }
