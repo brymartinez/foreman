@@ -155,7 +155,7 @@ func (r *taskRun) finalCheck() (step, error) {
 	}
 	r.rec = rec
 	switch {
-	case res.err != nil:
+	case res.err != nil || rec.State == task.Failed || rec.State == task.NeedsDecision:
 		return stepDone, nil
 	case rec.State == task.WaitingForCI && a.ReplyToPRFeedback:
 		return stepHandover, nil

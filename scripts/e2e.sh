@@ -272,6 +272,10 @@ if [[ " $* " == *" --resume "* || "$2" == *"You are correcting the latest review
 		if [[ "$2" == *"## Final full check"* ]]; then
 			echo "claude final-check" >>"$E2E_STATE/agents.log"
 			printf '%s' "$2" >"$E2E_STATE/final-check-prompt.txt"
+			if [ -f "$E2E_STATE/fail-final-check" ]; then
+				echo '{"type":"result","session_id":"s1","subtype":"success","structured_output":{"status":"failed","summary":"Chromium cannot start: MachPort registration denied","questions":[]}}'
+				exit 0
+			fi
 			# On a PR, take the branch as pushed, run the suite on it, and report the PR.
 			if [[ "$2" == *'"pr_opened" for PR #'* ]]; then
 				b=$(git branch --show-current); i=${b#*/}; pr=$((900 + ${i%%-*}))
@@ -597,6 +601,22 @@ scenario_full_check() {
 	check "the full result covers the pushed commit" bash -c "grep -A1 '^full_result:' '$task_file' | grep -qF 'head: $head'"
 	task 42 sd >"$sandbox/show.txt"
 	check "show reports the covering full result" contains "$sandbox/show.txt" "Full suite: covers ${head:0:7}"
+}
+
+scenario_final_check_stop() {
+	echo "final_check_stop: an explicit final-check failure stops once and preserves its cause"
+	setup final_check_stop
+	echo "review_before_pr: true" >>"$sandbox/config.yaml"
+	touch "$state/findings-once" "$state/focused-fixes" "$state/fail-final-check"
+	check "the task starts" start 42
+	check "the task stops as failed" wait_status "FAILED"
+	local task_file="$sandbox/tasks/acme-widgets-42.md"
+	check "only one final check ran" test "$(grep -c '^claude final-check$' "$state/agents.log")" = 1
+	check "the original failure is retained" contains "$task_file" "Chromium cannot start: MachPort registration denied"
+	check "the check counter stops at one" grep -q '^final_checks: 1$' "$task_file"
+	check "the generic retry-limit error did not replace the cause" bash -c "! grep -qF '3 final checks left' '$task_file'"
+	check "the PR opening did not run" bash -c "! grep -q '^claude open-pr$' '$state/agents.log'"
+	check "the proposed work is retained" grep -q '^local_head:' "$task_file"
 }
 
 scenario_planning_advice() {
@@ -1388,7 +1408,7 @@ scenario_account() {
 	unset E2E_CLONE_URL
 }
 
-scenarios=${*:-runner review_before_pr self_assessment full_check planning_advice plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui routing history linear account learning knowledge_transfer}
+scenarios=${*:-runner review_before_pr self_assessment full_check final_check_stop planning_advice plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui routing history linear account learning knowledge_transfer}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"
