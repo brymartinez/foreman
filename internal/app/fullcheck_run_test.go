@@ -181,6 +181,48 @@ func TestAFinalCheckThatStillFailsIsNotHandedOff(t *testing.T) {
 	}
 }
 
+func TestTerminalFinalCheckStopsBeforePendingPROpening(t *testing.T) {
+	for _, blocked := range []bool{false, true} {
+		name := "failed"
+		if blocked {
+			name = "blocked"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newFixture()
+			key := gatedLocalTask(t, f)
+			rec := f.store.recs[key]
+			d := rec.Delegation
+			d.LocalHead, d.ProposedTitle, d.ProposedBody = "commit1", proposedTitle, proposedBody
+			d.Implementer.ID = "sid-1"
+			rec.FullResult = &task.FullResult{Head: "older-commit", Revision: "older-commit", Covered: true}
+			applyReview(rec, task.SelfReview, task.Claude, agent.ReviewOutcome{Clean: true}, nil, now)
+			applyReview(rec, task.CompetingReview, task.Codex, agent.ReviewOutcome{Clean: true}, nil, now)
+			outcome := agent.Outcome{Status: agent.FailedRun, Summary: "Chromium cannot start: MachPort registration denied"}
+			want := task.Failed
+			if blocked {
+				want = task.NeedsDecision
+				outcome.Status = agent.Blocked
+				outcome.Summary = "The browser check needs an environment decision"
+				outcome.Questions = []task.Question{{Issue: "Where should browser verification run?", Options: []task.Option{{Label: "A", Description: "Use CI"}, {Label: "B", Description: "Repair the local environment"}}}}
+			}
+			f.claude.turn = agent.Turn{Session: task.Session{Agent: task.Claude, ID: "sid-1"}, Outcome: outcome}
+			if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			got := f.store.recs[key]
+			if got.State != want || got.LastOutcome.Status != string(outcome.Status) || got.LastOutcome.Summary != outcome.Summary {
+				t.Fatalf("terminal result overwritten: state=%s outcome=%+v", got.State, got.LastOutcome)
+			}
+			if got.Delegation.FinalChecks != 1 || countResumed(f, "## Final full check") != 1 || openTurns(f) != 0 || len(f.codex.reviewed) != 0 {
+				t.Fatalf("continued after terminal result: checks=%d resumes=%d opens=%d reviews=%d", got.Delegation.FinalChecks, len(f.claude.resumed), openTurns(f), len(f.codex.reviewed))
+			}
+			if got.Delegation.LocalHead != "commit1" || got.Delegation.ProposedBody != proposedBody || (blocked && (len(got.Decisions) != 1 || got.Pending() == nil)) {
+				t.Fatalf("saved work or question lost: delegation=%+v decisions=%+v", got.Delegation, got.Decisions)
+			}
+		})
+	}
+}
+
 func TestTheFirstReviewWaitsForACoveringFullResult(t *testing.T) {
 	t.Run("one request supplies it", func(t *testing.T) {
 		f := newFixture()

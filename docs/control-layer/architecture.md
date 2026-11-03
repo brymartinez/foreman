@@ -762,7 +762,9 @@ the same commit. The commit message records why it changed.
   with evidence for every path, or runs the suite; a failure is fixed in the same
   turn. A turn that keeps the head and covers it hands off without another review; a
   new commit goes through review again. The turn gets the same one-resume rule. Three
-  final checks per handoff, then the task fails with the reason.
+  final checks per handoff, then the task fails with the reason. A final-check turn
+  that reports `failed` or `blocked` stops immediately, preserving its failure
+  summary or pending decision. A pending local PR opening cannot restart that turn.
 - **An `unavailable` suite permits handoff with its explanation.** It covers any
   head, because the repository has no suite to rerun. The dashboard's task pane, which
   shows each check's scope and the full-suite state, and the PR-opening turn carry the
