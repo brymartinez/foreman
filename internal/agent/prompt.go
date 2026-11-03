@@ -47,8 +47,10 @@ type TaskBrief struct {
 	// implementation and self-review.
 	PlanText string
 	// Correction starts a fresh turn whose only task is the latest review findings.
-	Correction        bool
-	CorrectionAnswers []task.Decision
+	Correction         bool
+	FindingsReview     *task.Review
+	ReviewLimitReached bool
+	CorrectionAnswers  []task.Decision
 	// PriorPR is the pull request of a run the developer reset, or nil.
 	PriorPR *PriorPR
 	// A checkpoint starts a new implementation session from committed work.
@@ -218,18 +220,25 @@ Do not push or open a pull request when you are blocked.
 Reply with JSON matching the provided schema:
 %s%s%s- "blocked" when you need a decision, as described above.
 - "failed" when you cannot complete the task: say why in summary.
-Set nextObjective to null except for "checkpoint". Set fields that do not apply to null, or [] for validation and questions. %s
+Set reviewAssessment to null except when rejecting numbered findings from the current self-review. Set nextObjective to null except for "checkpoint". Set fields that do not apply to null, or [] for validation and questions. %s
 `, workspace, opening, pr, plannedStatus(b.Planning), finishedStatus(b), checkpointStatus(b), documentsRule(b.Planning))
 	return s.String()
 }
 
-// correctionPrompt starts a new session for one review's findings. The findings
-// are its complete task specification; repository access is for locating fixes.
+// correctionPrompt rebuilds a lost implementer session with the checked task,
+// answered decisions, and findings to assess.
 func correctionPrompt(b TaskBrief) string {
 	var s strings.Builder
-	fmt.Fprintf(&s, "You are correcting the latest review of %s in a fresh session. Make only the changes requested by the findings below. If a finding is ambiguous or requires another product decision, return blocked. Do not recover earlier agent transcripts, issue discussion, or planning documents.\n\n", b.Key.Repo)
+	fmt.Fprintf(&s, "You are correcting the latest review of %s in a fresh session. Assess the findings using the checked task and developer decisions below. Fix valid defects and reject invalid findings with concrete evidence. If a finding is ambiguous or requires another product decision, return blocked. Do not recover earlier agent transcripts, issue discussion, or planning documents.\n\n", b.Key.Repo)
+	s.WriteString("## Checked work\n\n" + b.PlanText + "\n\n")
 	s.WriteString("## Findings to correct\n\n")
 	writeFindings(&s, b.OpenFindings)
+	if b.FindingsReview != nil {
+		assessmentInstructions(&s, *b.FindingsReview)
+	}
+	if b.ReviewLimitReached {
+		s.WriteString(SelfReviewLimitInstruction)
+	}
 	s.WriteString("\n")
 	for _, d := range answeredDecisions(b.CorrectionAnswers) {
 		fmt.Fprintf(&s, "Decision on these findings: %s\nAnswer: %s\n\n", d.Question.Issue, d.Answer)

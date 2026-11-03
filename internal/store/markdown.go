@@ -252,23 +252,25 @@ type ciFM struct {
 }
 
 type reviewFM struct {
-	BaseRef  string          `yaml:"base_ref,omitempty"`
-	BaseHead string          `yaml:"base_head,omitempty"`
-	FromHead string          `yaml:"from_head,omitempty"`
-	Round    int             `yaml:"round"`
-	Kind     task.ReviewKind `yaml:"kind,omitempty"`
-	Reviewer task.Agent      `yaml:"reviewer"`
-	PR       int             `yaml:"pr"`
-	Verdict  string          `yaml:"verdict"`
-	Summary  string          `yaml:"summary"`
-	Findings []task.Finding  `yaml:"findings,omitempty"`
-	At       time.Time       `yaml:"at"`
-	Head     string          `yaml:"head,omitempty"`
-	Proposal string          `yaml:"proposal,omitempty"`
-	Claims   string          `yaml:"claims,omitempty"`
-	PRD      string          `yaml:"prd,omitempty"`
-	Scope    string          `yaml:"scope,omitempty"`
-	Plan     string          `yaml:"plan,omitempty"`
+	Decisions        string                 `yaml:"decisions_digest,omitempty"`
+	RejectedFindings []task.RejectedFinding `yaml:"rejected_findings,omitempty"`
+	BaseRef          string                 `yaml:"base_ref,omitempty"`
+	BaseHead         string                 `yaml:"base_head,omitempty"`
+	FromHead         string                 `yaml:"from_head,omitempty"`
+	Round            int                    `yaml:"round"`
+	Kind             task.ReviewKind        `yaml:"kind,omitempty"`
+	Reviewer         task.Agent             `yaml:"reviewer"`
+	PR               int                    `yaml:"pr"`
+	Verdict          string                 `yaml:"verdict"`
+	Summary          string                 `yaml:"summary"`
+	Findings         []task.Finding         `yaml:"findings,omitempty"`
+	At               time.Time              `yaml:"at"`
+	Head             string                 `yaml:"head,omitempty"`
+	Proposal         string                 `yaml:"proposal,omitempty"`
+	Claims           string                 `yaml:"claims,omitempty"`
+	PRD              string                 `yaml:"prd,omitempty"`
+	Scope            string                 `yaml:"scope,omitempty"`
+	Plan             string                 `yaml:"plan,omitempty"`
 	// Limitations are what the reviewer could not check.
 	Limitations []task.Limitation `yaml:"limitations,omitempty"`
 }
@@ -471,7 +473,7 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 			return nil, fmt.Errorf("review round %d has unknown kind %q", r.Round, r.Kind)
 		}
 		rec.Reviews = append(rec.Reviews, task.Review{BaseRef: r.BaseRef, BaseHead: r.BaseHead, FromHead: r.FromHead, Round: r.Round, Kind: r.Kind, Reviewer: r.Reviewer, PR: r.PR, Clean: r.Verdict == "clean", Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head, Proposal: r.Proposal,
-			Claims: r.Claims, PRD: r.PRD, Scope: r.Scope, Plan: r.Plan, Limitations: r.Limitations})
+			Claims: r.Claims, PRD: r.PRD, Scope: r.Scope, Plan: r.Plan, Limitations: r.Limitations, RejectedFindings: r.RejectedFindings, Decisions: r.Decisions})
 	}
 	if c := fm.CI; c != nil {
 		switch c.State {
@@ -586,7 +588,7 @@ func fromRecord(rec *task.Record) frontmatter {
 			verdict = "clean"
 		}
 		fm.Reviews = append(fm.Reviews, reviewFM{BaseRef: r.BaseRef, BaseHead: r.BaseHead, FromHead: r.FromHead, Round: r.Round, Kind: r.Kind, Reviewer: r.Reviewer, PR: r.PR, Verdict: verdict, Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head, Proposal: r.Proposal,
-			Claims: r.Claims, PRD: r.PRD, Scope: r.Scope, Plan: r.Plan, Limitations: r.Limitations})
+			Claims: r.Claims, PRD: r.PRD, Scope: r.Scope, Plan: r.Plan, Limitations: r.Limitations, RejectedFindings: r.RejectedFindings, Decisions: r.Decisions})
 	}
 	if c := rec.CI; c != nil {
 		fm.CI = &ciFM{State: c.State, Failing: c.Failing, CheckedAt: c.CheckedAt}

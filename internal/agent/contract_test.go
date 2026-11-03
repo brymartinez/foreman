@@ -458,3 +458,23 @@ func TestOutcomeSchemaRequiresANullableFullSuiteAndCheckScopes(t *testing.T) {
 		t.Error("a check does not require scope")
 	}
 }
+
+func TestParseOutcomeReviewAssessmentRequiresNumberedReasons(t *testing.T) {
+	base := `{"status":"pr_opened","summary":"The existing guard disproves the finding","validation":[{"command":"go test ./...","passed":true}],"reviewAssessment":%s}`
+	for _, raw := range []string{
+		`{"round":0,"rejected":[{"finding":1,"reason":"guard exists"}]}`,
+		`{"round":1,"rejected":[]}`,
+		`{"round":1,"rejected":[{"finding":0,"reason":"guard exists"}]}`,
+		`{"round":1,"rejected":[{"finding":1,"reason":" "}]}`,
+		`{"round":1,"rejected":[{"finding":1,"reason":"guard exists"},{"finding":1,"reason":"duplicate"}]}`,
+	} {
+		if _, err := ParseOutcome([]byte(strings.Replace(base, "%s", raw, 1))); err == nil {
+			t.Fatalf("invalid assessment accepted: %s", raw)
+		}
+	}
+	raw := `{"round":3,"rejected":[{"finding":1,"reason":"The caller checks this input in retry.go:20"}]}`
+	got, err := ParseOutcome([]byte(strings.Replace(base, "%s", raw, 1)))
+	if err != nil || got.ReviewAssessment == nil || got.ReviewAssessment.Round != 3 {
+		t.Fatalf("assessment lost: %+v %v", got, err)
+	}
+}

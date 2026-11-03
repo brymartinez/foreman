@@ -255,7 +255,7 @@ type Delegation struct {
 	ProposedTitle string
 	ProposedBody  string
 	// ClaimVerification is set when a task that plans starts. Its implementer then
-	// returns Claims with each change, and both reviews check them against the PRD.
+	// returns Claims with each change; adversarial review checks them against the PRD.
 	// Tasks started without it keep the review workflow they started with.
 	ClaimVerification bool
 	// FullSuiteGate is set when a task starts. Its change is then handed off only with
@@ -696,6 +696,9 @@ const (
 )
 
 type Review struct {
+	RejectedFindings []RejectedFinding
+	Decisions        string
+
 	BaseRef  string
 	BaseHead string
 	FromHead string
@@ -746,8 +749,8 @@ func (r *Record) latest(kind ReviewKind) *Review {
 	return nil
 }
 
-// CompetingReviews are the competing rounds alone, oldest first. The competing
-// reviewer sees only these, so self-review findings never reach it.
+// CompetingReviews are the adversarial rounds alone, oldest first. They supply
+// the reviewer's own findings for a focused re-review.
 func (r *Record) CompetingReviews() []Review {
 	var out []Review
 	for _, rv := range r.Reviews {
@@ -769,16 +772,16 @@ func (r *Record) CurrentChange() (head, proposal string) {
 	return d.PRHead, d.PRDigest
 }
 
-// selfCovers checks the commit, requirements, and claims that self-review covered.
+// selfCovers binds a contextless self-review only to the code and PR it read.
 func (r *Record) selfCovers(review *Review) bool {
 	head, _ := r.CurrentChange()
-	return review != nil && review.Kind == SelfReview && review.PR == r.Delegation.PR && review.Head == head && r.ClaimsCovered(review) && r.ScopeCovered(review)
+	return review != nil && review.Kind == SelfReview && review.PR == r.Delegation.PR && review.Head == head
 }
 
-// SelfReviewPassed reports a clean self-review of the current code and requirements.
+// SelfReviewPassed reports clean or fully rejected findings on the current code.
 func (r *Record) SelfReviewPassed() bool {
 	latest := r.LatestSelf()
-	return r.selfCovers(latest) && latest.Clean
+	return r.selfCovers(latest) && (latest.Clean || latest.AllFindingsRejected())
 }
 
 // NextReview is the review the current change needs next: the self-review until a
@@ -802,7 +805,7 @@ func (r *Record) ChangeRequestsSinceDecision() int {
 	}
 	n := 0
 	for _, rv := range r.Reviews {
-		if !rv.Clean && rv.At.After(last) {
+		if !rv.Clean && !rv.AllFindingsRejected() && rv.At.After(last) {
 			n++
 		}
 	}
@@ -857,7 +860,7 @@ func (r *Record) ReviewPending() bool {
 		return false
 	}
 	self := r.LatestSelf()
-	if r.selfCovers(self) && self.Clean && r.newer(self, r.LatestCompeting()) {
+	if r.selfCovers(self) && r.SelfReviewPassed() && r.newer(self, r.LatestCompeting()) {
 		// The change passed its self-review after its last competing review, which a
 		// restart must not skip even when that review read the same head.
 		return true
@@ -865,7 +868,7 @@ func (r *Record) ReviewPending() bool {
 	if r.competingCovers(r.LatestCompeting()) {
 		return false
 	}
-	return !r.selfCovers(self) || self.Clean
+	return !r.selfCovers(self) || r.SelfReviewPassed()
 }
 
 // newer reports whether review a comes after review b in the record. Both point into
@@ -904,7 +907,7 @@ func (r *Record) competingCovers(review *Review) bool {
 }
 
 func (r *Record) ScopeCovered(review *Review) bool {
-	if review == nil {
+	if review == nil || (review.Kind == CompetingReview && review.Decisions != DecisionsDigest(r.Decisions)) {
 		return false
 	}
 	if r.Delegation == nil || r.Delegation.ScopeDigest == "" {

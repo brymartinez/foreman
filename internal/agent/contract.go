@@ -37,13 +37,14 @@ type Check = task.Check
 // Outcome is how every implementation turn ends. For pr_opened, PRNumber may be 0
 // when the agent could not report it; foreman then looks the PR up by branch.
 type Outcome struct {
-	Status        Status
-	Summary       string
-	NextObjective string
-	PRNumber      int
-	PRURL         string
-	Validation    []Check
-	Questions     []task.Question
+	ReviewAssessment *task.ReviewAssessment
+	Status           Status
+	Summary          string
+	NextObjective    string
+	PRNumber         int
+	PRURL            string
+	Validation       []Check
+	Questions        []task.Question
 	// Documents are the planning documents a planned turn wrote, by task.PlanDocs.
 	Documents  map[task.PlanDoc]string
 	BranchName string
@@ -90,20 +91,21 @@ type wireDocuments struct {
 }
 
 type wireOutcome struct {
-	Status        Status          `json:"status"`
-	Summary       string          `json:"summary"`
-	NextObjective *string         `json:"nextObjective"`
-	PRNumber      *int            `json:"prNumber"`
-	PRURL         *string         `json:"prUrl"`
-	Validation    []Check         `json:"validation"`
-	Questions     []task.Question `json:"questions"`
-	Documents     *wireDocuments  `json:"documents"`
-	BranchName    *string         `json:"branchName"`
-	Uncertain     *bool           `json:"uncertain"`
-	PRTitle       *string         `json:"prTitle"`
-	PRBody        *string         `json:"prBody"`
-	Claims        []task.Claim    `json:"claims"`
-	FullSuite     *wireFullSuite  `json:"fullSuite"`
+	ReviewAssessment *task.ReviewAssessment `json:"reviewAssessment"`
+	Status           Status                 `json:"status"`
+	Summary          string                 `json:"summary"`
+	NextObjective    *string                `json:"nextObjective"`
+	PRNumber         *int                   `json:"prNumber"`
+	PRURL            *string                `json:"prUrl"`
+	Validation       []Check                `json:"validation"`
+	Questions        []task.Question        `json:"questions"`
+	Documents        *wireDocuments         `json:"documents"`
+	BranchName       *string                `json:"branchName"`
+	Uncertain        *bool                  `json:"uncertain"`
+	PRTitle          *string                `json:"prTitle"`
+	PRBody           *string                `json:"prBody"`
+	Claims           []task.Claim           `json:"claims"`
+	FullSuite        *wireFullSuite         `json:"fullSuite"`
 }
 
 type wireFullSuite struct {
@@ -130,7 +132,22 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 			return Outcome{}, fmt.Errorf("check %q has unknown scope %q (want focused or full)", c.Command, c.Scope)
 		}
 	}
-	out := Outcome{Status: w.Status, Summary: w.Summary}
+	if w.ReviewAssessment != nil {
+		if w.Status != ReviewReady && w.Status != PROpened {
+			return Outcome{}, errors.New("reviewAssessment requires review_ready or pr_opened")
+		}
+		if w.ReviewAssessment.Round < 1 || len(w.ReviewAssessment.Rejected) == 0 {
+			return Outcome{}, errors.New("reviewAssessment needs a review round and rejected findings")
+		}
+		seen := map[int]bool{}
+		for _, f := range w.ReviewAssessment.Rejected {
+			if f.Finding < 1 || strings.TrimSpace(f.Reason) == "" || seen[f.Finding] {
+				return Outcome{}, errors.New("reviewAssessment needs unique finding numbers and concrete rejection reasons")
+			}
+			seen[f.Finding] = true
+		}
+	}
+	out := Outcome{Status: w.Status, Summary: w.Summary, ReviewAssessment: w.ReviewAssessment}
 	var err error
 	switch w.Status {
 	case BranchProposed:

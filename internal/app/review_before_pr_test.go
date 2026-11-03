@@ -241,7 +241,7 @@ func TestReviewBeforePRReviewsTheLocalCommitThenOpensThePR(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if len(f.codex.reviewed) != 1 || !strings.Contains(f.codex.reviewed[0], "## Review scope") || strings.Contains(f.codex.reviewed[0], "Retry 5xx only.") {
+	if len(f.codex.reviewed) != 1 || !strings.Contains(f.codex.reviewed[0], "## Checked work") || strings.Contains(f.codex.reviewed[0], "Retry 5xx only.") {
 		t.Fatalf("reviews = %q", f.codex.reviewed)
 	}
 	if openTurns(f) != 1 {
@@ -271,7 +271,7 @@ func TestReviewBeforePRFixesFindingsLocallyAndOpensWithTheUpdatedDescription(t *
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	fix := f.claude.prompts[1]
+	fix := f.claude.resumed[0]
 	if !strings.Contains(fix, "4xx retried") || !strings.Contains(fix, "review_ready") || strings.Contains(fix, "pr_opened") {
 		t.Fatalf("fix turn = %q", fix)
 	}
@@ -335,7 +335,7 @@ func TestReviewBeforePRAnotherRoundResetsTheLimitAndContinues(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if len(f.claude.prompts) < 3 || !strings.Contains(f.claude.prompts[2], "Answer: A.") || !strings.Contains(f.claude.prompts[2], "review_ready") {
+	if len(f.claude.resumed) < 2 || !strings.Contains(f.claude.resumed[1], "Decision: A.") || !strings.Contains(f.claude.resumed[1], "review_ready") {
 		t.Fatalf("answer turns = %q", f.claude.prompts)
 	}
 	if got.State != task.WaitingForCI || got.Delegation.PR != 912 || got.Delegation.PRHead != "commit3" || openTurns(f) != 1 {
@@ -368,7 +368,7 @@ func TestReviewBeforePRFreeTextAnswerReachesTheImplementer(t *testing.T) {
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.claude.prompts) < 3 || !strings.Contains(f.claude.prompts[2], "Keep 4xx retries; fix only the logging") {
+	if len(f.claude.resumed) < 2 || !strings.Contains(f.claude.resumed[1], "Keep 4xx retries; fix only the logging") {
 		t.Fatalf("answer turns = %q", f.claude.prompts)
 	}
 	if got := f.store.recs[key]; got.Delegation.PR != 912 {

@@ -13,7 +13,8 @@
     "prTitle",
     "prBody",
     "claims",
-    "fullSuite"
+    "fullSuite",
+    "reviewAssessment"
   ],
   "properties": {
     "status": {
@@ -239,6 +240,41 @@
             "string",
             "null"
           ]
+        }
+      }
+    },
+    "reviewAssessment": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "round",
+        "rejected"
+      ],
+      "properties": {
+        "round": {
+          "type": "integer"
+        },
+        "rejected": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "finding",
+              "reason"
+            ],
+            "properties": {
+              "finding": {
+                "type": "integer"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
         }
       }
     }

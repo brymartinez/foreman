@@ -27,20 +27,20 @@ func TestClaimVerifiedTasksNeedAReviewOfTheCurrentClaimsAndPRD(t *testing.T) {
 		"a clean self-review of the current claims and PRD passes": {
 			rec: onPR(true, claims, prd, self), next: CompetingReview, pending: true,
 		},
-		"a clean self-review of an older claim set does not pass": {
-			rec: onPR(true, edited, prd, self), next: SelfReview, pending: true,
+		"a clean code review remains valid when claims change": {
+			rec: onPR(true, edited, prd, self), next: CompetingReview, pending: true,
 		},
-		"a clean self-review of an older PRD does not pass": {
-			rec: onPR(true, claims, Digest("the edited PRD"), self), next: SelfReview, pending: true,
+		"a clean code review remains valid when requirements change": {
+			rec: onPR(true, claims, Digest("the edited PRD"), self), next: CompetingReview, pending: true,
 		},
 		"a clean competing review of the current claims and PRD covers the PR": {
 			rec: onPR(true, claims, prd, self, competing), next: CompetingReview,
 		},
 		"a clean competing review of an older claim set leaves the review pending": {
-			rec: onPR(true, edited, prd, self, competing), next: SelfReview, pending: true,
+			rec: onPR(true, edited, prd, self, competing), next: CompetingReview, pending: true,
 		},
 		"a clean competing review of an older PRD leaves the review pending": {
-			rec: onPR(true, claims, Digest("the edited PRD"), self, competing), next: SelfReview, pending: true,
+			rec: onPR(true, claims, Digest("the edited PRD"), self, competing), next: CompetingReview, pending: true,
 		},
 		"a task without claim verification ignores the claim and PRD digests": {
 			rec: onPR(false, nil, "", Review{Kind: SelfReview, PR: 7, Head: "h1", Proposal: desc, Clean: true}, Review{PR: 7, Head: "h1", Proposal: desc, Clean: true}), next: CompetingReview,
@@ -49,10 +49,10 @@ func TestClaimVerifiedTasksNeedAReviewOfTheCurrentClaimsAndPRD(t *testing.T) {
 			rec: local(claims, prd, localSelf, localCompeting), next: CompetingReview, open: true,
 		},
 		"a clean local review of an older claim set does not open the PR": {
-			rec: local(edited, prd, localSelf, localCompeting), next: SelfReview, pending: true,
+			rec: local(edited, prd, localSelf, localCompeting), next: CompetingReview, pending: true,
 		},
 		"a clean local review of an older PRD does not open the PR": {
-			rec: local(claims, Digest("the edited PRD"), localSelf, localCompeting), next: SelfReview, pending: true,
+			rec: local(claims, Digest("the edited PRD"), localSelf, localCompeting), next: CompetingReview, pending: true,
 		},
 	} {
 		if got := tc.rec.NextReview(); got != tc.next {

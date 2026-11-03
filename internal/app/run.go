@@ -463,7 +463,7 @@ func (r *taskRun) review() (step, error) {
 	switch {
 	case reviewErr != nil:
 	case kind == task.SelfReview:
-		review, reviewErr = a.selfReview(r.ctx, rec, title, body, prd, r.log)
+		review, reviewErr = a.selfReview(r.ctx, rec, r.log)
 	default:
 		review, reviewer, reviewErr = a.review(r.ctx, rec, title, body, prd, r.log)
 	}
@@ -475,18 +475,9 @@ func (r *taskRun) review() (step, error) {
 	if reviewErr == nil {
 		_, _, reviewErr = a.reviewRequirements(r.ctx, rec)
 	}
-	// Every fix is reviewed; the developer is asked only once fix_rounds fixes, requested
-	// by either reviewer, still leave findings. A self-review at the limit is diagnosed
-	// first, and the review, the diagnosis, and the question are written together, so a
-	// restart reviews again rather than asking without a diagnosis.
+	// Findings return to the implementer. At the self-review limit it must reject
+	// them with evidence or ask the developer before making another correction.
 	atLimit := reviewErr == nil && !review.Clean && rec.ChangeRequestsSinceDecision()+1 > a.fixRounds()
-	var diagnosis *task.Diagnosis
-	var diagnosisUsage task.Usage
-	if atLimit && kind == task.SelfReview {
-		var d task.Diagnosis
-		d, diagnosisUsage = a.diagnoseLimit(r.ctx, rec, title, body, review.Findings, r.log)
-		diagnosis = &d
-	}
 	if rec, err = a.update(r.final, rec.Key, existing(func(cur *task.Record) {
 		if kind == task.CompetingReview {
 			cur.Delegation.Reviewer = reviewer
@@ -497,15 +488,10 @@ func (r *taskRun) review() (step, error) {
 		}
 		if !a.metered {
 			addUsage(&cur.Usage, review.Usage)
-			addUsage(&cur.Usage, diagnosisUsage)
 		}
 		// Findings put the task back to IMPLEMENTING; only they can reach the limit.
-		if atLimit && cur.State == task.Implementing && cur.ChangeRequestsSinceDecision() > a.fixRounds() {
-			if kind == task.SelfReview {
-				escalateSelfReview(cur, a.fixRounds(), *diagnosis, a.Now())
-			} else {
-				escalateReview(cur, a.fixRounds(), a.Now())
-			}
+		if atLimit && kind == task.CompetingReview && cur.State == task.Implementing {
+			escalateReview(cur, a.fixRounds(), a.Now())
 		}
 		holdForFinalCheck(cur)
 	})); err != nil {
@@ -655,13 +641,16 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 	} else if findings != nil {
 		resume = agent.FindingsMessage(*findings)
 	}
+	if findings != nil && findings.Kind == task.SelfReview && rec.ChangeRequestsSinceDecision() > a.fixRounds() {
+		resume += agent.SelfReviewLimitInstruction
+	}
 	if resume != "" && d.ClaimVerification && !planning {
 		resume += agent.ClaimsMessage
 	}
 	if resume != "" && !planning {
 		resume = fullSuiteResume(rec, req, resume)
 	}
-	if resume != "" && (findings == nil || len(rec.Undelivered()) > 0) && d.Implementer.ID != "" {
+	if resume != "" && d.Implementer.ID != "" {
 		if err := a.startAttempt(ctx, rec); err != nil {
 			return agent.Turn{}, err
 		}
@@ -683,7 +672,9 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 	}
 	brief.Correction = !planning && merge == nil && !d.ConflictPending && len(feedback) == 0 && req.finalCheck == nil && len(brief.OpenFindings) > 0
 	if brief.Correction {
-		brief.CorrectionAnswers = rec.Undelivered()
+		brief.CorrectionAnswers = rec.Decisions
+		brief.FindingsReview = rec.LatestReview()
+		brief.ReviewLimitReached = brief.FindingsReview != nil && brief.FindingsReview.Kind == task.SelfReview && rec.ChangeRequestsSinceDecision() > a.fixRounds()
 	}
 	brief.Merge = merge
 	brief.LocalReview = d.BeforePR()
@@ -694,7 +685,7 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 	if d.PR == 0 && d.CheckpointNext != "" {
 		brief.CheckpointHead, brief.NextObjective = d.CheckpointHead, d.CheckpointNext
 	}
-	if !planning && !brief.Correction && rec.PlanPosted() {
+	if !planning && rec.PlanPosted() {
 		_, brief.PlanText, err = a.reviewRequirements(ctx, rec)
 		if err != nil {
 			return agent.Turn{}, err
@@ -866,13 +857,11 @@ func reviewTarget(rec *task.Record) string {
 	return fmt.Sprintf("PR #%d", rec.Delegation.PR)
 }
 
-// selfReview runs the implementing agent's review in a fresh, read-only session. It
-// reads the description, confirmed scope, checked plan, and code, without the
-// implementer's session, PR comments, or earlier findings. It never falls back to another
-// agent, so an error stops the task instead of skipping to the competing review.
-func (a App) selfReview(ctx context.Context, rec *task.Record, title, body, prd string, log io.Writer) (agent.ReviewOutcome, error) {
+// selfReview runs a fresh, read-only review of code changes without task context.
+// An error stops the task instead of skipping to the adversarial review.
+func (a App) selfReview(ctx context.Context, rec *task.Record, log io.Writer) (agent.ReviewOutcome, error) {
 	d := rec.Delegation
-	_, plan, err := a.reviewRequirements(ctx, rec)
+	_, _, err := a.reviewRequirements(ctx, rec)
 	if err != nil {
 		return agent.ReviewOutcome{}, err
 	}
@@ -886,36 +875,27 @@ func (a App) selfReview(ctx context.Context, rec *task.Record, title, body, prd 
 	}
 	brief := agent.ReviewBrief{Key: rec.Key, Branch: d.Branch, BaseBranch: strings.TrimPrefix(d.BaseRef, "origin/"),
 		StageInstructions: instructions.Content(), Passes: a.reviewRounds(), Self: true,
-		Claimed: d.ClaimVerification, PRD: prd, Claims: d.Claims, Plan: plan}
+	}
 	if err := a.startAttempt(ctx, rec); err != nil {
 		return agent.ReviewOutcome{}, err
 	}
 	brief = a.prepareReview(ctx, rec, task.SelfReview, d.Implementer.Agent, brief, log)
+	brief.PreviousHead, brief.PreviousFindings = "", nil
 	in := agent.StartInput{Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ReviewerBudgetUSD, Prompt: agent.ReviewPrompt(brief), Step: agent.StepReview, Purpose: "self_review"}
 	fmt.Fprintf(log, "foreman: %s self-reviewing %s (round %d)\n", adapter.Name(), reviewTarget(rec), len(rec.Reviews)+1)
 	out, reviewErr := adapter.Review(ctx, in)
 	return reviewContext(out, brief), reviewErr
 }
 
-// review runs the competing agent's fresh, read-only session. When the competing
-// agent is unavailable, the implementer's agent reviews in a separate session.
+// review runs the other agent with the checked task, decisions, and validation.
+// An unavailable competing agent stops the task instead of reducing independence.
 func (a App) review(ctx context.Context, rec *task.Record, title, body, prd string, log io.Writer) (agent.ReviewOutcome, task.Agent, error) {
 	d := rec.Delegation
-	_, _, requirementsErr := a.reviewRequirements(ctx, rec)
+	_, plan, requirementsErr := a.reviewRequirements(ctx, rec)
 	if requirementsErr != nil {
 		return agent.ReviewOutcome{}, d.Reviewer, requirementsErr
 	}
-	chosen := d.Reviewer
-	if chosen != d.Implementer.Agent && a.Quota != nil {
-		if quotas, err := a.Quota.Quota(ctx); err == nil {
-			status := quotas[chosen].Status
-			own := quotas[d.Implementer.Agent].Status
-			if (status == QuotaNotSetUp || status == QuotaExhausted) && own != QuotaNotSetUp && own != QuotaExhausted {
-				fmt.Fprintf(log, "foreman: %s unavailable according to quota-axi; using %s for review\n", chosen, d.Implementer.Agent)
-				chosen = d.Implementer.Agent
-			}
-		}
-	}
+	chosen := d.Implementer.Agent.Reviewer()
 	reviewer, ok := a.Agents[chosen]
 	if !ok {
 		return agent.ReviewOutcome{}, chosen, fmt.Errorf("reviewer %s is not configured", chosen)
@@ -929,7 +909,7 @@ func (a App) review(ctx context.Context, rec *task.Record, title, body, prd stri
 	}
 	brief := agent.ReviewBrief{Key: rec.Key, Branch: d.Branch, BaseBranch: strings.TrimPrefix(d.BaseRef, "origin/"),
 		StageInstructions: instructions.Content(), Passes: a.reviewRounds(),
-		Claimed: d.ClaimVerification, PRD: prd, Claims: d.Claims}
+		Claimed: d.ClaimVerification, PRD: prd, Claims: d.Claims, Plan: plan, Decisions: rec.Decisions, Validation: rec.Validation, FullResult: rec.FullResult, Assessments: rec.Reviews}
 	if err := a.startAttempt(ctx, rec); err != nil {
 		return agent.ReviewOutcome{}, chosen, err
 	}
@@ -945,18 +925,6 @@ func (a App) review(ctx context.Context, rec *task.Record, title, body, prd stri
 	brief = a.prepareReview(ctx, rec, task.CompetingReview, chosen, brief, log)
 	in.Prompt = agent.ReviewPrompt(brief)
 	out, err := reviewer.Review(ctx, in)
-	if errors.Is(err, agent.ErrUnavailable) && chosen != d.Implementer.Agent {
-		chosen = d.Implementer.Agent
-		reviewer, ok = a.Agents[chosen]
-		if !ok {
-			return agent.ReviewOutcome{}, chosen, fmt.Errorf("reviewer %s is not configured", chosen)
-		}
-		fmt.Fprintf(log, "foreman: %s unavailable; using %s for review\n", d.Reviewer, chosen)
-		fmt.Fprintf(log, "foreman: %s reviewing %s (round %d)\n", reviewer.Name(), target, len(rec.Reviews)+1)
-		brief = a.prepareReview(ctx, rec, task.CompetingReview, chosen, brief, log)
-		in.Prompt = agent.ReviewPrompt(brief)
-		out, err = reviewer.Review(ctx, in)
-	}
 	return reviewContext(out, brief), chosen, err
 }
 
@@ -1181,6 +1149,7 @@ func markDelivered(rec *task.Record, now time.Time) {
 // verified commit with the proposed PR in the same write, so the reviewer always
 // reads the description the commit came with.
 func applyTurnResult(rec *task.Record, res turnResult, now time.Time) {
+	applyReviewAssessment(rec, res)
 	applyTurn(rec, res.turn, res.pr, res.err, now)
 	recordFull(rec, res)
 	if res.err != nil || res.turn.Outcome.Status != agent.ReviewReady {
@@ -1240,18 +1209,19 @@ func applyReview(rec *task.Record, kind task.ReviewKind, reviewer task.Agent, r 
 	head, proposal := rec.CurrentChange()
 	review := task.Review{
 		BaseRef: r.BaseRef, BaseHead: r.BaseHead, FromHead: r.FromHead,
-		Round:    len(rec.Reviews) + 1,
-		Kind:     kind,
-		Reviewer: reviewer,
-		PR:       rec.Delegation.PR,
-		Head:     head,
-		Proposal: proposal,
-		Clean:    r.Clean,
-		Summary:  r.Summary,
-		Findings: r.Findings,
-		At:       now,
-		Scope:    rec.Delegation.ScopeDigest,
-		Plan:     rec.Delegation.PlanDigest,
+		Round:     len(rec.Reviews) + 1,
+		Kind:      kind,
+		Decisions: task.DecisionsDigest(rec.Decisions),
+		Reviewer:  reviewer,
+		PR:        rec.Delegation.PR,
+		Head:      head,
+		Proposal:  proposal,
+		Clean:     r.Clean,
+		Summary:   r.Summary,
+		Findings:  r.Findings,
+		At:        now,
+		Scope:     rec.Delegation.ScopeDigest,
+		Plan:      rec.Delegation.PlanDigest,
 	}
 	if d := rec.Delegation; d.ClaimVerification {
 		review.Claims, review.PRD, review.Limitations = task.ClaimsDigest(d.Claims), d.PRDDigest, r.Limitations
@@ -1273,7 +1243,6 @@ func applyReview(rec *task.Record, kind task.ReviewKind, reviewer task.Agent, r 
 		return
 	}
 	rec.State = task.Implementing
-	rec.Delegation.Implementer.ID = ""
 	rec.LastOutcome = &task.Outcome{Status: "changes_requested", Summary: fmt.Sprintf("%d findings: %s", len(r.Findings), r.Summary), At: now}
 }
 

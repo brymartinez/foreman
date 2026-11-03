@@ -146,16 +146,20 @@ type ReviewBrief struct {
 	BaseHead          string
 	PreviousHead      string
 	PreviousFindings  []task.Finding
-	// Self gets the checked requirements and work plan; the competing reviewer gets only the diff.
+	// Self receives only code-review scope; the competing reviewer gets task context.
 	Self bool
 	// Claim verification explicitly adds PRD acceptance criteria and claims.
-	Claimed bool
-	PRD     string
-	Claims  []task.Claim
-	Plan    string
+	Claimed     bool
+	PRD         string
+	Claims      []task.Claim
+	Plan        string
+	Decisions   []task.Decision
+	Validation  []task.Check
+	FullResult  *task.FullResult
+	Assessments []task.Review
 }
 
-// ReviewPrompt gives self-review the checked plan and competing review the diff.
+// ReviewPrompt separates contextless self-review from task-aware adversarial review.
 // Both run in fresh, read-only sessions.
 func ReviewPrompt(b ReviewBrief) string {
 	var s strings.Builder
@@ -165,13 +169,35 @@ func ReviewPrompt(b ReviewBrief) string {
 	}
 	fmt.Fprintf(&s, "You are the %s for the change on branch %s in %s. This is a fresh, read-only session. Do not edit files, commit, or push.\n\n", role, b.Branch, b.Key.Repo)
 	if b.Self {
-		s.WriteString("## Checked work\n\nThese requirements and work plan are the complete task for this review. Check the requirements and test evidence against the change. Do not read the issue, triage, other planning comments, PR description, or earlier review rounds for requirements.\n\n")
-		s.WriteString(quote(b.Plan) + "\n\n")
+		s.WriteString("## Review scope\n\nJudge only concrete defects and regressions in the branch diff against the surrounding codebase. You have no task context. Do not read plans, claims, decisions, issue discussion, PR descriptions, earlier reviews, or implementation transcripts. Leave product and requirements decisions to the implementing agent.\n\n")
 	} else {
-		s.WriteString("## Review scope\n\nForm an independent judgment from the file diff. Do not read the issue, triage, planning documents, PR description, comments, or the other reviewer's findings for requirements. Read surrounding repository code and tests only as needed to verify a concrete defect in the diff.\n\n")
-	}
-	if b.Claimed {
-		writeClaims(&s, b)
+		s.WriteString("## Checked work\n\nReview the complete change against the authoritative requirements, work plan, and developer decisions below. Later developer decisions override earlier requirements on the same point. Do not recover implementation transcripts or infer requirements from earlier review discussion.\n\n")
+		if b.Plan != "" {
+			s.WriteString(quote(b.Plan) + "\n\n")
+		}
+		for _, d := range answeredDecisions(b.Decisions) {
+			fmt.Fprintf(&s, "Developer decision: %s\nContext: %s\nAnswer: %s\n\n", d.Question.Issue, d.Question.Context, d.Answer)
+			for _, o := range d.Question.Options {
+				fmt.Fprintf(&s, "Option %s: %s\n", o.Label, o.Description)
+			}
+		}
+		if b.Claimed {
+			writeClaims(&s, b)
+		}
+		for _, c := range b.Validation {
+			fmt.Fprintf(&s, "Reported check: %s; passed=%t; scope=%s\n", c.Command, c.Passed, c.Scope)
+		}
+		if b.FullResult != nil {
+			fmt.Fprintf(&s, "Full-suite evidence: revision=%s; covered head=%s; reason=%s; unavailable=%s\n", b.FullResult.Revision, b.FullResult.Head, b.FullResult.Reason, b.FullResult.Unverified)
+			for _, c := range b.FullResult.Checks {
+				fmt.Fprintf(&s, "Full check: %s; passed=%t\n", c.Command, c.Passed)
+			}
+		}
+		for _, r := range b.Assessments {
+			for _, rejection := range r.RejectedFindings {
+				fmt.Fprintf(&s, "Implementer rejected self-review round %d finding %d: %s\nReason: %s\n", r.Round, rejection.Finding, findingSummary(r, rejection.Finding), rejection.Reason)
+			}
+		}
 	}
 	silentWorkSection(&s)
 	if text := strings.TrimSpace(b.StageInstructions); text != "" {
@@ -179,7 +205,7 @@ func ReviewPrompt(b ReviewBrief) string {
 		s.WriteString(text + "\n\n")
 	}
 	s.WriteString("## The change\n\n")
-	if b.PreviousHead != "" {
+	if !b.Self && b.PreviousHead != "" {
 		fmt.Fprintf(&s, "Start with `git diff %s..HEAD`. Review the changes since your previous review and verify each of your earlier findings below. Check for regressions caused by the fix. Read surrounding code or the complete diff with `git diff origin/%s...HEAD` when needed to judge a wider effect. Do not repeat a full review of unchanged code without a concrete reason. These findings are checks to verify, not facts to trust.\n\n", b.PreviousHead, b.BaseBranch)
 		for _, finding := range b.PreviousFindings {
 			fmt.Fprintf(&s, "- %s:%d %s: %s\n", finding.File, finding.Line, finding.Summary, finding.Detail)
@@ -190,7 +216,7 @@ func ReviewPrompt(b ReviewBrief) string {
 	s.WriteString("Do not run tests, builds, or project code in this read-only session. Report only concrete defects you can verify.\n\n")
 	s.WriteString("Use Read to inspect cited files and line ranges, Grep to find symbols and fixture setup, and Glob to locate test files. These tools are available even when other Bash commands are denied. Verify line-number claims and relevant test fixtures yourself before deciding whether the evidence supports a finding. Do not hand verification commands to the developer in place of checking the repository.\n\n")
 	if b.Passes > 0 {
-		if b.PreviousHead != "" {
+		if !b.Self && b.PreviousHead != "" {
 			fmt.Fprintf(&s, "Make %d focused review pass(es).\n\n", b.Passes)
 		} else if b.Passes == 1 {
 			s.WriteString("Read the complete diff once.\n\n")
@@ -199,7 +225,7 @@ func ReviewPrompt(b ReviewBrief) string {
 		}
 	}
 	s.WriteString("## Final response\n\nReply with JSON matching the provided schema. Use verdict clean with no findings, or changes_requested with one verified defect per finding. Severity is blocking or should_fix. Set file and line when available. ")
-	if b.Claimed {
+	if !b.Self && b.Claimed {
 		s.WriteString("List behaviors you could not check in limitations.\n")
 	} else {
 		s.WriteString("Set limitations to null.\n")
@@ -207,10 +233,9 @@ func ReviewPrompt(b ReviewBrief) string {
 	return s.String()
 }
 
-// writeClaims gives the competing reviewer the requirements and both reviewers the
-// implementer's claims, without repeating requirements already in the self-review.
+// writeClaims supplies the adversarial review without repeating a checked plan.
 func writeClaims(s *strings.Builder, b ReviewBrief) {
-	if !b.Self {
+	if b.Plan == "" {
 		fmt.Fprintf(s, "## Requirements\n\nThese are the acceptance criteria posted on the issue.\n\n%s\n\n", quote(b.PRD))
 	}
 	s.WriteString("## Implementer's claims\n\nThe implementer claims the change delivers these behaviors. Claims and the checks they report are not proof.\n\n")
@@ -220,7 +245,8 @@ func writeClaims(s *strings.Builder, b ReviewBrief) {
 	s.WriteString(`
 ## Claim verification
 
-- Match every acceptance criterion in Requirements to a claim. A criterion no claim covers is a finding.
+- Apply the developer decisions before checking claims. A later decision supersedes a conflicting earlier criterion; do not require both.
+- Match every effective acceptance criterion in Requirements to a claim. A criterion no claim covers is a finding.
 - For each claim, read the cited code and tests and decide whether they establish the behavior. A reported passing check is the implementer's validation record, not proof that its tests establish the claimed behavior. Use CI results where you can read them.
 - Try to find a counterexample to each claim: an input, state, or path where the claimed behavior fails.
 - A material claim the evidence does not support is a finding. Say what the evidence shows and what is missing.
@@ -239,6 +265,7 @@ func FindingsMessage(r task.Review) string {
 	var s strings.Builder
 	fmt.Fprintf(&s, "Review round %d of PR #%d by %s requested changes.\n\n%s\n\n", r.Round, r.PR, reviewerName(r), orNone(r.Summary, ""))
 	writeFindings(&s, r.Findings)
+	assessmentInstructions(&s, r)
 	s.WriteString(`
 Address the findings under your implementation instructions, then commit and push to the same branch and pull request. End with the same JSON outcome: pr_opened (with the same PR), blocked, or failed.
 `)
@@ -251,6 +278,7 @@ func LocalFindingsMessage(r task.Review) string {
 	var s strings.Builder
 	fmt.Fprintf(&s, "Review round %d of your local change by %s requested changes.\n\n%s\n\n", r.Round, reviewerName(r), orNone(r.Summary, ""))
 	writeFindings(&s, r.Findings)
+	assessmentInstructions(&s, r)
 	s.WriteString("\nAddress the findings under your implementation instructions. ")
 	s.WriteString(localFinishRule)
 	s.WriteString("End with the same JSON outcome: review_ready, blocked, or failed.\n")
@@ -288,3 +316,22 @@ func orNone(s, fallback string) string {
 	}
 	return strings.TrimSpace(s)
 }
+
+func assessmentInstructions(s *strings.Builder, r task.Review) {
+	s.WriteString("\nAssess each finding using your task context. Fix valid defects, reject invalid findings with concrete evidence, and ask the developer about product decisions or conflicting requirements. Do not change approved behavior merely to satisfy a reviewer.\n")
+	if r.Kind == task.SelfReview {
+		fmt.Fprintf(s, "For rejected self-review findings, set reviewAssessment to {\"round\": %d, \"rejected\": [{\"finding\": 1, \"reason\": \"concrete evidence\"}]}, using the one-based finding numbers above. Omit fixed findings from rejected. Rejecting every finding without changing the reviewed commit ends self-review early. Otherwise the new commit gets another independent self-review.\n", r.Round)
+	} else {
+		s.WriteString("Set reviewAssessment to null. An adversarial verdict requires a clean re-review; it cannot be waived by the implementer.\n")
+	}
+}
+
+func findingSummary(r task.Review, n int) string {
+	if n < 1 || n > len(r.Findings) {
+		return "unknown finding"
+	}
+	return r.Findings[n-1].Summary
+}
+
+// SelfReviewLimitInstruction keeps a resumed or rebuilt assessor within the fix limit.
+const SelfReviewLimitInstruction = "\nThe self-review fix limit is reached. Assess the remaining findings without changing code. Reject invalid findings with reviewAssessment and concrete evidence, or return blocked with your question about how to proceed. Do not make another correction until the developer answers.\n"

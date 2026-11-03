@@ -404,7 +404,7 @@ func TestImplementationPromptUsesOnlyTheCheckedPlan(t *testing.T) {
 	}
 }
 
-func TestCorrectionPromptUsesOnlyLatestFindingsAsTaskContext(t *testing.T) {
+func TestCorrectionPromptRebuildsCheckedPlanAndFindings(t *testing.T) {
 	p := ImplementationPrompt(TaskBrief{
 		Key: task.Key{Repo: "testorg/example", Number: 825}, Correction: true,
 		IssueBody: "ISSUE-SECRET", ConfirmedScope: "TRIAGE-SECRET", PlanText: "PLAN-SECRET",
@@ -412,12 +412,12 @@ func TestCorrectionPromptUsesOnlyLatestFindingsAsTaskContext(t *testing.T) {
 		OpenFindings: []task.Finding{{Severity: "blocking", File: "retry.go", Line: 40, Summary: "429 is not retried", Detail: "Handle 429 too."}},
 		Branch:       "feat/825", BaseBranch: "main", Worktree: "/wt",
 	})
-	for _, want := range []string{"## Findings to correct", "429 is not retried", "Handle 429 too.", "return blocked"} {
+	for _, want := range []string{"## Findings to correct", "429 is not retried", "Handle 429 too.", "return blocked", "PLAN-SECRET"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("correction prompt missing %q", want)
 		}
 	}
-	for _, leaked := range []string{"ISSUE-SECRET", "TRIAGE-SECRET", "PLAN-SECRET", "CONTEXT-SECRET", "KNOWLEDGE-SECRET"} {
+	for _, leaked := range []string{"ISSUE-SECRET", "TRIAGE-SECRET", "CONTEXT-SECRET", "KNOWLEDGE-SECRET"} {
 		if strings.Contains(p, leaked) {
 			t.Errorf("correction prompt leaked %q", leaked)
 		}

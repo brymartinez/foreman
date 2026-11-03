@@ -293,15 +293,16 @@ confirmed triage decisions before delegation.
    could not. It uses the repository's documented setup and sample data when taking
    screenshots; Foreman does not create sample data. It leaves the PR description as
    written for review.
-4. The implementing agent first reviews its own PR in a fresh, read-only session
-   using the checked Requirements and Work plan and the file diff. The other agent reviews
-   the diff in its own fresh, read-only session. When claim verification is enabled,
-   both also receive the PRD and claims. Neither receives the PR description, triage
-   discussion, comments, or prior review rounds as review requirements. Findings
-   start a fresh correction session with only the latest findings as task context.
-   Each fix gets a new self-review before the next
-   competing review. The loop repeats until the competing review is clean. A
-   self-review that errors fails the task.
+4. A fresh read-only session of the implementing agent reviews the complete branch
+   diff and surrounding code without task context. Findings return to the retained
+   implementation session. The implementer fixes valid defects, rejects invalid
+   findings with concrete evidence, and asks you for product decisions. Fixes get
+   another independent self-review. Rejecting every finding without changing the
+   reviewed commit ends this loop early.
+   The other agent then performs an adversarial review with the checked Requirements
+   and Work plan, your answered decisions, claims, and reported verification.
+   Later decisions override earlier requirements on the same point. This review
+   cannot fall back to the implementing agent. Either review failing stops the task.
    Both reviews read code and tests without running validation commands. The
    implementer runs those commands; inability to rerun them in review alone does not
    request changes.
@@ -348,9 +349,8 @@ supplied text without reading the repository and reports only mismatches. An unr
 or inconclusive check fails with a reason; a nonblocking limitation on a clean
 check does not stop planning. Requirements says what must work and how to check it.
 Work plan gives ordered tasks that refer to requirement IDs without copying the rules.
-Foreman checks the two documents together against triage. The implementer and
-self-review receive both; the competing reviewer receives the diff (and Requirements
-when claim verification is on). A changed scope or document invalidates earlier
+Foreman checks the two documents together against triage. The implementer and adversarial reviewer receive both. Self-review receives only
+the code-review scope and diff instructions. A changed scope or document invalidates earlier
 checks before handoff.
 
 The `s` view links the two comments. A task that plans again, for example after a
@@ -431,27 +431,19 @@ turn: the issue, context, options, recommendation, and impact if wrong. You can 
 an option label, write your own answer, or press Enter to take the recommendation. Esc
 leaves the remaining questions waiting. Foreman saves each answer to the task file
 and, once all are answered, resumes the current stage's session when one exists.
-After review findings it starts a fresh correction session with the findings and
-your answer. The answer also appears in the PR description.
+After review findings it resumes the implementation session with the findings and
+your answer. If the session is unavailable, the replacement gets the checked plan,
+answered decisions, and outstanding findings. The answer also appears in the PR description.
 
-The implementer and reviewers take turns: every fix is reviewed again. Fixes asked
-for by the self-review and the competing review share one limit (`fix_rounds`). If the
-competing review after the third fix still has findings, foreman asks the same way: do
-another round, or accept the remaining findings. If the self-review is the one still
-finding problems, foreman never offers to accept them. It first diagnoses why, then
-asks you to do another round or stop the task:
-
-- a missed generic practice: the findings also go to learning;
-- a conflict in the stored task evidence (issue, plan, context file, your
-  answered decisions, PR description, `AGENTS.md` or `CLAUDE.md`, the implement stage
-  file, repository knowledge): each statement is
-  quoted with its source, and you pick which one governs. Foreman shows a conflict only
-  when every quote is in its source;
-- no concrete conflict found: the question says so.
-
-The implementer gets the findings along with your answer, and the next change gets a
-fresh self-review. Stopping fails the task with the open findings and leaves the PR
-and branch as they are.
+The implementer and reviewers take turns. Every changed commit gets another
+self-review before adversarial review. Fixes requested by either reviewer share
+`fix_rounds`. The implementer may reject invalid self-review findings with numbered
+reasons in `reviewAssessment`; the original verdict and reasons remain in the task
+file. Rejecting every finding without changing the reviewed commit ends self-review.
+At its fix limit, the implementer assesses the remaining findings and asks you before
+another correction. No separate diagnostic model call runs. After the adversarial
+fix limit, Foreman offers another round or accepting the remaining findings on an
+existing PR; a local change can instead be stopped without opening a PR.
 
 With `review_before_pr: true`, a new task is reviewed before its PR opens, so
 automated reviews that run on new PRs see the finished change. The implementer
@@ -523,9 +515,8 @@ Each task then appears as a note, and the frontmatter shows up as properties.
 
 ## Learning
 
-Foreman evaluates each task once it has a clean review, or once its self-review
-reaches the fix limit on a missed generic practice, and again when new evidence
-arrives: a later review, an answered decision, a PR comment, a new PR head, or the PR
+Foreman evaluates each task once it has a clean adversarial review and again when
+new evidence arrives: a later review, an answered decision, a PR comment, a new PR head, or the PR
 merging or closing. CI results are not evidence. The evaluation is one turn with the
 task's implementer agent, with no tools, run by a detached `foreman __learn` process.
 It reads the task file, the PR's comments from people (not bots), and the
@@ -555,12 +546,9 @@ issue or PR numbers, issue keys such as `ABC-12`, commit hashes, URLs, emails, a
 text. Paths inside the repository are kept.
 
 The separate triage skill can use repository knowledge while researching an issue.
-Foreman's diagnostic turn at a self-review fix limit can also use up to 8 active
-learnings and 2000 characters from the task's repository. Planning, implementation,
-correction, and review prompts omit that knowledge.
+Planning, implementation, correction, and review prompts omit repository knowledge.
 
-Set `learning.enabled: false` to stop new evaluations. Triage and fix-limit diagnosis
-can still use what is already learned. To forget a repository's knowledge, delete its directory. To remove
+Set `learning.enabled: false` to stop new evaluations. Triage can still use what is already learned. To forget a repository's knowledge, delete its directory. To remove
 one learning, delete its entry from `learnings.yaml`. Prompts read that file, and the
 next evaluation rewrites `knowledge.md`.
 
@@ -638,7 +626,7 @@ budgets:
   planning_tokens: 400000            # planning and plan checks
   call_timeout_seconds: 1800         # cancels one call; 0 disables each limit
   implementer_usd: 3.00              # Claude maximum per implementation turn
-  reviewer_usd: 1.00                 # Claude maximum per review, self-review, or diagnosis turn
+  reviewer_usd: 1.00                 # Claude maximum per review or self-review
 learning:
   enabled: true                      # evaluate finished tasks; off keeps existing knowledge in prompts
   budget_usd: 0.50                   # Claude maximum per evaluation; 0 sets no cap; Codex has none

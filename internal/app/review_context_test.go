@@ -113,10 +113,11 @@ func TestFixLoopUsesFocusedReviewsWithoutSharingFindings(t *testing.T) {
 	f.claude.turns = []agent.Turn{prTurn("first"), prTurn("fix")}
 	f.codex.reviews = []agent.ReviewOutcome{findings("blocking")}
 	f.claude.during = func() {
-		if f.claude.starts > 1 {
+		if f.claude.starts+len(f.claude.resumed) > 1 {
 			pushHead(f, "c0ffee2")
 		}
 	}
+	f.claude.onResume = f.claude.during
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +126,7 @@ func TestFixLoopUsesFocusedReviewsWithoutSharingFindings(t *testing.T) {
 		t.Fatalf("reviews %s", kinds(rec))
 	}
 	for _, r := range rec.Reviews[2:] {
-		if r.FromHead != "c0ffee1" || r.BaseHead != f.wt.reviewBase {
+		if (r.Kind == task.SelfReview && r.FromHead != "") || (r.Kind == task.CompetingReview && r.FromHead != "c0ffee1") || r.BaseHead != f.wt.reviewBase {
 			t.Fatalf("context %+v", r)
 		}
 	}
@@ -134,22 +135,16 @@ func TestFixLoopUsesFocusedReviewsWithoutSharingFindings(t *testing.T) {
 	}
 }
 
-func TestFallbackReviewerDoesNotInheritAnotherAgentsFocusedHistory(t *testing.T) {
+func TestUnavailableAdversarialReviewerDoesNotFallBack(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	rec := f.store.recs[key]
 	postedPlan(f, rec)
-	d := rec.Delegation
-	d.PR = 912
-	d.PRHead = "c0ffee2"
-	f.wt.reviewBase = strings.Repeat("a", 40)
-	rec.Reviews = []task.Review{{Kind: task.CompetingReview, Reviewer: task.Codex, Head: "c0ffee1", BaseRef: d.BaseRef, BaseHead: f.wt.reviewBase, Scope: d.ScopeDigest, Plan: d.PlanDigest, Findings: []task.Finding{{Summary: "Codex-only finding"}}}}
+	rec.Delegation.PR = 912
+	rec.Delegation.PRHead = "c0ffee2"
 	f.codex.reviewErr = agent.ErrUnavailable
-	out, chosen, err := f.app.review(context.Background(), rec, "title", "body", "", io.Discard)
-	if err != nil || chosen != task.Claude || out.FromHead != "" {
-		t.Fatalf("chosen %s outcome %+v error %v", chosen, out, err)
-	}
-	if p := f.claude.reviewed[0]; strings.Contains(p, "Codex-only finding") || strings.Contains(p, "Start with `git diff c0ffee1") {
-		t.Fatalf("fallback leaked history: %s", p)
+	_, chosen, err := f.app.review(context.Background(), rec, "title", "body", "", io.Discard)
+	if !errors.Is(err, agent.ErrUnavailable) || chosen != task.Codex || len(f.claude.reviewed) != 0 {
+		t.Fatalf("chosen %s error %v fallback reviews %d", chosen, err, len(f.claude.reviewed))
 	}
 }

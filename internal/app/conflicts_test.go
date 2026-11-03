@@ -100,8 +100,8 @@ func TestMergeTurnDoesNotUseFixRound(t *testing.T) {
 	// Clean before the first review, conflicting before the review of the fix.
 	f.wt.conflicts = [][]string{nil, {"retry.go"}}
 	got := run(t, f, key)
-	if len(f.claude.prompts) != 2 || !strings.Contains(f.claude.prompts[1], "## Findings to correct") || len(f.claude.resumed) != 1 || !strings.Contains(f.claude.resumed[0], "conflicts with the latest origin/main") {
-		t.Fatalf("want a fresh correction then a merge turn: starts %q resumes %q", f.claude.prompts, f.claude.resumed)
+	if len(f.claude.prompts) != 1 || len(f.claude.resumed) != 2 || !strings.Contains(f.claude.resumed[0], "requested changes") || !strings.Contains(f.claude.resumed[1], "conflicts with the latest origin/main") {
+		t.Fatalf("want a resumed correction then a merge turn: starts %q resumes %q", f.claude.prompts, f.claude.resumed)
 	}
 	if got.State != task.WaitingForCI || len(got.CompetingReviews()) != 2 || !got.LatestReview().Clean || got.ChangeRequestsSinceDecision() != 1 {
 		t.Fatalf("state %s reviews %d change requests %d", got.State, len(got.CompetingReviews()), got.ChangeRequestsSinceDecision())

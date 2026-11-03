@@ -139,3 +139,19 @@ func TestProposalDigestIgnoresLineEndingsAndSurroundingSpace(t *testing.T) {
 		t.Error("different descriptions digest the same")
 	}
 }
+
+func TestAdversarialCoverageTracksDeveloperDecisions(t *testing.T) {
+	rec := &Record{Delegation: &Delegation{PR: 7, PRHead: "h1"}, Decisions: []Decision{{Question: Question{Issue: "Show the metric?"}, Answer: "Hide it."}}}
+	review := Review{PR: 7, Head: "h1", Clean: true, Decisions: DecisionsDigest(rec.Decisions)}
+	if !rec.ScopeCovered(&review) {
+		t.Fatal("matching decision did not cover review")
+	}
+	rec.Decisions[0].Answer = "Show it."
+	if rec.ScopeCovered(&review) {
+		t.Fatal("changed decision reused old adversarial verdict")
+	}
+	review.Kind = SelfReview
+	if !rec.ScopeCovered(&review) {
+		t.Fatal("contextless self-review was invalidated solely by an answer")
+	}
+}

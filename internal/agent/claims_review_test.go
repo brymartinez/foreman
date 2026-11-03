@@ -16,7 +16,7 @@ func claimedReviewBrief() ReviewBrief {
 }
 
 func TestClaimedReviewPromptCarriesThePRDAndTheClaimsToTest(t *testing.T) {
-	for _, self := range []bool{false, true} {
+	for _, self := range []bool{false} {
 		b := claimedReviewBrief()
 		b.Self = self
 		b.Plan = "## Requirements\n\n- AC1. 5xx responses are retried.\n- AC2. 4xx responses are not.\n\n## Work plan\n\nR1. Retry only 5xx."
@@ -35,7 +35,7 @@ func TestClaimedReviewPromptCarriesThePRDAndTheClaimsToTest(t *testing.T) {
 		if strings.Contains(p, "Retry 5xx responses only.") {
 			t.Errorf("self %t: the PR description leaked into review", self)
 		}
-		if self && strings.Count(p, "AC1. 5xx responses are retried.") != 1 {
+		if strings.Count(p, "AC1. 5xx responses are retried.") != 1 {
 			t.Errorf("self-review repeated Requirements: %s", p)
 		}
 	}

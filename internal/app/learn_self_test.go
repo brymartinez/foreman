@@ -138,13 +138,13 @@ func TestSelfReviewPracticeGapsFromTwoTasksFollowTheUsualPromotionAndWithdrawal(
 	}
 }
 
-func TestRunnerStartsALearnerWhenTheSelfReviewLimitFindsAPracticeGap(t *testing.T) {
+func TestSelfReviewLimitDoesNotLaunchTheDiagnosticLearner(t *testing.T) {
 	for name, tc := range map[string]struct {
 		raw      string
 		learning bool
 		want     bool
 	}{
-		"practice gap":               {diagnosedGap, true, true},
+		"practice gap":               {diagnosedGap, true, false},
 		"no cause found":             {diagnosedNone, true, false},
 		"practice gap, learning off": {diagnosedGap, false, false},
 	} {
@@ -154,7 +154,7 @@ func TestRunnerStartsALearnerWhenTheSelfReviewLimitFindsAPracticeGap(t *testing.
 			f.app.FixRounds = 1
 			f.app.Diagnoser = &fakeDiagnoser{raw: tc.raw}
 			key := started(t, f, startReq(t))
-			f.claude.turns = []agent.Turn{prTurn("sid-1"), prTurn("sid-1")}
+			f.claude.turns = []agent.Turn{prTurn("sid-1"), prTurn("sid-1"), {Session: task.Session{Agent: task.Claude, ID: "sid-1"}, Outcome: agent.Outcome{Status: agent.Blocked, Summary: "Stop and ask", Questions: []task.Question{{Issue: "Continue?", Context: "Fix limit reached", Options: []task.Option{{Label: "A", Description: "Continue"}, {Label: "B", Description: "Stop"}}, Recommendation: "A", ImpactIfWrong: "More work"}}}}}
 			f.claude.reviews = []agent.ReviewOutcome{selfFindings(), selfFindings()}
 			if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 				t.Fatal(err)

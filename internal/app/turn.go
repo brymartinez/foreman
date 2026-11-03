@@ -89,7 +89,17 @@ func (a App) runTurn(ctx context.Context, rec *task.Record, req turnRequest, che
 		fmt.Fprintf(log, "foreman: verified implementation checkpoint %s\n", short(head))
 		return turnResult{turn: turn, checkpointHead: head}
 	}
-	return a.requireFullCheck(ctx, rec, req, a.checkChange(ctx, rec, req, turn, check, log), check, log)
+	res := a.requireFullCheck(ctx, rec, req, a.checkChange(ctx, rec, req, turn, check, log), check, log)
+	if res.err == nil {
+		res.err = validateReviewAssessment(rec, res)
+	}
+	if res.err == nil && finishesChange(res.turn.Outcome.Status) && req.findings != nil && req.findings.Kind == task.SelfReview && rec.ChangeRequestsSinceDecision() > a.fixRounds() {
+		head, _ := rec.CurrentChange()
+		if res.head() != head || res.turn.Outcome.ReviewAssessment == nil || len(res.turn.Outcome.ReviewAssessment.Rejected) != len(req.findings.Findings) {
+			res.err = errors.New("self-review fix limit reached: ask the developer before another correction")
+		}
+	}
+	return res
 }
 
 // checkChange verifies the change a review_ready or pr_opened turn reports.

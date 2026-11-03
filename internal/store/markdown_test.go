@@ -749,6 +749,7 @@ func TestStoreRoundTripsTheSelfReviewKindAndThePRDigest(t *testing.T) {
 	want := delegated()
 	want.Delegation.PRDigest = task.ProposalDigest("feat: retry", "Closes #825")
 	want.Reviews[0].Kind = task.SelfReview
+	want.Reviews[1].Decisions = task.DecisionsDigest(want.Decisions)
 	want.Reviews[0].Proposal = want.Delegation.PRDigest
 	if err := s.Save(ctx, want); err != nil {
 		t.Fatal(err)
@@ -888,5 +889,22 @@ func TestStoreRoundTripsFocusedReviewContext(t *testing.T) {
 	r := got.Reviews[0]
 	if r.BaseRef != "origin/main" || r.BaseHead != "base" || r.FromHead != "old" {
 		t.Fatalf("review %+v", r)
+	}
+}
+
+func TestSelfReviewRejectionsSurviveTaskReload(t *testing.T) {
+	want := delegated()
+	want.Reviews[0].Kind = task.SelfReview
+	want.Reviews[0].RejectedFindings = []task.RejectedFinding{{Finding: 1, Reason: "The developer explicitly approved this behavior."}}
+	store := Markdown{Dir: t.TempDir()}
+	if err := store.Save(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Get(ctx, want.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Reviews[0].Clean || !reflect.DeepEqual(got.Reviews[0].RejectedFindings, want.Reviews[0].RejectedFindings) || got.Reviews[1].Decisions != want.Reviews[1].Decisions {
+		t.Fatalf("rejection evidence or verdict lost: %+v", got.Reviews[0])
 	}
 }

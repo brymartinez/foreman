@@ -242,6 +242,15 @@ if [[ "$*" == *"You merge two machines' learnings"* ]]; then
 fi
 if [[ " $* " == *" --no-session-persistence "* ]]; then
 	echo "claude review" >>"$E2E_STATE/agents.log"
+	if [[ "$2" == "You are the self-reviewer"* ]]; then
+		echo "claude self-review" >>"$E2E_STATE/agents.log"
+		printf '%s' "$2" >"$E2E_STATE/self-review-prompt.txt"
+		if [ -f "$E2E_STATE/self-findings-once" ]; then
+			rm "$E2E_STATE/self-findings-once"
+			echo '{"type":"result","subtype":"success","structured_output":{"verdict":"changes_requested","summary":"Check the retry guard","findings":[{"category":"defect","severity":"should_fix","file":"widgets.go","line":1,"summary":"Retry guard may be missing","detail":"Check the caller"}],"limitations":[]}}'
+			exit 0
+		fi
+	fi
  if [[ "$2" == "You are checking planning documents"* && -f "$E2E_STATE/writing-advice" ]]; then
  echo '{"type":"result","session_id":"r1","subtype":"success","total_cost_usd":0.05,"structured_output":{"verdict":"changes_requested","summary":"Clear rules, long wording","findings":[{"category":"writing_advice","severity":"blocking","file":null,"line":null,"summary":"Shorten R1","detail":"Use two short sentences."}],"limitations":[]}}'
  exit 0
@@ -271,6 +280,11 @@ if [[ " $* " == *" --resume "* || "$2" == *"You are correcting the latest review
 				exit 0
 			fi
 			echo '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"review_ready","summary":"ran the full suite","nextObjective":null,"prNumber":null,"prUrl":null,'"$(full)"',"questions":[],"documents":null,"prTitle":"feat: add retries","prBody":"Retry 5xx and 429.\n\nCloses #42","claims":[{"criteria":["R1. Retry 5xx responses."],"behavior":"the client retries 5xx responses","evidence":"widgets.go","check":"go test ./... passed"}]}}'
+			exit 0
+		fi
+		if [[ -f "$E2E_STATE/reject-self" && "$2" == *"For rejected self-review findings"* ]]; then
+			echo "claude assess-self" >>"$E2E_STATE/agents.log"
+			echo '{"type":"result","session_id":"s1","subtype":"success","structured_output":{"status":"review_ready","summary":"The caller already guards retries","reviewAssessment":{"round":1,"rejected":[{"finding":1,"reason":"The caller in widgets.go already guards retries."}]},"nextObjective":null,"prNumber":null,"prUrl":null,'"$(full)"',"questions":[],"documents":null,"prTitle":"feat: add retries","prBody":"Retry 5xx only.\n\nCloses #42","claims":[{"criteria":["R1. Retry 5xx responses."],"behavior":"the client retries 5xx responses","evidence":"widgets.go","check":"go test ./... passed"}]}}'
 			exit 0
 		fi
 		# review_before_pr: fix findings locally, or push the reviewed commit and open the PR.
@@ -544,6 +558,26 @@ scenario_review_before_pr() {
 	check "the task records the pushed commit as the PR head" contains "$task_file" "pr_head: $head"
 	check "the last review covered the pushed commit" contains "$task_file" "head: $head"
 	check "the PR has the reviewed description" contains "$state/pr-942.json" "Retry 5xx and 429."
+}
+
+scenario_self_assessment() {
+	echo "self_assessment: the retained implementer rejects a contextless finding before adversarial review"
+	setup self_assessment
+	echo "review_before_pr: true" >>"$sandbox/config.yaml"
+	touch "$state/self-findings-once" "$state/reject-self"
+	check "the dashboard delegates #42" start 42
+	check "the runner reaches a clean adversarial review" wait_status "review ✓"
+	local task_file="$sandbox/tasks/acme-widgets-42.md"
+	check "the implementer assesses the findings in its resumed session" contains "$state/agents.log" "claude assess-self"
+	check "one independent self-review ran" test "$(grep -c '^claude self-review$' "$state/agents.log")" = 1
+	check "one adversarial review ran" test "$(grep -c '^codex review$' "$state/agents.log")" = 1
+	check "the self-review did not receive requirements" bash -c "! grep -qF 'R1. Retry 5xx responses.' '$state/self-review-prompt.txt'"
+	check "the adversarial review received requirements" contains "$state/review-prompt.txt" "R1. Retry 5xx responses."
+	check "the adversarial review received rejection evidence" contains "$state/review-prompt.txt" "caller in widgets.go already guards"
+	check "the task preserves rejected finding reasons" contains "$task_file" "rejected_findings:"
+	check "the original reviewer verdict remains unchanged" contains "$task_file" "verdict: changes_requested"
+	check "no unnecessary correction commit ran" bash -c "! grep -qF 'claude local-fix' '$state/agents.log'"
+	check "the PR opened after the adversarial review" contains "$state/agents.log" "claude open-pr"
 }
 
 scenario_full_check() {
@@ -1354,7 +1388,7 @@ scenario_account() {
 	unset E2E_CLONE_URL
 }
 
-scenarios=${*:-runner review_before_pr full_check planning_advice plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui routing history linear account learning knowledge_transfer}
+scenarios=${*:-runner review_before_pr self_assessment full_check planning_advice plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui routing history linear account learning knowledge_transfer}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"

@@ -10,8 +10,9 @@
 
 ## Correction turns
 
-- Change only what the latest findings require. Do not recover the earlier implementation session or broader task documents.
-- Fix valid findings and rerun their focused checks. Explain why you reject an invalid finding. Report `blocked` when a finding is ambiguous or needs a product decision.
+- Keep the implementation session and assess every finding using the checked task and developer decisions. If the session is lost, use the rebuilt task context. Do not recover old transcripts.
+- Fix valid findings and rerun their focused checks. Reject invalid self-review findings by number and concrete evidence in `reviewAssessment`. Rejecting all findings without changing the reviewed commit ends self-review early. Any code change receives a fresh self-review. Foreman preserves the reviewer verdict and your rejection reasons.
+- Report `blocked` when a finding needs a product decision or conflicts with requirements you cannot reconcile. At the self-review fix limit, reject the remaining invalid findings or ask the developer before another correction. Adversarial findings require a clean re-review; the implementer cannot waive its verdict.
 
 ## Questions
 

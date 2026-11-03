@@ -68,12 +68,12 @@ func TestAReviewFixWithFocusedChecksGetsOneFinalCheckAndNoSecondReviewOfTheSameH
 	if len(f.codex.reviewed) != 2 || countResumed(f, "## Final full check") != 1 {
 		t.Fatalf("competing reviews %d, final checks %d", len(f.codex.reviewed), countResumed(f, "## Final full check"))
 	}
-	fix := f.claude.prompts[1]
-	if !strings.Contains(fix, "## Findings to correct") || strings.Contains(fix, "has no full-suite result") ||
+	fix := f.claude.resumed[0]
+	if !strings.Contains(fix, "requested changes") || strings.Contains(fix, "has no full-suite result") ||
 		!strings.Contains(fix, "Do not rerun the full suite in this turn") || strings.Contains(fix, "Run the full suite once") {
 		t.Errorf("the fix turn must run focused checks only:\n%s", fix)
 	}
-	if !strings.Contains(f.claude.resumed[0], "covers commit1, and the change moved to commit2") {
+	if !strings.Contains(f.claude.resumed[1], "covers commit1, and the change moved to commit2") {
 		t.Errorf("the final check must say why the result is stale:\n%s", f.claude.resumed[0])
 	}
 	if r := got.FullResult; !r.Covers("commit2") || got.Delegation.FinalChecks != 0 {
@@ -266,12 +266,13 @@ func TestAPRReviewFixGetsAFinalCheckBeforeWaitingForCI(t *testing.T) {
 	f.claude.turns = []agent.Turn{full, fix, final}
 	f.codex.reviews = []agent.ReviewOutcome{findings("blocking")}
 	f.claude.during = func() {
-		if f.claude.starts == 2 {
+		if f.claude.starts+len(f.claude.resumed) == 2 {
 			pr := f.gh.prs[912]
 			pr.HeadSHA = "c0ffee2"
 			f.gh.prs[912] = pr
 		}
 	}
+	f.claude.onResume = f.claude.during
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +280,7 @@ func TestAPRReviewFixGetsAFinalCheckBeforeWaitingForCI(t *testing.T) {
 	if got.State != task.WaitingForCI || !got.FullResult.Covers("c0ffee2") || len(f.codex.reviewed) != 2 || countResumed(f, "## Final full check") != 1 {
 		t.Fatalf("state %s full %+v reviews %d resumed %q", got.State, got.FullResult, len(f.codex.reviewed), f.claude.resumed)
 	}
-	if !strings.Contains(f.claude.resumed[0], `End with "pr_opened" for PR #912`) {
+	if !strings.Contains(f.claude.resumed[1], `End with "pr_opened" for PR #912`) {
 		t.Errorf("final check prompt:\n%s", f.claude.resumed[0])
 	}
 }

@@ -155,8 +155,8 @@ func TestAFixReplacesTheClaimSetAndIsAskedForTheFullSet(t *testing.T) {
 	if task.ClaimsDigest(got.Delegation.Claims) != task.ClaimsDigest(fixed) {
 		t.Fatalf("claims = %+v, want the fix's full set", got.Delegation.Claims)
 	}
-	if len(f.claude.prompts) < 3 || !strings.Contains(f.claude.prompts[2], "## Findings to correct") || !strings.Contains(f.claude.prompts[2], "## Claim") {
-		t.Fatalf("fresh correction prompt = %q", f.claude.prompts)
+	if len(f.claude.resumed) != 1 || !strings.Contains(f.claude.resumed[0], "requested changes") || !strings.Contains(f.claude.resumed[0], "claim") {
+		t.Fatalf("retained correction session missing claims: %q", f.claude.prompts)
 	}
 }
 
@@ -194,7 +194,7 @@ func editPRD(t *testing.T, f fixture, text string) {
 	f.gh.comments[c.ID] = c
 }
 
-func TestBothReviewsReadThePRDAndTheClaims(t *testing.T) {
+func TestAdversarialReviewReadsThePRDAndTheClaims(t *testing.T) {
 	f := newFixture()
 	key := claimTask(t, f)
 	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), claimedTurn("sid-2", retryClaims)}
@@ -205,7 +205,7 @@ func TestBothReviewsReadThePRDAndTheClaims(t *testing.T) {
 	if kinds(got) != "self competing" || got.State != task.WaitingForCI {
 		t.Fatalf("state %s reviews %s", got.State, kinds(got))
 	}
-	for name, p := range map[string]string{"self-review": f.claude.reviewed[0], "competing review": f.codex.reviewed[0]} {
+	for name, p := range map[string]string{"competing review": f.codex.reviewed[0]} {
 		for _, want := range []string{"## Requirements", "> R1. Retry 5xx.", "## Implementer's claims", "the client retries 5xx responses", "retry.go:40, retry_test.go TestRetry5xx", "counterexample"} {
 			if !strings.Contains(p, want) {
 				t.Errorf("%s prompt lacks %q:\n%s", name, want, p)
@@ -317,7 +317,7 @@ func TestAnEditedPRDIsReviewedAgainBeforeHandover(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.SelfReviewing || got.Delegation.PRDDigest != task.Digest("R1. Retry 5xx.\nR2. Never retry 4xx.") || len(f.runners.spawned) != 2 {
+	if got.State != task.AdversarialReviewing || got.Delegation.PRDDigest != task.Digest("R1. Retry 5xx.\nR2. Never retry 4xx.") || len(f.runners.spawned) != 2 {
 		t.Fatalf("state %s prd %q spawned %d; an edited PRD must start the reviews again", got.State, got.Delegation.PRDDigest, len(f.runners.spawned))
 	}
 	got.Delegation.Launch.PID = 0
@@ -530,7 +530,7 @@ func TestAWaitingTaskChecksItsPRDWhenCICannotBeRead(t *testing.T) {
 		want   task.State
 	}{
 		"deleted PRD": {func(t *testing.T, f fixture) { delete(f.gh.comments, prdComment(t, f).ID) }, task.Failed},
-		"edited PRD":  {func(t *testing.T, f fixture) { editPRD(t, f, "R1. Retry 5xx.\nR2. Never retry 4xx.") }, task.SelfReviewing},
+		"edited PRD":  {func(t *testing.T, f fixture) { editPRD(t, f, "R1. Retry 5xx.\nR2. Never retry 4xx.") }, task.AdversarialReviewing},
 		"same PRD":    {func(t *testing.T, f fixture) {}, task.WaitingForCI},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -559,7 +559,7 @@ func TestAReopenedPRIsHandedOverOnlyWithAReviewOfTheCurrentPRD(t *testing.T) {
 		want   task.State
 	}{
 		"same PRD":    {func(t *testing.T, f fixture) {}, task.ReadyForHuman},
-		"edited PRD":  {func(t *testing.T, f fixture) { editPRD(t, f, "R1. Retry 5xx.\nR2. Never retry 4xx.") }, task.SelfReviewing},
+		"edited PRD":  {func(t *testing.T, f fixture) { editPRD(t, f, "R1. Retry 5xx.\nR2. Never retry 4xx.") }, task.AdversarialReviewing},
 		"deleted PRD": {func(t *testing.T, f fixture) { delete(f.gh.comments, prdComment(t, f).ID) }, task.Failed},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -654,7 +654,7 @@ func TestAReopenedPRActsOnItsPRDWhenCICannotBeRead(t *testing.T) {
 		want   task.State
 	}{
 		"same PRD":    {func(t *testing.T, f fixture) {}, task.PRClosed},
-		"edited PRD":  {func(t *testing.T, f fixture) { editPRD(t, f, "R1. Retry 5xx.\nR2. Never retry 4xx.") }, task.SelfReviewing},
+		"edited PRD":  {func(t *testing.T, f fixture) { editPRD(t, f, "R1. Retry 5xx.\nR2. Never retry 4xx.") }, task.AdversarialReviewing},
 		"deleted PRD": {func(t *testing.T, f fixture) { delete(f.gh.comments, prdComment(t, f).ID) }, task.Failed},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -680,7 +680,7 @@ func TestAReopenedPRActsOnItsPRDWhenCICannotBeRead(t *testing.T) {
 			if got.State != tc.want {
 				t.Fatalf("state %s, want %s; outcome %+v", got.State, tc.want, got.LastOutcome)
 			}
-			if tc.want == task.SelfReviewing && len(f.runners.spawned) != 2 {
+			if tc.want == task.AdversarialReviewing && len(f.runners.spawned) != 2 {
 				t.Errorf("spawned %d runners; the edited PRD needs a review runner", len(f.runners.spawned))
 			}
 		})

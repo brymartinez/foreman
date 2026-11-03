@@ -48,8 +48,8 @@ func TestReviewLoopCleanFirstRound(t *testing.T) {
 		t.Fatalf("wrong reviewer: codex %d claude %d", len(f.codex.reviewed), len(f.claude.reviewed))
 	}
 	p := f.codex.reviewed[0]
-	if !strings.Contains(p, "## Review scope") || strings.Contains(p, "Retry 5xx only.") || strings.Contains(p, "5xx-only retry semantics") || strings.Contains(p, "sid-1") {
-		t.Errorf("competing review must see only the diff as task context:\n%s", p)
+	if !strings.Contains(p, "## Checked work") || strings.Contains(p, "Retry 5xx only.") || strings.Contains(p, "5xx-only retry semantics") || strings.Contains(p, "sid-1") {
+		t.Errorf("adversarial review lacks checked work or leaks implementation context:\n%s", p)
 	}
 	if got.Delegation.RunnerPID != 0 || got.LastOutcome.Status != "review_clean" {
 		t.Errorf("pid %d outcome %+v", got.Delegation.RunnerPID, got.LastOutcome)
@@ -70,7 +70,7 @@ func TestReviewLoopFixesFindingsThenReReviews(t *testing.T) {
 	if got.State != task.WaitingForCI || len(cr) != 2 || cr[0].Clean || !cr[1].Clean || cr[1].Round != 3 {
 		t.Fatalf("state %s reviews %+v", got.State, got.Reviews)
 	}
-	if len(f.claude.prompts) != 2 || !strings.Contains(f.claude.prompts[1], "## Findings to correct") || !strings.Contains(f.claude.prompts[1], "retry.go:40") {
+	if len(f.claude.resumed) != 1 || !strings.Contains(f.claude.resumed[0], "requested changes") || !strings.Contains(f.claude.resumed[0], "retry.go:40") {
 		t.Errorf("correction did not start fresh with findings: %q", f.claude.prompts)
 	}
 	if strings.Contains(f.codex.reviewed[1], "Round 2 (one problem)") {
@@ -97,7 +97,7 @@ func TestReviewLoopEscalatesAfterRoundCapAndResumesOnAnswer(t *testing.T) {
 	if got.State != task.NeedsDecision || len(got.CompetingReviews()) != 4 || q == nil || !strings.Contains(q.Question.Issue, "after 3 rounds of fixes") {
 		t.Fatalf("state %s reviews %d pending %+v", got.State, len(got.Reviews), q)
 	}
-	if f.claude.starts != 4 {
+	if f.claude.starts != 1 || len(f.claude.resumed) != 3 {
 		t.Errorf("fresh implementer and correction turns = %d, want 4", f.claude.starts)
 	}
 	if q.Question.Recommendation != "B" || !strings.Contains(q.Question.Context, "[should_fix] 4xx retried") {
@@ -110,7 +110,7 @@ func TestReviewLoopEscalatesAfterRoundCapAndResumesOnAnswer(t *testing.T) {
 	if _, err := f.app.Respond(context.Background(), key, "B"); err != nil {
 		t.Fatal(err)
 	}
-	startsBefore := f.claude.starts
+	resumesBefore := len(f.claude.resumed)
 	if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -118,13 +118,12 @@ func TestReviewLoopEscalatesAfterRoundCapAndResumesOnAnswer(t *testing.T) {
 	if got.State != task.WaitingForCI || !got.LatestReview().Clean || len(got.CompetingReviews()) != 5 {
 		t.Fatalf("after answer: state %s reviews %d", got.State, len(got.Reviews))
 	}
-	if f.claude.starts <= startsBefore || !strings.Contains(f.claude.prompts[len(f.claude.prompts)-1], "Answer: B. Leave the code as is") {
-		t.Errorf("answer not delivered to fresh correction turn: %q", f.claude.prompts)
+	if len(f.claude.resumed) <= resumesBefore || !strings.Contains(f.claude.resumed[len(f.claude.resumed)-1], "Decision: B. Leave the code as is") {
+		t.Errorf("answer not delivered to retained implementation session: %q", f.claude.prompts)
 	}
-	// The reviewer judges the change by the PR description alone, not the developer's
-	// answers to the implementer.
-	if strings.Contains(f.codex.reviewed[len(f.codex.reviewed)-1], "Leave the code as is") {
-		t.Error("reviewer was shown the developer's decision")
+	// The adversarial reviewer must receive the developer's answered decisions.
+	if !strings.Contains(f.codex.reviewed[len(f.codex.reviewed)-1], "Leave the code as is") {
+		t.Error("reviewer was not shown the developer's decision")
 	}
 }
 
@@ -138,7 +137,7 @@ func TestFixRoundsCapsTheLoopApartFromReviewRounds(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.NeedsDecision || len(got.CompetingReviews()) != 2 || f.claude.starts != 2 || !strings.Contains(got.Pending().Question.Issue, "after 1 round of fixes") {
+	if got.State != task.NeedsDecision || len(got.CompetingReviews()) != 2 || f.claude.starts != 1 || len(f.claude.resumed) != 1 || !strings.Contains(got.Pending().Question.Issue, "after 1 round of fixes") {
 		t.Fatalf("state %s reviews %d", got.State, len(got.Reviews))
 	}
 	if !strings.Contains(f.codex.reviewed[0], "Read the complete diff 5 times") {
@@ -184,7 +183,7 @@ func TestCodexImplementationIsReviewedByClaude(t *testing.T) {
 	}
 }
 
-func TestCodexPRUsesCodexReviewWhenAxiConfirmsClaudeNotSetUp(t *testing.T) {
+func TestQuotaDoesNotReplaceTheAdversarialAgent(t *testing.T) {
 	f := newFixture()
 	f.app.Quota = fakeQuota{q: map[task.Agent]Quota{task.Claude: {Status: QuotaNotSetUp}}}
 	req := startReq(t)
@@ -193,13 +192,13 @@ func TestCodexPRUsesCodexReviewWhenAxiConfirmsClaudeNotSetUp(t *testing.T) {
 	f.codex.turn = agent.Turn{Session: task.Session{Agent: task.Codex, ID: "th-1"}, Outcome: prTurn("").Outcome}
 	f.run(context.Background(), key, 4242, io.Discard)
 	got := f.store.recs[key]
-	// Codex self-reviews, then reviews again in a separate session in Claude's place.
-	if got.State != task.WaitingForCI || len(f.codex.reviewed) != 2 || len(f.claude.reviewed) != 0 || got.LatestCompeting().Reviewer != task.Codex || got.Delegation.Reviewer != task.Codex {
+	// Quota status must not substitute Codex for the independent Claude review.
+	if got.State != task.WaitingForCI || len(f.codex.reviewed) != 1 || len(f.claude.reviewed) != 1 || got.LatestCompeting().Reviewer != task.Claude || got.Delegation.Reviewer != task.Claude {
 		t.Fatalf("state %s reviewer %s reviews %+v; codex %d claude %d", got.State, got.Delegation.Reviewer, got.Reviews, len(f.codex.reviewed), len(f.claude.reviewed))
 	}
 }
 
-func TestCodexPRFallsBackToCodexReviewWhenClaudeAuthenticationFails(t *testing.T) {
+func TestUnavailableAdversarialAgentFailsTheTask(t *testing.T) {
 	f := newFixture()
 	req := startReq(t)
 	req.Agent = task.Codex
@@ -208,12 +207,12 @@ func TestCodexPRFallsBackToCodexReviewWhenClaudeAuthenticationFails(t *testing.T
 	f.claude.reviewErr = fmt.Errorf("OAuth session expired: %w", agent.ErrUnavailable)
 	f.run(context.Background(), key, 4242, io.Discard)
 	got := f.store.recs[key]
-	if got.State != task.WaitingForCI || len(f.claude.reviewed) != 1 || len(f.codex.reviewed) != 2 || got.LatestCompeting().Reviewer != task.Codex || got.Delegation.Reviewer != task.Codex {
+	if got.State != task.Failed || len(f.claude.reviewed) != 1 || len(f.codex.reviewed) != 1 || got.Delegation.Reviewer != task.Claude {
 		t.Fatalf("state %s reviewer %s reviews %+v; codex %d claude %d", got.State, got.Delegation.Reviewer, got.Reviews, len(f.codex.reviewed), len(f.claude.reviewed))
 	}
 	got.State = task.Failed
 	resumed := started(t, f, req)
-	if f.store.recs[resumed].Delegation.Reviewer != task.Codex {
+	if f.store.recs[resumed].Delegation.Reviewer != task.Claude {
 		t.Fatalf("resumed reviewer = %s, want codex", f.store.recs[resumed].Delegation.Reviewer)
 	}
 }
@@ -516,15 +515,15 @@ func TestPlanIsPostedThenAFreshSessionImplementsIt(t *testing.T) {
 	if !slices.Equal(f.claude.stages, []task.Stage{task.StagePlan, task.StageImplement}) {
 		t.Errorf("implementer stages = %v", f.claude.stages)
 	}
-	if !strings.Contains(f.claude.reviewed[0], "## Requirements") || !strings.Contains(f.claude.reviewed[0], "### Task 1") || strings.Contains(f.codex.reviewed[0], "### Task 1") {
-		t.Errorf("the self-review needs the plan, competing review does not: self %q competing %q", f.claude.reviewed[0], f.codex.reviewed[0])
+	if strings.Contains(f.claude.reviewed[0], "## Requirements") || strings.Contains(f.claude.reviewed[0], "### Task 1") || !strings.Contains(f.codex.reviewed[0], "### Task 1") {
+		t.Errorf("the adversarial review needs the plan; self-review must omit it: self %q competing %q", f.claude.reviewed[0], f.codex.reviewed[0])
 	}
 	if got.Usage.ClaudeCostUSD != 0.5 || !strings.Contains(log.String(), "foreman: posted the Requirements: https://") {
 		t.Errorf("usage %+v log %q", got.Usage, log.String())
 	}
 }
 
-func TestReviewFindingsStartFreshCorrectionSessionAfterPlan(t *testing.T) {
+func TestReviewFindingsResumeImplementationSessionAfterPlan(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2"), prTurn("sid-2")}
@@ -532,7 +531,7 @@ func TestReviewFindingsStartFreshCorrectionSessionAfterPlan(t *testing.T) {
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if f.claude.starts != 3 || len(f.claude.resumed) != 0 || !strings.Contains(f.claude.prompts[2], "## Findings to correct") {
+	if f.claude.starts != 2 || len(f.claude.resumed) != 1 || !strings.Contains(f.claude.resumed[0], "requested changes") {
 		t.Errorf("review findings must start a correction session: starts %d resumed %q", f.claude.starts, f.claude.resumed)
 	}
 	if !slices.Equal(f.claude.stages, []task.Stage{task.StagePlan, task.StageImplement, task.StageImplement}) {
@@ -607,7 +606,7 @@ func TestPlanCommentFitsGitHubsLimit(t *testing.T) {
 	}
 }
 
-func TestCodexPlansAndClaudeReviewsWithoutThePRD(t *testing.T) {
+func TestCodexPlansAndClaudeReviewsWithTheCheckedPlan(t *testing.T) {
 	f := newFixture()
 	req := startReq(t)
 	req.Agent = task.Codex
@@ -625,8 +624,8 @@ func TestCodexPlansAndClaudeReviewsWithoutThePRD(t *testing.T) {
 	if len(f.codex.prompts) != 2 || !strings.Contains(f.codex.prompts[0], "## Plan first") || !strings.Contains(f.codex.prompt, "### Task 1") || len(f.codex.resumed) != 0 || got.Delegation.Implementer.ID != "th-2" {
 		t.Errorf("codex must implement in a fresh thread: prompts %q resumed %q session %q", f.codex.prompts, f.codex.resumed, got.Delegation.Implementer.ID)
 	}
-	if len(f.claude.reviewed) != 1 || strings.Contains(f.claude.reviewed[0], "R1. Retry 5xx.") || strings.Contains(f.claude.reviewed[0], "> Retry 5xx only.") {
-		t.Errorf("claude's competing review must see only the diff: %q", f.claude.reviewed)
+	if len(f.claude.reviewed) != 1 || !strings.Contains(f.claude.reviewed[0], "R1. Retry 5xx.") || strings.Contains(f.claude.reviewed[0], "> Retry 5xx only.") {
+		t.Errorf("claude's adversarial review must receive the checked plan: %q", f.claude.reviewed)
 	}
 }
 

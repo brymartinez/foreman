@@ -104,25 +104,23 @@ runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR)
                       read the PRD comment, storing its digest (gone, unmarked, or
                       empty PRD -> FAILED)
                     SELF_REVIEW: self = implementer.Review(disposable read-only session,
-                                              checked Requirements and Work plan + git diff
-                                              [+ claims]),
-                                              until a clean one covers this head, scope,
-                                              and plan [and claims and PRD]
+                                              git diff and surrounding code, no task context),
+                                              until clean, or all findings are rejected
+                                              on this unchanged head
                     self error -> FAILED, exit (never falls back to the competing review)
                     self clean -> the competing review of the same change, in this run
                     ADVERSARIAL_REVIEW: review = reviewer.Review(disposable read-only
-                                             session, git diff [+ PRD + claims])
+                                             session, checked plan + decisions + claims + validation + git diff)
                     clean    -> record review and the head it covered; WAITING_FOR_CI, exit
                                 (with the full-suite gate and no full result covering
                                 the head: final check first, see below)
-                    findings (either review) -> IMPLEMENTING; implementer.Start(new session,
+                    findings (either review) -> IMPLEMENTING; implementer.Resume(retained session,
                                 latest findings); agent pushes fixes and reports pr_opened
                                 again; re-verify; self-review, then re-review
                     findings after fix_rounds reviewed fixes since the last answer ->
                       competing: NEEDS_DECISION (A: another round, B: accept remaining), exit
-                      self:      diagnosis turn (implementer, no tools), then
-                                 NEEDS_DECISION (another round or stop; a verified
-                                 context conflict adds which statement governs), exit
+                      self:      implementer assesses on the unchanged commit; reject all
+                                 invalid findings or ask the developer, exit
   with review_before_pr captured on the task and no PR yet, a finished turn returns
   review_ready instead of pr_opened (pr_opened there fails the task):
     review_ready -> verify the branch, a clean worktree, and a descendant commit
@@ -133,9 +131,9 @@ runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR)
                       git merge-tree HEAD origin/<base>
                       conflict -> implementer.Resume(session, merge the base locally, no
                                   push); after two turns still conflicting -> NEEDS_DECISION
-                    self = implementer.Review(checked Requirements and Work plan + git diff), as above
-                    review = reviewer.Review(git diff [+ PRD + claims])
-                    findings -> IMPLEMENTING; implementer.Start(new session, latest findings); fix,
+                    self = implementer.Review(git diff without task context), as above
+                    review = reviewer.Review(checked plan + decisions + claims + validation + git diff)
+                    findings -> IMPLEMENTING; implementer.Resume(retained session, latest findings); assess,
                                 commit locally,
                                 review_ready again with the updated description;
                                 self-review, then re-review
@@ -151,8 +149,8 @@ runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR)
                                 WAITING_FOR_CI, exit
   a stop answered at the fix limit -> FAILED with the unresolved findings; any PR and
   branch stay, and the task is never handed over
-  when the loop ends on a clean review, or at a self-review fix limit diagnosed as a
-  missed practice, and the evidence changed since the stored evaluation: spawn
+  when the loop ends on a clean adversarial review and the evidence changed since
+  the stored evaluation: spawn
   detached `foreman __learn owner/repo#825`, then exit
 
 foreman __learn       -> one evaluation of one task; output goes to <log_dir>/learning.log
@@ -555,7 +553,7 @@ the same commit. The commit message records why it changed.
   `review_ready`, `blocked` with questions, or `failed`. `pr_opened` and `review_ready`
   may carry `claims`. `agent.ParseOutcome` is the only way an implementer's output
   enters the program, and it rejects questions with fewer than two options or duplicate
-  labels. The reviewer, the routing selector, the evaluator, and the limit diagnosis have
+  labels. The reviewer, the routing selector, and the evaluator have
   their own schemas and parsers, `agent.ParseReview`, `agent.ParseSelection`,
   `agent.ParseEvaluation`, and `agent.ParseDiagnosis`.
   Rejected: interactive sessions with terminal scraping.
@@ -691,7 +689,7 @@ the same commit. The commit message records why it changed.
 - **Dollar budgets cap Claude only.** Codex reports no cost and its tokens arrive only
   when a turn ends, so foreman records Codex tokens and never invents a price. The
   Codex log states that the per-call dollar setting is unsupported. Each runner call
-  (including plan checks, revisions, self-review, competing review, and limit diagnosis)
+  (including plan checks, revisions, self-review, and competing review)
   saves its stage, model, times, reported usage, and error before processing its outcome.
   Totals include failed calls when usage was reported. Claude input includes cache
   creation and cache reads; cached input is also shown separately. Codex reasoning is
@@ -794,49 +792,49 @@ the same commit. The commit message records why it changed.
 
 ### Review
 
-- **The implementer reviews its own change first.** Every change gets a self-review
-  before the competing review: a fresh, disposable, read-only session of the
-  implementing agent with its review model, the reviewer budget, and `review_rounds`
-  passes. It never resumes the implementer's session or an earlier self-review. Its
-  prompt carries the checked Requirements and Work plan and diff instructions. With claim
-  verification it also carries the claims. It checks requirements and test evidence
-  before the competing reviewer checks defects and regressions. Findings start a fresh correction
-  session, limited to the latest findings as task context. A self-review that errors
-  fails the task; it never falls back to
-  the competing reviewer, which would skip it. Rejected: running the self-review inside
-  the implementer's session, which shares the blind spots it is meant to catch.
+- **Self-review is independent of task context.** Before adversarial review, the
+  implementing agent's review model runs in a fresh, disposable, read-only session
+  with the reviewer budget and `review_rounds` passes. Each session inspects the
+  complete branch diff and surrounding code. It receives no requirements, plan,
+  claims, decisions, transcript, or earlier findings. It reports concrete code
+  defects and regressions; product decisions belong to the implementing agent.
+  Review errors fail the task.
+- **The implementer assesses findings in its retained session.** Valid findings get
+  focused fixes and another independent self-review. Invalid self-review findings
+  may be rejected through `reviewAssessment`, naming the current review round and
+  unique one-based finding numbers with concrete reasons. Go checks that the round
+  and reviewed commit match the current task and that the findings exist. Reasons
+  are saved as `rejected_findings` on the original review without changing its
+  verdict. Rejecting every finding on an unchanged reviewed commit ends self-review
+  early. Partial rejections or changed commits need another self-review. Rejected
+  findings do not consume fix rounds. A lost session is rebuilt from the checked
+  plan, all answered decisions, committed work, and outstanding findings.
 - **Review kinds live on the record.** Each review records its kind (`self`, or empty
   for competing), head, requirement and claim digests, and the PR text digest for
-  audit. Code review coverage depends on the commit, confirmed scope, plan, and
-  claims. A title or description edit alone does not start model reviews again.
+  audit. Self-review coverage depends on the commit and PR. Adversarial coverage also
+  depends on the confirmed scope, plan, claims, and `decisions_digest`, so a changed
+  answer or option meaning invalidates an earlier verdict. A title or description edit alone does not start model reviews again.
   Empty PR descriptions still block review and handoff through local checks.
   Publishing a locally reviewed change still verifies that the actual PR holds the
   exact proposed title and description, allowing only a trailing codesmith-marked
   footer added after publication. A clean self-review newer than the latest
   competing review leaves the competing review pending, so a restart finishes it.
-- **Reviews start full, then focus on fixes.** The first review reads the whole diff.
-  A later review starts with changes since the same reviewer's previous head and its
-  own earlier findings. The reviewer may inspect the whole change for wider effects.
-  Self-review findings never enter competing review, and a fallback agent does not
-  receive another agent's earlier findings. Both sessions stay fresh and read-only.
-  A focused review requires the same base ref and base commit, unchanged scope and
-  plan, the same Requirements digest for claim verification, and proof that the old
-  review head is an ancestor of the current head. Missing commits, rewritten history,
-  changed requirements or bases, and old records without this metadata get a full
-  review. `WorktreeManager.ReviewRange` reads the already fetched local refs and
-  checks ancestry without another fetch. Each review saves the base ref, base commit,
-  and focused starting head for audit. The PRD and current claims remain statements
-  to test; PR discussion and the other reviewer's verdicts stay out of the prompt.
-- **The reviewer starts as the competing agent** in a disposable session
-  (`--no-session-persistence` / `--ephemeral`) that never sees the implementer's
-  session. Before each review, a fresh `quota-axi` report can move the review to
-  the implementer's agent if it confirms the competitor is not set up or exhausted.
-  An authentication failure from the competitor also triggers that fallback, even
-  when quota is unknown. Foreman records the actual reviewer and keeps it on resume.
-  The fallback is a fresh session with the agent's review settings. Reviews are
-  strictly read-only:
-  Claude gets only `Read, Grep, Glob` and read-only git, and Codex the read-only
-  sandbox. Letting it run tests was rejected, because Claude's Bash has no sandbox.
+- **Adversarial review uses the authoritative task context.** The other agent runs
+  in a fresh disposable session with the checked Requirements and Work plan, all
+  answered decisions including option meanings, claims, reported checks, full-suite
+  evidence, and self-review rejection reasons. Later decisions override conflicting
+  earlier requirements. Implementation transcripts are excluded. Claims and reported
+  checks are evidence to examine, not facts to trust. An unavailable competing agent
+  fails the task; Foreman never substitutes the implementing agent.
+- **Adversarial re-reviews can focus on fixes.** The first adversarial review reads
+  the complete diff. Later reviews may start at that reviewer's previous head with
+  its earlier findings. This requires the same base ref and commit, unchanged scope
+  and plan, the same PRD digest when claims are enabled, and a previous head that is
+  an ancestor of the current one. Missing metadata, rewritten history, or changed
+  requirements or base triggers a full review. Each review records its base and
+  starting head. Self-review always starts independently with the full branch diff.
+- **Both reviewers are read-only.** Claude gets `Read, Grep, Glob` and read-only git;
+  Codex uses its read-only sandbox. Reviewers never resume the implementation session.
 - **Validation commands run in implementation, not review.** Reviewers read code and
   tests but do not run vet, tests, builds, or end-to-end scripts. A reported passing
   check is still a claim about execution, not proof that the tests establish the
@@ -847,8 +845,8 @@ the same commit. The commit message records why it changed.
   check the repository themselves rather than asking the developer to run commands
   that the review session cannot run.
 - **Confirmed triage is checked before implementation.** Foreman verifies Requirements
-  against current triage and checks that Work plan covers each rule. Self-review then
-  checks the change against both documents; competing review judges the diff independently.
+  against current triage and checks that Work plan covers each rule. Adversarial review checks the change against both documents and answered decisions.
+  Self-review inspects only code changes.
   Both use `git diff origin/<base>...HEAD` and may inspect surrounding code to verify
   a concrete defect. A blank PR description still stops the review because Foreman
   requires a usable PR, although reviewers do not receive its text. A task with claim
@@ -871,13 +869,13 @@ the same commit. The commit message records why it changed.
   reviewed PR is given the reviewed claims and must return them unchanged, and before
   it runs, or a matching PR is adopted, the PRD is read again: a changed PRD sends the
   change back to review, and a missing one fails the task. Claims stay in the task file: the prompts keep them out of
-  the PR, comments, commits, and worktree files, and Foreman never posts them. No agent
-  call exists to verify them; both existing reviews do.
+  the PR, comments, commits, and worktree files, and Foreman never posts them. No extra agent
+  call exists to verify them; the adversarial review does.
 - **Reviews test claims against the live PRD.** Before each review, the review step
   reads the PRD comment the task recorded, strips its marker and heading, and stores
   its digest; Linear and GitHub read alike. A missing, unmarked, or empty PRD fails the
   task with the cause, and an unreadable one fails it with the error, before any review
-  runs. Reviewers map each acceptance criterion to a claim, check that cited evidence
+  runs. The adversarial reviewer maps each effective acceptance criterion to a claim, check that cited evidence
   establishes it, look for counterexamples, and treat claims and reported checks as
   unproven. An unsupported material claim is a finding. A behavior the reviewer cannot
   check is a limitation; a blocking one (it prevents judging a criterion or hides a
@@ -912,7 +910,8 @@ the same commit. The commit message records why it changed.
 - **A code review covers one commit and its requirements.** Each review records its
   head, scope, and plan, and with claim verification the claim set and PRD digests too;
   a review of other claims or another PRD does not cover the change. A WAITING_FOR_CI
-  task whose head, scope, plan, claims, or PRD changed is reviewed again, self-review first
+  task whose head, scope, plan, claims, decisions, or PRD changed is reviewed again.
+  A changed head needs self-review first; changed task context alone goes to adversarial review
   (the gate reads the PRD of such a task, and of a claim-verified PR it finds
   reopened, on each refresh before CI, and fails the task when it cannot load it; paths
   that answer comments leave a claim-verified task in WAITING_FOR_CI for that check); new commits on a READY_FOR_HUMAN PR are only
@@ -929,23 +928,13 @@ the same commit. The commit message records why it changed.
   against it. The cap is checked after a review, so no fix reaches the developer
   unreviewed, and answering resets it. At the cap after a competing review, the
   developer can accept the rest (stop, for a local change) or go again.
-- **An unclean self-review is never accepted.** At the cap after a self-review, the
-  options are another round or a stop. Before asking, one diagnosis turn of the
-  implementer's agent, with the evaluator's tool-less restrictions and the reviewer
-  budget, reads the open findings and stored evidence for diagnosing a conflict:
-  issue, plan documents, context file, answered decisions, PR or proposed description,
-  `AGENTS.md` and `CLAUDE.md`, the implement stage instructions, and repository
-  knowledge. This diagnostic evidence does not enter a correction prompt. It answers `practice_gap`,
-  `conflict`, or `none`. Go keeps a conflict only when every quoted statement appears
-  in its named source (whitespace runs compare equal), and otherwise reports none, so
-  a model cannot invent one. A verified conflict lists each statement with its source
-  and adds options for which statement governs. A practice gap goes to learning. A
-  failed diagnosis still asks, saying it was unavailable. The review, the diagnosis,
-  and the question are written together, and the diagnosis is stored on the decision,
-  so a restart neither asks without one nor runs it twice. An answer reaches the
-  implementer, which reconciles code, plan, and description, and the next change
-  needs a new self-review. A stop fails the task with the unresolved findings and
-  leaves any PR and branch as they are.
+- **The implementer owns self-review questions at the fix limit.** The retained
+  implementation session receives the remaining findings and the limit instruction.
+  It may reject every invalid finding with evidence on the unchanged commit or
+  return `blocked` with questions for the developer. A turn that changes the commit
+  or returns without a complete rejection fails until a developer answer resets the
+  limit. No tool-less diagnosis call or generated self-review question runs.
+  Existing stored diagnosis and stop decisions remain readable and actionable.
 
 ### CI and handover
 
@@ -1111,8 +1100,7 @@ the same commit. The commit message records why it changed.
   come from a validated `owner/repo`, so one repository cannot reach another's
   directory. Writes use a temp file and rename.
 - **Two triggers, no daemon.** The runner spawns `foreman __learn` when its loop ends
-  on a clean review, or when it asks at the self-review fix limit with a `practice_gap`
-  diagnosis. The refresh spawns it for a learnable task whose evidence fingerprint
+  on a clean review. The refresh spawns it for a learnable task whose evidence fingerprint
   changed. A task is learnable with a clean competing review, or while its latest
   decision is a `practice_gap` limit that waits for an answer or was answered with a
   stop. The fingerprint covers review count, answered decisions, PR comments, PR
@@ -1176,11 +1164,9 @@ the same commit. The commit message records why it changed.
   still needs a second task or a maintainer citation.
 - **Time and cost are context, not a score.** The evaluator prompt says so, and says
   CI is not evidence. A long or expensive task is not a failure by itself.
-- **Repository knowledge informs triage and diagnosis.** The separate triage skill
-  researches relevant knowledge before publishing decisions. Foreman's diagnostic
-  turn may select up to 8 active learnings and 2000 characters from the task's
-  repository. Planning, implementation, correction, and review prompts do not carry
-  that selection, so their handoff context remains bounded by the stage contract.
+- **Repository knowledge informs triage.** The separate triage skill researches
+  relevant knowledge before publishing decisions. Planning, implementation,
+  correction, and review prompts omit repository knowledge.
 - **Knowledge moves between machines as one Markdown file.** `foreman knowledge
   export owner/repo` writes the rendered active guidance, then a fenced YAML payload
   after a `<!-- foreman-knowledge-payload -->` line: `format: foreman-knowledge/1`,
@@ -1261,7 +1247,7 @@ the same commit. The commit message records why it changed.
   output, a conflict, the lock held, or `--dry-run` writes nothing.
 - **Learning is a side job.** `learning.enabled: false` stops new evaluations, even
   from a learner spawned before the change, because `App.Learn` checks it too;
-  triage and fix-limit diagnosis can still read knowledge already stored.
+  triage can still read knowledge already stored.
   `learning.budget_usd` (default
   0.50) caps one Claude evaluation. Codex reports no cost, so its evaluations have no
   cap, like its other turns. Evaluation errors go to `learning.log` and never
