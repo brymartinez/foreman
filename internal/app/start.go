@@ -43,6 +43,17 @@ var ErrDelegated = errors.New("already delegated")
 // Start prepares the worktree and task file, then launches the detached runner.
 // Rerunning it for a FAILED task, or one whose runner died, resumes from durable state.
 func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) {
+	if req.Key.Source == task.Linear {
+		recs, err := a.Store.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, rec := range recs {
+			if rec.Key.Source == task.Linear && rec.Key.ExternalID == req.Key.ExternalID && rec.Key.Repo != req.Repo && (rec.Delegation != nil || rec.Reset != nil) {
+				return nil, fmt.Errorf("Linear issue already belongs to a task in %s; resume that task", rec.Key.Repo)
+			}
+		}
+	}
 	info, err := a.sourceRepo(ctx, &req)
 	if err != nil {
 		return nil, err

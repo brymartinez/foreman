@@ -28,11 +28,12 @@ internal/task         the durable model: Record, State, Delegation, Decision, At
 `app` depends only on the interfaces in `internal/app/ports.go`. Presentation stays in
 `cmd/foreman`, and process handling stays in `runner` and the adapters.
 `IssueTracker` carries source display identifiers and string comment IDs. Linear
-queries resolve `linear_teams` URLs to team IDs within the authenticated workspace,
-then page through open issues assigned to the authenticated user in each team,
-across every project and including issues without a project. Each team maps to one
-GitHub repository. Config accepts team URLs with an optional `/overview` or `/issues`
-suffix and rejects the retired `linear_projects` key. Issue state types `completed` and `canceled`
+queries resolve the singular `linear_team` URL to a team ID within the authenticated
+workspace, then page through its open issues assigned to the authenticated user,
+across every project and including issues without a project. The team has no
+repository mapping. Config accepts a team URL with an optional `/overview` or
+`/issues` suffix and rejects the retired `linear_projects` and `linear_teams` keys.
+Issue state types `completed` and `canceled`
 map to closed; Linear's `Entity not found` errors map to `ErrGone` for tracked
 issues and planning comments. Repository and PR operations remain on `GitHubClient`.
 The detached runner receives `owner/repo#linear:<issue ID>` for Linear tasks and
@@ -395,6 +396,25 @@ the same commit. The commit message records why it changed.
   `gh pr create`). That lets a crashed runner be restarted from the
   task file.
 
+### Linear repository selection
+
+- **Discovery does not allocate a repository.** New team issues use their Linear
+  UUID as the inbox identity and stay in memory. Reconciliation reuses an existing
+  delegation's repository by UUID. Legacy undelegated Linear snapshots are ignored
+  during refresh, and no empty-repository task is saved.
+- **Resolve before preparing work.** Selecting a new issue reads its description
+  and marked triage comments for explicit GitHub repository links. A single allowed
+  destination prefills a repository prompt. The developer confirms or edits it
+  before agent routing or branch proposal. Missing or conflicting evidence requires
+  an explicit repository. External triage documents are not fetched automatically.
+  Repository filters are checked before a branch proposal prepares a checkout.
+- **Auto mode uses the same resolver.** It starts only with one allowed repository
+  in the issue or triage links. Otherwise the issue waits for a manual choice.
+  Existing assignment, triaged-label, quota, and branch rules still apply.
+- **Delegations keep their repository.** A start rejects an issue UUID already
+  delegated to another repository. Task keys, filenames, branches, and runner
+  arguments stay unchanged for existing delegations.
+
 ### Task files
 
 - **One Markdown file per source-qualified issue**, named `<owner>-<repo>-<number>.md`
@@ -611,7 +631,8 @@ the same commit. The commit message records why it changed.
   or its comments fails the task before any turn or post.
 - **Implementation checkpoints reset context within the implement phase.** Before a
   PR exists, an implementer may finish one tested part with `checkpoint`, one short
-  next objective, and reported passing validation. Foreman accepts it only when the
+  next objective, and reported passing validation. Brevity is prompt guidance;
+  objectives have no character limit. Foreman accepts it only when the
   worktree is clean on the task branch and HEAD advances from the last accepted
   commit. It saves the commit, objective, and usage together, clears the old session,
   and starts a fresh one. The new prompt includes the checked Requirements and Work plan,
@@ -991,12 +1012,12 @@ the same commit. The commit message records why it changed.
   their closing keyword.
 - **Repository and source filters.** A nonempty `include_repositories` shows only those
   repositories and overrides `exclude_repositories`; otherwise the exclude list hides
-  its repositories. Mapped repositories discover issues through Linear, while their
-  GitHub PR search results remain in the refresh report. Unmapped repositories discover
-  issues through GitHub. The resolved source (`-s`, else `default_source`) limits
+  its repositories. GitHub discovery remains independent of the Linear team. New
+  Linear issues have no repository until delegation, so repository filters do not
+  hide them. The resolved source (`-s`, else `default_source`) limits
   inbox discovery to `github` or `linear`; `all` becomes the empty source, which
   selects both. A missing Linear key blocks startup only when the source is `linear`
-  or `all` and a visible repository is mapped. A failed source leaves successful results and a warning, while
+  or `all` and `linear_team` is configured. A failed source leaves successful results and a warning, while
   auto mode waits for all selected sources to refresh successfully. The inbox groups
   selectable issues under GITHUB and LINEAR. `App.InboxSources` drops filtered items before
   `Reconcile`, so the configured view writes no records for them and reports no waiting
@@ -1056,6 +1077,8 @@ the same commit. The commit message records why it changed.
   line. `R` shows raw lines and returns to the tail, since raw and cleaned lines do not
   line up. The scroll offset counts from the tail and grows with new lines, so a reader
   scrolled back keeps the same lines on screen.
+  The runner's final log line includes the saved task state and last outcome summary,
+  including failures recorded without a returned execution error.
 
 - **The PR history is its own full-screen view.** `p` opens a narrow PR list beside
   the selected PR's vertical phase times, with a short full-width log below. Enter

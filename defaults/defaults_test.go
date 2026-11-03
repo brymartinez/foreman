@@ -32,7 +32,7 @@ func TestShippingConfigLoadsWithoutPersonalSettings(t *testing.T) {
 	if cfg.Claude.Model != "opus" || cfg.Claude.PlanModel != "sonnet" || cfg.Codex.PlanModel != "gpt-6-luna" {
 		t.Errorf("shipping models were not loaded: claude=%+v codex=%+v", cfg.Claude, cfg.Codex)
 	}
-	if cfg.Notifications.WebhookURL != "" || len(cfg.IncludedRepos) != 0 || len(cfg.ExcludedRepos) != 0 || len(cfg.LinearTeams) != 0 {
+	if cfg.Notifications.WebhookURL != "" || len(cfg.IncludedRepos) != 0 || len(cfg.ExcludedRepos) != 0 || cfg.LinearTeam != "" {
 		t.Error("shipping config contains personal settings")
 	}
 }

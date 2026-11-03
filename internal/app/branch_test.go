@@ -35,18 +35,18 @@ func TestRepositoryBranchGuidanceWinsOverLinearSuggestion(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "docs/branches.md"), []byte("Branch naming: <owner>/<workstream>-<short-slug>."), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	f.gh.issue.Identifier = "KUB-189"
-	f.gh.issue.BranchName = "bryan/kub-189-project-comms"
+	f.gh.issue.Identifier = "ENG-189"
+	f.gh.issue.BranchName = "bryan/eng-189-project-comms"
 	f.gh.issue.Title = "DB project comms thread"
 	f.gh.issue.Body = "Workstream: db"
 	f.app.Linear = &lifecycleTracker{issue: f.gh.issue}
-	proposer := &fakeBranchProposer{out: agent.Outcome{Status: agent.BranchProposed, BranchName: "bryan/db-kub-189-project-comms", Summary: "DB workstream"}}
+	proposer := &fakeBranchProposer{out: agent.Outcome{Status: agent.BranchProposed, BranchName: "bryan/db-eng-189-project-comms", Summary: "DB workstream"}}
 	f.app.BranchProposer = proposer
 	got, err := f.app.ProposeBranch(context.Background(), StartRequest{Dir: root, Key: task.Key{Source: task.Linear, Repo: f.gh.repo.Repo, ExternalID: "issue-id"}, Agent: task.Claude})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Name != "bryan/db-kub-189-project-comms" || got.Uncertain {
+	if got.Name != "bryan/db-eng-189-project-comms" || got.Uncertain {
 		t.Fatalf("proposal = %+v", got)
 	}
 	if !strings.Contains(proposer.in.Prompt, "<owner>/<workstream>-<short-slug>") || !strings.Contains(proposer.in.Prompt, f.gh.issue.BranchName) {

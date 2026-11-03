@@ -9,19 +9,10 @@ import (
 	"github.com/brymartinez/foreman/internal/task"
 )
 
-func TestLinearCredentialsNeededOnlyForVisibleLinearTeams(t *testing.T) {
-	cfg := config.Config{LinearTeams: map[task.Repo]string{"acme/web": "project"}}
+func TestLinearCredentialsIgnoreRepositoryFilters(t *testing.T) {
+	cfg := config.Config{LinearTeam: "https://linear.app/acme/team/ENG", IncludedRepos: []task.Repo{"acme/api"}}
 	if !linearSelected(cfg, "") || !linearSelected(cfg, task.Linear) || linearSelected(cfg, task.GitHub) {
-		t.Fatal("source selection did not match the mapped repository")
-	}
-	cfg.IncludedRepos = []task.Repo{"acme/api"}
-	if linearSelected(cfg, "") {
-		t.Fatal("excluded Linear team required credentials")
-	}
-	cfg.IncludedRepos = nil
-	cfg.ExcludedRepos = []task.Repo{"acme/web"}
-	if linearSelected(cfg, "") {
-		t.Fatal("excluded Linear team required credentials")
+		t.Fatal("incorrect team selection")
 	}
 }
 
@@ -65,18 +56,18 @@ func TestResolveMentionsPrefersTheFlagThenConfig(t *testing.T) {
 }
 
 func TestMissingLinearKeyStopsTheDashboardOnlyWhenTheSourceShowsAVisibleLinearRepo(t *testing.T) {
-	mapped := map[task.Repo]string{"acme/web": "https://linear.app/acme/project/web"}
+	team := "https://linear.app/acme/team/WEB"
 	for name, tc := range map[string]struct {
 		cfg     config.Config
 		cmd     cli.Command
 		wantErr bool
 	}{
-		"default_source all needs the key":    {config.Config{DefaultSource: config.SourceAll, LinearTeams: mapped}, cli.Command{}, true},
-		"-s all needs the key":                {config.Config{DefaultSource: task.GitHub, LinearTeams: mapped}, cli.Command{Source: config.SourceAll, Auto: cli.AutoOn}, true},
-		"default_source linear needs the key": {config.Config{DefaultSource: task.Linear, LinearTeams: mapped}, cli.Command{}, true},
-		"-s github skips the key":             {config.Config{DefaultSource: config.SourceAll, LinearTeams: mapped}, cli.Command{Source: task.GitHub}, false},
-		"built-in github skips the key":       {config.Config{DefaultSource: task.GitHub, LinearTeams: mapped}, cli.Command{}, false},
-		"all with the Linear repo excluded":   {config.Config{DefaultSource: config.SourceAll, LinearTeams: mapped, ExcludedRepos: []task.Repo{"acme/web"}}, cli.Command{}, false},
+		"default_source all needs the key":    {config.Config{DefaultSource: config.SourceAll, LinearTeam: team}, cli.Command{}, true},
+		"-s all needs the key":                {config.Config{DefaultSource: task.GitHub, LinearTeam: team}, cli.Command{Source: config.SourceAll, Auto: cli.AutoOn}, true},
+		"default_source linear needs the key": {config.Config{DefaultSource: task.Linear, LinearTeam: team}, cli.Command{}, true},
+		"-s github skips the key":             {config.Config{DefaultSource: config.SourceAll, LinearTeam: team}, cli.Command{Source: task.GitHub}, false},
+		"built-in github skips the key":       {config.Config{DefaultSource: task.GitHub, LinearTeam: team}, cli.Command{}, false},
+		"all with the Linear repo excluded":   {config.Config{DefaultSource: config.SourceAll, LinearTeam: team, ExcludedRepos: []task.Repo{"acme/web"}}, cli.Command{}, true},
 		"all with no Linear mapping":          {config.Config{DefaultSource: config.SourceAll}, cli.Command{}, false},
 	} {
 		t.Run(name, func(t *testing.T) {

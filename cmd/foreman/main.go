@@ -114,7 +114,7 @@ func run(argv []string) int {
 		Store:             store.Markdown{Dir: cfg.TasksDir},
 		GitHub:            github.New(),
 		Linear:            linearClient,
-		LinearTeams:       cfg.LinearTeams,
+		LinearTeam:        cfg.LinearTeam,
 		Repositories:      github.New(),
 		Worktrees:         worktree.Git{},
 		Accounts:          github.New(),
@@ -187,7 +187,6 @@ func run(argv []string) int {
 			fmt.Fprintf(log, "foreman: %v\n", err)
 			return 1
 		}
-		fmt.Fprintf(log, "foreman: runner %d finished\n", os.Getpid())
 	case cli.Learn:
 		// Every learner shares learning.log, so each line names the task. A failure
 		// here is the log's alone: the task, its alerts, and its runner never see it.
@@ -236,8 +235,7 @@ func resolveMentions(cfg config.Config, cmd cli.Command) bool {
 	return cfg.Mentions
 }
 
-// requireLinearKey fails when the resolved source shows a visible repository mapped
-// to Linear and no API key is set.
+// requireLinearKey checks credentials for the selected Linear team.
 func requireLinearKey(cfg config.Config, source task.Source, key string) error {
 	if key != "" || !linearSelected(cfg, source) {
 		return nil
@@ -246,34 +244,14 @@ func requireLinearKey(cfg config.Config, source task.Source, key string) error {
 	if source == "" {
 		shown = "all"
 	}
-	return fmt.Errorf("issue source %s needs LINEAR_API_KEY for the repositories mapped in linear_teams; set it, or use -s github or default_source: github for GitHub only", shown)
+	return fmt.Errorf("issue source %s needs LINEAR_API_KEY for linear_team; set it, or use -s github or default_source: github for GitHub only", shown)
 }
 
 func linearSelected(cfg config.Config, source task.Source) bool {
 	if source == task.GitHub {
 		return false
 	}
-	for repo := range cfg.LinearTeams {
-		if len(cfg.IncludedRepos) > 0 {
-			for _, included := range cfg.IncludedRepos {
-				if included == repo {
-					return true
-				}
-			}
-			continue
-		}
-		excluded := false
-		for _, entry := range cfg.ExcludedRepos {
-			if entry == repo {
-				excluded = true
-				break
-			}
-		}
-		if !excluded {
-			return true
-		}
-	}
-	return false
+	return cfg.LinearTeam != ""
 }
 
 // autoMode reads the saved auto mode choice. A state file that cannot be read

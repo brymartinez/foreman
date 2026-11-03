@@ -44,7 +44,7 @@ var secretPatterns = []pattern{
 // but not in reusable guidance.
 var referencePatterns = []pattern{
 	{regexp.MustCompile(`#\s*\d+`), 0, "issue reference", nil},
-	// Linear and Jira keys such as KUB-129. Encodings and standards keep their names.
+	// Linear and Jira keys such as ENG-129. Encodings and standards keep their names.
 	{regexp.MustCompile(`\b[A-Z][A-Z0-9]{0,9}-\d+\b`), 0, "issue reference", standardName},
 	{regexp.MustCompile(`(?i)\b(pr|pull request|issue|ticket)\s*#?\s*\d+`), 0, "issue reference", nil},
 	{regexp.MustCompile(`\b[0-9a-f]*(?:[0-9][a-f]|[a-f][0-9])[0-9a-f]*\b`), 7, "commit reference", nil},

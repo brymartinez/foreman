@@ -308,6 +308,9 @@ func inboxPane(m Model) pane {
 		identity := fmt.Sprintf("%s#%d  %s", k.Repo, k.Number, e.Item.Title)
 		if issueSource == task.Linear {
 			identity = fmt.Sprintf("%s · %s  %s", k.Repo, e.Item.Identifier, e.Item.Title)
+			if k.Repo == "" {
+				identity = fmt.Sprintf("%s  %s", e.Item.Identifier, e.Item.Title)
+			}
 		}
 		r := row{lines: []string{identity}}
 		if i == 0 || issueSource != previous {
@@ -700,6 +703,10 @@ func footer(m Model) string {
 		return "PAUSED · space or navigation resumes"
 	}
 	switch m.Mode {
+	case ResolvingRepository:
+		return "Reading issue and triage for repository selection…   esc cancel"
+	case TypingRepository:
+		return "GitHub repository (owner/repo; enter to confirm): " + m.Input + "█  esc cancel"
 	case ChoosingAgent:
 		if m.offersRoute() {
 			return fmt.Sprintf("Delegate %s#%d with:  [1] Claude   [2] Codex   [3] Route   esc cancel", m.pending.Repo, m.pending.Issue)

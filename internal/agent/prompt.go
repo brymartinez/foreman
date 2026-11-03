@@ -175,7 +175,7 @@ func ImplementationPrompt(b TaskBrief) string {
 
 For a multi-part change, complete one coherent, testable part at a time. When that part is committed and more work remains, end this session with status "checkpoint". Ensure the worktree is clean, report the validation you ran, and set nextObjective to one short, concrete objective for a fresh session. Do not push or open a pull request at a checkpoint. When the whole change is ready, %s.
 
-The next session receives the commit, nextObjective, and checked requirements and work plan, not this transcript. Keep nextObjective under 500 characters; the committed code and documents hold the details.
+The next session receives the commit, nextObjective, and checked requirements and work plan, not this transcript. Keep nextObjective short and concrete; the committed code and documents hold the details.
 
 `, finish)
 	}

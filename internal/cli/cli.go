@@ -110,7 +110,7 @@ Precedence:
   such as mentions: false, models, and budgets.
 
 Settings without launch flags:
-  config.yaml: refresh, repository filters and linear_teams, directories,
+  config.yaml: refresh, repository filters and linear_team, directories,
   agent commands and models, budgets, review policy, learning, notifications,
   cleanup, auto.agent, and auto.max_concurrent. Unknown keys are an error.
   routing.yaml: selector, profiles, and rules.

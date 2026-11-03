@@ -226,9 +226,8 @@ start that fails is shown on the message line and is not retried until you reope
 dashboard. An issue that lacks detail goes through the usual decision flow.
 
 For GitHub repositories, the inbox searches for open issues assigned to you, open
-issues and PRs that mention you, and PRs that request your review. For repositories
-mapped to Linear, it lists open,
-nonterminal issues assigned to the Linear user named by `LINEAR_API_KEY`. INBOX groups
+issues and PRs that mention you, and PRs that request your review. For the configured
+Linear team, it lists open issues assigned to the user named by `LINEAR_API_KEY`. INBOX groups
 delegatable issues under GITHUB and LINEAR, with
 what changed since the last refresh beneath each one. Each search returns up to 1000
 results.
@@ -615,7 +614,7 @@ The built-in defaults are not the same file as the shipped `defaults/config.yaml
 which `make setup` installs when you have no config. The shipped file chooses some
 different values on purpose: `mentions: false`, `opus` and `sonnet` Claude models,
 Codex plan and reasoning settings, and $25 and $10 budgets. It leaves the webhook
-URL, repository filters, and Linear team mappings empty.
+URL, repository filters, and Linear team setting empty.
 
 Built-in defaults:
 
@@ -661,7 +660,7 @@ codex:
   review_reasoning_effort: ""        # "" uses reasoning_effort
 include_repositories: []             # exact owner/name; when set, the inbox shows only these
 exclude_repositories: []             # exact owner/name hidden from the inbox when include is empty
-linear_teams: {}                      # GitHub owner/name -> Linear team URL
+linear_team: ""                      # Linear team URL; independent of GitHub repositories
 cleanup:
   on_done: true                   # each refresh removes DONE tasks' worktrees
   delete_merged_branch: true      # and the local branch, once the PR is merged
@@ -693,12 +692,11 @@ planning totals use the saved call history. Older missing usage is not backfille
 Dollar limits apply to Claude only. The task file stores each runner call with its
 stage, model, usage, times, and error; the task view shows calls and tokens by stage.
 
-To use Linear issues for a repository, map it to one Linear team URL and set a
-personal API key before starting Foreman:
+To use Linear, set the team URL and a personal API key before starting Foreman:
 
 ```yaml
-linear_teams:
-  acme/web: https://linear.app/kubbly-ai/team/KUB/overview
+linear_team: https://linear.app/acme/team/ENG/overview
+default_source: all
 ```
 
 ```bash
@@ -706,17 +704,28 @@ export LINEAR_API_KEY=your-personal-linear-api-key
 foreman
 ```
 
-Replace any existing `linear_projects` setting with `linear_teams` and replace
-each project URL with its team URL. The old setting is no longer accepted. Team
-URLs can end in `/overview` or `/issues`, or stop at the team key.
+Replace `linear_projects` or `linear_teams` with the singular `linear_team` string.
+The old mapping settings are no longer accepted. Team URLs can end in `/overview`
+or `/issues`, or stop at the team key.
 
-Repositories without a mapping continue to use GitHub issues. A Linear team can
-belong to only one repository. Foreman discovers your assigned open issues across
-all projects in that team, including issues without a project. The API key must
-have access to the team. Set `default_source: linear` or `all` to show Linear
-issues by default, or pass `-s linear` or `-s all` for one launch. `foreman -s github`
-does not need `LINEAR_API_KEY`. If the selected source is `linear` or `all` and a
-visible repository is mapped, foreman stops at startup until the key is set.
+Foreman discovers your assigned open issues across every project in the team,
+including issues without a project. GitHub issues remain available independently.
+Set `default_source: linear` or `all`, or pass `-s linear` or `-s all` for one
+launch. Linear discovery needs `LINEAR_API_KEY` with access to that team.
+`foreman -s github` does not need the key.
+
+When you select a new Linear issue, Foreman reads its description and triage
+comments for explicit GitHub repository links. It proposes a repository when those
+links identify one allowed destination. Confirm or edit the `owner/repo` before
+choosing an agent. Missing or conflicting links require you to enter a repository.
+A triage document hosted elsewhere is not fetched automatically; enter the
+repository when the issue and its triage comments do not identify it.
+
+Repository filters apply after selection and do not hide unresolved Linear issues.
+Auto mode infers the destination using the same links and leaves ambiguous issues
+for manual selection. A delegated issue keeps its confirmed repository across
+refreshes and restarts.
+
 Foreman reads and comments on Linear issues but does not change their status.
 Branches and pull requests stay on GitHub. A Linear task's PR title includes its
 Linear identifier, and its body links to the Linear issue instead of using a GitHub

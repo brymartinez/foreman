@@ -66,6 +66,7 @@ type result struct {
 	// routed is a manual route's result, for the request numbered routeSeq.
 	routed      *app.Decision
 	routeSeq    int
+	repository  *app.RepositoryProposal
 	proposal    *app.BranchProposal
 	proposalSeq int
 	// wait is why routing held an auto start back; selection is what it chose.
@@ -192,6 +193,12 @@ func Run(ctx context.Context, o Options) (err error) {
 				req := a.Start
 				pending++
 				go func() { results <- start(ctx, o.Source, req, false) }()
+			case ActionRepository:
+				req, seq := a.Start, a.ProposalSeq
+				go func() {
+					p, err := o.Source.ProposeRepository(ctx, req.Key)
+					results <- result{repository: &p, proposalSeq: seq, err: err}
+				}()
 			case ActionPropose:
 				req, seq := a.Start, a.ProposalSeq
 				go func() { results <- propose(ctx, o.Source, req, seq) }()
@@ -335,6 +342,10 @@ func apply(m *Model, r result) {
 		m.Routed(r.routeSeq, *r.routed, r.err)
 		return
 	}
+	if r.repository != nil {
+		m.RepositoryProposed(r.proposalSeq, *r.repository, r.err)
+		return
+	}
 	if r.proposal != nil {
 		m.Proposed(r.proposalSeq, *r.proposal, r.err)
 		return
@@ -434,6 +445,16 @@ func propose(ctx context.Context, s Source, req app.StartRequest, seq int) resul
 // profile. When no suitable profile can run, nothing starts and the result says why.
 func autoStart(ctx context.Context, s Source, req app.StartRequest, prior *agent.Selection) result {
 	key := requestKey(req)
+	if req.Key.Source == task.Linear && req.Repo == "" {
+		p, err := s.ProposeRepository(ctx, req.Key)
+		if err != nil {
+			return result{err: fmt.Errorf("auto: repository selection: %w", err), key: key, auto: true, finished: true}
+		}
+		if p.Repo == "" {
+			return result{message: "! auto: repository needs a choice: " + p.Reason, wait: p.Reason, key: key, auto: true, finished: true}
+		}
+		req.Repo, req.Key.Repo = p.Repo, p.Repo
+	}
 	var selection agent.Selection
 	if req.Agent == "" {
 		d, err := s.Route(ctx, app.RouteRequest{Key: req.Key, Repo: req.Repo, Issue: req.Issue, Prior: prior})
@@ -455,7 +476,9 @@ func autoStart(ctx context.Context, s Source, req app.StartRequest, prior *agent
 		return result{message: fmt.Sprintf("! auto: %s#%d waits: %s", req.Repo, req.Issue, reason), wait: reason, selection: selection, key: key, auto: true, finished: true}
 	}
 	req.BranchName = p.Name
-	return start(ctx, s, req, true)
+	r := start(ctx, s, req, true)
+	r.key = key
+	return r
 }
 
 func startResult(ctx context.Context, s Source, req app.StartRequest) result {

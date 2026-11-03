@@ -46,9 +46,9 @@ type Config struct {
 	Auto          Auto          `yaml:"auto"`
 	// IncludedRepos, when nonempty, limits the inbox to these repositories and
 	// overrides ExcludedRepos.
-	IncludedRepos []task.Repo          `yaml:"include_repositories"`
-	ExcludedRepos []task.Repo          `yaml:"exclude_repositories"`
-	LinearTeams   map[task.Repo]string `yaml:"linear_teams"`
+	IncludedRepos []task.Repo `yaml:"include_repositories"`
+	ExcludedRepos []task.Repo `yaml:"exclude_repositories"`
+	LinearTeam    string      `yaml:"linear_team"`
 	// Path is the resolved config file used by config show/edit.
 	Path string `yaml:"-"`
 	// StagesDir holds the global stage instructions: stages/ next to the config file,
@@ -161,6 +161,9 @@ func Load() (Config, error) {
 		dec := yaml.NewDecoder(bytes.NewReader(raw))
 		dec.KnownFields(true)
 		if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
+			if strings.Contains(err.Error(), "field linear_teams not found") || strings.Contains(err.Error(), "field linear_projects not found") {
+				return Config{}, fmt.Errorf("%s: %w; replace retired Linear mappings with linear_team: https://linear.app/<workspace>/team/<KEY>/overview; choose a repository when delegating", path, err)
+			}
 			return Config{}, fmt.Errorf("%s: %w", path, err)
 		}
 		// A later document would be ignored, along with any key in it. An empty one,
@@ -216,20 +219,12 @@ func Load() (Config, error) {
 	if err := parseRepoList("exclude_repositories", cfg.ExcludedRepos); err != nil {
 		return Config{}, err
 	}
-	seenTeams := make(map[string]task.Repo)
-	for repo, teamURL := range cfg.LinearTeams {
-		if _, err := task.ParseRepo(string(repo)); err != nil {
-			return Config{}, fmt.Errorf("linear_teams: %w", err)
-		}
-		canonical, err := linearTeamURL(teamURL)
+	if cfg.LinearTeam != "" {
+		canonical, err := linearTeamURL(cfg.LinearTeam)
 		if err != nil {
-			return Config{}, fmt.Errorf("linear_teams[%s]: %w", repo, err)
+			return Config{}, fmt.Errorf("linear_team: %w", err)
 		}
-		if other, ok := seenTeams[canonical]; ok {
-			return Config{}, fmt.Errorf("linear team %s mapped to both %s and %s", canonical, other, repo)
-		}
-		seenTeams[canonical] = repo
-		cfg.LinearTeams[repo] = canonical
+		cfg.LinearTeam = canonical
 	}
 	return cfg, nil
 }
@@ -248,13 +243,6 @@ func ValidSource(s task.Source) error {
 		return nil
 	}
 	return fmt.Errorf("unknown issue source %q (want github, linear, or all)", s)
-}
-
-func (c Config) IssueSource(repo task.Repo) task.Source {
-	if _, ok := c.LinearTeams[repo]; ok {
-		return task.Linear
-	}
-	return task.GitHub
 }
 
 func linearTeamURL(raw string) (string, error) {

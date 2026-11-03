@@ -123,12 +123,16 @@ func TestCheckpointVerificationFailureStopsBeforeAnotherSession(t *testing.T) {
 	postedPlan(f, f.store.recs[key])
 	f.wt.checkpointErr = errors.New("checkpoint has uncommitted files")
 	f.claude.turn = checkpointTurn("first-session", "Continue work")
-	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+	var log strings.Builder
+	if err := f.run(context.Background(), key, 4242, &log); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
 	if got.State != task.Failed || !strings.Contains(got.LastOutcome.Summary, "uncommitted files") || f.claude.starts != 1 || got.Delegation.Checkpoints != 0 {
 		t.Fatalf("state %s outcome %+v starts %d checkpoints %d", got.State, got.LastOutcome, f.claude.starts, got.Delegation.Checkpoints)
+	}
+	if !strings.Contains(log.String(), "foreman: runner 4242 finished: FAILED: verify implementation checkpoint: checkpoint has uncommitted files") {
+		t.Fatalf("failure missing from runner log: %s", log.String())
 	}
 }
 
@@ -136,6 +140,7 @@ func TestRetryPreservesCheckpointOnlyWhenBranchHeadMatches(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	rec := f.store.recs[key]
+	postedPlan(f, rec)
 	rec.State = task.Failed
 	rec.Delegation.CheckpointHead = "commit1"
 	rec.Delegation.CheckpointNext = "Add the dashboard log pager"
@@ -156,6 +161,16 @@ func TestRetryPreservesCheckpointOnlyWhenBranchHeadMatches(t *testing.T) {
 	}
 	if got.Delegation.CheckpointNext != "" || got.Delegation.CheckpointHead != "later-commit" || got.Delegation.Checkpoints != 0 {
 		t.Fatalf("changed head kept stale checkpoint: %+v", got.Delegation)
+	}
+	f.claude.turn = prTurn("retry-session")
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if f.store.recs[key].State != task.WaitingForCI || f.claude.starts != 1 {
+		t.Fatalf("retry did not continue implementation: state %s starts %d", f.store.recs[key].State, f.claude.starts)
+	}
+	if !strings.Contains(f.claude.prompt, "Posted plan.") || strings.Contains(f.claude.prompt, "Add the dashboard log pager") {
+		t.Fatalf("retry did not use the saved plan without the stale objective: %s", f.claude.prompt)
 	}
 }
 

@@ -218,13 +218,13 @@ func TestDelegateWithoutAContextFile(t *testing.T) {
 func TestManualStartCanEditAnUncertainBranchBeforeStarting(t *testing.T) {
 	m := model()
 	a := press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter})
-	m.Proposed(a.ProposalSeq, app.BranchProposal{Name: "bryan/kub-189-x", Reason: "workstream unclear", Uncertain: true}, nil)
+	m.Proposed(a.ProposalSeq, app.BranchProposal{Name: "bryan/eng-189-x", Reason: "workstream unclear", Uncertain: true}, nil)
 	if m.Mode != TypingBranch || !strings.Contains(m.Message, "needs your choice") {
 		t.Fatalf("mode %v message %q", m.Mode, m.Message)
 	}
-	m.Input = "bryan/db-kub-189-x"
+	m.Input = "bryan/db-eng-189-x"
 	got := press(&m, Key{Kind: KeyEnter})
-	if got.Kind != ActionStart || got.Start.BranchName != "bryan/db-kub-189-x" {
+	if got.Kind != ActionStart || got.Start.BranchName != "bryan/db-eng-189-x" {
 		t.Fatalf("start = %+v", got)
 	}
 }

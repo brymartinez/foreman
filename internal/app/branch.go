@@ -21,6 +21,9 @@ type BranchProposal struct {
 // ProposeBranch reads repository guidance without creating a worktree or task.
 // A stored branch always wins, including on a failed task's next start.
 func (a App) ProposeBranch(ctx context.Context, req StartRequest) (BranchProposal, error) {
+	if req.Key.Source == task.Linear && !a.repoVisible(req.Repo, false) {
+		return BranchProposal{}, fmt.Errorf("repository %s is outside the configured repository filters", req.Repo)
+	}
 	info, err := a.sourceRepo(ctx, &req)
 	if err != nil {
 		return BranchProposal{}, err

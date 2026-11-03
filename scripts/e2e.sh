@@ -753,16 +753,15 @@ scenario_linear() {
 	export LINEAR_API_KEY=e2e-personal-key
 	export FOREMAN_LINEAR_ENDPOINT="http://127.0.0.1:$(cat "$state/linear-port")/graphql"
 	cat >>"$sandbox/config.yaml" <<'EOF'
-linear_teams:
-  acme/linear: https://linear.app/acme/team/LIN
+linear_team: https://linear.app/acme/team/LIN
 EOF
 	issue 43 "GitHub work" '[{"name":"triaged"}]'
 	echo "[$(hit acme/widgets 43 'GitHub work'),$(hit acme/linear 44 'Mapped GitHub work')]" >"$state/search-issues-assignee.json"
 	dash --no-auto -s all -- refreshed print >"$sandbox/mixed.txt" 2>/dev/null
 	check "the mixed inbox shows the GitHub section" contains "$sandbox/mixed.txt" "GITHUB"
 	check "the mixed inbox shows the Linear section" contains "$sandbox/mixed.txt" "LINEAR"
-	check "the mixed inbox shows both issues" bash -c "grep -qF 'acme/widgets#43' '$sandbox/mixed.txt' && grep -qF 'acme/linear · LIN-7' '$sandbox/mixed.txt'"
-	check "the mapped repository hides GitHub issues" bash -c "! grep -qF 'acme/linear#44' '$sandbox/mixed.txt'"
+	check "the mixed inbox shows both issues" bash -c "grep -qF 'acme/widgets#43' '$sandbox/mixed.txt' && grep -qF 'LIN-7' '$sandbox/mixed.txt'"
+	check "the team does not hide GitHub issues" bash -c "grep -qF 'acme/linear#44' '$sandbox/mixed.txt'"
 	dash --no-auto -s github -- refreshed print >"$sandbox/github.txt" 2>/dev/null
 	check "the GitHub filter hides Linear issues" bash -c "grep -qF 'acme/widgets#43' '$sandbox/github.txt' && ! grep -qF 'LIN-7' '$sandbox/github.txt'"
 	dash --no-auto -s linear -- refreshed print >"$sandbox/linear.txt" 2>/dev/null
@@ -774,7 +773,7 @@ EOF
 	rm -f "$state/linear-fail"
 	check "a GitHub issue can be delegated" dash --no-auto -s github -- refreshed "pick=acme/widgets#43" 'keys=\r1\r' confirm-branch "wait=Started acme/widgets#43"
 	check "the GitHub task keeps its issue number" grep -q '^number: 43' "$sandbox/tasks/acme-widgets-43.md"
-	if dash --no-auto -s linear -- refreshed "pick=acme/linear · LIN-7" 'keys=\r1\r' confirm-branch "wait=Started acme/linear · LIN-7" >"$sandbox/linear-start.txt" 2>&1; then
+	if dash --no-auto -s linear -- refreshed "pick=LIN-7" 'keys=\r' "wait=GitHub repository" 'keys=acme/linear\r1\r' confirm-branch "wait=Started acme/linear · LIN-7" >"$sandbox/linear-start.txt" 2>&1; then
 		pass "a Linear issue can be delegated"
 	else
 		fail "a Linear issue can be delegated"

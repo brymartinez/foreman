@@ -42,11 +42,22 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, token string, l
 	}
 	final := context.WithoutCancel(ctx)
 	a = a.meterAgents(key)
-	defer a.update(final, key, existing(func(cur *task.Record) {
-		if cur.Delegation.RunnerPID == pid {
-			cur.Delegation.RunnerPID = 0
+	defer func() {
+		last, err := a.update(final, key, existing(func(cur *task.Record) {
+			if cur.Delegation.RunnerPID == pid {
+				cur.Delegation.RunnerPID = 0
+			}
+		}))
+		if err != nil {
+			fmt.Fprintf(log, "foreman: runner %d could not record its final state: %v\n", pid, err)
+			return
 		}
-	}))
+		summary := ""
+		if last.LastOutcome != nil {
+			summary = ": " + last.LastOutcome.Summary
+		}
+		fmt.Fprintf(log, "foreman: runner %d finished: %s%s\n", pid, last.State, summary)
+	}()
 	if rec, err = a.logRoute(ctx, rec, log); err != nil {
 		return err
 	}

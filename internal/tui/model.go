@@ -27,6 +27,8 @@ type Mode int
 const (
 	Browsing Mode = iota
 	ChoosingAgent
+	ResolvingRepository
+	TypingRepository
 	TypingContext
 	ProposingBranch
 	TypingBranch
@@ -53,6 +55,7 @@ const (
 	ActionToggleView
 	ActionRoute
 	ActionPropose
+	ActionRepository
 	// ActionReadLog rereads the open log from its tail; ActionLoadOlder reads the
 	// lines before the oldest loaded one.
 	ActionReadLog
@@ -365,6 +368,13 @@ func (m *Model) Key(k Key) Action {
 		return Action{}
 	}
 	switch m.Mode {
+	case ResolvingRepository:
+		if k.Kind == KeyEscape {
+			m.Mode = Browsing
+		}
+		return Action{}
+	case TypingRepository:
+		return m.typeRepository(k)
 	case ChoosingAgent:
 		return m.chooseAgent(k)
 	case TypingContext:
@@ -588,6 +598,11 @@ func (m *Model) enter() Action {
 			m.pending.Key = e.Item.Key
 		}
 		m.pendingNew = !e.Delegated
+		if e.Item.Key.Source == task.Linear && e.Item.Key.Repo == "" {
+			m.Mode, m.Input = ResolvingRepository, ""
+			m.proposalSeq++
+			return Action{Kind: ActionRepository, Start: m.pending, ProposalSeq: m.proposalSeq}
+		}
 		m.Mode, m.Input = ChoosingAgent, ""
 		return Action{}
 	}

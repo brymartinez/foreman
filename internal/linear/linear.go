@@ -83,8 +83,8 @@ func (n issueNode) state() string {
 	}
 }
 
-func (c Client) AssignedIssues(ctx context.Context, teams map[task.Repo]string) ([]app.InboxItem, error) {
-	if len(teams) == 0 {
+func (c Client) AssignedIssues(ctx context.Context, teamURL string) ([]app.InboxItem, error) {
+	if teamURL == "" {
 		return nil, nil
 	}
 	var viewer struct {
@@ -101,15 +101,12 @@ func (c Client) AssignedIssues(ctx context.Context, teams map[task.Repo]string) 
 	if viewer.Viewer.ID == "" {
 		return nil, errors.New("Linear viewer has no ID")
 	}
-	teamRepos := make(map[string]task.Repo, len(teams))
-	for repo, teamURL := range teams {
-		parts := strings.Split(strings.TrimRight(teamURL, "/"), "/")
-		if len(parts) != 6 || parts[3] != viewer.Viewer.Organization.URLKey {
-			return nil, fmt.Errorf("configured Linear team %s does not belong to the authenticated workspace", teamURL)
-		}
-		teamRepos[parts[5]] = repo
+	parts := strings.Split(strings.TrimRight(teamURL, "/"), "/")
+	if len(parts) != 6 || parts[3] != viewer.Viewer.Organization.URLKey {
+		return nil, fmt.Errorf("configured Linear team %s does not belong to the authenticated workspace", teamURL)
 	}
-	resolved := make(map[string]task.Repo, len(teams))
+	teamKey := parts[5]
+	teamID := ""
 	cursor := ""
 	for {
 		var data struct {
@@ -125,11 +122,11 @@ func (c Client) AssignedIssues(ctx context.Context, teams map[task.Repo]string) 
 			return nil, err
 		}
 		for _, p := range data.Teams.Nodes {
-			if repo, ok := teamRepos[p.Key]; ok {
-				resolved[p.ID] = repo
+			if p.Key == teamKey {
+				teamID = p.ID
 			}
 		}
-		if len(resolved) == len(teams) || !data.Teams.PageInfo.HasNextPage {
+		if teamID != "" || !data.Teams.PageInfo.HasNextPage {
 			break
 		}
 		if data.Teams.PageInfo.EndCursor == "" || data.Teams.PageInfo.EndCursor == cursor {
@@ -137,42 +134,40 @@ func (c Client) AssignedIssues(ctx context.Context, teams map[task.Repo]string) 
 		}
 		cursor = data.Teams.PageInfo.EndCursor
 	}
-	if len(resolved) != len(teams) {
-		return nil, fmt.Errorf("found %d of %d configured Linear teams", len(resolved), len(teams))
+	if teamID == "" {
+		return nil, fmt.Errorf("configured Linear team %s is inaccessible or does not exist", teamKey)
 	}
 	var items []app.InboxItem
-	for teamID, repo := range resolved {
-		cursor = ""
-		for {
-			var data struct {
-				Issues struct {
-					Nodes    []issueNode `json:"nodes"`
-					PageInfo pageInfo    `json:"pageInfo"`
-				} `json:"issues"`
-			}
-			vars := after(cursor)
-			vars["filter"] = map[string]any{"assignee": map[string]any{"id": map[string]string{"eq": viewer.Viewer.ID}}, "team": map[string]any{"id": map[string]string{"eq": teamID}}}
-			query := `query($filter:IssueFilter,$after:String){ issues(first:50,after:$after,filter:$filter){ nodes{id identifier title description url createdAt updatedAt assignee{id} team{id} state{type} labels(first:250){nodes{name}}} pageInfo{hasNextPage endCursor} } }`
-			if err := c.query(ctx, query, vars, &data); err != nil {
-				return nil, err
-			}
-			for _, n := range data.Issues.Nodes {
-				if n.Assignee == nil || n.Assignee.ID != viewer.Viewer.ID || n.Team == nil || n.Team.ID != teamID || n.state() != "open" {
-					continue
-				}
-				if n.ID == "" || n.Identifier == "" {
-					return nil, errors.New("Linear issue missing ID or identifier")
-				}
-				items = append(items, app.InboxItem{Key: task.Key{Repo: repo, Source: task.Linear, ExternalID: n.ID}, Identifier: n.Identifier, Kind: task.Issue, Title: n.Title, URL: n.URL, State: "open", CreatedAt: n.CreatedAt, UpdatedAt: n.UpdatedAt, Reasons: []task.InboxReason{task.Assigned}, Labels: n.labels()})
-			}
-			if !data.Issues.PageInfo.HasNextPage {
-				break
-			}
-			if data.Issues.PageInfo.EndCursor == "" || data.Issues.PageInfo.EndCursor == cursor {
-				return nil, errors.New("Linear issues pagination did not advance")
-			}
-			cursor = data.Issues.PageInfo.EndCursor
+	cursor = ""
+	for {
+		var data struct {
+			Issues struct {
+				Nodes    []issueNode `json:"nodes"`
+				PageInfo pageInfo    `json:"pageInfo"`
+			} `json:"issues"`
 		}
+		vars := after(cursor)
+		vars["filter"] = map[string]any{"assignee": map[string]any{"id": map[string]string{"eq": viewer.Viewer.ID}}, "team": map[string]any{"id": map[string]string{"eq": teamID}}}
+		query := `query($filter:IssueFilter,$after:String){ issues(first:50,after:$after,filter:$filter){ nodes{id identifier title description url createdAt updatedAt assignee{id} team{id} state{type} labels(first:250){nodes{name}}} pageInfo{hasNextPage endCursor} } }`
+		if err := c.query(ctx, query, vars, &data); err != nil {
+			return nil, err
+		}
+		for _, n := range data.Issues.Nodes {
+			if n.Assignee == nil || n.Assignee.ID != viewer.Viewer.ID || n.Team == nil || n.Team.ID != teamID || n.state() != "open" {
+				continue
+			}
+			if n.ID == "" || n.Identifier == "" {
+				return nil, errors.New("Linear issue missing ID or identifier")
+			}
+			items = append(items, app.InboxItem{Key: task.Key{Source: task.Linear, ExternalID: n.ID}, Identifier: n.Identifier, Kind: task.Issue, Title: n.Title, URL: n.URL, State: "open", CreatedAt: n.CreatedAt, UpdatedAt: n.UpdatedAt, Reasons: []task.InboxReason{task.Assigned}, Labels: n.labels()})
+		}
+		if !data.Issues.PageInfo.HasNextPage {
+			break
+		}
+		if data.Issues.PageInfo.EndCursor == "" || data.Issues.PageInfo.EndCursor == cursor {
+			return nil, errors.New("Linear issues pagination did not advance")
+		}
+		cursor = data.Issues.PageInfo.EndCursor
 	}
 	return items, nil
 }

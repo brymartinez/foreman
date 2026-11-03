@@ -86,7 +86,7 @@ func TestAssignedIssuesReturnsOnlyCurrentUsersOpenTeamIssues(t *testing.T) {
 		t.Fatalf("unexpected query: %s", q)
 		return ""
 	})
-	items, err := c.AssignedIssues(context.Background(), map[task.Repo]string{"acme/web": "https://linear.app/acme/team/WEB"})
+	items, err := c.AssignedIssues(context.Background(), "https://linear.app/acme/team/WEB")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestAssignedIssuesReadsEveryPage(t *testing.T) {
 		t.Fatalf("query = %s", q)
 		return ""
 	})
-	items, err := c.AssignedIssues(context.Background(), map[task.Repo]string{"acme/web": "https://linear.app/acme/team/WEB"})
+	items, err := c.AssignedIssues(context.Background(), "https://linear.app/acme/team/WEB")
 	if err != nil || len(items) != 1 || teamPages != 2 || issuePages != 2 {
 		t.Fatalf("items = %+v, pages = %d/%d, error = %v", items, teamPages, issuePages, err)
 	}
@@ -242,7 +242,7 @@ func TestAssignedIssuesIncludesAllTeamProjectsAndUnprojectedIssues(t *testing.T)
 			return `{"errors":[{"message":"unexpected project-scoped query"}]}`
 		}
 	})
-	items, err := c.AssignedIssues(context.Background(), map[task.Repo]string{"acme/web": "https://linear.app/acme/team/WEB"})
+	items, err := c.AssignedIssues(context.Background(), "https://linear.app/acme/team/WEB")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +250,7 @@ func TestAssignedIssuesIncludesAllTeamProjectsAndUnprojectedIssues(t *testing.T)
 		t.Fatalf("got %d issues, want all 3 assigned open team issues", len(items))
 	}
 	for _, item := range items {
-		if item.Key.Repo != "acme/web" {
+		if item.Key.Repo != "" {
 			t.Errorf("repository = %s", item.Key.Repo)
 		}
 	}
@@ -259,7 +259,7 @@ func TestAssignedIssuesIncludesAllTeamProjectsAndUnprojectedIssues(t *testing.T)
 func TestAssignedIssuesRejectsWrongWorkspaceOrMissingTeam(t *testing.T) {
 	for _, tc := range []struct{ name, url, want string }{
 		{"wrong workspace", "https://linear.app/other/team/WEB", "does not belong"},
-		{"inaccessible team", "https://linear.app/acme/team/WEB", "found 0 of 1"},
+		{"inaccessible team", "https://linear.app/acme/team/WEB", "inaccessible"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := testClient(t, func(q string, _ map[string]json.RawMessage) string {
@@ -272,7 +272,7 @@ func TestAssignedIssuesRejectsWrongWorkspaceOrMissingTeam(t *testing.T) {
 				t.Errorf("unexpected issue query: %s", q)
 				return `{"data":{}}`
 			})
-			_, err := c.AssignedIssues(context.Background(), map[task.Repo]string{"acme/web": tc.url})
+			_, err := c.AssignedIssues(context.Background(), tc.url)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("error = %v, want %q", err, tc.want)
 			}

@@ -82,7 +82,10 @@ func (m *Model) AutoStarts() []app.StartRequest {
 	var picks []app.InboxItem
 	for _, e := range m.Inbox {
 		k := e.Item.Key
-		if eligible(e) && !m.tried[k] && !m.starting[k] && !tracked[k] {
+		if k.Source == task.Linear && m.Mode != Browsing && m.pending.Key.Source == task.Linear && m.pending.Key.ExternalID == k.ExternalID {
+			continue
+		}
+		if eligible(e) && !containsIssue(m.tried, k) && !containsIssue(m.starting, k) && !containsIssue(tracked, k) {
 			picks = append(picks, e.Item)
 		}
 	}
@@ -183,4 +186,19 @@ func mark(set map[task.Key]bool, key task.Key) map[task.Key]bool {
 	}
 	set[key] = true
 	return set
+}
+
+// Linear discovery and delegation have the same UUID before and after a repository is chosen.
+func containsIssue(keys map[task.Key]bool, key task.Key) bool {
+	if keys[key] {
+		return true
+	}
+	if key.Source == task.Linear {
+		for known, present := range keys {
+			if present && known.Source == task.Linear && known.ExternalID == key.ExternalID {
+				return true
+			}
+		}
+	}
+	return false
 }

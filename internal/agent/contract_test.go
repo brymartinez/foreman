@@ -59,7 +59,7 @@ func TestParseOutcomePlannedKeepsAnEmptyDocumentForTheRunner(t *testing.T) {
 	}
 }
 
-func TestParseOutcomeCheckpointRequiresShortNextObjectiveAndPassingValidation(t *testing.T) {
+func TestParseOutcomeCheckpointRequiresNextObjectiveAndPassingValidation(t *testing.T) {
 	valid := `{"status":"checkpoint","summary":"committed the first part","nextObjective":"Add the log pager","prNumber":null,"prUrl":null,"validation":[{"command":"go test ./...","passed":true}],"questions":[],"documents":null}`
 	got, err := ParseOutcome([]byte(valid))
 	if err != nil || got.Status != Checkpoint || got.NextObjective != "Add the log pager" || len(got.Validation) != 1 {
@@ -69,11 +69,28 @@ func TestParseOutcomeCheckpointRequiresShortNextObjectiveAndPassingValidation(t 
 		"missing next objective": strings.Replace(valid, `"Add the log pager"`, "null", 1),
 		"failed validation":      strings.Replace(valid, `"passed":true`, `"passed":false`, 1),
 		"no validation":          strings.Replace(valid, `[{"command":"go test ./...","passed":true}]`, `[]`, 1),
-		"long next objective":    strings.Replace(valid, `"Add the log pager"`, `"`+strings.Repeat("x", 501)+`"`, 1),
 	} {
 		if _, err := ParseOutcome([]byte(wire)); err == nil {
 			t.Errorf("%s was accepted", name)
 		}
+	}
+}
+
+func TestParseOutcomeCheckpointPreservesLongNextObjective(t *testing.T) {
+	next := strings.Repeat("Continue the next planned task. ", 30)
+	raw, err := json.Marshal(map[string]any{
+		"status": "checkpoint", "summary": "committed the first part", "nextObjective": next,
+		"validation": []task.Check{{Command: "go test ./...", Passed: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseOutcome(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.NextObjective != strings.TrimSpace(next) {
+		t.Fatalf("checkpoint objective was truncated: %q", got.NextObjective)
 	}
 }
 

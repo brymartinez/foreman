@@ -55,7 +55,7 @@ type App struct {
 	ClaimVerification bool
 	FullSuiteGate     bool // enabled in the CLI; every task copies it when it starts
 	Linear            IssueTracker
-	LinearTeams       map[task.Repo]string
+	LinearTeam        string
 	Repositories      RepositoryManager
 	Worktrees         WorktreeManager
 	Agents            map[task.Agent]AgentAdapter
@@ -138,6 +138,9 @@ func (a App) inboxView(ctx context.Context, allRepos bool, source task.Source) (
 	if err != nil {
 		return InboxReport{}, err
 	}
+	recs = slices.DeleteFunc(recs, func(rec *task.Record) bool {
+		return rec.Key.Source == task.Linear && rec.Delegation == nil && rec.Reset == nil
+	})
 	dead := a.deadRunners(recs)
 	if err := a.clearExited(ctx, recs); err != nil {
 		return InboxReport{}, err
@@ -158,6 +161,26 @@ func (a App) inboxView(ctx context.Context, allRepos bool, source task.Source) (
 		return InboxReport{}, errors.Join(sourceWarnings...)
 	}
 	fresh := len(sourceWarnings) == 0
+	var pending []InboxItem
+	var bound []InboxItem
+	for _, item := range items {
+		if item.Key.Source == task.Linear && item.Key.Repo == "" {
+			for _, rec := range recs {
+				if rec.Key.Source == task.Linear && rec.Key.ExternalID == item.Key.ExternalID && (rec.Delegation != nil || rec.Reset != nil) {
+					item.Key = rec.Key
+					break
+				}
+			}
+			if item.Key.Repo == "" {
+				pending = append(pending, item)
+				continue
+			}
+		}
+		if a.repoVisible(item.Key.Repo, allRepos) {
+			bound = append(bound, item)
+		}
+	}
+	items = bound
 	tracked, gone, refreshWarnings, err := a.fetchTrackedSources(ctx, recs, items, allRepos, source, available)
 	if err != nil {
 		return InboxReport{}, err
@@ -178,6 +201,11 @@ func (a App) inboxView(ctx context.Context, allRepos bool, source task.Source) (
 		report.Current = sourceEntries(report.Current, source)
 		report.New = sourceEntries(report.New, source)
 		report.Changed = sourceEntries(report.Changed, source)
+	}
+	for _, item := range pending {
+		entry := InboxEntry{Item: item, Changes: []string{"repository selected at delegation"}}
+		report.Current = append(report.Current, entry)
+		report.New = append(report.New, entry)
 	}
 	report.Truncated = truncated
 	report.SourcesFresh = fresh
@@ -247,28 +275,21 @@ func (a App) discoverSources(ctx context.Context, source task.Source, allRepos b
 			available[task.GitHub] = true
 			truncated = search.Truncated
 			for _, item := range search.Items {
-				_, mapped := a.LinearTeams[item.Key.Repo]
-				if (item.Kind != task.Issue || !mapped) && a.repoVisible(item.Key.Repo, allRepos) {
+				if a.repoVisible(item.Key.Repo, allRepos) {
 					items = append(items, item)
 				}
 			}
 		}
 	}
 	if source == "" || source == task.Linear {
-		teams := map[task.Repo]string{}
-		for repo, url := range a.LinearTeams {
-			if a.repoVisible(repo, allRepos) {
-				teams[repo] = url
-			}
-		}
-		if len(teams) > 0 {
+		if a.LinearTeam != "" {
 			if a.Linear == nil {
 				warnings = append(warnings, errors.New("Linear refresh: set LINEAR_API_KEY to use Linear issues"))
-			} else if found, err := a.Linear.AssignedIssues(ctx, teams); err != nil {
+			} else if found, err := a.Linear.AssignedIssues(ctx, a.LinearTeam); err != nil {
 				warnings = append(warnings, fmt.Errorf("Linear refresh: %w", err))
 			} else {
 				available[task.Linear] = true
-				items = append(items, a.visibleItems(found, allRepos)...)
+				items = append(items, found...)
 			}
 		}
 	}

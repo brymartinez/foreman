@@ -192,9 +192,6 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 		if w.NextObjective == nil || strings.TrimSpace(*w.NextObjective) == "" {
 			return Outcome{}, errors.New("checkpoint outcome needs a next objective")
 		}
-		if len([]rune(*w.NextObjective)) > 500 {
-			return Outcome{}, errors.New("checkpoint next objective exceeds 500 characters")
-		}
 		if len(w.Validation) == 0 {
 			return Outcome{}, errors.New("checkpoint outcome needs the validation that was run")
 		}
