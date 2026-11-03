@@ -179,3 +179,24 @@ func TestFullCheckRepairCannotIntroduceAStaleReviewAssessment(t *testing.T) {
 		t.Fatalf("stale assessment from repair was accepted: %v", res.err)
 	}
 }
+
+func TestAllFindingsFixedStillGetsAFreshSelfReview(t *testing.T) {
+	f := newFixture()
+	key := localTask(t, f)
+	fixed := reviewReadyTurn("sid", proposedBody)
+	fixed.Outcome.ReviewAssessment = &task.ReviewAssessment{Round: 1, Rejected: []task.RejectedFinding{}}
+	f.claude.turns = []agent.Turn{reviewReadyTurn("sid", proposedBody), fixed, prTurn("sid")}
+	f.claude.reviews = []agent.ReviewOutcome{selfFindings()}
+	f.wt.checkpointHeads = []string{"commit1", "commit2"}
+	opensPR(t, f, "commit2", proposedTitle, proposedBody, 1)
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.WaitingForCI || kinds(got) != "self! self competing" || got.Delegation.PRHead != "commit2" {
+		t.Fatalf("state %s reviews %s head %s", got.State, kinds(got), got.Delegation.PRHead)
+	}
+	if got.Reviews[0].AllFindingsRejected() {
+		t.Fatal("all-fixed assessment waived self-review")
+	}
+}

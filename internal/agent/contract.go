@@ -136,8 +136,8 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 		if w.Status != ReviewReady && w.Status != PROpened {
 			return Outcome{}, errors.New("reviewAssessment requires review_ready or pr_opened")
 		}
-		if w.ReviewAssessment.Round < 1 || len(w.ReviewAssessment.Rejected) == 0 {
-			return Outcome{}, errors.New("reviewAssessment needs a review round and rejected findings")
+		if w.ReviewAssessment.Round < 1 {
+			return Outcome{}, errors.New("reviewAssessment needs a review round")
 		}
 		seen := map[int]bool{}
 		for _, f := range w.ReviewAssessment.Rejected {

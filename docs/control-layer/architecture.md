@@ -802,7 +802,8 @@ the same commit. The commit message records why it changed.
 - **The implementer assesses findings in its retained session.** Valid findings get
   focused fixes and another independent self-review. Invalid self-review findings
   may be rejected through `reviewAssessment`, naming the current review round and
-  unique one-based finding numbers with concrete reasons. Go checks that the round
+  unique one-based finding numbers with concrete reasons. An empty rejection list
+  means all findings were fixed; it does not waive another review. Go checks that the round
   and reviewed commit match the current task and that the findings exist. Reasons
   are saved as `rejected_findings` on the original review without changing its
   verdict. Rejecting every finding on an unchanged reviewed commit ends self-review

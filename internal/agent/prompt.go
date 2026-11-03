@@ -220,7 +220,7 @@ Do not push or open a pull request when you are blocked.
 Reply with JSON matching the provided schema:
 %s%s%s- "blocked" when you need a decision, as described above.
 - "failed" when you cannot complete the task: say why in summary.
-Set reviewAssessment to null except when rejecting numbered findings from the current self-review. Set nextObjective to null except for "checkpoint". Set fields that do not apply to null, or [] for validation and questions. %s
+Set reviewAssessment to null except when assessing the current self-review; rejected may be empty when every finding was fixed. Set nextObjective to null except for "checkpoint". Set fields that do not apply to null, or [] for validation and questions. %s
 `, workspace, opening, pr, plannedStatus(b.Planning), finishedStatus(b), checkpointStatus(b), documentsRule(b.Planning))
 	return s.String()
 }

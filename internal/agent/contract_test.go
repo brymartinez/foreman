@@ -463,7 +463,6 @@ func TestParseOutcomeReviewAssessmentRequiresNumberedReasons(t *testing.T) {
 	base := `{"status":"pr_opened","summary":"The existing guard disproves the finding","validation":[{"command":"go test ./...","passed":true}],"reviewAssessment":%s}`
 	for _, raw := range []string{
 		`{"round":0,"rejected":[{"finding":1,"reason":"guard exists"}]}`,
-		`{"round":1,"rejected":[]}`,
 		`{"round":1,"rejected":[{"finding":0,"reason":"guard exists"}]}`,
 		`{"round":1,"rejected":[{"finding":1,"reason":" "}]}`,
 		`{"round":1,"rejected":[{"finding":1,"reason":"guard exists"},{"finding":1,"reason":"duplicate"}]}`,
@@ -476,5 +475,16 @@ func TestParseOutcomeReviewAssessmentRequiresNumberedReasons(t *testing.T) {
 	got, err := ParseOutcome([]byte(strings.Replace(base, "%s", raw, 1)))
 	if err != nil || got.ReviewAssessment == nil || got.ReviewAssessment.Round != 3 {
 		t.Fatalf("assessment lost: %+v %v", got, err)
+	}
+}
+
+func TestParseOutcomeAcceptsAllFindingsFixedAssessment(t *testing.T) {
+	raw := []byte(`{"status":"review_ready","summary":"Finding 1 is valid and fixed","reviewAssessment":{"round":6,"rejected":[]},"prTitle":"fix: preserve saved figures","prBody":"Preserve saved figures on polls.","validation":[{"command":"focused checks","passed":true,"scope":"focused"}]}`)
+	got, err := ParseOutcome(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != ReviewReady || got.ReviewAssessment == nil || got.ReviewAssessment.Round != 6 || len(got.ReviewAssessment.Rejected) != 0 {
+		t.Fatalf("all-fixed assessment lost: %+v", got)
 	}
 }

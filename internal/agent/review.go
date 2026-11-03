@@ -320,7 +320,7 @@ func orNone(s, fallback string) string {
 func assessmentInstructions(s *strings.Builder, r task.Review) {
 	s.WriteString("\nAssess each finding using your task context. Fix valid defects, reject invalid findings with concrete evidence, and ask the developer about product decisions or conflicting requirements. Do not change approved behavior merely to satisfy a reviewer.\n")
 	if r.Kind == task.SelfReview {
-		fmt.Fprintf(s, "For rejected self-review findings, set reviewAssessment to {\"round\": %d, \"rejected\": [{\"finding\": 1, \"reason\": \"concrete evidence\"}]}, using the one-based finding numbers above. Omit fixed findings from rejected. Rejecting every finding without changing the reviewed commit ends self-review early. Otherwise the new commit gets another independent self-review.\n", r.Round)
+		fmt.Fprintf(s, "For rejected self-review findings, set reviewAssessment to {\"round\": %d, \"rejected\": [{\"finding\": 1, \"reason\": \"concrete evidence\"}]}, using the one-based finding numbers above. Omit fixed findings from rejected; an empty rejected list means all findings were fixed and still requires review. Rejecting every finding without changing the reviewed commit ends self-review early. Otherwise the new commit gets another independent self-review.\n", r.Round)
 	} else {
 		s.WriteString("Set reviewAssessment to null. An adversarial verdict requires a clean re-review; it cannot be waived by the implementer.\n")
 	}
