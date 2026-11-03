@@ -626,7 +626,7 @@ func TestRestartWithAnotherAgentKeepsThePRWithCommentsWaiting(t *testing.T) {
 	}
 }
 
-func TestRestartWithAnotherAgentStartsOverWithNoCommentsWaiting(t *testing.T) {
+func TestRestartWithAnotherAgentKeepsExistingPR(t *testing.T) {
 	f := newFixture()
 	key := task.Key{Repo: "testorg/example", Number: 825}
 	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.Failed,
@@ -635,8 +635,8 @@ func TestRestartWithAnotherAgentStartsOverWithNoCommentsWaiting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.Delegation.PR != 0 {
-		t.Errorf("pr = %d; another implementer starts over", rec.Delegation.PR)
+	if rec.Delegation.PR != 912 {
+		t.Errorf("pr = %d; a handoff must keep the existing PR", rec.Delegation.PR)
 	}
 }
 

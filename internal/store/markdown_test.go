@@ -924,3 +924,21 @@ func TestReviewAreaCoverageSurvivesReload(t *testing.T) {
 		t.Fatalf("area coverage lost: %+v", got.Reviews[0])
 	}
 }
+
+func TestQuotaSkippedReviewSurvivesReloadWithoutBecomingClean(t *testing.T) {
+	want := delegated()
+	want.Reviews[0].Clean = false
+	want.Reviews[0].Skipped = true
+	want.Reviews[0].Summary = "Adversarial review skipped: claude quota exhausted"
+	store := Markdown{Dir: t.TempDir()}
+	if err := store.Save(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Get(ctx, want.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Reviews[0].Skipped || got.Reviews[0].Clean || !got.Reviews[0].Accepted() || got.Reviews[0].Summary != want.Reviews[0].Summary {
+		t.Fatalf("skip lost: %+v", got.Reviews[0])
+	}
+}

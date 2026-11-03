@@ -21,7 +21,7 @@ func (a App) prepareReview(ctx context.Context, rec *task.Record, kind task.Revi
 		previous = rec.LatestSelf()
 	}
 	prior := ""
-	if previous != nil && previous.BaseHead != "" && previous.Reviewer == reviewer && reviewCommit.MatchString(previous.Head) && previous.BaseRef == rec.Delegation.BaseRef {
+	if previous != nil && !previous.Skipped && previous.BaseHead != "" && previous.Reviewer == reviewer && reviewCommit.MatchString(previous.Head) && previous.BaseRef == rec.Delegation.BaseRef {
 		covered := rec.ScopeCovered(previous) && (!rec.Delegation.ClaimVerification || previous.PRD == rec.Delegation.PRDDigest)
 		if kind == task.SelfReview {
 			covered = len(previous.Areas) > 0 && len(previous.Limitations) == 0

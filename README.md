@@ -27,7 +27,7 @@ an issue you started.
   [Codex](https://github.com/openai/codex) (`codex`), both logged in. Each agent reviews
   the other's work, so install both for the review loop.
 - Optional: [`quota-axi`](https://github.com/kunchenguid/quota-axi) on `PATH`, so
-  routing can skip an agent that has run out of quota.
+  Foreman can avoid providers that have run out of quota.
 
 ## Install
 
@@ -439,6 +439,13 @@ and, once all are answered, resumes the current stage's session when one exists.
 After review findings it resumes the implementation session with the findings and
 your answer. If the session is unavailable, the replacement gets the checked plan,
 answered decisions, and outstanding findings. The answer also appears in the PR description.
+
+Foreman checks provider quota before model calls. If the implementer runs out,
+restarting the task hands its existing branch, proposal, PR, and decisions to the
+other agent when that agent has confirmed quota. The runner also checks between
+stages. If the adversarial reviewer is confirmed out of quota, Foreman records
+`review skipped (quota)` and continues. Self-review and full verification still
+apply. Unknown quota does not grant a skip.
 
 The implementer and reviewers take turns. Every changed commit gets scoped
 self-review before adversarial review. The task records the covered file areas,

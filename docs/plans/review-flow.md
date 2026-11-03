@@ -25,7 +25,11 @@ The competing agent then reviews the full task context: checked requirements and
 plan, answered decisions, implementation claims, reported checks, and the code.
 The implementer still handles its findings, but cannot waive this review's verdict.
 Do not fall back to the implementer's agent for the adversarial review.
-A changed commit must pass review before handoff. Existing full-suite gates remain.
+Before each model call, check quota. An exhausted implementer hands off to a
+confirmed available provider without discarding existing work. A confirmed
+exhausted adversarial provider gets an explicit, durable skipped verdict. Unknown
+quota and execution errors cannot waive review. Skips never become clean verdicts
+or incremental-review baselines. Self-review and full-suite gates remain.
 
 ## Implementation and verification
 

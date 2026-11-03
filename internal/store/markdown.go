@@ -466,14 +466,17 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 		rec.Feedback = append(rec.Feedback, item)
 	}
 	for _, r := range fm.Reviews {
-		if r.Verdict != "clean" && r.Verdict != "changes_requested" {
+		if r.Verdict == "skipped" && r.Kind == task.SelfReview {
+			return nil, fmt.Errorf("self-review round %d cannot be skipped", r.Round)
+		}
+		if r.Verdict != "clean" && r.Verdict != "changes_requested" && r.Verdict != "skipped" {
 			return nil, fmt.Errorf("review round %d has unknown verdict %q", r.Round, r.Verdict)
 		}
 		// An unknown kind is refused rather than read as competing, which could pass the gate.
 		if r.Kind != task.CompetingReview && r.Kind != task.SelfReview {
 			return nil, fmt.Errorf("review round %d has unknown kind %q", r.Round, r.Kind)
 		}
-		rec.Reviews = append(rec.Reviews, task.Review{BaseRef: r.BaseRef, BaseHead: r.BaseHead, FromHead: r.FromHead, Round: r.Round, Kind: r.Kind, Reviewer: r.Reviewer, PR: r.PR, Clean: r.Verdict == "clean", Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head, Proposal: r.Proposal,
+		rec.Reviews = append(rec.Reviews, task.Review{BaseRef: r.BaseRef, BaseHead: r.BaseHead, FromHead: r.FromHead, Round: r.Round, Kind: r.Kind, Reviewer: r.Reviewer, PR: r.PR, Clean: r.Verdict == "clean", Skipped: r.Verdict == "skipped", Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head, Proposal: r.Proposal,
 			Claims: r.Claims, PRD: r.PRD, Scope: r.Scope, Plan: r.Plan, Limitations: r.Limitations, RejectedFindings: r.RejectedFindings, Decisions: r.Decisions, Areas: r.Areas})
 	}
 	if c := fm.CI; c != nil {
@@ -587,6 +590,8 @@ func fromRecord(rec *task.Record) frontmatter {
 		verdict := "changes_requested"
 		if r.Clean {
 			verdict = "clean"
+		} else if r.Skipped {
+			verdict = "skipped"
 		}
 		fm.Reviews = append(fm.Reviews, reviewFM{BaseRef: r.BaseRef, BaseHead: r.BaseHead, FromHead: r.FromHead, Round: r.Round, Kind: r.Kind, Reviewer: r.Reviewer, PR: r.PR, Verdict: verdict, Summary: r.Summary, Findings: r.Findings, At: r.At, Head: r.Head, Proposal: r.Proposal,
 			Claims: r.Claims, PRD: r.PRD, Scope: r.Scope, Plan: r.Plan, Limitations: r.Limitations, RejectedFindings: r.RejectedFindings, Decisions: r.Decisions, Areas: r.Areas})

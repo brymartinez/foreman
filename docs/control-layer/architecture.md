@@ -567,12 +567,11 @@ the same commit. The commit message records why it changed.
 - **The agent pushes and opens the PR.** Foreman then checks with `gh` that the PR is
   open, in the task's repo, from the task branch, against the task's base, and records
   the verified number and head. A PR the developer retargets keeps its new base.
-- **Resume first for answers, rebuild for review findings.** Answers and human PR
-  comments resume the recorded session when one exists. Every set of self-review or
-  competing-review findings clears the implementer session and starts a fresh
-  correction session whose task context is only those findings. Repository access
-  remains available to locate the fix. Only `agent.ErrNoSession` falls back to a fresh
-  turn for a resumable step; any other resume error fails the task.
+- **Resume retained implementation context.** Answers, PR comments, and review
+  findings resume the implementation session when present. A missing session or
+  provider handoff rebuilds context from the checked plan, all answered decisions,
+  committed work, and outstanding findings. Only `agent.ErrNoSession` falls back
+  after a resume error; other errors stop the turn.
 - **Planning is its own session.** Until the two planning documents are posted, the
   turn plans, including for an existing open PR. The runner, not the agent, posts them as issue
   comments with a `<!-- foreman:<doc> desc=<fingerprint> -->` marker and edits them on a
@@ -660,7 +659,7 @@ the same commit. The commit message records why it changed.
   is off. A file that fails to load is an error on every route, and nothing that needed
   a route starts; the rest of the dashboard still works.
 - **Only starts of never-delegated issues are routed:** auto mode, and `3` in the agent
-  choice. `1` and `2` override it.
+  choice. `1` and `2` select a provider directly. Quota preflight applies to both.
 - **Fit comes first.** A selector turn (Claude with `claude.plan_model` unless
   `selector` says otherwise) reads the repository, title, labels, body (6000 runes), up
   to 10 of the newest non-foreman comments (1000 runes each, 5000 in all), and the
@@ -670,6 +669,18 @@ the same commit. The commit message records why it changed.
   a route error, so the selector never chooses from part of the issue. It runs with no tools in a scratch
   directory. A selector failure, an unknown rule, or 0 uses `default`, and the reason
   says so.
+- **Check provider quota before model calls.** Starts, resumes, reviews, selector and
+  branch proposals, diagnostics, learning, and knowledge merging consult quota first.
+  Confirmed exhaustion or absent setup prevents the call. Unknown quota preserves
+  the selected provider. At a runner stage boundary or restart, an unavailable
+  implementer hands existing work to the configured competing provider only when
+  it is positively available. The handoff clears provider-specific sessions and
+  profiles; it retains the branch, checkpoint progress, local proposal, PR, plan,
+  claims, decisions, and verification. Both unavailable providers stop implementation
+  without calling either. Mid-call failures stop the turn; a retry checks quota
+  again before handing off. New manual tasks refuse an unavailable provider.
+  The routing selector may use the available competing provider with its configured
+  planning settings; if neither can run, routing waits without a selector call.
 - **Quota only removes candidates.** Candidates are the chosen rule's profiles in the
   order listed, or `default` alone. `quota-axi` removes those whose agent it confirms
   exhausted (a fresh `all_models` reading at 0%) or not set up (`notSetUp: true`
@@ -853,8 +864,13 @@ the same commit. The commit message records why it changed.
   answered decisions including option meanings, claims, reported checks, full-suite
   evidence, and self-review rejection reasons. Later decisions override conflicting
   earlier requirements. Implementation transcripts are excluded. Claims and reported
-  checks are evidence to examine, not facts to trust. An unavailable competing agent
-  fails the task; Foreman never substitutes the implementing agent.
+  checks are evidence to examine, not facts to trust. A fresh quota report confirming
+  exhaustion skips this review without calling the provider. Foreman stores a
+  `skipped` verdict and reason bound to the same head, proposal, requirements, and
+  claims as a review. It permits progress without claiming a clean verdict and
+  never supplies an incremental-review baseline. Unknown quota, absent setup,
+  provider errors, and missing adapters do not grant a skip. Self-review and the
+  full-suite gate still apply. Foreman never substitutes the implementing agent.
 - **Adversarial re-reviews can focus on fixes.** The first adversarial review reads
   the complete diff. Later reviews may start at that reviewer's previous head with
   its earlier findings. This requires the same base ref and commit, unchanged scope
@@ -1300,7 +1316,7 @@ the same commit. The commit message records why it changed.
   when the tree had changes.
 - **`quota-axi` is optional** (https://github.com/kunchenguid/quota-axi), found on
   `PATH`. Foreman runs `quota-axi --provider claude,codex --json` with a 10 second
-  limit before each route and reads `providers[].notSetUp` and
+  limit before routing and each model call and reads `providers[].notSetUp` and
   `providers[].quotaSemantics.effectiveAvailability`.
   A report printed with exit code 1 (one provider failed) is still read; a missing
   binary, a timeout, or no report makes quota unknown.

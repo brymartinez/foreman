@@ -63,6 +63,7 @@ func (a App) Route(ctx context.Context, req RouteRequest) (Decision, error) {
 	if cfg == nil || a.Selector == nil {
 		return Decision{}, ErrRoutingOff
 	}
+	quotas := a.readQuotas(ctx, nil)
 	sel, note := agent.Selection{}, ""
 	if req.Prior != nil {
 		sel = *req.Prior
@@ -72,6 +73,24 @@ func (a App) Route(ctx context.Context, req RouteRequest) (Decision, error) {
 			return Decision{}, err
 		}
 		s := cfg.SelectorFor(a.RoutingDefaults)
+		chosen, quotaErr := a.quotaImplementer(s.Agent, quotas)
+		if quotaErr != nil {
+			blocked := quotaErr.Error()
+			if otherErr := quotaError(s.Agent.Reviewer(), quotas); otherErr != nil {
+				blocked += "; " + otherErr.Error()
+			}
+			return Decision{Wait: blocked, Reason: "selector unavailable"}, nil
+		}
+		if chosen != s.Agent {
+			inherit := a.RoutingDefaults[chosen]
+			s.Agent, s.Model, s.ReasoningEffort = chosen, inherit.PlanModel, inherit.PlanReasoningEffort
+			if s.Model == "" {
+				s.Model = inherit.Model
+			}
+			if s.ReasoningEffort == "" {
+				s.ReasoningEffort = inherit.ReasoningEffort
+			}
+		}
 		sel, err = a.Selector.Select(ctx, agent.SelectInput{Agent: s.Agent, Model: s.Model, ReasoningEffort: s.ReasoningEffort, Prompt: prompt})
 		if err != nil {
 			sel, note = agent.Selection{}, "selector failed: "+err.Error()
@@ -92,12 +111,6 @@ func (a App) Route(ctx context.Context, req RouteRequest) (Decision, error) {
 		reason = "no rule fits; default"
 	}
 
-	quotas := map[task.Agent]Quota{}
-	if a.Quota != nil {
-		if q, err := a.Quota.Quota(ctx); err == nil {
-			quotas = q
-		}
-	}
 	var runnable []string
 	var blockedAgents []task.Agent
 	var blocked []string

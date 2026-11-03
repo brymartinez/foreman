@@ -696,6 +696,9 @@ const (
 )
 
 type Review struct {
+	// Skipped records a controller waiver for an exhausted adversarial provider.
+	Skipped bool
+
 	Areas            []ReviewArea
 	RejectedFindings []RejectedFinding
 	Decisions        string
@@ -723,6 +726,11 @@ type Review struct {
 	Plan   string // planning documents the reviewer checked
 	// Limitations are the behaviors the reviewer could not check.
 	Limitations []Limitation
+}
+
+// Accepted permits progress after a clean review or an explicit adversarial quota skip.
+func (r *Review) Accepted() bool {
+	return r != nil && (r.Clean || (r.Kind == CompetingReview && r.Skipped))
 }
 
 // LatestReview is the most recent review round of either kind, or nil. Its findings
@@ -806,7 +814,7 @@ func (r *Record) ChangeRequestsSinceDecision() int {
 	}
 	n := 0
 	for _, rv := range r.Reviews {
-		if !rv.Clean && !rv.AllFindingsRejected() && rv.At.After(last) {
+		if !rv.Accepted() && !rv.AllFindingsRejected() && rv.At.After(last) {
 			n++
 		}
 	}
@@ -929,7 +937,7 @@ func (r *Record) LocalReview() bool {
 	return r.Delegation.BeforePR() && r.Delegation.LocalHead != ""
 }
 
-// OpenPending reports a local commit with a clean competing review and no PR yet, so
+// OpenPending reports a local commit with an accepted competing review and no PR yet, so
 // the next step pushes that commit and opens the PR with the reviewed description.
 // Answers the implementer has not received go to it with that step.
 func (r *Record) OpenPending() bool {
@@ -937,10 +945,10 @@ func (r *Record) OpenPending() bool {
 		return false
 	}
 	latest := r.LatestCompeting()
-	return r.competingCovers(latest) && latest.Clean
+	return r.competingCovers(latest) && latest.Accepted()
 }
 
-// FinalCheckPending reports a change with a clean competing review that cannot be
+// FinalCheckPending reports a change with an accepted competing review that cannot be
 // handed off yet, because no full-suite result covers it. Its next turn is the
 // implementer's final check.
 func (r *Record) FinalCheckPending() bool {
@@ -950,7 +958,7 @@ func (r *Record) FinalCheckPending() bool {
 	}
 	latest := r.LatestCompeting()
 	head, _ := r.CurrentChange()
-	return latest != nil && latest.Clean && r.competingCovers(latest) && !r.FullResult.Covers(head)
+	return latest != nil && latest.Accepted() && r.competingCovers(latest) && !r.FullResult.Covers(head)
 }
 
 // coversLocal checks the stored local commit. PR text is checked when published.
@@ -1004,7 +1012,7 @@ func (r *Record) UpgradeState() {
 		r.State = r.NextStage()
 	case LegacyReviewing:
 		r.State = r.NextStage()
-		if latest := r.LatestCompeting(); r.Delegation != nil && r.Delegation.PR != 0 && r.competingCovers(latest) && latest.Clean {
+		if latest := r.LatestCompeting(); r.Delegation != nil && r.Delegation.PR != 0 && r.competingCovers(latest) && latest.Accepted() {
 			r.State = WaitingForCI
 		}
 	}

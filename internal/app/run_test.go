@@ -183,7 +183,7 @@ func TestCodexImplementationIsReviewedByClaude(t *testing.T) {
 	}
 }
 
-func TestQuotaDoesNotReplaceTheAdversarialAgent(t *testing.T) {
+func TestUnconfiguredQuotaDoesNotReplaceOrSkipTheAdversarialAgent(t *testing.T) {
 	f := newFixture()
 	f.app.Quota = fakeQuota{q: map[task.Agent]Quota{task.Claude: {Status: QuotaNotSetUp}}}
 	req := startReq(t)
@@ -193,7 +193,7 @@ func TestQuotaDoesNotReplaceTheAdversarialAgent(t *testing.T) {
 	f.run(context.Background(), key, 4242, io.Discard)
 	got := f.store.recs[key]
 	// Quota status must not substitute Codex for the independent Claude review.
-	if got.State != task.WaitingForCI || len(f.codex.reviewed) != 1 || len(f.claude.reviewed) != 1 || got.LatestCompeting().Reviewer != task.Claude || got.Delegation.Reviewer != task.Claude {
+	if got.State != task.Failed || len(f.codex.reviewed) != 1 || len(f.claude.reviewed) != 0 || got.LatestCompeting() != nil || got.Delegation.Reviewer != task.Claude {
 		t.Fatalf("state %s reviewer %s reviews %+v; codex %d claude %d", got.State, got.Delegation.Reviewer, got.Reviews, len(f.codex.reviewed), len(f.claude.reviewed))
 	}
 }

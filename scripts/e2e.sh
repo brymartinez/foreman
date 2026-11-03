@@ -132,6 +132,15 @@ EOF
 	cp "$root"/defaults/stages/*.md "$sandbox/stages/"
 	export FOREMAN_CONFIG="$sandbox/config.yaml" E2E_STATE="$state" E2E_ORIGIN="$sandbox/origin.git"
 	export PATH="$sandbox/bin:$PATH"
+ # Provider quota is deterministic; e2e must never consult real subscriptions.
+ cat >"$sandbox/bin/quota-axi" <<'EOF'
+#!/usr/bin/env bash
+claude=100; codex=100
+[ ! -f "$E2E_STATE/claude-exhausted" ] || claude=0
+[ ! -f "$E2E_STATE/codex-exhausted" ] || codex=0
+printf '{"providers":[{"provider":"claude","state":{"stale":false},"quotaSemantics":{"effectiveAvailability":[{"scope":"all_models","status":"known","effectivePercentRemaining":%s}]}},{"provider":"codex","state":{"stale":false},"quotaSemantics":{"effectiveAvailability":[{"scope":"all_models","status":"known","effectivePercentRemaining":%s}]}}]}' "$claude" "$codex"
+EOF
+
 	unset FOREMAN_TASKS_DIR
 
 	issue 42 "Add retries"
@@ -642,6 +651,21 @@ scenario_area_review() {
 	check "one adversarial review ran" test "$(grep -c '^codex review$' "$state/agents.log")" = 1
 	check "one final full check ran" test "$(grep -c '^claude final-check$' "$state/agents.log")" = 1
 	check "the task records scoped coverage" contains "$sandbox/tasks/acme-widgets-42.md" "areas:"
+}
+
+scenario_quota_skip() {
+ echo "quota_skip: exhausted adversarial provider is skipped explicitly and the PR still opens"
+ setup quota_skip
+ echo "review_before_pr: true" >>"$sandbox/config.yaml"
+ touch "$state/codex-exhausted"
+ check "the task starts with available Claude" start 42
+ check "the task completes with an explicit skip" wait_status "review skipped (quota)"
+ check "the task records the skipped verdict" contains "$sandbox/tasks/acme-widgets-42.md" "verdict: skipped"
+ check "the log explains the skipped provider" contains "$sandbox/logs/acme-widgets-42.log" "Adversarial review skipped: codex quota exhausted"
+ check "no exhausted Codex call ran" bash -c "! grep -q '^codex ' '$state/agents.log'"
+ check "self-review still ran" contains "$state/agents.log" "claude self-review"
+ check "the PR opened" contains "$state/agents.log" "claude open-pr"
+ check "the final commit has full verification" contains "$sandbox/tasks/acme-widgets-42.md" "covered: true"
 }
 
 scenario_self_assessment() {
@@ -1472,7 +1496,7 @@ scenario_account() {
 	unset E2E_CLONE_URL
 }
 
-scenarios=${*:-runner review_before_pr retry_committed_correction self_assessment area_review full_check planning_advice plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui routing history linear account learning knowledge_transfer}
+scenarios=${*:-runner review_before_pr retry_committed_correction self_assessment area_review quota_skip full_check planning_advice plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui routing history linear account learning knowledge_transfer}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"

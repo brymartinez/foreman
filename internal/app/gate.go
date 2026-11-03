@@ -421,7 +421,7 @@ func reopen(rec *task.Record, pr PullRequest, ci task.CIStatus, now time.Time) s
 	}
 	rec.CI = &ci
 	latest := rec.LatestCompeting()
-	reviewed := latest != nil && latest.Clean && latest.PR == d.PR && latest.Head != "" && latest.Head == pr.HeadSHA && rec.ClaimsCovered(latest) && rec.ScopeCovered(latest)
+	reviewed := latest != nil && latest.Accepted() && latest.PR == d.PR && latest.Head != "" && latest.Head == pr.HeadSHA && rec.ClaimsCovered(latest) && rec.ScopeCovered(latest)
 	if reviewed && strings.TrimSpace(pr.Body) == "" {
 		failTask(rec, "the pull request description is empty; restore it before handoff", now)
 		return rec.LastOutcome.Summary
@@ -459,7 +459,7 @@ func gated(r *task.Record) bool {
 		return true
 	case task.WaitingForCI:
 		latest := r.LatestCompeting()
-		return latest != nil && latest.Clean && latest.PR == d.PR
+		return latest != nil && latest.Accepted() && latest.PR == d.PR
 	}
 	return false
 }
@@ -474,7 +474,7 @@ func rereview(r *task.Record) bool {
 		return false
 	}
 	latest := r.LatestCompeting()
-	return latest != nil && latest.Clean && latest.PR == d.PR
+	return latest != nil && latest.Accepted() && latest.PR == d.PR
 }
 
 // restartReview stores the head and description the PR has now, so the runner the

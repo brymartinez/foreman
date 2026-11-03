@@ -87,6 +87,26 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 	if _, ok := a.Agents[req.Agent]; !ok {
 		return nil, fmt.Errorf("agent %s is not configured", req.Agent)
 	}
+	// Restarts may hand existing work to the available provider. New manual starts
+	// retain the requested provider and refuse confirmed unavailable quota.
+	quotas := a.readQuotas(ctx, nil)
+	if existing != nil && existing.Delegation != nil {
+		// An outstanding adversarial review may complete or be skipped without
+		// any implementation call. Its own provider gets a separate preflight.
+		reviewOnly := req.Agent == existing.Delegation.Implementer.Agent && existing.ReviewPending() && existing.NextReview() == task.CompetingReview && !existing.Delegation.ConflictPending && len(existing.Undelivered()) == 0 && len(existing.UnhandledFeedback()) == 0
+		if !reviewOnly {
+			req.Agent, err = a.quotaImplementer(req.Agent, quotas)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if req.Profile != nil && req.Profile.Agent != req.Agent {
+			req.Profile = nil
+			req.RouteReason = ""
+		}
+	} else if err := quotaError(req.Agent, quotas); err != nil {
+		return nil, err
+	}
 	if req.ContextFile != "" {
 		if _, err := os.Stat(req.ContextFile); err != nil {
 			return nil, fmt.Errorf("context file: %w", err)
@@ -259,7 +279,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			cur.Delegation.FullSuiteGate = a.FullSuiteGate
 		}
 		// The same branch has the same PR, so a restart can pick up at its review.
-		// Another implementer starts over: its reviewer wrote the existing PR. A
+		// A provider handoff keeps the same committed work and PR. A
 		// PR_CLOSED task's PR cannot be picked up, and keeping its number would have
 		// the readiness gate end this run on its next refresh. When feedback replies
 		// are enabled, waiting comments keep the PR for any agent.
@@ -267,13 +287,13 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		if sameAgent && prev.Reviewer == req.Agent {
 			cur.Delegation.Reviewer = prev.Reviewer
 		}
-		if sameAgent && prev.Branch == wt.Branch && prev.CheckpointHead == head {
+		if prev != nil && prev.Branch == wt.Branch && prev.CheckpointHead == head {
 			cur.Delegation.CheckpointNext = prev.CheckpointNext
 			cur.Delegation.Checkpoints = prev.Checkpoints
 		}
 		// A restart at the commit the last run returned for review keeps it with its
 		// proposal, so the review or the PR opening picks up where the run stopped.
-		if sameAgent && prev.Branch == wt.Branch && prev.ReviewBeforePR && prev.PR == 0 && prev.LocalHead == head {
+		if prev != nil && prev.Branch == wt.Branch && prev.ReviewBeforePR && prev.PR == 0 && prev.LocalHead == head {
 			cur.Delegation.LocalHead, cur.Delegation.ProposedTitle, cur.Delegation.ProposedBody = prev.LocalHead, prev.ProposedTitle, prev.ProposedBody
 			cur.Delegation.Claims, cur.Delegation.PRDDigest = prev.Claims, prev.PRDDigest
 		}
@@ -281,7 +301,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		if req.Profile == nil && sameAgent && prev.Profile != nil {
 			cur.Delegation.Profile, cur.Delegation.RouteReason, cur.Delegation.RouteLogged = prev.Profile, prev.RouteReason, prev.RouteLogged
 		}
-		if was != task.PRClosed && prev != nil && prev.Branch == wt.Branch && (sameAgent || (a.ReplyToPRFeedback && len(cur.UnhandledFeedback()) > 0)) {
+		if was != task.PRClosed && prev != nil && prev.Branch == wt.Branch {
 			cur.Delegation.PR, cur.Delegation.PRURL, cur.Delegation.PRHead = prev.PR, prev.PRURL, prev.PRHead
 			// The description digest goes with the head: without it, a review of an
 			// earlier description would cover the kept PR.

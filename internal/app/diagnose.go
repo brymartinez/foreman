@@ -44,6 +44,9 @@ func (a App) diagnoseLimit(ctx context.Context, rec *task.Record, title, body st
 		}
 		defer cancel()
 	}
+	if err := a.checkQuota(ctx, in.Agent, log); err != nil {
+		return unavailable(err), task.Usage{}
+	}
 	started := a.Now()
 	out, err := a.Diagnoser.Diagnose(callCtx, in, sources)
 	if a.metered {

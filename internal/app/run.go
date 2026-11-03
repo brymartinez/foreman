@@ -67,6 +67,11 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, token string, l
 	}
 
 	if rec.Delegation.ConflictPending {
+		rec, err = a.handoffForQuota(ctx, rec, log)
+		if err != nil {
+			_, saveErr := a.update(final, key, existing(func(cur *task.Record) { failTask(cur, err.Error(), a.Now()) }))
+			return saveErr
+		}
 		// The gate found the handed-over PR conflicting with its base. A repair
 		// that worked leaves a new head to review; anything else is the developer's.
 		if rec, err = a.repairConflict(ctx, final, rec, log); err != nil || !rec.State.Reviewing() {
@@ -213,6 +218,19 @@ func (r *taskRun) loop(next step) error {
 // scopeBoundary re-reads triage before every stage. A changed scope invalidates
 // prior plan and code reviews; a removed label or unreadable source stops the run.
 func (r *taskRun) scopeBoundary(next step) (step, bool, error) {
+	// Finish an available adversarial review before changing implementers. A
+	// quota skip and metadata-only handover need no implementation quota.
+	needsImplementer := next != stepHandover && next != stepPickUpReview && !(next == stepReview && r.rec.NextReview() == task.CompetingReview)
+	if needsImplementer {
+		rec, quotaErr := r.a.handoffForQuota(r.ctx, r.rec, r.log)
+		if quotaErr != nil {
+			saved, err := r.a.update(r.final, r.rec.Key, existing(func(cur *task.Record) { failTask(cur, quotaErr.Error(), r.a.Now()) }))
+			r.rec = saved
+			return stepDone, true, err
+		}
+		r.rec = rec
+	}
+
 	scope, err := r.a.readScope(r.ctx, r.rec.Key)
 	if err != nil {
 		rec, saveErr := r.a.update(r.final, r.rec.Key, existing(func(cur *task.Record) { failTask(cur, err.Error(), r.a.Now()) }))
@@ -477,7 +495,7 @@ func (r *taskRun) review() (step, error) {
 	}
 	// Findings return to the implementer. At the self-review limit it must reject
 	// them with evidence or ask the developer before making another correction.
-	atLimit := reviewErr == nil && !review.Clean && rec.ChangeRequestsSinceDecision()+1 > a.fixRounds()
+	atLimit := reviewErr == nil && !review.Clean && !review.Skipped && rec.ChangeRequestsSinceDecision()+1 > a.fixRounds()
 	if rec, err = a.update(r.final, rec.Key, existing(func(cur *task.Record) {
 		if kind == task.CompetingReview {
 			cur.Delegation.Reviewer = reviewer
@@ -509,7 +527,7 @@ func (r *taskRun) review() (step, error) {
 	case rec.State == task.Implementing:
 		r.findings = rec.LatestReview()
 		return stepImplement, nil
-	case reviewErr == nil && review.Clean && rec.State == task.WaitingForCI && a.ReplyToPRFeedback:
+	case reviewErr == nil && (review.Clean || review.Skipped) && rec.State == task.WaitingForCI && a.ReplyToPRFeedback:
 		return stepHandover, nil
 	}
 	return stepDone, nil
@@ -624,7 +642,7 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 		resume = agent.ConflictMessage(*conflict)
 	} else if decs := rec.Undelivered(); len(decs) > 0 {
 		var open *task.Review
-		if latest := rec.LatestReview(); latest != nil && !latest.Clean {
+		if latest := rec.LatestReview(); latest != nil && !latest.Accepted() {
 			open = latest
 		}
 		resume = agent.ResumeMessage(decs, open, planning, local)
@@ -667,7 +685,7 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 		return agent.Turn{}, err
 	}
 	// The turn that pushed before a merge already fixed the latest findings.
-	if latest := rec.LatestReview(); merge == nil && latest != nil && !latest.Clean {
+	if latest := rec.LatestReview(); merge == nil && latest != nil && !latest.Accepted() {
 		brief.OpenFindings = latest.Findings
 	}
 	brief.Correction = !planning && merge == nil && !d.ConflictPending && len(feedback) == 0 && req.finalCheck == nil && len(brief.OpenFindings) > 0
@@ -858,7 +876,7 @@ func reviewTarget(rec *task.Record) string {
 }
 
 // review runs the other agent with the checked task, decisions, and validation.
-// An unavailable competing agent stops the task instead of reducing independence.
+// Confirmed exhausted quota skips this review; other provider failures stop it.
 func (a App) review(ctx context.Context, rec *task.Record, title, body, prd string, log io.Writer) (agent.ReviewOutcome, task.Agent, error) {
 	d := rec.Delegation
 	_, plan, requirementsErr := a.reviewRequirements(ctx, rec)
@@ -894,7 +912,22 @@ func (a App) review(ctx context.Context, rec *task.Record, title, body, prd stri
 	fmt.Fprintf(log, "foreman: %s reviewing %s (round %d)\n", reviewer.Name(), target, len(rec.Reviews)+1)
 	brief = a.prepareReview(ctx, rec, task.CompetingReview, chosen, brief, log)
 	in.Prompt = agent.ReviewPrompt(brief)
+	if err := a.checkQuota(ctx, chosen, log); err != nil {
+		var unavailable quotaUnavailable
+		if errors.As(err, &unavailable) && unavailable.Status == QuotaExhausted {
+			summary := fmt.Sprintf("Adversarial review skipped: %s quota exhausted", chosen)
+			fmt.Fprintf(log, "foreman: %s\n", summary)
+			return reviewContext(agent.ReviewOutcome{Skipped: true, Summary: summary}, brief), chosen, nil
+		}
+		return agent.ReviewOutcome{}, chosen, err
+	}
 	out, err := reviewer.Review(ctx, in)
+	var unavailable quotaUnavailable
+	if errors.As(err, &unavailable) && unavailable.Status == QuotaExhausted {
+		out = agent.ReviewOutcome{Skipped: true, Summary: fmt.Sprintf("Adversarial review skipped: %s quota exhausted", chosen)}
+		fmt.Fprintf(log, "foreman: %s\n", out.Summary)
+		err = nil
+	}
 	return reviewContext(out, brief), chosen, err
 }
 
@@ -1160,8 +1193,8 @@ func short(sha string) string {
 }
 
 // applyReview records a review round. Findings send the task back to IMPLEMENTING. A
-// clean self-review leaves the next review to enter its stage. A clean competing review
-// of a local commit goes on to OPENING_PR, and of a PR waits for the readiness gate
+// clean self-review leaves the next review to enter its stage. An accepted competing
+// review of a local commit goes on to OPENING_PR, and of a PR waits for the readiness gate
 // (gate.go) in WAITING_FOR_CI.
 // A self-review's error fails the task too: it never falls through to the competing
 // review. The round records the head and description it read, and for a task with
@@ -1179,27 +1212,32 @@ func applyReview(rec *task.Record, kind task.ReviewKind, reviewer task.Agent, r 
 	head, proposal := rec.CurrentChange()
 	review := task.Review{
 		BaseRef: r.BaseRef, BaseHead: r.BaseHead, FromHead: r.FromHead,
-		Round:     len(rec.Reviews) + 1,
-		Kind:      kind,
-		Decisions: task.DecisionsDigest(rec.Decisions),
-		Areas:     r.Areas,
-		Reviewer:  reviewer,
-		PR:        rec.Delegation.PR,
-		Head:      head,
-		Proposal:  proposal,
-		Clean:     r.Clean,
-		Summary:   r.Summary,
-		Findings:  r.Findings,
-		At:        now,
-		Scope:     rec.Delegation.ScopeDigest,
-		Plan:      rec.Delegation.PlanDigest,
+		Round:       len(rec.Reviews) + 1,
+		Kind:        kind,
+		Decisions:   task.DecisionsDigest(rec.Decisions),
+		Areas:       r.Areas,
+		Reviewer:    reviewer,
+		PR:          rec.Delegation.PR,
+		Head:        head,
+		Proposal:    proposal,
+		Clean:       r.Clean,
+		Skipped:     r.Skipped,
+		Summary:     r.Summary,
+		Limitations: r.Limitations,
+		Findings:    r.Findings,
+		At:          now,
+		Scope:       rec.Delegation.ScopeDigest,
+		Plan:        rec.Delegation.PlanDigest,
 	}
 	if d := rec.Delegation; d.ClaimVerification {
-		review.Claims, review.PRD, review.Limitations = task.ClaimsDigest(d.Claims), d.PRDDigest, r.Limitations
+		review.Claims, review.PRD = task.ClaimsDigest(d.Claims), d.PRDDigest
 	}
 	rec.Reviews = append(rec.Reviews, review)
-	if r.Clean {
+	if r.Clean || r.Skipped {
 		status := "review_clean"
+		if r.Skipped {
+			status = "review_skipped"
+		}
 		if kind == task.SelfReview {
 			status = "self_review_clean"
 		}
@@ -1347,7 +1385,7 @@ func stopSummary(rec *task.Record) string {
 	if rec.Delegation.PR == 0 {
 		summary = "stopped by the maintainer; no PR opened"
 	}
-	if latest := rec.LatestReview(); latest != nil && !latest.Clean {
+	if latest := rec.LatestReview(); latest != nil && !latest.Accepted() {
 		var open []string
 		for _, f := range latest.Findings {
 			open = append(open, f.Summary)

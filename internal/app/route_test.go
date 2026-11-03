@@ -243,8 +243,8 @@ func TestRouteWaitsWhenAllCandidatesExhausted(t *testing.T) {
 	if err != nil || d.Profile != nil || !strings.Contains(d.Wait, "claude") || !strings.Contains(d.Wait, "codex") {
 		t.Fatalf("decision = %+v, %v", d, err)
 	}
-	if d.Selection.Rule != 3 {
-		t.Errorf("selection = %+v, want it kept for the retry", d.Selection)
+	if d.Selection.Rule != 0 {
+		t.Errorf("selector should not run while both providers are exhausted: %+v", d.Selection)
 	}
 }
 

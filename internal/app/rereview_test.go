@@ -159,7 +159,7 @@ func TestRestartImplementsWhenThePendingReviewsPRIsNoLongerOpen(t *testing.T) {
 	}
 }
 
-func TestRestartWithTheOtherAgentDoesNotKeepThePR(t *testing.T) {
+func TestRestartWithTheOtherAgentKeepsThePendingReview(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	f.claude.turn = prTurn("sid-1")
@@ -170,7 +170,7 @@ func TestRestartWithTheOtherAgentDoesNotKeepThePR(t *testing.T) {
 	req := startReq(t)
 	req.Agent = task.Codex
 	key = started(t, f, req)
-	if got := f.store.recs[key]; got.Delegation.PR != 0 || got.ReviewPending() {
-		t.Fatalf("kept PR #%d for a different implementer", got.Delegation.PR)
+	if got := f.store.recs[key]; got.Delegation.PR != 912 || !got.ReviewPending() {
+		t.Fatalf("lost pending review of PR #%d during provider handoff", got.Delegation.PR)
 	}
 }

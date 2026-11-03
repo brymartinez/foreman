@@ -223,10 +223,10 @@ func handsOverNow(rec *task.Record, ci *task.CIStatus) bool {
 	return ci != nil && ci.State != task.CIPending && !rec.Delegation.ClaimVerification && !rec.FinalCheckPending()
 }
 
-// reviewCovers requires a clean competing review of the commit, scope, and claims.
+// reviewCovers requires an accepted competing review of the commit, scope, and claims.
 func reviewCovers(rec *task.Record, head string) bool {
 	latest := rec.LatestCompeting()
-	return latest != nil && rec.ClaimsCovered(latest) && rec.ScopeCovered(latest) && latest.Clean && latest.PR == rec.Delegation.PR && head != "" && latest.Head == head
+	return latest != nil && rec.ClaimsCovered(latest) && rec.ScopeCovered(latest) && latest.Accepted() && latest.PR == rec.Delegation.PR && head != "" && latest.Head == head
 }
 
 // beforeHandover answers comments that arrived while the run worked, so the developer

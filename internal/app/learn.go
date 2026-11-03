@@ -89,6 +89,9 @@ func (a App) Learn(ctx context.Context, key task.Key, log io.Writer) error {
 	if in.Agent == "" {
 		in.Agent = task.Claude
 	}
+	if err := a.checkQuota(ctx, in.Agent, log); err != nil {
+		return err
+	}
 	out, err := a.Evaluator.Evaluate(ctx, in)
 	if err != nil {
 		return fmt.Errorf("evaluate %s#%d: %w", rec.Repo, rec.Number, err)

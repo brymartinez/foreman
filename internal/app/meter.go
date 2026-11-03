@@ -77,6 +77,9 @@ func (a App) saveCall(ctx context.Context, key task.Key, name task.Agent, step s
 }
 
 func (m meteredAgent) turn(ctx context.Context, in agent.StartInput, run func(context.Context) (agent.Turn, error)) (agent.Turn, error) {
+	if err := m.app.checkQuota(ctx, m.Name(), in.Log); err != nil {
+		return agent.Turn{}, err
+	}
 	child, cancel, err := m.app.callContext(ctx, m.key, cmp.Or(in.Purpose, in.Step))
 	if err != nil {
 		return agent.Turn{}, err
@@ -100,6 +103,9 @@ func (m meteredAgent) Resume(ctx context.Context, session task.Session, in agent
 }
 
 func (m meteredAgent) Review(ctx context.Context, in agent.StartInput) (agent.ReviewOutcome, error) {
+	if err := m.app.checkQuota(ctx, m.Name(), in.Log); err != nil {
+		return agent.ReviewOutcome{}, err
+	}
 	child, cancel, err := m.app.callContext(ctx, m.key, cmp.Or(in.Purpose, in.Step))
 	if err != nil {
 		return agent.ReviewOutcome{}, err

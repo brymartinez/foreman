@@ -18,6 +18,7 @@ import (
 var ReviewSchema []byte
 
 type ReviewOutcome struct {
+	Skipped bool // Controller-only: adversarial provider has confirmed exhausted quota.
 	// These fields are set by the runner, never parsed from model output.
 	Areas    []task.ReviewArea
 	BaseRef  string

@@ -127,6 +127,8 @@ func reviewBadge(r *task.Record) string {
 	switch {
 	case latest == nil:
 		return ""
+	case latest.Skipped:
+		return reviewName(latest) + " skipped (quota)"
 	case latest.Clean:
 		return reviewName(latest) + " ✓"
 	}
@@ -150,6 +152,8 @@ func reviewState(r *task.Record) string {
 	switch {
 	case latest == nil:
 		return ""
+	case latest.Skipped:
+		return reviewName(latest) + " skipped (quota)"
 	case latest.Clean:
 		return reviewName(latest) + " ✓"
 	}
@@ -237,6 +241,8 @@ func Show(w io.Writer, r *task.Record) {
 		verdict := "changes requested"
 		if latest.Clean {
 			verdict = "clean"
+		} else if latest.Skipped {
+			verdict = "skipped (quota)"
 		}
 		fmt.Fprintf(w, "\nLatest %s (round %d of %d, %s, %s): %s\n", reviewName(latest), latest.Round, len(r.Reviews), agentName(latest.Reviewer), latest.At.Local().Format(time.DateTime), verdict)
 		if s := strings.TrimSpace(latest.Summary); s != "" {

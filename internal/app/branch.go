@@ -109,6 +109,10 @@ func (a App) proposeBranch(ctx context.Context, req StartRequest, base string, i
 	if want == "" && req.Profile != nil {
 		want = req.Profile.Agent
 	}
+	if err := a.checkQuota(ctx, want, nil); err != nil {
+		proposal.Uncertain, proposal.Reason = true, err.Error()
+		return proposal, nil
+	}
 	out, err := a.BranchProposer.Propose(ctx, agent.BranchInput{Agent: want, Profile: req.Profile, Prompt: branchPrompt(issue, fallback, guide)})
 	if err != nil {
 		proposal.Uncertain, proposal.Reason = true, "could not apply repository branch guidance: "+err.Error()

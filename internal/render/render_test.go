@@ -303,3 +303,15 @@ func TestShowKeepsWritingAdviceSeparateFromBlockingFindings(t *testing.T) {
 		t.Fatalf("show %s", b.String())
 	}
 }
+
+func TestQuotaSkipIsShownAsSkippedRatherThanClean(t *testing.T) {
+	rec := &task.Record{Key: task.Key{Repo: "a/b", Number: 1}, Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex}}, Reviews: []task.Review{{Skipped: true, Summary: "Adversarial review skipped: claude quota exhausted"}}}
+	if got := reviewBadge(rec); got != "review skipped (quota)" {
+		t.Fatal(got)
+	}
+	var out bytes.Buffer
+	Show(&out, rec)
+	if !strings.Contains(out.String(), "skipped (quota)") || !strings.Contains(out.String(), "claude quota exhausted") {
+		t.Fatal(out.String())
+	}
+}

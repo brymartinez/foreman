@@ -128,6 +128,9 @@ func (a App) IngestKnowledge(ctx context.Context, in IngestInput) (IngestResult,
 			if a.Merger == nil {
 				return res, errors.New("no merge agent is configured")
 			}
+			if err := a.checkQuota(ctx, in.Agent, in.Log); err != nil {
+				return res, err
+			}
 			out, err := a.Merger.Merge(ctx, agent.EvaluateInput{Agent: in.Agent, Prompt: agent.MergePrompt(dest, m.Items), MaxBudgetUSD: a.LearningBudgetUSD, Log: in.Log}, m.Refs())
 			res.Usage = out.Usage
 			if err != nil {
