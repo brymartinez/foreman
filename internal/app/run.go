@@ -857,36 +857,6 @@ func reviewTarget(rec *task.Record) string {
 	return fmt.Sprintf("PR #%d", rec.Delegation.PR)
 }
 
-// selfReview runs a fresh, read-only review of code changes without task context.
-// An error stops the task instead of skipping to the adversarial review.
-func (a App) selfReview(ctx context.Context, rec *task.Record, log io.Writer) (agent.ReviewOutcome, error) {
-	d := rec.Delegation
-	_, _, err := a.reviewRequirements(ctx, rec)
-	if err != nil {
-		return agent.ReviewOutcome{}, err
-	}
-	adapter, ok := a.Agents[d.Implementer.Agent]
-	if !ok {
-		return agent.ReviewOutcome{}, fmt.Errorf("agent %s is not configured", d.Implementer.Agent)
-	}
-	instructions, err := a.Stages.Resolve(d.Worktree, task.StageReview)
-	if err != nil {
-		return agent.ReviewOutcome{}, err
-	}
-	brief := agent.ReviewBrief{Key: rec.Key, Branch: d.Branch, BaseBranch: strings.TrimPrefix(d.BaseRef, "origin/"),
-		StageInstructions: instructions.Content(), Passes: a.reviewRounds(), Self: true,
-	}
-	if err := a.startAttempt(ctx, rec); err != nil {
-		return agent.ReviewOutcome{}, err
-	}
-	brief = a.prepareReview(ctx, rec, task.SelfReview, d.Implementer.Agent, brief, log)
-	brief.PreviousHead, brief.PreviousFindings = "", nil
-	in := agent.StartInput{Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ReviewerBudgetUSD, Prompt: agent.ReviewPrompt(brief), Step: agent.StepReview, Purpose: "self_review"}
-	fmt.Fprintf(log, "foreman: %s self-reviewing %s (round %d)\n", adapter.Name(), reviewTarget(rec), len(rec.Reviews)+1)
-	out, reviewErr := adapter.Review(ctx, in)
-	return reviewContext(out, brief), reviewErr
-}
-
 // review runs the other agent with the checked task, decisions, and validation.
 // An unavailable competing agent stops the task instead of reducing independence.
 func (a App) review(ctx context.Context, rec *task.Record, title, body, prd string, log io.Writer) (agent.ReviewOutcome, task.Agent, error) {
@@ -1212,6 +1182,7 @@ func applyReview(rec *task.Record, kind task.ReviewKind, reviewer task.Agent, r 
 		Round:     len(rec.Reviews) + 1,
 		Kind:      kind,
 		Decisions: task.DecisionsDigest(rec.Decisions),
+		Areas:     r.Areas,
 		Reviewer:  reviewer,
 		PR:        rec.Delegation.PR,
 		Head:      head,

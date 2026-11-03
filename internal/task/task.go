@@ -696,6 +696,7 @@ const (
 )
 
 type Review struct {
+	Areas            []ReviewArea
 	RejectedFindings []RejectedFinding
 	Decisions        string
 

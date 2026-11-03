@@ -53,7 +53,7 @@ func TestReviewMethodsCannotOverrideScope(t *testing.T) {
 	}
 }
 
-func TestSelfReviewDoesNotReceiveTaskOrEarlierReviewContext(t *testing.T) {
+func TestSelfReviewDoesNotReceiveTaskContext(t *testing.T) {
 	b := claimedReviewBrief()
 	b.Self = true
 	b.PreviousHead = "old-head"
@@ -62,9 +62,40 @@ func TestSelfReviewDoesNotReceiveTaskOrEarlierReviewContext(t *testing.T) {
 	b.Validation = []task.Check{{Command: "VALIDATION"}}
 	b.FullResult = &task.FullResult{Revision: "FULL-REVISION"}
 	p := ReviewPrompt(b)
-	for _, leak := range []string{"AC1.", "only 5xx is retried", "retry.go:40", "EARLIER-FINDING", "DECISION", "VALIDATION", "FULL-REVISION", "Start with `git diff old-head"} {
+	for _, leak := range []string{"AC1.", "only 5xx is retried", "retry.go:40", "DECISION", "VALIDATION", "FULL-REVISION"} {
 		if strings.Contains(p, leak) {
 			t.Errorf("self-review leaked %q", leak)
 		}
+	}
+}
+
+func TestSelfReviewFollowupStartsFromTheFixDiff(t *testing.T) {
+	b := reviewBrief()
+	b.Self = true
+	b.PreviousHead = "abcdef1234567"
+	b.PreviousFindings = []task.Finding{{File: "queue.go", Line: 12, Summary: "Lease expiry is not checked", Detail: "A stale worker can publish."}}
+	p := ReviewPrompt(b)
+	if !strings.Contains(p, "git diff abcdef1234567..HEAD") || !strings.Contains(p, "Lease expiry is not checked") {
+		t.Fatalf("followup lost fix scope: %s", p)
+	}
+	if strings.Contains(p, "Read the complete diff once.") {
+		t.Fatal("followup repeats a full branch review")
+	}
+}
+
+func TestScopedReviewUsesLiteralAssignedPaths(t *testing.T) {
+	b := reviewBrief()
+	b.Self = true
+	b.Head = "new-head"
+	b.BaseHead = "base-head"
+	b.Area = &task.ReviewArea{Name: "storage", Paths: []string{"db/save.go", "db/a'$(secret).go"}}
+	p := ReviewPrompt(b)
+	for _, want := range []string{"Assigned review area: storage", "Inspect every assigned file", "git diff base-head...new-head -- ':(literal)db/save.go' ':(literal)db/a'\\''$(secret).go'", "Collect all verified findings", "If a command is denied"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("scoped prompt missing %q", want)
+		}
+	}
+	if strings.Contains(p, "Read the complete diff once.") {
+		t.Fatal("scoped review requested the full branch")
 	}
 }

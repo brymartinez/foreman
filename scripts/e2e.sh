@@ -245,6 +245,20 @@ if [[ " $* " == *" --no-session-persistence "* ]]; then
 	if [[ "$2" == "You are the self-reviewer"* ]]; then
 		echo "claude self-review" >>"$E2E_STATE/agents.log"
 		printf '%s' "$2" >"$E2E_STATE/self-review-prompt.txt"
+		if [ -f "$E2E_STATE/area-batch" ]; then
+			if [[ "$2" == *"focused re-review"* ]]; then
+				echo "claude focused-self" >>"$E2E_STATE/agents.log"
+				printf '%s' "$2" >"$E2E_STATE/focused-self-prompt.txt"
+			else
+				for file in api/route.go data/save.go ui/view.go; do
+					if [[ "$2" == *":(literal)$file"* ]]; then
+						echo "claude area $file" >>"$E2E_STATE/agents.log"
+						printf '{"type":"result","subtype":"success","structured_output":{"verdict":"changes_requested","summary":"A verified guard is missing","findings":[{"category":"defect","severity":"should_fix","file":"%s","line":1,"summary":"Guard missing in %s","detail":"The caller can reach an invalid state."}],"limitations":[]}}\n' "$file" "$file"
+						exit 0
+					fi
+				done
+			fi
+		fi
 		if [ -f "$E2E_STATE/self-findings-once" ]; then
 			rm "$E2E_STATE/self-findings-once"
 			echo '{"type":"result","subtype":"success","structured_output":{"verdict":"changes_requested","summary":"Check the retry guard","findings":[{"category":"defect","severity":"should_fix","file":"widgets.go","line":1,"summary":"Retry guard may be missing","detail":"Check the caller"}],"limitations":[]}}'
@@ -295,7 +309,13 @@ if [[ " $* " == *" --resume "* || "$2" == *"You are correcting the latest review
 		# review_before_pr: fix findings locally, or push the reviewed commit and open the PR.
 		if [[ "$2" == *"of your local change by"* || "$2" == *"You are correcting the latest review"* ]]; then
 			echo "claude local-fix" >>"$E2E_STATE/agents.log"
-			echo "// retry 429" >>widgets.go
+			if [ -f "$E2E_STATE/area-batch" ]; then
+				echo "claude combined-area-fix" >>"$E2E_STATE/agents.log"
+				printf '%s' "$2" >"$E2E_STATE/combined-area-prompt.txt"
+				for file in api/route.go data/save.go ui/view.go; do echo "// fixed guard" >>"$file"; done
+			else
+				echo "// retry 429" >>widgets.go
+			fi
 			git commit -qam "fix: retry 429"
 			if [ -f "$E2E_STATE/fail-correction-output-once" ]; then
 				rm "$E2E_STATE/fail-correction-output-once"
@@ -384,6 +404,13 @@ echo "$$" >"$E2E_STATE/implement-agent.pid"
 sleep "${E2E_AGENT_SLEEP:-1}"
 branch=$(git branch --show-current)
 echo "// retries" >>widgets.go
+if [ -f "$E2E_STATE/area-batch" ]; then
+	mkdir -p api data ui
+	for file in api/route.go data/save.go ui/view.go; do
+		awk 'BEGIN {print "package widgets"; for (i=1;i<=900;i++) print "// review line " i}' >"$file"
+	done
+	git add api data ui
+fi
 # No -c identity: foreman sets the commit author in the worktree's own config.
 git commit -qam "feat: retries"
 # review_before_pr: commit only, and propose the PR for review.
@@ -592,6 +619,29 @@ scenario_retry_committed_correction() {
 	check "the original finding's rejection reason is retained" contains "$task_file" "Already fixed in the committed correction"
 	check "the recorded review covers the unchanged retry commit" grep -qE "^[[:space:]]+head: $head$" "$task_file"
 	check "the PR opened" contains "$state/agents.log" "claude open-pr"
+}
+
+scenario_area_review() {
+	echo "area_review: all initial areas finish before one combined correction, then only the fix is reviewed"
+	setup area_review
+	echo "review_before_pr: true" >>"$sandbox/config.yaml"
+	touch "$state/area-batch" "$state/focused-fixes"
+	check "the task starts" start 42
+	check "the task reaches a clean review" wait_status "review ✓"
+	local file
+	for file in api/route.go data/save.go ui/view.go; do
+		check "initial review owns $file" contains "$state/agents.log" "claude area $file"
+		check "one correction receives the finding for $file" contains "$state/combined-area-prompt.txt" "Guard missing in $file"
+	done
+	check "one combined correction ran" test "$(grep -c '^claude combined-area-fix$' "$state/agents.log")" = 1
+	check "all three area calls precede the correction" bash -c "grep -E '^claude (area |combined-area-fix)' '$state/agents.log' | tail -1 | grep -qx 'claude combined-area-fix'"
+	check "only one focused self-review followed the fix" test "$(grep -c '^claude focused-self$' "$state/agents.log")" = 1
+	check "three bounded initial calls and one focused call ran" test "$(grep -c '^claude self-review$' "$state/agents.log")" = 4
+	check "the followup includes prior findings" contains "$state/focused-self-prompt.txt" "Guard missing in api/route.go"
+	check "the followup excludes unrelated unchanged code" bash -c "! grep -qF 'widgets.go' '$state/focused-self-prompt.txt'"
+	check "one adversarial review ran" test "$(grep -c '^codex review$' "$state/agents.log")" = 1
+	check "one final full check ran" test "$(grep -c '^claude final-check$' "$state/agents.log")" = 1
+	check "the task records scoped coverage" contains "$sandbox/tasks/acme-widgets-42.md" "areas:"
 }
 
 scenario_self_assessment() {
@@ -1422,7 +1472,7 @@ scenario_account() {
 	unset E2E_CLONE_URL
 }
 
-scenarios=${*:-runner review_before_pr retry_committed_correction self_assessment full_check planning_advice plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui routing history linear account learning knowledge_transfer}
+scenarios=${*:-runner review_before_pr retry_committed_correction self_assessment area_review full_check planning_advice plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui routing history linear account learning knowledge_transfer}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"

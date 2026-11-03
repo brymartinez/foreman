@@ -21,8 +21,14 @@ func (a App) prepareReview(ctx context.Context, rec *task.Record, kind task.Revi
 		previous = rec.LatestSelf()
 	}
 	prior := ""
-	if previous != nil && previous.BaseHead != "" && previous.Reviewer == reviewer && reviewCommit.MatchString(previous.Head) && previous.BaseRef == rec.Delegation.BaseRef && rec.ScopeCovered(previous) && (!rec.Delegation.ClaimVerification || previous.PRD == rec.Delegation.PRDDigest) {
-		prior = previous.Head
+	if previous != nil && previous.BaseHead != "" && previous.Reviewer == reviewer && reviewCommit.MatchString(previous.Head) && previous.BaseRef == rec.Delegation.BaseRef {
+		covered := rec.ScopeCovered(previous) && (!rec.Delegation.ClaimVerification || previous.PRD == rec.Delegation.PRDDigest)
+		if kind == task.SelfReview {
+			covered = len(previous.Areas) > 0 && len(previous.Limitations) == 0
+		}
+		if covered {
+			prior = previous.Head
+		}
 	}
 	head, _ := rec.CurrentChange()
 	r, err := a.Worktrees.ReviewRange(ctx, rec.Delegation.Worktree, rec.Delegation.BaseRef, head, prior)
@@ -33,6 +39,18 @@ func (a App) prepareReview(ctx context.Context, rec *task.Record, kind task.Revi
 	brief.BaseHead = r.BaseHead
 	if prior != "" && previous.BaseHead != "" && previous.BaseHead == r.BaseHead && r.PreviousIsAncestor {
 		brief.PreviousHead, brief.PreviousFindings = prior, previous.Findings
+		if kind == task.SelfReview {
+			brief.PreviousFindings = nil
+			rejected := map[int]bool{}
+			for _, f := range previous.RejectedFindings {
+				rejected[f.Finding] = true
+			}
+			for i, f := range previous.Findings {
+				if !rejected[i+1] {
+					brief.PreviousFindings = append(brief.PreviousFindings, f)
+				}
+			}
+		}
 	}
 	return brief
 }

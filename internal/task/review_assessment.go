@@ -5,6 +5,12 @@ import (
 	"strings"
 )
 
+// ReviewArea is a controller-assigned set of changed files covered by one review.
+type ReviewArea struct {
+	Name  string   `yaml:"name"`
+	Paths []string `yaml:"paths"`
+}
+
 type RejectedFinding struct {
 	Finding int    `json:"finding" yaml:"finding"`
 	Reason  string `json:"reason" yaml:"reason"`

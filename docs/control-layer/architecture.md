@@ -792,13 +792,34 @@ the same commit. The commit message records why it changed.
 
 ### Review
 
-- **Self-review is independent of task context.** Before adversarial review, the
-  implementing agent's review model runs in a fresh, disposable, read-only session
-  with the reviewer budget and `review_rounds` passes. Each session inspects the
-  complete branch diff and surrounding code. It receives no requirements, plan,
-  claims, decisions, transcript, or earlier findings. It reports concrete code
-  defects and regressions; product decisions belong to the implementing agent.
-  Review errors fail the task.
+- **Initial self-review covers explicit file areas.** Git supplies the complete
+  changed-path inventory and line counts, including deleted paths and both sides
+  of renames. Foreman groups source files with colocated tests and balances their
+  changed lines into up to three areas. Small changes stay in one area. The
+  800-line target is scheduling guidance, not an accepted-change limit. Every
+  changed path has one owner, and assignments are deterministic. Reviewers receive
+  pinned, literal-path diff commands and may read surrounding code to trace effects.
+  No task requirements, plan, claims, decisions, or implementation transcript enters
+  self-review. Each area uses a fresh, read-only session of the implementing agent's
+  review model and `review_rounds` passes. It collects every concrete finding in its
+  assigned area before returning.
+- **Collect area findings before correcting code.** Area calls run sequentially on
+  the committed change. The existing reviewer dollar budget is divided across the
+  batch without increasing its total. All areas must return before findings reach
+  the retained implementer. Foreman merges their findings without a synthesis model
+  call, deduplicates exact findings, and retains the strongest severity. It records
+  one review round with all assigned `areas`; individual calls remain metered and
+  logged. A failed area stops the run without recording completed coverage or
+  advancing to fixes or adversarial review. No extra agent-output fields are needed.
+- **Self-review after fixes focuses on the delta.** A prior area review supplies
+  the baseline only for the same reviewer and base ref and commit, with a verified
+  ancestor head and no recorded limitations. It supplies only earlier code findings
+  that the implementer did not reject. Changed files and earlier finding locations
+  get bounded areas; reviewers trace fix effects without restarting unrelated work.
+  Task wording changes alone do not invalidate code-only coverage. Missing area
+  metadata, recorded limitations, changed base, or rewritten history requires a full
+  pass. Older records remain readable; when they need a new self-review without this
+  coverage metadata, it starts with the full file inventory.
 - **Review-ready work need not advance on every turn.** Checkpoints still require
   a new commit. A `review_ready` turn may reuse an existing clean commit, including
   work committed before a previous turn's output failed validation. When that commit
@@ -815,8 +836,8 @@ the same commit. The commit message records why it changed.
   are saved as `rejected_findings` on the original review without changing its
   verdict. Rejecting every finding on an unchanged reviewed commit ends self-review
   early. Partial rejections or changed commits need another self-review. Rejected
-  findings do not consume fix rounds. A lost session is rebuilt from the checked
-  plan, all answered decisions, committed work, and outstanding findings.
+  findings do not consume fix rounds. A lost implementation session is rebuilt from
+  the checked plan, all answered decisions, committed work, and outstanding findings.
 - **Review kinds live on the record.** Each review records its kind (`self`, or empty
   for competing), head, requirement and claim digests, and the PR text digest for
   audit. Self-review coverage depends on the commit and PR. Adversarial coverage also
@@ -840,7 +861,7 @@ the same commit. The commit message records why it changed.
   and plan, the same PRD digest when claims are enabled, and a previous head that is
   an ancestor of the current one. Missing metadata, rewritten history, or changed
   requirements or base triggers a full review. Each review records its base and
-  starting head. Self-review always starts independently with the full branch diff.
+  starting head. Self-review uses its own completed area coverage and code findings.
 - **Both reviewers are read-only.** Claude gets `Read, Grep, Glob` and read-only git;
   Codex uses its read-only sandbox. Reviewers never resume the implementation session.
 - **Validation commands run in implementation, not review.** Reviewers read code and

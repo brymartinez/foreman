@@ -57,7 +57,7 @@ func TestSelfReviewRunsBeforeTheCompetingReviewOfAPR(t *testing.T) {
 		t.Errorf("self-review budget %v steps %v", f.claude.reviewBudgets, f.claude.steps)
 	}
 	p := f.claude.reviewed[0]
-	if strings.Contains(p, "> Retry 5xx only.") || !strings.Contains(p, "git diff origin/main...HEAD") || !strings.Contains(p, "Read the complete diff 2 times") {
+	if strings.Contains(p, "> Retry 5xx only.") || !strings.Contains(p, "git diff origin/main...c0ffee1 --") || !strings.Contains(p, "Make 2 review pass(es) over every assigned file") {
 		t.Errorf("self-review prompt must use the diff and pass count without the PR body:\n%s", p)
 	}
 	for _, leak := range []string{"sid-1", "Pull request comments", "Earlier review rounds"} {
@@ -131,7 +131,7 @@ func TestSelfReviewFailureStopsTheTaskBeforeTheCompetingReview(t *testing.T) {
 	if got.State != task.Failed || len(f.codex.reviewed) != 0 || len(got.Reviews) != 0 {
 		t.Fatalf("state %s codex reviews %d reviews %s", got.State, len(f.codex.reviewed), kinds(got))
 	}
-	if !strings.Contains(got.LastOutcome.Summary, "claude self-review failed: claude exited 1") {
+	if !strings.Contains(got.LastOutcome.Summary, "claude self-review failed: self-review area") || !strings.Contains(got.LastOutcome.Summary, "claude exited 1") {
 		t.Errorf("outcome = %+v", got.LastOutcome)
 	}
 }

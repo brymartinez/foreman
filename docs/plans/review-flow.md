@@ -7,11 +7,18 @@ rejects invalid findings with evidence, and asks the developer for decisions.
 If the session is unavailable, rebuild it from the checked plan, answered decisions,
 committed work, and outstanding findings.
 
-Each self-review is a fresh, read-only review of the branch diff and surrounding
-code. It receives no plan, claims, decisions, transcript, or prior findings. It
-returns concrete defects. The implementer may reject findings by number and reason.
+The initial self-review assigns the complete changed-file inventory to up to three
+balanced areas, keeping source files and colocated tests together. Fresh, read-only
+sessions review their assigned files and relevant callers without task context.
+The existing budget is shared across the batch. All areas finish before their
+combined, deduplicated findings return to the implementer.
+
+After fixes, self-review uses the completed review baseline, fix diff, unresolved
+code findings, and their effects. It receives no plan, claims, decisions, or
+implementation transcript. Missing coverage or an invalid baseline requires a full
+pass. The implementer may reject findings by number and reason.
 Rejecting every finding without changing the reviewed commit ends this loop early.
-Any code change receives another fresh self-review. Keep the existing fix limit;
+Any code change receives fresh scoped self-review. Keep the existing fix limit;
 at the limit, the implementer may reject the findings or ask for a decision.
 
 The competing agent then reviews the full task context: checked requirements and

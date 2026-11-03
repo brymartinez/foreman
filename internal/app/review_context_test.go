@@ -13,7 +13,7 @@ import (
 
 func TestFocusedReviewUsesOnlyItsOwnVerifiedHistory(t *testing.T) {
 	for _, kind := range []task.ReviewKind{task.SelfReview, task.CompetingReview} {
-		for _, mode := range []string{"valid", "base changed", "scope changed", "plan changed", "rewritten history", "other agent", "missing commit", "unknown base", "read failed", "requirements changed"} {
+		for _, mode := range []string{"valid", "old coverage", "incomplete coverage", "base changed", "scope changed", "plan changed", "rewritten history", "other agent", "missing commit", "unknown base", "read failed", "requirements changed"} {
 			t.Run(string(kind)+"/"+mode, func(t *testing.T) {
 				f := newFixture()
 				key := started(t, f, startReq(t))
@@ -30,8 +30,12 @@ func TestFocusedReviewUsesOnlyItsOwnVerifiedHistory(t *testing.T) {
 				if kind == task.SelfReview {
 					reviewer = task.Claude
 				}
-				previous := task.Review{Kind: kind, Reviewer: reviewer, Head: strings.Repeat("c", 40), BaseRef: d.BaseRef, BaseHead: f.wt.reviewBase, Scope: d.ScopeDigest, Plan: d.PlanDigest, PRD: d.PRDDigest, Findings: []task.Finding{{Summary: "own finding"}}}
+				previous := task.Review{Areas: []task.ReviewArea{{Name: "complete", Paths: []string{"retry.go"}}}, Kind: kind, Reviewer: reviewer, Head: strings.Repeat("c", 40), BaseRef: d.BaseRef, BaseHead: f.wt.reviewBase, Scope: d.ScopeDigest, Plan: d.PlanDigest, PRD: d.PRDDigest, Findings: []task.Finding{{Summary: "own finding"}}}
 				switch mode {
+				case "old coverage":
+					previous.Areas = nil
+				case "incomplete coverage":
+					previous.Limitations = []task.Limitation{{Behavior: "one file", Reason: "could not inspect"}}
 				case "base changed":
 					previous.BaseHead = strings.Repeat("d", 40)
 				case "scope changed":
@@ -58,7 +62,8 @@ func TestFocusedReviewUsesOnlyItsOwnVerifiedHistory(t *testing.T) {
 				rec.Reviews = []task.Review{previous, {Kind: other, Findings: []task.Finding{{Summary: "other review finding"}}}}
 				brief := f.app.prepareReview(context.Background(), rec, kind, reviewer, agent.ReviewBrief{Passes: 1, BaseBranch: "main"}, io.Discard)
 				p := agent.ReviewPrompt(brief)
-				if mode == "valid" {
+				focused := mode == "valid" || (kind == task.SelfReview && (mode == "scope changed" || mode == "plan changed" || mode == "requirements changed")) || (kind == task.CompetingReview && (mode == "old coverage" || mode == "incomplete coverage"))
+				if focused {
 					if brief.PreviousHead != previous.Head || !strings.Contains(p, "git diff "+previous.Head+"..HEAD") || !strings.Contains(p, "own finding") || strings.Contains(p, "other review finding") {
 						t.Fatalf("focused prompt %s", p)
 					}
@@ -126,7 +131,7 @@ func TestFixLoopUsesFocusedReviewsWithoutSharingFindings(t *testing.T) {
 		t.Fatalf("reviews %s", kinds(rec))
 	}
 	for _, r := range rec.Reviews[2:] {
-		if (r.Kind == task.SelfReview && r.FromHead != "") || (r.Kind == task.CompetingReview && r.FromHead != "c0ffee1") || r.BaseHead != f.wt.reviewBase {
+		if r.FromHead != "c0ffee1" || r.BaseHead != f.wt.reviewBase {
 			t.Fatalf("context %+v", r)
 		}
 	}

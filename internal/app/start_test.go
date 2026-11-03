@@ -16,6 +16,9 @@ import (
 )
 
 type fakeWorktrees struct {
+	reviewFiles     []ReviewFile
+	reviewFilesErr  error
+	reviewSpans     []string
 	reviewBase      string
 	reviewRangeErr  error
 	reqs            []WorktreeRequest
@@ -140,6 +143,17 @@ func (f *fakeWorktrees) ReviewRange(ctx context.Context, dir, baseRef, head, pre
 		return result, err
 	}
 	return result, nil
+}
+
+func (f *fakeWorktrees) ReviewChanges(_ context.Context, _, base, head, previous string) ([]ReviewFile, error) {
+	f.reviewSpans = append(f.reviewSpans, base+":"+previous+":"+head)
+	if f.reviewFilesErr != nil {
+		return nil, f.reviewFilesErr
+	}
+	if f.reviewFiles != nil {
+		return f.reviewFiles, nil
+	}
+	return []ReviewFile{{Path: "retry.go", ChangedLines: 10}}, nil
 }
 
 func (f *fakeWorktrees) Contains(_ context.Context, dir, ancestor, descendant string) (bool, error) {
@@ -290,6 +304,7 @@ type fakeAgent struct {
 	scopeReviews  []agent.ReviewOutcome
 	scopeReviewed []string
 	reviewErr     error
+	reviewErrs    []error
 	reviewed      []string
 	during        func() // runs inside Start, while the turn is in progress
 	onResume      func() // the same, inside Resume
@@ -328,6 +343,13 @@ func (f *fakeAgent) Review(_ context.Context, in agent.StartInput) (agent.Review
 	}
 	if f.reviewErr != nil {
 		return agent.ReviewOutcome{}, f.reviewErr
+	}
+	if len(f.reviewErrs) > 0 {
+		err := f.reviewErrs[0]
+		f.reviewErrs = f.reviewErrs[1:]
+		if err != nil {
+			return agent.ReviewOutcome{}, err
+		}
 	}
 	if len(f.reviews) == 0 {
 		return agent.ReviewOutcome{Clean: true, Summary: "looks good"}, nil

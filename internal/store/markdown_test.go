@@ -908,3 +908,19 @@ func TestSelfReviewRejectionsSurviveTaskReload(t *testing.T) {
 		t.Fatalf("rejection evidence or verdict lost: %+v", got.Reviews[0])
 	}
 }
+
+func TestReviewAreaCoverageSurvivesReload(t *testing.T) {
+	want := delegated()
+	want.Reviews[0].Areas = []task.ReviewArea{{Name: "storage", Paths: []string{"db/save.go", "db/save_test.go"}}, {Name: "HTTP", Paths: []string{"api/a'\tfile.go"}}}
+	store := Markdown{Dir: t.TempDir()}
+	if err := store.Save(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Get(ctx, want.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Reviews[0].Areas, want.Reviews[0].Areas) {
+		t.Fatalf("area coverage lost: %+v", got.Reviews[0])
+	}
+}

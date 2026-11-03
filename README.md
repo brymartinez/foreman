@@ -293,12 +293,15 @@ confirmed triage decisions before delegation.
    could not. It uses the repository's documented setup and sample data when taking
    screenshots; Foreman does not create sample data. It leaves the PR description as
    written for review.
-4. A fresh read-only session of the implementing agent reviews the complete branch
-   diff and surrounding code without task context. Findings return to the retained
-   implementation session. The implementer fixes valid defects, rejects invalid
-   findings with concrete evidence, and asks you for product decisions. Fixes get
-   another independent self-review. Rejecting every finding without changing the
-   reviewed commit ends this loop early.
+4. The initial self-review assigns all changed files to explicit areas, keeping
+   source and colocated tests together. A large change uses up to three fresh,
+   read-only sessions without task context, sharing the existing review budget.
+   Foreman combines their findings before returning to the retained implementation
+   session. Small changes use one area. The implementer fixes valid defects,
+   rejects invalid findings with concrete evidence, and asks you for product
+   decisions. Fixes get a focused self-review of the fix diff, unresolved findings,
+   and their effects. Rejecting every finding without changing the reviewed commit
+   ends this loop early.
    The other agent then performs an adversarial review with the checked Requirements
    and Work plan, your answered decisions, claims, and reported verification.
    Later decisions override earlier requirements on the same point. This review
@@ -437,8 +440,10 @@ After review findings it resumes the implementation session with the findings an
 your answer. If the session is unavailable, the replacement gets the checked plan,
 answered decisions, and outstanding findings. The answer also appears in the PR description.
 
-The implementer and reviewers take turns. Every changed commit gets another
-self-review before adversarial review. Fixes requested by either reviewer share
+The implementer and reviewers take turns. Every changed commit gets scoped
+self-review before adversarial review. The task records the covered file areas,
+and the log distinguishes initial coverage
+from a focused check of fixes. Fixes requested by either reviewer share
 `fix_rounds`. The implementer may reject invalid self-review findings with numbered
 reasons in `reviewAssessment`; the original verdict and reasons remain in the task
 file. Rejecting every finding without changing the reviewed commit ends self-review.
@@ -628,7 +633,7 @@ budgets:
   planning_tokens: 400000            # planning and plan checks
   call_timeout_seconds: 1800         # cancels one call; 0 disables each limit
   implementer_usd: 3.00              # Claude maximum per implementation turn
-  reviewer_usd: 1.00                 # Claude maximum per review or self-review
+  reviewer_usd: 1.00                 # Claude maximum per review; shared across self-review areas
 learning:
   enabled: true                      # evaluate finished tasks; off keeps existing knowledge in prompts
   budget_usd: 0.50                   # Claude maximum per evaluation; 0 sets no cap; Codex has none

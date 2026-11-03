@@ -19,6 +19,7 @@ var ReviewSchema []byte
 
 type ReviewOutcome struct {
 	// These fields are set by the runner, never parsed from model output.
+	Areas    []task.ReviewArea
 	BaseRef  string
 	BaseHead string
 	FromHead string
@@ -138,6 +139,8 @@ func reviewEnvironmentBlocked(text string) bool {
 
 // ReviewBrief contains only the task context allowed for a fresh review.
 type ReviewBrief struct {
+	Area              *task.ReviewArea
+	Head              string
 	Key               task.Key
 	Branch            string
 	BaseBranch        string
@@ -169,7 +172,7 @@ func ReviewPrompt(b ReviewBrief) string {
 	}
 	fmt.Fprintf(&s, "You are the %s for the change on branch %s in %s. This is a fresh, read-only session. Do not edit files, commit, or push.\n\n", role, b.Branch, b.Key.Repo)
 	if b.Self {
-		s.WriteString("## Review scope\n\nJudge only concrete defects and regressions in the branch diff against the surrounding codebase. You have no task context. Do not read plans, claims, decisions, issue discussion, PR descriptions, earlier reviews, or implementation transcripts. Leave product and requirements decisions to the implementing agent.\n\n")
+		s.WriteString("## Review scope\n\nJudge only concrete defects and regressions in the branch diff against the surrounding codebase. You have no task context. Do not read plans, claims, decisions, issue discussion, PR descriptions, earlier review discussions, or implementation transcripts. Any supplied previous code findings are hypotheses to verify against the fix. Leave product and requirements decisions to the implementing agent.\n\n")
 	} else {
 		s.WriteString("## Checked work\n\nReview the complete change against the authoritative requirements, work plan, and developer decisions below. Later developer decisions override earlier requirements on the same point. Do not recover implementation transcripts or infer requirements from earlier review discussion.\n\n")
 		if b.Plan != "" {
@@ -194,6 +197,11 @@ func ReviewPrompt(b ReviewBrief) string {
 			}
 		}
 		for _, r := range b.Assessments {
+			if r.Kind == task.SelfReview {
+				for _, l := range r.Limitations {
+					fmt.Fprintf(&s, "Self-review limitation at %s: %s: %s\n", r.Head, l.Behavior, l.Reason)
+				}
+			}
 			for _, rejection := range r.RejectedFindings {
 				fmt.Fprintf(&s, "Implementer rejected self-review round %d finding %d: %s\nReason: %s\n", r.Round, rejection.Finding, findingSummary(r, rejection.Finding), rejection.Reason)
 			}
@@ -204,20 +212,15 @@ func ReviewPrompt(b ReviewBrief) string {
 		s.WriteString("## Developer workflow instructions\n\nFollow these review methods where they agree with the scope above.\n\n")
 		s.WriteString(text + "\n\n")
 	}
-	s.WriteString("## The change\n\n")
-	if !b.Self && b.PreviousHead != "" {
-		fmt.Fprintf(&s, "Start with `git diff %s..HEAD`. Review the changes since your previous review and verify each of your earlier findings below. Check for regressions caused by the fix. Read surrounding code or the complete diff with `git diff origin/%s...HEAD` when needed to judge a wider effect. Do not repeat a full review of unchanged code without a concrete reason. These findings are checks to verify, not facts to trust.\n\n", b.PreviousHead, b.BaseBranch)
-		for _, finding := range b.PreviousFindings {
-			fmt.Fprintf(&s, "- %s:%d %s: %s\n", finding.File, finding.Line, finding.Summary, finding.Detail)
-		}
-	} else {
-		fmt.Fprintf(&s, "Read the file diff with `git diff origin/%s...HEAD`. Review the complete diff for correctness, regressions, missing cases, and unnecessary changes.\n\n", b.BaseBranch)
-	}
+	writeReviewScope(&s, b)
+
 	s.WriteString("Do not run tests, builds, or project code in this read-only session. Report only concrete defects you can verify.\n\n")
 	s.WriteString("Use Read to inspect cited files and line ranges, Grep to find symbols and fixture setup, and Glob to locate test files. These tools are available even when other Bash commands are denied. Verify line-number claims and relevant test fixtures yourself before deciding whether the evidence supports a finding. Do not hand verification commands to the developer in place of checking the repository.\n\n")
 	if b.Passes > 0 {
-		if !b.Self && b.PreviousHead != "" {
+		if b.PreviousHead != "" {
 			fmt.Fprintf(&s, "Make %d focused review pass(es).\n\n", b.Passes)
+		} else if b.Area != nil {
+			fmt.Fprintf(&s, "Make %d review pass(es) over every assigned file and its relevant callers.\n\n", b.Passes)
 		} else if b.Passes == 1 {
 			s.WriteString("Read the complete diff once.\n\n")
 		} else {
@@ -225,7 +228,9 @@ func ReviewPrompt(b ReviewBrief) string {
 		}
 	}
 	s.WriteString("## Final response\n\nReply with JSON matching the provided schema. Use verdict clean with no findings, or changes_requested with one verified defect per finding. Severity is blocking or should_fix. Set file and line when available. ")
-	if !b.Self && b.Claimed {
+	if b.Self {
+		s.WriteString("List any assigned files you could not inspect in limitations, with the reason. Inspect all assigned areas before returning; do not stop at the first finding.\n")
+	} else if b.Claimed {
 		s.WriteString("List behaviors you could not check in limitations.\n")
 	} else {
 		s.WriteString("Set limitations to null.\n")
