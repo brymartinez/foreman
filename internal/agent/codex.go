@@ -102,18 +102,6 @@ func gitDirs(worktree string) (string, string) {
 
 // Review runs a disposable (--ephemeral) session in the read-only sandbox.
 func (c Codex) Review(ctx context.Context, in StartInput) (ReviewOutcome, error) {
-	return c.review(ctx, in, true, "", func(task.Session) {})
-}
-
-func (c Codex) StartReview(ctx context.Context, in StartInput, save func(task.Session)) (ReviewOutcome, error) {
-	return c.review(ctx, in, false, "", save)
-}
-
-func (c Codex) ResumeReview(ctx context.Context, s task.Session, in StartInput) (ReviewOutcome, error) {
-	return c.review(ctx, in, false, s.ID, func(task.Session) {})
-}
-
-func (c Codex) review(ctx context.Context, in StartInput, ephemeral bool, resumeID string, save func(task.Session)) (ReviewOutcome, error) {
 	if c.ReviewModel != "" {
 		c.Model = c.ReviewModel
 	}
@@ -122,17 +110,9 @@ func (c Codex) review(ctx context.Context, in StartInput, ephemeral bool, resume
 	}
 	logTurn(in.Log, task.Codex, c.Model, in.Step)
 	_, raw, usage, err := c.exec(ctx, in, ReviewSchema, func(schema, last string) []string {
-		if resumeID != "" {
-			return []string{"exec", "resume", "--json",
-				"-c", `sandbox_mode="read-only"`, "--output-schema", schema, "-o", last}
-		}
-		args := []string{"exec", "--json", "-C", in.Worktree,
-			"-s", "read-only", "--output-schema", schema, "-o", last}
-		if ephemeral {
-			args = append(args, "--ephemeral")
-		}
-		return args
-	}, resumeID, save)
+		return []string{"exec", "--json", "-C", in.Worktree,
+			"-s", "read-only", "--output-schema", schema, "-o", last, "--ephemeral"}
+	}, "", func(task.Session) {})
 	if err != nil {
 		return ReviewOutcome{Usage: usage}, err
 	}

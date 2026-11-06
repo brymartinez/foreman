@@ -45,10 +45,10 @@ func (a App) codeReview(ctx context.Context, rec *task.Record, kind task.ReviewK
 	if !self {
 		action.Kind = task.AdversarialAction
 	}
-	if self && d.Action != nil && d.Action.Kind == task.SelfReviewAction &&
+	if d.Action != nil && d.Action.Kind == action.Kind &&
 		d.Action.Head == head && d.Action.BaseHead == base && d.Action.BaseRef == d.BaseRef &&
 		d.Action.FromHead != "" && d.Action.FromHead != head {
-		if _, err := a.Worktrees.ChangedPaths(ctx, d.Worktree, d.Action.FromHead, head); err == nil {
+		if paths, err := a.Worktrees.ChangedPaths(ctx, d.Worktree, d.Action.FromHead, head); err == nil && len(paths) > 0 {
 			action.FromHead = d.Action.FromHead
 		}
 	}
@@ -60,17 +60,13 @@ func (a App) codeReview(ctx context.Context, rec *task.Record, kind task.ReviewK
 		}),
 		Purpose: purpose, Step: agent.StepReview,
 	}
-	rec, err = a.beginAction(ctx, rec, action)
+	_, err = a.beginAction(ctx, rec, action)
 	if err != nil {
 		return agent.ReviewOutcome{}, err
 	}
 	var out agent.ReviewOutcome
 	if err = a.checkQuota(ctx, chosen, log); err == nil {
-		if self {
-			out, err = reviewer.Review(ctx, in)
-		} else {
-			out, err = a.retainedReview(ctx, rec, reviewer, in)
-		}
+		out, err = reviewer.Review(ctx, in)
 	}
 	if out.Skipped && err == nil {
 		err = errors.New("review must complete before the task can advance")
@@ -82,37 +78,4 @@ func (a App) codeReview(ctx context.Context, rec *task.Record, kind task.ReviewK
 	}
 	out.BaseRef, out.BaseHead, out.FromHead = d.BaseRef, base, action.FromHead
 	return out, err
-}
-
-func (a App) retainedReview(ctx context.Context, rec *task.Record, adapter AgentAdapter, in agent.StartInput) (agent.ReviewOutcome, error) {
-	reviewer, ok := adapter.(retainedReviewer)
-	if !ok {
-		return agent.ReviewOutcome{}, errors.New("adapter does not support retained reviews")
-	}
-	role := task.AdversarialRole
-	s := rec.Delegation.Adversary
-	if rec.Delegation.Action.Started && s.ID == "" {
-		return agent.ReviewOutcome{}, missingRoleSession{role}
-	}
-	rec, err := a.startAction(ctx, rec)
-	if err != nil {
-		return agent.ReviewOutcome{}, err
-	}
-	if s.ID != "" {
-		out, err := reviewer.ResumeReview(ctx, s, in)
-		if errors.Is(err, agent.ErrNoSession) {
-			err = missingRoleSession{role}
-		}
-		return out, err
-	}
-	var saveErr error
-	out, err := reviewer.StartReview(ctx, in, func(s task.Session) {
-		if s.ID != "" {
-			saveErr = a.saveRoleSession(ctx, rec, role, s)
-		}
-	})
-	if errors.Is(err, agent.ErrNoSession) {
-		err = missingRoleSession{role}
-	}
-	return out, errors.Join(err, saveErr)
 }

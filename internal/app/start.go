@@ -219,7 +219,6 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		// discarded the run, so it starts with the current settings.
 		if prev != nil {
 			cur.Delegation.Planner = prev.Planner
-			cur.Delegation.Adversary = prev.Adversary
 			cur.Delegation.Action = prev.Action
 			cur.Delegation.Implementer.ID = prev.Implementer.ID
 			if !cur.PlanPosted() && prev.Planner.ID == "" && prev.Action == nil && prev.PR == 0 && prev.LocalHead == "" {

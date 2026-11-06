@@ -56,8 +56,6 @@ func (d *Delegation) RoleSession(role Role) *Session {
 		return &d.Planner
 	case ImplementerRole:
 		return &d.Implementer
-	case AdversarialRole:
-		return &d.Adversary
 	}
 	return nil
 }

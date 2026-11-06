@@ -23,7 +23,7 @@ func TestReviewStopsWhenTheBaseCannotBeResolved(t *testing.T) {
 	}
 }
 
-func TestFixLoopReviewsTheCompleteDiffWithoutSharingFindings(t *testing.T) {
+func TestAdversarialReviewFallsBackToFullDiffWhenAncestryCannotBeVerified(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	postedPlan(f, f.store.recs[key])
@@ -66,5 +66,23 @@ func TestUnavailableAdversarialReviewerDoesNotFallBack(t *testing.T) {
 	_, err := f.app.codeReview(context.Background(), rec, task.CompetingReview, task.Codex, io.Discard)
 	if !errors.Is(err, agent.ErrUnavailable) || len(f.claude.reviewed) != 0 {
 		t.Fatalf("error %v fallback reviews %d", err, len(f.claude.reviewed))
+	}
+}
+
+func TestAdversarialReviewUsesFullDiffAfterAnEmptyCommit(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	rec := f.store.recs[key]
+	rec.Delegation.PR = 912
+	rec.Delegation.PRHead = "c0ffee2"
+	rec.Delegation.Action = &task.Action{
+		Kind: task.AdversarialAction, BaseRef: rec.Delegation.BaseRef,
+		BaseHead: "basehead", FromHead: "c0ffee1", Head: "c0ffee2",
+	}
+	f.wt.changed = map[string][]string{"c0ffee1..c0ffee2": {}}
+	review, err := f.app.codeReview(context.Background(), rec, task.CompetingReview, task.Codex, io.Discard)
+	if err != nil || review.FromHead != "" || len(f.codex.reviewed) != 1 ||
+		!strings.Contains(f.codex.reviewed[0], "basehead...c0ffee2") {
+		t.Fatalf("review %+v, prompts %q, err %v", review, f.codex.reviewed, err)
 	}
 }

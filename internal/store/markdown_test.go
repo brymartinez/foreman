@@ -952,7 +952,6 @@ func TestRoleSessionsAndPendingActionSurviveReload(t *testing.T) {
 	want := delegated()
 	d := want.Delegation
 	d.Planner = task.Session{Agent: task.Claude, ID: "plan"}
-	d.Adversary = task.Session{Agent: task.Codex, ID: "review"}
 	d.Action = &task.Action{
 		ID: "action", Kind: task.SelfReviewAction, BaseRef: "origin/main",
 		BaseHead: "base", FromHead: "old", Head: "new", ReviewRound: 2, Started: true,
@@ -965,7 +964,7 @@ func TestRoleSessionsAndPendingActionSurviveReload(t *testing.T) {
 		t.Fatal(err)
 	}
 	reloaded := got.Delegation
-	if reloaded.Planner != d.Planner || reloaded.Implementer != d.Implementer || reloaded.Adversary != d.Adversary ||
+	if reloaded.Planner != d.Planner || reloaded.Implementer != d.Implementer ||
 		reloaded.Action == nil || *reloaded.Action != *d.Action {
 		t.Fatalf("role sessions or pending action lost: %+v", reloaded)
 	}

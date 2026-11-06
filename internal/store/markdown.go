@@ -206,7 +206,6 @@ type frontmatter struct {
 	ScopeDigest               string                 `yaml:"scope_digest,omitempty"`
 	PlanScopeDigest           string                 `yaml:"plan_scope_digest,omitempty"`
 	PlannerSession            *task.Session          `yaml:"planner_session,omitempty"`
-	AdversarySession          *task.Session          `yaml:"adversary_session,omitempty"`
 	Action                    *task.Action           `yaml:"action,omitempty"`
 	PlanDraft                 *task.PlanDraft        `yaml:"plan_draft,omitempty"`
 	PlanDigest                string                 `yaml:"plan_digest,omitempty"`
@@ -438,9 +437,6 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 		if fm.PlannerSession != nil {
 			rec.Delegation.Planner = *fm.PlannerSession
 		}
-		if fm.AdversarySession != nil {
-			rec.Delegation.Adversary = *fm.AdversarySession
-		}
 		if fm.StartedAt != nil {
 			rec.Delegation.StartedAt = *fm.StartedAt
 		}
@@ -579,9 +575,6 @@ func fromRecord(rec *task.Record) frontmatter {
 		fm.Action = d.Action
 		if d.Planner != (task.Session{}) {
 			fm.PlannerSession = &d.Planner
-		}
-		if d.Adversary != (task.Session{}) {
-			fm.AdversarySession = &d.Adversary
 		}
 		fm.PlanImplementationPending = d.PlanImplementationPending
 	}

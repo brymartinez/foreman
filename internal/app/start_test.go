@@ -276,8 +276,6 @@ type fakeAgent struct {
 	reviewErr     error
 	reviewErrs    []error
 	reviewed      []string
-	reviewStarts  int
-	reviewResumes []task.Session
 	during        func() // runs inside Start, while the turn is in progress
 	onResume      func() // the same, inside Resume
 	onReview      func() // the same, inside Review
@@ -295,17 +293,6 @@ func (f *fakeAgent) next() (agent.Turn, error) {
 		return t, nil
 	}
 	return f.turn, f.err
-}
-
-func (f *fakeAgent) StartReview(ctx context.Context, in agent.StartInput, save func(task.Session)) (agent.ReviewOutcome, error) {
-	f.reviewStarts++
-	save(task.Session{Agent: f.Name(), ID: "retained-review"})
-	return f.Review(ctx, in)
-}
-
-func (f *fakeAgent) ResumeReview(ctx context.Context, s task.Session, in agent.StartInput) (agent.ReviewOutcome, error) {
-	f.reviewResumes = append(f.reviewResumes, s)
-	return f.Review(ctx, in)
 }
 
 func (f *fakeAgent) Review(_ context.Context, in agent.StartInput) (agent.ReviewOutcome, error) {

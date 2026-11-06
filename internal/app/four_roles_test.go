@@ -18,7 +18,10 @@ func TestFourRolesUseOneImplementerAndReturnEachFixToItsReviewer(t *testing.T) {
 	f.claude.turns = []agent.Turn{plannedTurn("planning"), prTurn("implementation"), fix, prTurn("implementation")}
 	f.claude.reviews = []agent.ReviewOutcome{selfFindings()}
 	f.codex.reviews = []agent.ReviewOutcome{findings("blocking")}
-	f.wt.changed = map[string][]string{"c0ffee1..c0ffee2": {"retry.go"}}
+	f.wt.changed = map[string][]string{
+		"c0ffee1..c0ffee2": {"retry.go"},
+		"c0ffee2..c0ffee3": {"retry.go"},
+	}
 	f.claude.onResume = func() {
 		switch len(f.claude.resumed) {
 		case 1:
@@ -33,7 +36,7 @@ func TestFourRolesUseOneImplementerAndReturnEachFixToItsReviewer(t *testing.T) {
 		t.Fatalf("state %s, reviews %s, outcome %+v", got.State, kinds(got), got.LastOutcome)
 	}
 	d := got.Delegation
-	if d.Planner.ID != "planning" || d.Implementer.ID != "implementation" || d.Adversary.ID != "retained-review" || d.Action != nil {
+	if d.Planner.ID != "planning" || d.Implementer.ID != "implementation" || d.Action != nil {
 		t.Fatalf("saved sessions or next action are wrong: %+v", d)
 	}
 	if f.claude.starts != 2 || len(f.claude.scopeReviewed) != 0 || len(f.claude.resumed) != 2 {
@@ -48,28 +51,36 @@ func TestFourRolesUseOneImplementerAndReturnEachFixToItsReviewer(t *testing.T) {
 		!strings.Contains(f.claude.reviewed[1], "c0ffee1..c0ffee2") || got.Reviews[1].FromHead != "c0ffee1" {
 		t.Fatalf("self-review ranges: %q", f.claude.reviewed)
 	}
-	if f.codex.reviewStarts != 1 || len(f.codex.reviewResumes) != 1 ||
-		f.codex.reviewResumes[0].ID != d.Adversary.ID || !strings.Contains(f.codex.reviewed[1], "basehead...c0ffee3") {
-		t.Fatalf("adversarial starts %d resumes %+v", f.codex.reviewStarts, f.codex.reviewResumes)
+	if len(f.codex.reviewed) != 2 || !strings.Contains(f.codex.reviewed[0], "basehead...c0ffee2") ||
+		!strings.Contains(f.codex.reviewed[1], "c0ffee2..c0ffee3") || got.Reviews[3].FromHead != "c0ffee2" ||
+		strings.Contains(f.codex.reviewed[1], "4xx retried") {
+		t.Fatalf("adversarial review ranges or context: %q", f.codex.reviewed)
 	}
 }
 
-func TestInterruptedAdversarialReviewResumesItsSavedSession(t *testing.T) {
+func TestInterruptedAdversarialReviewRetriesItsPinnedFixDiff(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	f.claude.turn = prTurn("implementation")
-	f.codex.reviewErr = errors.New("provider disconnected")
+	f.codex.reviews = []agent.ReviewOutcome{findings("blocking")}
+	f.wt.changed = map[string][]string{"c0ffee1..c0ffee2": {"retry.go"}}
+	f.claude.onResume = func() {
+		setHead(f, "c0ffee2")
+		f.codex.reviewErr = errors.New("provider disconnected")
+	}
 	stopped := run(t, f, key)
 	action := stopped.Delegation.Action
-	if stopped.State != task.Failed || action == nil || action.Kind != task.AdversarialAction || action.Head != "c0ffee1" ||
-		stopped.Delegation.Adversary.ID != "retained-review" {
+	if stopped.State != task.Failed || action == nil || action.Kind != task.AdversarialAction ||
+		action.FromHead != "c0ffee1" || action.Head != "c0ffee2" {
 		t.Fatalf("saved action %+v, state %s", action, stopped.State)
 	}
 	f.codex.reviewErr = nil
 	key = started(t, f, startReq(t))
 	got := run(t, f, key)
-	if got.State != task.WaitingForCI || f.codex.reviewStarts != 1 || len(f.codex.reviewResumes) != 1 || f.claude.starts != 1 {
-		t.Fatalf("state %s, reviewer starts %d resumes %+v, implementation starts %d", got.State, f.codex.reviewStarts, f.codex.reviewResumes, f.claude.starts)
+	if got.State != task.WaitingForCI || len(f.codex.reviewed) != 3 ||
+		f.codex.reviewed[2] != f.codex.reviewed[1] || !strings.Contains(f.codex.reviewed[2], "c0ffee1..c0ffee2") ||
+		f.claude.starts != 1 || len(f.claude.resumed) != 1 {
+		t.Fatalf("state %s, review prompts %q, implementation starts %d", got.State, f.codex.reviewed, f.claude.starts)
 	}
 }
 

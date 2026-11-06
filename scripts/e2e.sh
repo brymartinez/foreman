@@ -575,7 +575,7 @@ scenario_runner() {
 	check "review uses its Codex model" contains "$state/models.log" "codex model=gpt-6-sol"
 	check "review uses medium Codex effort" contains "$state/models.log" 'codex model_reasoning_effort="medium"'
 	check "Codex recognizes the adversarial role prompt" contains "$state/adversarial-review-prompt.txt" "You are the competing reviewer"
-	check "Codex starts a retained adversarial session" contains "$state/review-sessions.log" "start adversarial-review cwd="
+	check "Codex starts a fresh adversarial session" contains "$state/review-sessions.log" "start adversarial-review cwd="
 	check "self-review precedes adversarial review" bash -c "grep -E '^(claude self-review|codex review)$' '$state/agents.log' | tail -2 | tr '\n' ' ' | grep -qx 'claude self-review codex review '"
 	local base head
 	base=$(git --git-dir="$sandbox/origin.git" rev-parse main)
@@ -611,7 +611,8 @@ scenario_review_before_pr() {
 	head=$(git --git-dir="$sandbox/origin.git" rev-parse "$(sed -n 's/^branch: *//p' "$task_file")")
 	first=$(git --git-dir="$sandbox/origin.git" rev-parse "$head^")
 	check "self-review reads its full initial baseline" complete_review_diff "$state/self-review-prompt.txt" "$base" "$first"
-	check "adversarial reviewer reads the full diff after a fix" complete_review_diff "$state/adversarial-review-prompt.txt" "$base" "$head"
+	check "the adversarial reviewer reads only the fix diff" complete_review_delta "$state/adversarial-review-prompt.txt" "$first" "$head"
+	check "both adversarial passes start fresh" test "$(grep -c '^start adversarial-review ' "$state/review-sessions.log")" = 2
 	check "self-review omits task context" no_review_context "$state/self-review-prompt.txt"
 	check "adversarial review omits task context" no_review_context "$state/adversarial-review-prompt.txt"
 	check "adversarial review omits its earlier finding" bash -c "! grep -qF 'retry 429 too' '$state/adversarial-review-prompt.txt'"
@@ -659,7 +660,7 @@ scenario_complete_diff_review() {
 	check "self-review follow-up reads only the verified fix range" complete_review_delta "$state/self-review-prompt.txt" "$first" "$head"
 	check "self-review omits its earlier finding" bash -c "! grep -qF 'Retry guard may be missing' '$state/self-review-prompt.txt'"
 	check "one competing review ran" test "$(grep -c '^codex review$' "$state/agents.log")" = 1
-	check "adversarial reviewer reads the full diff after a fix" complete_review_diff "$state/adversarial-review-prompt.txt" "$base" "$head"
+	check "first adversarial review reads the full diff after self-review fixes" complete_review_diff "$state/adversarial-review-prompt.txt" "$base" "$head"
 	check "one final full check ran" test "$(grep -c '^claude final-check$' "$state/agents.log")" = 1
 }
 

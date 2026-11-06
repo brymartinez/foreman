@@ -540,10 +540,6 @@ func (r *taskRun) review() (step, error) {
 			cur.Delegation.Reviewer = reviewer
 		}
 		applyReview(cur, kind, reviewer, review, reviewErr, a.Now())
-		var missing missingRoleSession
-		if errors.As(reviewErr, &missing) && r.ctx.Err() == nil {
-			askForSession(cur, missing.role, a.Now())
-		}
 		if reviewErr == nil {
 			cur.Delegation.Action = nil
 			if kind == task.SelfReview && review.Clean {

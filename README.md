@@ -289,10 +289,9 @@ confirmed triage decisions before delegation.
    screenshots; Foreman does not create sample data. It leaves the PR description as
    written for review.
 4. Each task has four roles: planner, implementer, self-reviewer, and adversarial
-   reviewer. Foreman starts a fresh, read-only self-review using the implementing
-   provider. Its first pass reads the full branch diff; follow-ups read the verified
-   fix range. The adversarial reviewer keeps one read-only session and reads the full
-   branch diff each round. Both can inspect surrounding code and tests.
+   reviewer. Both reviewers start a fresh read-only session for each pass. Each role
+   first reads the full branch diff, then reads the verified fix range on follow-ups.
+   Both can inspect surrounding code and tests.
    Task requirements, plans, decisions, PR text, validation results, and earlier
    findings stay out of both code review prompts.
    Findings return to the implementer, then directly to the reviewer that raised
@@ -300,8 +299,8 @@ confirmed triage decisions before delegation.
    adversarial findings require a clean adversarial review. Findings cannot be
    waived because of quota or a fix limit. A missing session or uncertain launch
    pauses the role until it is available or explicitly replaced. Retries resume
-   retained planner, implementer, or adversarial sessions. A self-review retry
-   repeats its pinned range without earlier review messages. Code changes need review.
+   retained planner and implementer sessions. A review retry uses the pinned range
+   when it still matches the current revisions. Code changes need review.
    The implementer runs the repository's full documented suite before the first
    review and focused checks for each fix. Before handoff, Foreman needs a full-suite
    result that covers the final commit. If a fix changed behavior or a validation
@@ -432,8 +431,8 @@ answered decisions, and outstanding findings. The answer also appears in the PR 
 
 Foreman checks provider quota before each role call. Exhaustion pauses the role and
 preserves its session and work. Quota never skips a review. Each new revision gets a
-self-review before adversarial review. Self-review follow-ups inspect the verified fix
-range; adversarial review reads the full branch diff. Findings go back to the
+self-review before adversarial review. Both reviewers inspect the verified fix range
+on follow-ups. Findings go back to the
 implementer, then directly to the reviewer that raised them. The task pauses at its
 fix limit until you choose another round; unresolved adversarial findings cannot be
 accepted.

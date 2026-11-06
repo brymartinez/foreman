@@ -112,6 +112,10 @@ func TestAFinalCheckThatFixesAFailureSendsTheNewCommitThroughReviewAgain(t *test
 	f := newFixture()
 	key := gatedLocalTask(t, f)
 	f.wt.checkpointHeads = []string{"commit1", "commit2", "commit3"}
+	f.wt.changed = map[string][]string{
+		"commit1..commit2": {"retry.go"},
+		"commit2..commit3": {"retry_test.go"},
+	}
 	f.claude.turns = []agent.Turn{
 		withFullRun(readyTurn(), fullRun("commit1")),
 		focusedOnly(readyTurn()),
@@ -129,7 +133,8 @@ func TestAFinalCheckThatFixesAFailureSendsTheNewCommitThroughReviewAgain(t *test
 		t.Fatalf("state %s head %s outcome %+v", got.State, got.Delegation.PRHead, got.LastOutcome)
 	}
 	last := got.LatestCompeting()
-	if len(f.codex.reviewed) != 3 || last.Head != "commit3" || !last.Clean {
+	if len(f.codex.reviewed) != 3 || last.Head != "commit3" || !last.Clean ||
+		last.FromHead != "commit2" || !strings.Contains(f.codex.reviewed[2], "commit2..commit3") {
 		t.Fatalf("competing reviews %d, latest %+v", len(f.codex.reviewed), last)
 	}
 }

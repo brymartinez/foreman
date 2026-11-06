@@ -123,7 +123,7 @@ type ReviewBrief struct {
 	StageInstructions string
 }
 
-// ReviewPrompt gives both reviewers the full change in a fresh session.
+// ReviewPrompt gives a fresh reviewer the pinned branch or fix diff.
 func ReviewPrompt(b ReviewBrief) string {
 	var s strings.Builder
 	role := "competing reviewer"
@@ -225,7 +225,7 @@ func assessmentInstructions(s *strings.Builder, r task.Review) {
 	if r.Kind == task.SelfReview {
 		fmt.Fprintf(s, "Always account for self-review findings in reviewAssessment when returning a correction. For rejected self-review findings, set reviewAssessment to {\"round\": %d, \"rejected\": [{\"finding\": 1, \"reason\": \"concrete evidence\"}]}, using the one-based finding numbers above. Omit fixed findings from rejected; an empty rejected list means all findings were fixed and still requires review. Rejecting every finding without changing the reviewed commit ends self-review early. Otherwise the new commit gets another independent self-review.\n", r.Round)
 	} else {
-		s.WriteString("Set reviewAssessment to null. An adversarial verdict requires a clean re-review; it cannot be waived by the implementer.\n")
+		s.WriteString("The next adversarial reviewer starts fresh and checks the fix diff. Before returning a successful correction, verify that every finding is resolved on the resulting revision. If any finding remains unresolved, return blocked and explain what is needed. Set reviewAssessment to null. A clean adversarial re-review is required.\n")
 	}
 }
 

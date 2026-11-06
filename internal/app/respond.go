@@ -38,7 +38,9 @@ func (a App) Respond(ctx context.Context, key task.Key, raw string) (*task.Recor
 			if action == nil {
 				return nil, fmt.Errorf("the pending action is missing")
 			}
-			cur.Delegation.RoleSession(action.Role()).ID = ""
+			if session := cur.Delegation.RoleSession(action.Role()); session != nil {
+				session.ID = ""
+			}
 			action.ID = ""
 			action.Started = false
 		}

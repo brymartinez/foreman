@@ -82,7 +82,8 @@ runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR)
     self-reviewer = fresh read-only session
       first pass: pinned base...head; follow-up: verified reviewedHead..fixedHead
       findings -> implementer.Resume, then self-reviewer reviews the fix range
-    adversarial reviewer = Resume(retained read-only session, full pinned base...head)
+    adversarial reviewer = fresh read-only session
+      first pass: pinned base...head; follow-up: verified reviewedHead..fixedHead
       findings -> implementer.Resume, then return directly to adversarial reviewer
       clean -> record verdict and covered head; run final-check and CI handoff gates
   missing or uncertain session / unavailable provider -> preserve progress and pause;
@@ -592,27 +593,29 @@ the same commit. The commit message records why it changed.
 - **Each task uses four roles.** The planner has one retained session. It receives
   confirmed triage and returns Requirements and Work plan after checking both against
   that scope. The implementer has one retained session across fixes, questions,
-  checkpoints, merge repairs, final checks, and publishing. The self-reviewer uses a
-  fresh read-only session for each pass. The adversarial reviewer keeps one retained,
-  read-only session. Foreman records each role's session and pending action before
-  starting the next action, so retries resume the same work.
+  checkpoints, merge repairs, final checks, and publishing. Both reviewers use
+  a fresh read-only session for each pass. Foreman records the planner and
+  implementer sessions and each pending action. Retried reviews use the saved
+  diff range when it still matches the current revisions.
 - **Session uncertainty pauses safely.** If a session is missing, its launch is
   uncertain, or its provider is unavailable, Foreman preserves progress and explains
   the reason. Work resumes when the session is available or the user explicitly
   replaces that role. Older task records remain readable; ambiguous recovery asks for
   a dashboard decision.
-- **Self-review starts broad, then checks the fix.** The first pass reads the full
+- **Both reviewers start broad, then check the fix.** The first pass reads the full
   pinned `base...head` diff. After a fix, Foreman uses `reviewedHead..fixedHead` only
   when Git verifies the earlier head is an ancestor and the base remains valid.
-  Retargets, rewritten history, or missing ranges start a new full baseline. The
-  self-review prompt contains its stage file, the pinned diff command, and read-only
-  access to relevant code; it excludes the plan, implementation, and earlier reviews.
+  Retargets, rewritten history, and empty or missing ranges start a new full baseline. The
+  review prompt contains the role's stage instructions and the pinned diff command.
+  Reviewers can read relevant code. The plan, implementation transcript, and earlier
+  reviews stay outside their context.
 - **Findings return to their reviewer.** The retained implementer accounts for every
   self-review finding as fixed or rejected with evidence tied to its round. The
-  self-reviewer checks the fix range. After an adversarial finding, Foreman resumes
-  the implementer and returns directly to the retained adversarial reviewer, which
-  reads the full branch diff. A changed plan or invalidated base restarts at
-  self-review. Only an explicit clean adversarial verdict advances the task.
+  self-reviewer checks the fix range. After an adversarial finding, the implementer
+  verifies that every finding is resolved before Foreman sends the fix diff directly
+  to a fresh adversarial reviewer.
+  A changed plan or invalidated base restarts at self-review. Only an explicit clean
+  adversarial verdict advances the task.
 - **No findings are waived.** Quota and fix limits pause work; they cannot skip a
   review or accept unresolved adversarial findings. If final validation changes code,
   the changed revision returns to the review that covers it. `review_rounds` (1) sets

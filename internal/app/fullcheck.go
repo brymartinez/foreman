@@ -148,7 +148,7 @@ func (r *taskRun) finalCheck() (step, error) {
 		if res.err == nil && finishesChange(res.turn.Outcome.Status) && res.head() != head {
 			latest := cur.LatestCompeting()
 			if latest != nil {
-				cur.Delegation.Action = &task.Action{Kind: task.AdversarialAction, Head: res.head(), BaseRef: latest.BaseRef, BaseHead: latest.BaseHead}
+				cur.Delegation.Action = &task.Action{Kind: task.AdversarialAction, Head: res.head(), FromHead: latest.Head, BaseRef: latest.BaseRef, BaseHead: latest.BaseHead}
 				cur.State = cur.ReviewStage()
 			}
 		}

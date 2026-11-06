@@ -201,7 +201,6 @@ type Delegation struct {
 	PlanDraft   *PlanDraft
 	Planner     Session
 	Implementer Session
-	Adversary   Session
 	Action      *Action
 	// Profile is set when routing chose the implementer; RouteReason says why.
 	// RouteLogged is set once the runner has written the route line to the log.
