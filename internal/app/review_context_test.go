@@ -11,67 +11,15 @@ import (
 	"github.com/brymartinez/foreman/internal/task"
 )
 
-func TestFocusedReviewUsesOnlyItsOwnVerifiedHistory(t *testing.T) {
-	for _, kind := range []task.ReviewKind{task.SelfReview, task.CompetingReview} {
-		for _, mode := range []string{"valid", "old coverage", "incomplete coverage", "base changed", "scope changed", "plan changed", "rewritten history", "other agent", "missing commit", "unknown base", "read failed", "requirements changed"} {
-			t.Run(string(kind)+"/"+mode, func(t *testing.T) {
-				f := newFixture()
-				key := started(t, f, startReq(t))
-				rec := f.store.recs[key]
-				d := rec.Delegation
-				d.PRHead = strings.Repeat("b", 40)
-				d.BaseRef = "origin/main"
-				d.ScopeDigest = "scope"
-				d.PlanDigest = "plan"
-				d.PRDDigest = "requirements"
-				d.ClaimVerification = true
-				f.wt.reviewBase = strings.Repeat("a", 40)
-				reviewer := task.Codex
-				if kind == task.SelfReview {
-					reviewer = task.Claude
-				}
-				previous := task.Review{Areas: []task.ReviewArea{{Name: "complete", Paths: []string{"retry.go"}}}, Kind: kind, Reviewer: reviewer, Head: strings.Repeat("c", 40), BaseRef: d.BaseRef, BaseHead: f.wt.reviewBase, Scope: d.ScopeDigest, Plan: d.PlanDigest, PRD: d.PRDDigest, Findings: []task.Finding{{Summary: "own finding"}}}
-				switch mode {
-				case "old coverage":
-					previous.Areas = nil
-				case "incomplete coverage":
-					previous.Limitations = []task.Limitation{{Behavior: "one file", Reason: "could not inspect"}}
-				case "base changed":
-					previous.BaseHead = strings.Repeat("d", 40)
-				case "scope changed":
-					previous.Scope = "old"
-				case "plan changed":
-					previous.Plan = "old"
-				case "rewritten history":
-					f.wt.contains = func(string, string, string) (bool, error) { return false, nil }
-				case "other agent":
-					previous.Reviewer = task.Agent("different")
-				case "missing commit":
-					previous.Head = "bad; git command"
-				case "unknown base":
-					previous.BaseHead = ""
-				case "read failed":
-					f.wt.reviewRangeErr = errors.New("missing local object")
-				case "requirements changed":
-					previous.PRD = "old"
-				}
-				other := task.CompetingReview
-				if kind == task.CompetingReview {
-					other = task.SelfReview
-				}
-				rec.Reviews = []task.Review{previous, {Kind: other, Findings: []task.Finding{{Summary: "other review finding"}}}}
-				brief := f.app.prepareReview(context.Background(), rec, kind, reviewer, agent.ReviewBrief{Passes: 1, BaseBranch: "main"}, io.Discard)
-				p := agent.ReviewPrompt(brief)
-				focused := mode == "valid" || (kind == task.SelfReview && (mode == "scope changed" || mode == "plan changed" || mode == "requirements changed")) || (kind == task.CompetingReview && (mode == "old coverage" || mode == "incomplete coverage"))
-				if focused {
-					if brief.PreviousHead != previous.Head || !strings.Contains(p, "git diff "+previous.Head+"..HEAD") || !strings.Contains(p, "own finding") || strings.Contains(p, "other review finding") {
-						t.Fatalf("focused prompt %s", p)
-					}
-				} else if brief.PreviousHead != "" || strings.Contains(p, "own finding") {
-					t.Fatalf("unsafe focused review for %s: %s", mode, p)
-				}
-			})
-		}
+func TestReviewStopsWhenTheBaseCannotBeResolved(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	postedPlan(f, f.store.recs[key])
+	f.claude.turn = prTurn("sid")
+	f.wt.reviewBaseErr = errors.New("missing local object")
+	rec := run(t, f, key)
+	if rec.State != task.Failed || !strings.Contains(rec.LastOutcome.Summary, "missing local object") || len(rec.Reviews) != 0 || len(f.claude.reviewed)+len(f.codex.reviewed) != 0 {
+		t.Fatalf("state %s, outcome %+v, reviews %+v", rec.State, rec.LastOutcome, rec.Reviews)
 	}
 }
 
@@ -110,7 +58,7 @@ func TestAdoptingPlanKeepsWritingAdviceWithoutARevision(t *testing.T) {
 	}
 }
 
-func TestFixLoopUsesFocusedReviewsWithoutSharingFindings(t *testing.T) {
+func TestFixLoopReviewsTheCompleteDiffWithoutSharingFindings(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	postedPlan(f, f.store.recs[key])
@@ -131,12 +79,14 @@ func TestFixLoopUsesFocusedReviewsWithoutSharingFindings(t *testing.T) {
 		t.Fatalf("reviews %s", kinds(rec))
 	}
 	for _, r := range rec.Reviews[2:] {
-		if r.FromHead != "c0ffee1" || r.BaseHead != f.wt.reviewBase {
+		if r.FromHead != "" || r.BaseHead != f.wt.reviewBase || r.Head != "c0ffee2" {
 			t.Fatalf("context %+v", r)
 		}
 	}
-	if strings.Contains(f.claude.reviewed[1], "4xx retried") || !strings.Contains(f.codex.reviewed[1], "4xx retried") {
-		t.Fatal("review findings crossed roles or were lost")
+	for _, reviews := range [][]string{f.claude.reviewed, f.codex.reviewed} {
+		if len(reviews) != 2 || !strings.Contains(reviews[1], "git diff --no-ext-diff --no-textconv --ignore-submodules=none "+f.wt.reviewBase+"...c0ffee2 --") || strings.Contains(reviews[1], "4xx retried") {
+			t.Fatalf("follow-up review omitted the complete diff or included prior findings: %q", reviews)
+		}
 	}
 }
 
@@ -148,8 +98,8 @@ func TestUnavailableAdversarialReviewerDoesNotFallBack(t *testing.T) {
 	rec.Delegation.PR = 912
 	rec.Delegation.PRHead = "c0ffee2"
 	f.codex.reviewErr = agent.ErrUnavailable
-	_, chosen, err := f.app.review(context.Background(), rec, "title", "body", "", io.Discard)
-	if !errors.Is(err, agent.ErrUnavailable) || chosen != task.Codex || len(f.claude.reviewed) != 0 {
-		t.Fatalf("chosen %s error %v fallback reviews %d", chosen, err, len(f.claude.reviewed))
+	_, err := f.app.codeReview(context.Background(), rec, task.CompetingReview, task.Codex, io.Discard)
+	if !errors.Is(err, agent.ErrUnavailable) || len(f.claude.reviewed) != 0 {
+		t.Fatalf("error %v fallback reviews %d", err, len(f.claude.reviewed))
 	}
 }

@@ -242,7 +242,7 @@ func TestReviewBeforePRReviewsTheLocalCommitThenOpensThePR(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if len(f.codex.reviewed) != 1 || !strings.Contains(f.codex.reviewed[0], "## Checked work") || strings.Contains(f.codex.reviewed[0], "Retry 5xx only.") {
+	if len(f.codex.reviewed) != 1 || !strings.Contains(f.codex.reviewed[0], "git diff --no-ext-diff --no-textconv --ignore-submodules=none basehead...commit1 --") || strings.Contains(f.codex.reviewed[0], "Retry 5xx only.") {
 		t.Fatalf("reviews = %q", f.codex.reviewed)
 	}
 	if openTurns(f) != 1 {

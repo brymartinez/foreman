@@ -16,11 +16,9 @@ import (
 )
 
 type fakeWorktrees struct {
-	reviewFiles     []ReviewFile
-	reviewFilesErr  error
-	reviewSpans     []string
 	reviewBase      string
-	reviewRangeErr  error
+	reviewBaseErr   error
+	baseRefs        []string
 	reqs            []WorktreeRequest
 	head            string
 	checkpointHeads []string
@@ -43,10 +41,6 @@ type fakeWorktrees struct {
 	// identities records each ConfigureIdentity call as "dir name <email>".
 	identities  []string
 	identityErr error
-	// syncs records each SyncDefaultBranch call as "dir branch"; onSync runs inside it.
-	syncs   []string
-	syncErr error
-	onSync  func(dir string)
 	// changed answers ChangedPaths by "from..to"; a pair it lacks is not an ancestor.
 	changed map[string][]string
 }
@@ -60,17 +54,6 @@ func (f *fakeWorktrees) ChangedPaths(_ context.Context, _, from, to string) ([]s
 		return nil, fmt.Errorf("%s is not an ancestor of %s", from, to)
 	}
 	return paths, nil
-}
-
-func (f *fakeWorktrees) SyncDefaultBranch(_ context.Context, dir, branch string) error {
-	f.syncs = append(f.syncs, dir+" "+branch)
-	if f.syncErr != nil {
-		return f.syncErr
-	}
-	if f.onSync != nil {
-		f.onSync(dir)
-	}
-	return nil
 }
 
 func (f *fakeWorktrees) ConfigureIdentity(_ context.Context, dir, name, email string) error {
@@ -132,28 +115,15 @@ func (f *fakeWorktrees) RemoteBranchHead(_ context.Context, _, branch string) (s
 	return f.remoteHeads[branch], nil
 }
 
-func (f *fakeWorktrees) ReviewRange(ctx context.Context, dir, baseRef, head, previous string) (ReviewRange, error) {
-	if f.reviewRangeErr != nil {
-		return ReviewRange{}, f.reviewRangeErr
+func (f *fakeWorktrees) ReviewBase(_ context.Context, _, baseRef string) (string, error) {
+	f.baseRefs = append(f.baseRefs, baseRef)
+	if f.reviewBaseErr != nil {
+		return "", f.reviewBaseErr
 	}
-	result := ReviewRange{BaseHead: f.reviewBase}
-	if previous != "" {
-		var err error
-		result.PreviousIsAncestor, err = f.Contains(ctx, dir, previous, head)
-		return result, err
+	if f.reviewBase == "" {
+		return "basehead", nil
 	}
-	return result, nil
-}
-
-func (f *fakeWorktrees) ReviewChanges(_ context.Context, _, base, head, previous string) ([]ReviewFile, error) {
-	f.reviewSpans = append(f.reviewSpans, base+":"+previous+":"+head)
-	if f.reviewFilesErr != nil {
-		return nil, f.reviewFilesErr
-	}
-	if f.reviewFiles != nil {
-		return f.reviewFiles, nil
-	}
-	return []ReviewFile{{Path: "retry.go", ChangedLines: 10}}, nil
+	return f.reviewBase, nil
 }
 
 func (f *fakeWorktrees) Contains(_ context.Context, dir, ancestor, descendant string) (bool, error) {
@@ -748,7 +718,7 @@ func TestStatusReapsDeadRunner(t *testing.T) {
 
 func TestRunTaskVerifiesReportedPR(t *testing.T) {
 	good := func() PullRequest {
-		return PullRequest{Key: task.Key{Repo: "testorg/example", Number: 913}, URL: "u913", State: "open", HeadRefName: "feat/825-provider-retries", BaseRefName: "main", Body: "Retry 5xx only."}
+		return PullRequest{Key: task.Key{Repo: "testorg/example", Number: 913}, URL: "u913", State: "open", HeadSHA: "c0ffee1", HeadRefName: "feat/825-provider-retries", BaseRefName: "main", Body: "Retry 5xx only."}
 	}
 	cases := []struct {
 		name     string
@@ -828,11 +798,21 @@ func TestLinearStartRejectsUnsafeTrackerBranchName(t *testing.T) {
 	f := newFixture()
 	key := task.Key{Repo: f.gh.repo.Repo, Source: task.Linear, ExternalID: "uuid-42"}
 	f.app.Linear = &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", BranchName: "../outside", Title: "Fix cache", State: "open", Labels: []string{"triaged"}}}
-	if _, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude}); err == nil || !strings.Contains(err.Error(), "invalid branch name") {
+	req := StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude}
+	if _, err := f.app.Start(context.Background(), req); err == nil || !strings.Contains(err.Error(), "invalid branch name") {
 		t.Fatalf("start error = %v", err)
 	}
 	if len(f.wt.reqs) != 0 {
 		t.Fatalf("worktree was created: %+v", f.wt.reqs)
+	}
+
+	req.BranchName = "fix/linear-web-42-cache"
+	rec, err := f.app.Start(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Delegation.Branch != req.BranchName || f.wt.reqs[0].Branch != req.BranchName {
+		t.Fatalf("confirmed branch was not used: %+v, %+v", rec.Delegation, f.wt.reqs)
 	}
 }
 

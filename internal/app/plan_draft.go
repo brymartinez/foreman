@@ -91,8 +91,5 @@ func (r *taskRun) restorePlanDraft() (bool, step, error) {
 	if err != nil || r.rec.State != task.Planning {
 		return true, stepDone, err
 	}
-	if r.rec.Delegation.PR != 0 {
-		return true, stepReview, nil
-	}
 	return true, stepImplement, nil
 }

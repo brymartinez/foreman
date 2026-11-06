@@ -253,8 +253,8 @@ func TestRetargetedPRIsCheckedAgainstItsNewBase(t *testing.T) {
 	if got.State != task.WaitingForCI || got.Delegation.BaseRef != "origin/release" || len(got.CompetingReviews()) != 1 {
 		t.Fatalf("state %s base %s reviews %d", got.State, got.Delegation.BaseRef, len(got.CompetingReviews()))
 	}
-	if p := f.codex.reviewed[len(f.codex.reviewed)-1]; !strings.Contains(p, "git diff origin/release...HEAD") {
-		t.Errorf("review prompt uses the old base:\n%s", p)
+	if last := f.wt.baseRefs[len(f.wt.baseRefs)-1]; last != "origin/release" {
+		t.Errorf("review resolved %s, want origin/release", last)
 	}
 }
 

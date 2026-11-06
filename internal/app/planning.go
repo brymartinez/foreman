@@ -249,6 +249,7 @@ func (a App) postPlan(ctx, final context.Context, rec *task.Record, docs map[tas
 	return a.update(final, rec.Key, existing(func(cur *task.Record) {
 		cur.Delegation.PlanScopeDigest = scope.digest
 		cur.Delegation.PlanDigest = planDigest(texts)
+		cur.Delegation.PlanImplementationPending = cur.Delegation.PR != 0 || cur.LocalReview()
 		cur.Delegation.PlanDraft = nil
 	}))
 }

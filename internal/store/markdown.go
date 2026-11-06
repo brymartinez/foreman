@@ -157,71 +157,72 @@ func (m Markdown) List(_ context.Context) ([]*task.Record, error) {
 }
 
 type frontmatter struct {
-	Repo                string                 `yaml:"repo"`
-	Number              int                    `yaml:"number"`
-	Source              task.Source            `yaml:"issue_source,omitempty"`
-	ExternalID          string                 `yaml:"external_issue_id,omitempty"`
-	Identifier          string                 `yaml:"issue_identifier,omitempty"`
-	Kind                task.Kind              `yaml:"kind"`
-	Title               string                 `yaml:"title"`
-	URL                 string                 `yaml:"url"`
-	State               task.State             `yaml:"state"`
-	ImplementationAgent task.Agent             `yaml:"implementation_agent,omitempty"`
-	Profile             *task.Profile          `yaml:"profile,omitempty"`
-	RouteReason         string                 `yaml:"route_reason,omitempty"`
-	RouteLogged         bool                   `yaml:"route_logged,omitempty"`
-	StartedAt           *time.Time             `yaml:"started_at,omitempty"`
-	SessionID           string                 `yaml:"session_id,omitempty"`
-	ReviewAgent         task.Agent             `yaml:"review_agent,omitempty"`
-	Account             string                 `yaml:"account,omitempty"`
-	AccountEmail        string                 `yaml:"account_email,omitempty"`
-	Branch              string                 `yaml:"branch,omitempty"`
-	BaseRef             string                 `yaml:"base_ref,omitempty"`
-	RepoDir             string                 `yaml:"repo_dir,omitempty"`
-	Worktree            string                 `yaml:"worktree,omitempty"`
-	WorktreeRemovedAt   *time.Time             `yaml:"worktree_removed_at,omitempty"`
-	ContextFile         string                 `yaml:"context_file,omitempty"`
-	Launch              *task.Launch           `yaml:"launch,omitempty"`
-	RunnerPID           int                    `yaml:"runner_pid,omitempty"`
-	RunnerLog           string                 `yaml:"runner_log,omitempty"`
-	PR                  int                    `yaml:"pr,omitempty"`
-	PRURL               string                 `yaml:"pr_url,omitempty"`
-	PriorPR             int                    `yaml:"prior_pr,omitempty"`
-	PRHead              string                 `yaml:"pr_head,omitempty"`
-	PRDigest            string                 `yaml:"pr_digest,omitempty"`
-	CheckpointHead      string                 `yaml:"checkpoint_head,omitempty"`
-	CheckpointNext      string                 `yaml:"checkpoint_next,omitempty"`
-	Checkpoints         int                    `yaml:"checkpoints,omitempty"`
-	ConflictAttempts    []task.ConflictAttempt `yaml:"conflict_attempts,omitempty"`
-	ConflictPending     bool                   `yaml:"conflict_pending,omitempty"`
-	ReviewBeforePR      bool                   `yaml:"review_before_pr,omitempty"`
-	LocalHead           string                 `yaml:"local_head,omitempty"`
-	ProposedTitle       string                 `yaml:"proposed_title,omitempty"`
-	ProposedBody        string                 `yaml:"proposed_body,omitempty"`
-	ClaimVerification   bool                   `yaml:"claim_verification,omitempty"`
-	FullSuiteGate       bool                   `yaml:"full_suite_gate,omitempty"`
-	FinalChecks         int                    `yaml:"final_checks,omitempty"`
-	Claims              []task.Claim           `yaml:"claims,omitempty"`
-	PRDDigest           string                 `yaml:"prd_digest,omitempty"`
-	ScopeDigest         string                 `yaml:"scope_digest,omitempty"`
-	PlanScopeDigest     string                 `yaml:"plan_scope_digest,omitempty"`
-	PlanDraft           *task.PlanDraft        `yaml:"plan_draft,omitempty"`
-	PlanDigest          string                 `yaml:"plan_digest,omitempty"`
-	GitHub              *snapshot              `yaml:"github,omitempty"`
-	LastGitHubSync      *time.Time             `yaml:"last_github_sync,omitempty"`
-	Decisions           []decisionFM           `yaml:"decisions,omitempty"`
-	LastOutcome         *outcomeFM             `yaml:"last_outcome,omitempty"`
-	PlanningAdvice      []task.Advice          `yaml:"planning_advice,omitempty"`
-	Calls               []task.ModelCall       `yaml:"calls,omitempty"`
-	Usage               usageFM                `yaml:"usage,omitempty"`
-	Validation          []task.Check           `yaml:"validation,omitempty"`
-	FullResult          *task.FullResult       `yaml:"full_result,omitempty"`
-	Reviews             []reviewFM             `yaml:"reviews,omitempty"`
-	Plan                []task.PlanComment     `yaml:"plan,omitempty"`
-	Feedback            []feedbackFM           `yaml:"feedback,omitempty"`
-	CI                  *ciFM                  `yaml:"ci,omitempty"`
-	Attempts            []task.Attempt         `yaml:"attempts,omitempty"`
-	Reset               *resetFM               `yaml:"reset,omitempty"`
+	Repo                      string                 `yaml:"repo"`
+	Number                    int                    `yaml:"number"`
+	Source                    task.Source            `yaml:"issue_source,omitempty"`
+	ExternalID                string                 `yaml:"external_issue_id,omitempty"`
+	Identifier                string                 `yaml:"issue_identifier,omitempty"`
+	Kind                      task.Kind              `yaml:"kind"`
+	Title                     string                 `yaml:"title"`
+	URL                       string                 `yaml:"url"`
+	State                     task.State             `yaml:"state"`
+	ImplementationAgent       task.Agent             `yaml:"implementation_agent,omitempty"`
+	Profile                   *task.Profile          `yaml:"profile,omitempty"`
+	RouteReason               string                 `yaml:"route_reason,omitempty"`
+	RouteLogged               bool                   `yaml:"route_logged,omitempty"`
+	StartedAt                 *time.Time             `yaml:"started_at,omitempty"`
+	SessionID                 string                 `yaml:"session_id,omitempty"`
+	ReviewAgent               task.Agent             `yaml:"review_agent,omitempty"`
+	Account                   string                 `yaml:"account,omitempty"`
+	AccountEmail              string                 `yaml:"account_email,omitempty"`
+	Branch                    string                 `yaml:"branch,omitempty"`
+	BaseRef                   string                 `yaml:"base_ref,omitempty"`
+	RepoDir                   string                 `yaml:"repo_dir,omitempty"`
+	Worktree                  string                 `yaml:"worktree,omitempty"`
+	WorktreeRemovedAt         *time.Time             `yaml:"worktree_removed_at,omitempty"`
+	ContextFile               string                 `yaml:"context_file,omitempty"`
+	Launch                    *task.Launch           `yaml:"launch,omitempty"`
+	RunnerPID                 int                    `yaml:"runner_pid,omitempty"`
+	RunnerLog                 string                 `yaml:"runner_log,omitempty"`
+	PR                        int                    `yaml:"pr,omitempty"`
+	PRURL                     string                 `yaml:"pr_url,omitempty"`
+	PriorPR                   int                    `yaml:"prior_pr,omitempty"`
+	PRHead                    string                 `yaml:"pr_head,omitempty"`
+	PRDigest                  string                 `yaml:"pr_digest,omitempty"`
+	CheckpointHead            string                 `yaml:"checkpoint_head,omitempty"`
+	CheckpointNext            string                 `yaml:"checkpoint_next,omitempty"`
+	Checkpoints               int                    `yaml:"checkpoints,omitempty"`
+	ConflictAttempts          []task.ConflictAttempt `yaml:"conflict_attempts,omitempty"`
+	ConflictPending           bool                   `yaml:"conflict_pending,omitempty"`
+	ReviewBeforePR            bool                   `yaml:"review_before_pr,omitempty"`
+	LocalHead                 string                 `yaml:"local_head,omitempty"`
+	ProposedTitle             string                 `yaml:"proposed_title,omitempty"`
+	ProposedBody              string                 `yaml:"proposed_body,omitempty"`
+	ClaimVerification         bool                   `yaml:"claim_verification,omitempty"`
+	FullSuiteGate             bool                   `yaml:"full_suite_gate,omitempty"`
+	FinalChecks               int                    `yaml:"final_checks,omitempty"`
+	Claims                    []task.Claim           `yaml:"claims,omitempty"`
+	PRDDigest                 string                 `yaml:"prd_digest,omitempty"`
+	ScopeDigest               string                 `yaml:"scope_digest,omitempty"`
+	PlanScopeDigest           string                 `yaml:"plan_scope_digest,omitempty"`
+	PlanDraft                 *task.PlanDraft        `yaml:"plan_draft,omitempty"`
+	PlanDigest                string                 `yaml:"plan_digest,omitempty"`
+	PlanImplementationPending bool                   `yaml:"plan_implementation_pending,omitempty"`
+	GitHub                    *snapshot              `yaml:"github,omitempty"`
+	LastGitHubSync            *time.Time             `yaml:"last_github_sync,omitempty"`
+	Decisions                 []decisionFM           `yaml:"decisions,omitempty"`
+	LastOutcome               *outcomeFM             `yaml:"last_outcome,omitempty"`
+	PlanningAdvice            []task.Advice          `yaml:"planning_advice,omitempty"`
+	Calls                     []task.ModelCall       `yaml:"calls,omitempty"`
+	Usage                     usageFM                `yaml:"usage,omitempty"`
+	Validation                []task.Check           `yaml:"validation,omitempty"`
+	FullResult                *task.FullResult       `yaml:"full_result,omitempty"`
+	Reviews                   []reviewFM             `yaml:"reviews,omitempty"`
+	Plan                      []task.PlanComment     `yaml:"plan,omitempty"`
+	Feedback                  []feedbackFM           `yaml:"feedback,omitempty"`
+	CI                        *ciFM                  `yaml:"ci,omitempty"`
+	Attempts                  []task.Attempt         `yaml:"attempts,omitempty"`
+	Reset                     *resetFM               `yaml:"reset,omitempty"`
 }
 
 type resetFM struct {
@@ -390,44 +391,45 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 			return nil, fmt.Errorf("implementation_agent: %w", err)
 		}
 		rec.Delegation = &task.Delegation{
-			Implementer:       task.Session{Agent: impl, ID: fm.SessionID},
-			Profile:           fm.Profile,
-			RouteReason:       fm.RouteReason,
-			RouteLogged:       fm.RouteLogged,
-			Reviewer:          impl.Reviewer(),
-			Account:           fm.Account,
-			AccountEmail:      fm.AccountEmail,
-			Branch:            fm.Branch,
-			BaseRef:           fm.BaseRef,
-			RepoDir:           fm.RepoDir,
-			Worktree:          fm.Worktree,
-			ContextFile:       fm.ContextFile,
-			Launch:            fm.Launch,
-			RunnerPID:         fm.RunnerPID,
-			RunnerLog:         fm.RunnerLog,
-			PR:                fm.PR,
-			PRURL:             fm.PRURL,
-			PriorPR:           fm.PriorPR,
-			PRHead:            fm.PRHead,
-			PRDigest:          fm.PRDigest,
-			CheckpointHead:    fm.CheckpointHead,
-			CheckpointNext:    fm.CheckpointNext,
-			Checkpoints:       fm.Checkpoints,
-			ConflictAttempts:  fm.ConflictAttempts,
-			ConflictPending:   fm.ConflictPending,
-			ReviewBeforePR:    fm.ReviewBeforePR,
-			LocalHead:         fm.LocalHead,
-			ProposedTitle:     fm.ProposedTitle,
-			ProposedBody:      fm.ProposedBody,
-			ClaimVerification: fm.ClaimVerification,
-			FullSuiteGate:     fm.FullSuiteGate,
-			FinalChecks:       fm.FinalChecks,
-			Claims:            fm.Claims,
-			PRDDigest:         fm.PRDDigest,
-			ScopeDigest:       fm.ScopeDigest,
-			PlanScopeDigest:   fm.PlanScopeDigest,
-			PlanDigest:        fm.PlanDigest,
-			PlanDraft:         fm.PlanDraft,
+			Implementer:               task.Session{Agent: impl, ID: fm.SessionID},
+			Profile:                   fm.Profile,
+			RouteReason:               fm.RouteReason,
+			RouteLogged:               fm.RouteLogged,
+			Reviewer:                  impl.Reviewer(),
+			Account:                   fm.Account,
+			AccountEmail:              fm.AccountEmail,
+			Branch:                    fm.Branch,
+			BaseRef:                   fm.BaseRef,
+			RepoDir:                   fm.RepoDir,
+			Worktree:                  fm.Worktree,
+			ContextFile:               fm.ContextFile,
+			Launch:                    fm.Launch,
+			RunnerPID:                 fm.RunnerPID,
+			RunnerLog:                 fm.RunnerLog,
+			PR:                        fm.PR,
+			PRURL:                     fm.PRURL,
+			PriorPR:                   fm.PriorPR,
+			PRHead:                    fm.PRHead,
+			PRDigest:                  fm.PRDigest,
+			CheckpointHead:            fm.CheckpointHead,
+			CheckpointNext:            fm.CheckpointNext,
+			Checkpoints:               fm.Checkpoints,
+			ConflictAttempts:          fm.ConflictAttempts,
+			ConflictPending:           fm.ConflictPending,
+			ReviewBeforePR:            fm.ReviewBeforePR,
+			LocalHead:                 fm.LocalHead,
+			ProposedTitle:             fm.ProposedTitle,
+			ProposedBody:              fm.ProposedBody,
+			ClaimVerification:         fm.ClaimVerification,
+			FullSuiteGate:             fm.FullSuiteGate,
+			FinalChecks:               fm.FinalChecks,
+			Claims:                    fm.Claims,
+			PRDDigest:                 fm.PRDDigest,
+			ScopeDigest:               fm.ScopeDigest,
+			PlanScopeDigest:           fm.PlanScopeDigest,
+			PlanDigest:                fm.PlanDigest,
+			PlanImplementationPending: fm.PlanImplementationPending,
+			PlanDraft:                 fm.PlanDraft,
 		}
 		if fm.StartedAt != nil {
 			rec.Delegation.StartedAt = *fm.StartedAt
@@ -564,6 +566,7 @@ func fromRecord(rec *task.Record) frontmatter {
 		fm.FullSuiteGate, fm.FinalChecks = d.FullSuiteGate, d.FinalChecks
 		fm.ScopeDigest, fm.PlanScopeDigest, fm.PlanDigest = d.ScopeDigest, d.PlanScopeDigest, d.PlanDigest
 		fm.PlanDraft = d.PlanDraft
+		fm.PlanImplementationPending = d.PlanImplementationPending
 	}
 	if s := rec.GitHub; s != nil {
 		fm.GitHub = &snapshot{UpdatedAt: s.UpdatedAt, State: s.State, Reasons: s.Reasons}

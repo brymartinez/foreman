@@ -171,18 +171,11 @@ func (r *taskRun) reconcilePlan() (bool, error) {
 	p, readErr := a.readIssuePlan(r.ctx, r.rec)
 	answer, answered := planConflictAnswer(r.rec, p.fingerprint)
 	adopt := readErr == nil && p.complete() && (len(p.conflicts) == 0 || answer == optionText(keepPlanOption))
-	var missingPlanErr error
-	if readErr == nil && r.rec.PlanPosted() && !p.complete() && r.rec.Delegation.ClaimVerification {
-		_, missingPlanErr = a.reviewPRD(r.ctx, r.rec)
-	}
 	var emptyPlanErr error
 	if readErr == nil {
 		for _, doc := range task.PlanDocs {
 			if f, ok := p.found[doc]; ok && strings.TrimSpace(f.text) == "" {
 				emptyPlanErr = fmt.Errorf("the %s planning comment %s is empty", doc.Title(), f.comment.URL)
-				if doc == task.PRD && r.rec.Delegation.ClaimVerification {
-					_, emptyPlanErr = a.reviewPRD(r.ctx, r.rec)
-				}
 				break
 			}
 		}
@@ -211,19 +204,15 @@ func (r *taskRun) reconcilePlan() (bool, error) {
 		case emptyPlanErr != nil:
 			failTask(cur, emptyPlanErr.Error(), a.Now())
 		case r.rec.PlanPosted() && !p.complete():
-			if missingPlanErr != nil {
-				failTask(cur, missingPlanErr.Error(), a.Now())
-			} else {
-				var missing []string
-				for _, doc := range task.PlanDocs {
-					if _, ok := p.found[doc]; !ok {
-						if ref := cur.PlanComment(doc); ref != nil {
-							missing = append(missing, doc.Title()+": "+ref.URL)
-						}
+			var missing []string
+			for _, doc := range task.PlanDocs {
+				if _, ok := p.found[doc]; !ok {
+					if ref := cur.PlanComment(doc); ref != nil {
+						missing = append(missing, doc.Title()+": "+ref.URL)
 					}
 				}
-				failTask(cur, "recorded planning documents were deleted or lost their markers ("+strings.Join(missing, ", ")+"); restore or revise them before restarting", a.Now())
 			}
+			failTask(cur, "recorded planning documents were deleted or lost their markers ("+strings.Join(missing, ", ")+"); restore or revise them before restarting", a.Now())
 		case scopeCheckErr != nil:
 			failTask(cur, scopeCheckErr.Error(), a.Now())
 		case adopt && !scopeCheck.Clean && len(scopeCheck.Findings) == 0:
@@ -243,6 +232,9 @@ func (r *taskRun) reconcilePlan() (bool, error) {
 			}
 			cur.Delegation.PlanScopeDigest = r.scope.digest
 			cur.Delegation.PlanDigest = planDigest(p.texts())
+			if checkedNow && (cur.Delegation.PR != 0 || cur.LocalReview()) {
+				cur.Delegation.PlanImplementationPending = true
+			}
 		}
 	}))
 	if err != nil {

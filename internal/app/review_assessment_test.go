@@ -28,8 +28,8 @@ func TestImplementerCanRejectSelfReviewWithoutAnotherReview(t *testing.T) {
 	if got.Reviews[0].Clean || !got.Reviews[0].AllFindingsRejected() {
 		t.Fatal("assessment lost or reviewer verdict overwritten")
 	}
-	if !strings.Contains(f.codex.reviewed[0], "caller already guards") {
-		t.Fatal("adversarial reviewer did not receive rejection evidence")
+	if strings.Contains(f.codex.reviewed[0], "caller already guards") {
+		t.Fatal("competing review received a prior assessment")
 	}
 }
 
@@ -73,7 +73,7 @@ func TestPartialRejectionOrChangedCommitStillNeedsSelfReview(t *testing.T) {
 	}
 }
 
-func TestAdversarialReviewReceivesAnsweredDecisionsAndPlan(t *testing.T) {
+func TestBothCodeReviewsOmitAnsweredDecisionsAndPlan(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	rec := f.store.recs[key]
@@ -83,12 +83,9 @@ func TestAdversarialReviewReceivesAnsweredDecisionsAndPlan(t *testing.T) {
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(f.claude.reviewed[0], "Hide it.") || strings.Contains(f.claude.reviewed[0], "Posted plan.") {
-		t.Fatal("context leaked to self-review")
-	}
-	for _, want := range []string{"Hide it.", "Posted plan.", "Later developer decisions override"} {
-		if !strings.Contains(f.codex.reviewed[0], want) {
-			t.Fatalf("adversarial prompt missing %q", want)
+	for _, p := range []string{f.claude.reviewed[0], f.codex.reviewed[0]} {
+		if strings.Contains(p, "Hide it.") || strings.Contains(p, "Posted plan.") {
+			t.Fatal("task context leaked into code review")
 		}
 	}
 }

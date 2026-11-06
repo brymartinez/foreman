@@ -254,21 +254,8 @@ if [[ " $* " == *" --no-session-persistence "* ]]; then
 	if [[ "$2" == "You are the self-reviewer"* ]]; then
 		echo "claude self-review" >>"$E2E_STATE/agents.log"
 		printf '%s' "$2" >"$E2E_STATE/self-review-prompt.txt"
-		if [ -f "$E2E_STATE/area-batch" ]; then
-			if [[ "$2" == *"focused re-review"* ]]; then
-				echo "claude focused-self" >>"$E2E_STATE/agents.log"
-				printf '%s' "$2" >"$E2E_STATE/focused-self-prompt.txt"
-			else
-				for file in api/route.go data/save.go ui/view.go; do
-					if [[ "$2" == *":(literal)$file"* ]]; then
-						echo "claude area $file" >>"$E2E_STATE/agents.log"
-						printf '{"type":"result","subtype":"success","structured_output":{"verdict":"changes_requested","summary":"A verified guard is missing","findings":[{"category":"defect","severity":"should_fix","file":"%s","line":1,"summary":"Guard missing in %s","detail":"The caller can reach an invalid state."}],"limitations":[]}}\n' "$file" "$file"
-						exit 0
-					fi
-				done
-			fi
-		fi
 		if [ -f "$E2E_STATE/self-findings-once" ]; then
+			cp "$E2E_STATE/self-review-prompt.txt" "$E2E_STATE/first-self-review-prompt.txt"
 			rm "$E2E_STATE/self-findings-once"
 			echo '{"type":"result","subtype":"success","structured_output":{"verdict":"changes_requested","summary":"Check the retry guard","findings":[{"category":"defect","severity":"should_fix","file":"widgets.go","line":1,"summary":"Retry guard may be missing","detail":"Check the caller"}],"limitations":[]}}'
 			exit 0
@@ -283,7 +270,7 @@ if [[ " $* " == *" --no-session-persistence "* ]]; then
 fi
 if [[ -f "$E2E_STATE/correction-committed" && "$2" != *"Push it and open the pull request now"* && "$2" != *"## Final full check"* ]]; then
 	echo "claude reuse-correction" >>"$E2E_STATE/agents.log"
-	echo '{"type":"result","session_id":"s1","subtype":"success","structured_output":{"status":"review_ready","summary":"The old finding is already fixed in this commit","reviewAssessment":{"round":1,"rejected":[{"finding":1,"reason":"Already fixed in the committed correction; no further edit is needed."}]},"nextObjective":null,"prNumber":null,"prUrl":null,'"$(full)"',"questions":[],"documents":null,"prTitle":"feat: add retries","prBody":"Retry 5xx and 429.\n\nCloses #42","claims":[{"criteria":["R1. Retry 5xx responses."],"behavior":"the client retries 5xx responses","evidence":"widgets.go","check":"go test ./... passed"}]}}'
+	echo '{"type":"result","session_id":"s1","subtype":"success","structured_output":{"status":"review_ready","summary":"The old finding is already fixed in this commit","reviewAssessment":{"round":1,"rejected":[{"finding":1,"reason":"Already fixed in the committed correction; no further edit is needed."}]},"nextObjective":null,"prNumber":null,"prUrl":null,'"$(full)"',"questions":[],"documents":null,"prTitle":"feat: add retries","prBody":"Retry 5xx and 429.\n\nCloses #42"}}'
 	exit 0
 fi
 # A planning turn starts with "## Plan first", or resumes one with its answers.
@@ -308,27 +295,21 @@ if [[ " $* " == *" --resume "* || "$2" == *"You are correcting the latest review
 			if [[ "$2" == *'"pr_opened" for PR #'* ]]; then
 				b=$(git branch --show-current); i=${b#*/}; pr=$((900 + ${i%%-*}))
 				git fetch -q origin "$b" && git merge -q --ff-only FETCH_HEAD
-				printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"pr_opened","summary":"ran the full suite","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s",'"$(full)"',"questions":[],"claims":[{"criteria":["R1. Retry 5xx responses."],"behavior":"the client retries 5xx responses","evidence":"widgets.go","check":"go test ./... passed"}]}}\n' "$pr" "$pr"
+				printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"pr_opened","summary":"ran the full suite","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s",'"$(full)"',"questions":[]}}\n' "$pr" "$pr"
 				exit 0
 			fi
-			echo '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"review_ready","summary":"ran the full suite","nextObjective":null,"prNumber":null,"prUrl":null,'"$(full)"',"questions":[],"documents":null,"prTitle":"feat: add retries","prBody":"Retry 5xx and 429.\n\nCloses #42","claims":[{"criteria":["R1. Retry 5xx responses."],"behavior":"the client retries 5xx responses","evidence":"widgets.go","check":"go test ./... passed"}]}}'
+			echo '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"review_ready","summary":"ran the full suite","nextObjective":null,"prNumber":null,"prUrl":null,'"$(full)"',"questions":[],"documents":null,"prTitle":"feat: add retries","prBody":"Retry 5xx and 429.\n\nCloses #42"}}'
 			exit 0
 		fi
 		if [[ -f "$E2E_STATE/reject-self" && "$2" == *"For rejected self-review findings"* ]]; then
 			echo "claude assess-self" >>"$E2E_STATE/agents.log"
-			echo '{"type":"result","session_id":"s1","subtype":"success","structured_output":{"status":"review_ready","summary":"The caller already guards retries","reviewAssessment":{"round":1,"rejected":[{"finding":1,"reason":"The caller in widgets.go already guards retries."}]},"nextObjective":null,"prNumber":null,"prUrl":null,'"$(full)"',"questions":[],"documents":null,"prTitle":"feat: add retries","prBody":"Retry 5xx only.\n\nCloses #42","claims":[{"criteria":["R1. Retry 5xx responses."],"behavior":"the client retries 5xx responses","evidence":"widgets.go","check":"go test ./... passed"}]}}'
+			echo '{"type":"result","session_id":"s1","subtype":"success","structured_output":{"status":"review_ready","summary":"The caller already guards retries","reviewAssessment":{"round":1,"rejected":[{"finding":1,"reason":"The caller in widgets.go already guards retries."}]},"nextObjective":null,"prNumber":null,"prUrl":null,'"$(full)"',"questions":[],"documents":null,"prTitle":"feat: add retries","prBody":"Retry 5xx only.\n\nCloses #42"}}'
 			exit 0
 		fi
 		# review_before_pr: fix findings locally, or push the reviewed commit and open the PR.
 		if [[ "$2" == *"of your local change by"* || "$2" == *"You are correcting the latest review"* ]]; then
 			echo "claude local-fix" >>"$E2E_STATE/agents.log"
-			if [ -f "$E2E_STATE/area-batch" ]; then
-				echo "claude combined-area-fix" >>"$E2E_STATE/agents.log"
-				printf '%s' "$2" >"$E2E_STATE/combined-area-prompt.txt"
-				for file in api/route.go data/save.go ui/view.go; do echo "// fixed guard" >>"$file"; done
-			else
-				echo "// retry 429" >>widgets.go
-			fi
+			echo "// retry 429" >>widgets.go
 			git commit -qam "fix: retry 429"
 			if [ -f "$E2E_STATE/fail-correction-output-once" ]; then
 				rm "$E2E_STATE/fail-correction-output-once"
@@ -339,7 +320,7 @@ if [[ " $* " == *" --resume "* || "$2" == *"You are correcting the latest review
 			# focused-fixes: the fix runs focused checks only and reports no full result.
 			v=$(full)
 			[ ! -f "$E2E_STATE/focused-fixes" ] || v='"validation":[{"command":"go test ./widgets","passed":true,"scope":"focused"}],"fullSuite":null'
-			echo '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"review_ready","summary":"retried 429","nextObjective":null,"prNumber":null,"prUrl":null,'"$v"',"questions":[],"documents":null,"prTitle":"feat: add retries","prBody":"Retry 5xx and 429.\n\nCloses #42","claims":[{"criteria":["R1. Retry 5xx responses."],"behavior":"the client retries 5xx responses","evidence":"widgets.go","check":"go test ./... passed"}]}}'
+			echo '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"review_ready","summary":"retried 429","nextObjective":null,"prNumber":null,"prUrl":null,'"$v"',"questions":[],"documents":null,"prTitle":"feat: add retries","prBody":"Retry 5xx and 429.\n\nCloses #42"}}'
 			exit 0
 		fi
 		if [[ "$2" == *"Push it and open the pull request now"* ]]; then
@@ -350,7 +331,7 @@ if [[ " $* " == *" --resume "* || "$2" == *"You are correcting the latest review
 			file=$(printf '%s' "$2" | sed -n 's/.*--body-file \([^`]*\)`.*/\1/p' | head -n 1)
 			body=$(sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' "$file" | awk '{printf "%s\\n", $0}')
 			printf '{"number":%s,"url":"https://github.com/acme/widgets/pull/%s","state":"OPEN","headRefName":"%s","headRefOid":"%s","baseRefName":"main","isCrossRepository":false,"title":"feat: add retries","body":"%s"}\n' "$pr" "$pr" "$b" "$(git rev-parse HEAD)" "$body" >"$E2E_STATE/pr-$pr.json"
-			printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"pr_opened","summary":"opened the PR","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s",'"$(full)"',"questions":[],"claims":[{"criteria":["R1. Retry 5xx responses."],"behavior":"the client retries 5xx responses","evidence":"widgets.go","check":"go test ./... passed"}]}}\n' "$pr" "$pr"
+			printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"pr_opened","summary":"opened the PR","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s",'"$(full)"',"questions":[]}}\n' "$pr" "$pr"
 			exit 0
 		fi
 		# A merge conflict: merge main, keep both sides, push, and report the PR.
@@ -365,7 +346,7 @@ if [[ " $* " == *" --resume "* || "$2" == *"You are correcting the latest review
 			git -c user.email=e2e@example.com -c user.name=e2e commit -q --no-edit
 			git push -q origin "$b"
 			printf '{"number":%s,"url":"https://github.com/acme/widgets/pull/%s","state":"OPEN","headRefName":"%s","headRefOid":"%s","baseRefName":"main","isCrossRepository":false,"body":"Retry 5xx only.\\n\\nCloses #42"}\n' "$pr" "$pr" "$b" "$(git rev-parse HEAD)" >"$E2E_STATE/pr-$pr.json"
-			printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"pr_opened","summary":"merged main","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s",'"$(full)"',"questions":[],"claims":[{"criteria":["R1. Retry 5xx responses."],"behavior":"the client retries 5xx responses","evidence":"widgets.go","check":"go test ./... passed"}]}}\n' "$pr" "$pr"
+			printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"pr_opened","summary":"merged main","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s",'"$(full)"',"questions":[]}}\n' "$pr" "$pr"
 			exit 0
 		fi
 		# Repairing a merge conflict: merge the base, or fail when told to.
@@ -380,7 +361,7 @@ if [[ " $* " == *" --resume "* || "$2" == *"You are correcting the latest review
 			b=$(git branch --show-current); i=${b#*/}; pr=$((900 + ${i%%-*}))
 			git push -q origin "$b"
 			printf '{"number":%s,"url":"https://github.com/acme/widgets/pull/%s","state":"OPEN","headRefName":"%s","headRefOid":"%s","baseRefName":"main","isCrossRepository":false,"mergeable":"MERGEABLE","body":"Retry 5xx only.\\n\\nCloses #42"}\n' "$pr" "$pr" "$b" "$(git rev-parse HEAD)" >"$E2E_STATE/pr-$pr.json"
-			printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"pr_opened","summary":"merged main","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s",'"$(full)"',"questions":[],"claims":[{"criteria":["R1. Retry 5xx responses."],"behavior":"the client retries 5xx responses","evidence":"widgets.go","check":"go test ./... passed"}]}}\n' "$pr" "$pr"
+			printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"pr_opened","summary":"merged main","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s",'"$(full)"',"questions":[]}}\n' "$pr" "$pr"
 			exit 0
 		fi
 		# Answering PR feedback: reply where the comment is and change no code.
@@ -389,7 +370,7 @@ if [[ " $* " == *" --resume "* || "$2" == *"You are correcting the latest review
 			printf '%s' "$2" >>"$E2E_STATE/feedback-prompt.txt"
 			b=$(git branch --show-current); i=${b#*/}; pr=$((900 + ${i%%-*}))
 			gh api --method POST "repos/acme/widgets/issues/$pr/comments" -f body="<!-- foreman:reply --> Capped at three." >/dev/null
-			printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"pr_opened","summary":"answered the comment","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s",'"$(full)"',"questions":[],"claims":[{"criteria":["R1. Retry 5xx responses."],"behavior":"the client retries 5xx responses","evidence":"widgets.go","check":"go test ./... passed"}]}}\n' "$pr" "$pr"
+			printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"pr_opened","summary":"answered the comment","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s",'"$(full)"',"questions":[]}}\n' "$pr" "$pr"
 			exit 0
 		fi
 	fi
@@ -417,7 +398,7 @@ echo "$$" >"$E2E_STATE/implement-agent.pid"
 sleep "${E2E_AGENT_SLEEP:-1}"
 branch=$(git branch --show-current)
 echo "// retries" >>widgets.go
-if [ -f "$E2E_STATE/area-batch" ]; then
+if [ -f "$E2E_STATE/large-diff" ]; then
 	mkdir -p api data ui
 	for file in api/route.go data/save.go ui/view.go; do
 		awk 'BEGIN {print "package widgets"; for (i=1;i<=900;i++) print "// review line " i}' >"$file"
@@ -429,7 +410,7 @@ git commit -qam "feat: retries"
 # review_before_pr: commit only, and propose the PR for review.
 if [[ "$*" == *"## Proposing the pull request"* ]]; then
 	echo "claude review-ready" >>"$E2E_STATE/agents.log"
-	echo '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.25,"structured_output":{"status":"review_ready","summary":"added retries","nextObjective":null,"prNumber":null,"prUrl":null,'"$(full)"',"questions":[],"documents":null,"prTitle":"feat: add retries","prBody":"Retry 5xx only.\n\nCloses #42","claims":[{"criteria":["R1. Retry 5xx responses."],"behavior":"the client retries 5xx responses","evidence":"widgets.go","check":"go test ./... passed"}]}}'
+	echo '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.25,"structured_output":{"status":"review_ready","summary":"added retries","nextObjective":null,"prNumber":null,"prUrl":null,'"$(full)"',"questions":[],"documents":null,"prTitle":"feat: add retries","prBody":"Retry 5xx only.\n\nCloses #42"}}'
 	exit 0
 fi
 git push -q origin "$branch"
@@ -455,7 +436,7 @@ printf '{"number":%s,"url":"https://github.com/%s/pull/%s","state":"OPEN","headR
 echo "claude stderr progress" >&2
 echo '{"type":"system","subtype":"init","session_id":"s1"}'
 echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"go test ./...","description":"Run the tests"}}]}}'
-printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.25,"structured_output":{"status":"pr_opened","summary":"added retries","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s",'"$(full)"',"questions":[],"claims":[{"criteria":["R1. Retry 5xx responses."],"behavior":"the client retries 5xx responses","evidence":"widgets.go","check":"go test ./... passed"}]}}\n' "$pr" "$pr"
+printf '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.25,"structured_output":{"status":"pr_opened","summary":"added retries","prNumber":%s,"prUrl":"https://github.com/acme/widgets/pull/%s",'"$(full)"',"questions":[]}}\n' "$pr" "$pr"
 EOF
 
 	# Reviewer on the codex JSONL protocol.
@@ -549,6 +530,14 @@ issue() { # issue <number> <title> [labels-json]
 		"$1" "$2" "$1" >"$state/api-$1.json"
 }
 
+complete_review_diff() {
+	contains "$1" "\`git diff --no-ext-diff --no-textconv --ignore-submodules=none $2...$3 --\`"
+}
+
+no_review_context() {
+	test -f "$1" && ! grep -qE 'Retry 5xx|Task 1: retries|do it|go test \./\.\.\.' "$1"
+}
+
 scenario_runner() {
 	echo "runner: a detached runner outlives the dashboard that started it"
 	setup runner
@@ -572,16 +561,16 @@ scenario_runner() {
 	check "implementation uses its Claude model" contains "$state/models.log" "claude model=opus"
 	check "review uses its Codex model" contains "$state/models.log" "codex model=gpt-6-sol"
 	check "review uses medium Codex effort" contains "$state/models.log" 'codex model_reasoning_effort="medium"'
-	check "the review omits the PR description" bash -c "! grep -qF '> Retry 5xx only.' '$state/review-prompt.txt'"
 	check "the implementer self-reviews before the competing review" bash -c "grep -E '^(claude|codex) review' '$state/agents.log' | tail -2 | tr '\n' ' ' | grep -qx 'claude review codex review '"
-	check "the review omits the issue description" bash -c "! grep -qF 'do it' '$state/review-prompt.txt'"
-	check "the review carries the PRD" contains "$state/review-prompt.txt" "> R1. Retry 5xx responses."
-	check "the review carries the claims to test" contains "$state/review-prompt.txt" "the client retries 5xx responses"
+	local base head
+	base=$(git --git-dir="$sandbox/origin.git" rev-parse main)
+	head=$(jq -r '.headRefOid' "$state/pr-942.json")
+	check "self-review reads the complete published diff" complete_review_diff "$state/self-review-prompt.txt" "$base" "$head"
+	check "competing review reads the complete published diff" complete_review_diff "$state/review-prompt.txt" "$base" "$head"
+	check "self-review omits task context" no_review_context "$state/self-review-prompt.txt"
+	check "competing review omits task context" no_review_context "$state/review-prompt.txt"
 	check "the task records plan-check usage" contains "$sandbox/tasks/acme-widgets-42.md" "step: plan_check"
 	check "the task records self-review usage" contains "$sandbox/tasks/acme-widgets-42.md" "step: self_review"
-	check "the task file holds the claims" contains "$sandbox/tasks/acme-widgets-42.md" "the client retries 5xx responses"
-	check "no claim reaches GitHub" bash -c "! grep -rqF 'the client retries 5xx responses' '$state/gh.log' '$state'/comment-*.md '$state'/pr-*.json"
-	check "no claim reaches git" bash -c "! git --git-dir='$sandbox/origin.git' log --all -p | grep -qF 'the client retries 5xx responses'"
 	task 42 sd >"$sandbox/show.txt"
 	check "the show pane lists the plan" contains "$sandbox/show.txt" "Requirements https://github.com/acme/widgets/issues/42#issuecomment-3001"
 	rm "$sandbox/stages/pr.md"
@@ -596,19 +585,23 @@ scenario_review_before_pr() {
 	touch "$state/findings-once"
 	check "the dashboard delegates #42" start 42
 	check "the runner reaches a clean review" wait_status "review ✓"
-	local task_file="$sandbox/tasks/acme-widgets-42.md" head
+	local task_file="$sandbox/tasks/acme-widgets-42.md" base head
 	check "the implementer proposed the PR without pushing" contains "$state/agents.log" "claude review-ready"
 	check "the findings were fixed locally" contains "$state/agents.log" "claude local-fix"
-	check "two reviews ran" test "$(grep -c '^codex review' "$state/agents.log")" = 2
+	check "two self-reviews ran" test "$(grep -c '^claude self-review$' "$state/agents.log")" = 2
+	check "two competing reviews ran" test "$(grep -c '^codex review$' "$state/agents.log")" = 2
 	check "no review saw the branch on origin" bash -c "test \"\$(sort -u '$state/review-origin.log')\" = local"
-	check "the re-review starts with the fix diff" contains "$state/review-prompt.txt" 'Start with `git diff '
-	check "the task records a focused starting commit" grep -q 'from_head:' "$task_file"
-	check "the review omits the proposed description" bash -c "! grep -qF 'Retry 5xx and 429.' '$state/review-prompt.txt'"
 	check "the branch was pushed once" test "$(wc -l <"$state/pushes.log" | tr -d ' ')" = 1
+	base=$(git --git-dir="$sandbox/origin.git" rev-parse main)
 	head=$(git --git-dir="$sandbox/origin.git" rev-parse "$(sed -n 's/^branch: *//p' "$task_file")")
+	check "self-review rereads the complete diff after a fix" complete_review_diff "$state/self-review-prompt.txt" "$base" "$head"
+	check "competing review rereads the complete diff after a fix" complete_review_diff "$state/review-prompt.txt" "$base" "$head"
+	check "self-review omits task context" no_review_context "$state/self-review-prompt.txt"
+	check "competing review omits task context" no_review_context "$state/review-prompt.txt"
+	check "competing review omits its earlier finding" bash -c "! grep -qF 'retry 429 too' '$state/review-prompt.txt'"
 	check "the task records the pushed commit as the PR head" contains "$task_file" "pr_head: $head"
 	check "the last review covered the pushed commit" contains "$task_file" "head: $head"
-	check "the PR has the reviewed description" contains "$state/pr-942.json" "Retry 5xx and 429."
+	check "the PR has the proposed description" contains "$state/pr-942.json" "Retry 5xx and 429."
 }
 
 scenario_retry_committed_correction() {
@@ -634,27 +627,24 @@ scenario_retry_committed_correction() {
 	check "the PR opened" contains "$state/agents.log" "claude open-pr"
 }
 
-scenario_area_review() {
-	echo "area_review: all initial areas finish before one combined correction, then only the fix is reviewed"
-	setup area_review
+scenario_complete_diff_review() {
+	echo "complete_diff_review: both reviewers cover a large branch in one call per round"
+	setup complete_diff_review
 	echo "review_before_pr: true" >>"$sandbox/config.yaml"
-	touch "$state/area-batch" "$state/focused-fixes"
+	touch "$state/large-diff" "$state/self-findings-once" "$state/focused-fixes"
 	check "the task starts" start 42
 	check "the task reaches a clean review" wait_status "review ✓"
-	local file
-	for file in api/route.go data/save.go ui/view.go; do
-		check "initial review owns $file" contains "$state/agents.log" "claude area $file"
-		check "one correction receives the finding for $file" contains "$state/combined-area-prompt.txt" "Guard missing in $file"
-	done
-	check "one combined correction ran" test "$(grep -c '^claude combined-area-fix$' "$state/agents.log")" = 1
-	check "all three area calls precede the correction" bash -c "grep -E '^claude (area |combined-area-fix)' '$state/agents.log' | tail -1 | grep -qx 'claude combined-area-fix'"
-	check "only one focused self-review followed the fix" test "$(grep -c '^claude focused-self$' "$state/agents.log")" = 1
-	check "three bounded initial calls and one focused call ran" test "$(grep -c '^claude self-review$' "$state/agents.log")" = 4
-	check "the followup includes prior findings" contains "$state/focused-self-prompt.txt" "Guard missing in api/route.go"
-	check "the followup excludes unrelated unchanged code" bash -c "! grep -qF 'widgets.go' '$state/focused-self-prompt.txt'"
-	check "one adversarial review ran" test "$(grep -c '^codex review$' "$state/agents.log")" = 1
+	local base first head
+	base=$(git --git-dir="$sandbox/origin.git" rev-parse main)
+	head=$(jq -r '.headRefOid' "$state/pr-942.json")
+	first=$(git --git-dir="$sandbox/origin.git" rev-parse "$head^")
+	check "self-review ran once before the correction and once after" test "$(grep -c '^claude self-review$' "$state/agents.log")" = 2
+	check "the first self-review reads the complete large diff" complete_review_diff "$state/first-self-review-prompt.txt" "$base" "$first"
+	check "self-review rereads the complete large diff after a fix" complete_review_diff "$state/self-review-prompt.txt" "$base" "$head"
+	check "self-review omits its earlier finding" bash -c "! grep -qF 'Retry guard may be missing' '$state/self-review-prompt.txt'"
+	check "one competing review ran" test "$(grep -c '^codex review$' "$state/agents.log")" = 1
+	check "competing review reads the complete large diff after a fix" complete_review_diff "$state/review-prompt.txt" "$base" "$head"
 	check "one final full check ran" test "$(grep -c '^claude final-check$' "$state/agents.log")" = 1
-	check "the task records scoped coverage" contains "$sandbox/tasks/acme-widgets-42.md" "areas:"
 }
 
 scenario_quota_skip() {
@@ -683,9 +673,9 @@ scenario_self_assessment() {
 	check "the implementer assesses the findings in its resumed session" contains "$state/agents.log" "claude assess-self"
 	check "one independent self-review ran" test "$(grep -c '^claude self-review$' "$state/agents.log")" = 1
 	check "one adversarial review ran" test "$(grep -c '^codex review$' "$state/agents.log")" = 1
-	check "the self-review did not receive requirements" bash -c "! grep -qF 'R1. Retry 5xx responses.' '$state/self-review-prompt.txt'"
-	check "the adversarial review received requirements" contains "$state/review-prompt.txt" "R1. Retry 5xx responses."
-	check "the adversarial review received rejection evidence" contains "$state/review-prompt.txt" "caller in widgets.go already guards"
+	check "self-review omits task context" no_review_context "$state/self-review-prompt.txt"
+	check "competing review omits task context" no_review_context "$state/review-prompt.txt"
+	check "competing review omits rejection evidence" bash -c "! grep -qF 'caller in widgets.go already guards' '$state/review-prompt.txt'"
 	check "the task preserves rejected finding reasons" contains "$task_file" "rejected_findings:"
 	check "the original reviewer verdict remains unchanged" contains "$task_file" "verdict: changes_requested"
 	check "no unnecessary correction commit ran" bash -c "! grep -qF 'claude local-fix' '$state/agents.log'"
@@ -747,7 +737,6 @@ scenario_plan_reuse() {
 		i=$((i + 1)); title=${doc#*:}
 		entry=$(printf '{"id":%s,"html_url":"https://github.com/acme/widgets/issues/42#issuecomment-%s","body":"<!-- foreman:%s -->\\n## %s\\n\\nPosted earlier.","updated_at":"2026-09-20T10:00:00Z","user":{"login":"brymartinez"}}' "$((2000 + i))" "$((2000 + i))" "${doc%%:*}" "$title")
 		comments="$comments${comments:+,}$entry"
-		# The review reads the PRD comment by its ID.
 		printf '%s\n' "$entry" >"$state/api-$((2000 + i)).json"
 	done
 	printf '[[{"id":1999,"html_url":"https://github.com/acme/widgets/issues/42#issuecomment-1999","body":"Thanks, looking.","updated_at":"2026-09-20T09:00:00Z","user":{"login":"brymartinez"}},%s]]\n' "$comments" >"$state/conv-repos-acme-widgets-issues-42-comments.json"
@@ -1516,7 +1505,7 @@ scenario_account() {
 	unset E2E_CLONE_URL
 }
 
-scenarios=${*:-runner review_before_pr retry_committed_correction self_assessment area_review quota_skip full_check final_check_stop planning_advice plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui routing history linear account learning knowledge_transfer}
+scenarios=${*:-runner review_before_pr retry_committed_correction self_assessment complete_diff_review quota_skip full_check final_check_stop planning_advice plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui routing history linear account learning knowledge_transfer}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"

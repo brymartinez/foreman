@@ -190,14 +190,14 @@ func TestInconclusivePlanCheckStopsWithoutPosting(t *testing.T) {
 	}
 }
 
-func TestReviewFindsBehaviorThatFollowsPRButConflictsWithTriage(t *testing.T) {
+func TestDiffFindingGoesToTheImplementerWithoutGivingTriageToTheReviewer(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	f.gh.issueComments = []IssueComment{{ID: 7, URL: "https://example.test/triage", Body: "## Triage decisions\nUse the campaign Recent Activity table."}}
 	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2"), {Session: task.Session{Agent: task.Claude, ID: "sid-2"}, Outcome: agent.Outcome{
 		Status: agent.Blocked, Summary: "Need scope decision", Questions: []task.Question{{Issue: "How should the table be changed?", Options: []task.Option{{Label: "A", Description: "Use activity."}, {Label: "B", Description: "Correct triage."}}, Recommendation: "A"}},
 	}}}
-	f.codex.reviews = []agent.ReviewOutcome{{Clean: false, Summary: "wrong table", Findings: []task.Finding{{Severity: "blocking", Summary: "Implementation uses recipients", Detail: "The code follows the PR description but triage requires Recent Activity at https://example.test/triage."}}}}
+	f.codex.reviews = []agent.ReviewOutcome{{Clean: false, Summary: "wrong table", Findings: []task.Finding{{Severity: "blocking", Summary: "Implementation uses recipients", Detail: "The query drops events that have no matching recipient."}}}}
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}

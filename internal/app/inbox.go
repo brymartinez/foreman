@@ -50,16 +50,12 @@ type App struct {
 	// ReplyToPRFeedback is disabled in the CLI. It remains available to exercise
 	// the older feedback flow in tests while stored tasks are migrated.
 	ReplyToPRFeedback bool
-	// ClaimVerification is enabled in the CLI. A task that plans copies it when it
-	// starts. Off, tests exercise the review workflow of tasks started before claims.
-	ClaimVerification bool
 	FullSuiteGate     bool // enabled in the CLI; every task copies it when it starts
 	Linear            IssueTracker
 	LinearTeam        string
 	Repositories      RepositoryManager
 	Worktrees         WorktreeManager
 	Agents            map[task.Agent]AgentAdapter
-	BranchProposer    BranchProposer
 	Runners           Runners
 	Stages            StageInstructionResolver
 	WorktreesDir      string

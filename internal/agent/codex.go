@@ -162,6 +162,7 @@ func (c Codex) exec(ctx context.Context, in StartInput, schema []byte, baseArgs 
 		return task.Session{}, nil, task.Usage{}, err
 	}
 	args := baseArgs(schemaPath, lastPath)
+	args = append(args, "-c", `approval_policy="never"`)
 	if c.Model != "" {
 		args = append(args, "-m", c.Model)
 	}

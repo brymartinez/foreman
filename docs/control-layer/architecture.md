@@ -99,18 +99,15 @@ runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR)
                       conflict -> implementer.Resume(session, merge the base, never
                                   rebase or force-push, push); recheck; after two
                                   turns still conflicting -> NEEDS_DECISION, exit
-                    read the PR description and store its digest beside the head;
-                      with claim verification, also require the stored claims and
-                      read the PRD comment, storing its digest (gone, unmarked, or
-                      empty PRD -> FAILED)
-                    SELF_REVIEW: self = implementer.Review(disposable read-only session,
-                                              git diff and surrounding code, no task context),
+                    check that the PR description is usable
+                    SELF_REVIEW: self = implementer.Review(fresh read-only session,
+                                              complete pinned base...head diff and surrounding code),
                                               until clean, or all findings are rejected
                                               on this unchanged head
                     self error -> FAILED, exit (never falls back to the competing review)
                     self clean -> the competing review of the same change, in this run
-                    ADVERSARIAL_REVIEW: review = reviewer.Review(disposable read-only
-                                             session, checked plan + decisions + claims + validation + git diff)
+                    ADVERSARIAL_REVIEW: review = reviewer.Review(fresh read-only session,
+                                             complete pinned base...head diff and surrounding code)
                     clean    -> record review and the head it covered; WAITING_FOR_CI, exit
                                 (with the full-suite gate and no full result covering
                                 the head: final check first, see below)
@@ -131,8 +128,8 @@ runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR)
                       git merge-tree HEAD origin/<base>
                       conflict -> implementer.Resume(session, merge the base locally, no
                                   push); after two turns still conflicting -> NEEDS_DECISION
-                    self = implementer.Review(git diff without task context), as above
-                    review = reviewer.Review(checked plan + decisions + claims + validation + git diff)
+                    self = implementer.Review(complete pinned base...head diff), as above
+                    review = reviewer.Review(complete pinned base...head diff), as above
                     findings -> IMPLEMENTING; implementer.Resume(retained session, latest findings); assess,
                                 commit locally,
                                 review_ready again with the updated description;
@@ -144,7 +141,7 @@ runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR)
                                 head, title, and description is adopted; otherwise
                                 implementer turn: push exactly that commit, gh pr create
                                 with that title and --body-file; gh: confirm the PR and its
-                                head, title, and body match the review (mismatch -> FAILED)
+                                head, title, and body match the verified handoff (mismatch -> FAILED)
                                 record PR and head, the clean review covers it,
                                 WAITING_FOR_CI, exit
   a stop answered at the fix limit -> FAILED with the unresolved findings; any PR and
@@ -505,43 +502,18 @@ the same commit. The commit message records why it changed.
   block is cleared. The reset record keeps no plan links, attempts, decisions, or
   session. With an open PR and an absent or partial plan, the run plans before reviewing
   that PR. Every run reads the issue's planning comments before it plans.
-- **Names are chosen once, before worktree creation.** The default branch is
-  `<type>/<workName>`, with the type from the title prefix, the labels, then `feat`;
-  `task.WorkName` is `<issue>-<slug>` (at most 5 words and 40 characters). A Linear
-  suggestion is the fallback when present. For a new task in the managed checkout,
-  Foreman first fetches the default branch and fast-forwards the local one, so the
-  proposal reads current guidance. A failed fetch, a diverged branch, uncommitted
-  changes, or another checked-out branch stops manual and auto starts with the
-  reason; Foreman never resets local work. A checkout the caller supplies is read as
-  it is. Guidance is `AGENTS.md` plus the Markdown files it names as branch naming
-  guidance, up to two links deep. Text splits into blocks: a paragraph, a heading,
-  or a list item. Wrapped lines in one block join, and a blank line, heading
-  (`#` or setext), thematic break, or list marker ends the block, so a description never reaches another paragraph or
-  item. Blocks split into clauses at `;`, `|`, or a sentence end. Links joined by
-  only commas, "and", or "or" form a group. Text between two groups splits at its
-  last comma, "and", "but", or "or": the part before describes the earlier group,
-  the part after leads into the later one; with no such word it all leads in. A
-  link is read when the group's lead-in, its trailing text, or the labels up to its
-  own say "branch" and "name", "convention", "rule", or "guidance", so the
-  description may come before, inside, or after the link. A link whose label or
-  path says "decision log", "history", "archive", or "superseded" (with `-`, `_`,
-  `/`, or `.` read as spaces, so `decision-log.md` counts) is skipped; a group
-  whose lead-in or trailing text says so is skipped whole. Other links, even in the
-  same clause ("see [architecture](...)"), are not read. A document that only
-  mentions branches is not a rule. A named file that is missing, unreadable, not a
-  regular file, over 32 KiB, or outside the repository stops the start with its
-  path and that reason. The proposer runs in an empty scratch directory on purpose,
-  and its prompt says the supplied excerpts are the repository's guidance. A start with a confirmed name
-  runs the same sync and guidance read, since either can change while a person edits
-  it. A tool-free
-  proposal applies the repository convention to the issue and tracker suggestion;
-  repository guidance takes precedence. A manual start shows an editable proposal;
-  branch name keys move a rune-index cursor and insert or delete at that position.
-  Auto mode waits when the workstream or guidance is unclear. The chosen name is
-  validated before making a worktree and stored at the first start. A new worktree is
+- **Names are chosen once, before worktree creation.** GitHub tasks default to
+  `<type>/<issue>-<slug>`. The type comes from the title prefix, the labels, or
+  `feat`, and the slug is capped at five words and 40 characters. Linear tasks
+  use the tracker suggestion when present. Without one, the default is
+  `<type>/linear-<identifier>-<title-slug>`. An invalid tracker suggestion
+  requires a manual choice. The manual prompt allows editing before confirming,
+  and auto mode waits for a choice if the proposal is invalid or reserved by a
+  prior PR. Foreman validates the chosen name before creating the worktree.
+  A new branch starts from the fetched remote base. Its worktree is
   `<worktrees_dir>/<owner>-<repo>/<branch>`, with each branch slash as a directory
-  separator. Restarts keep the stored branch and worktree path, including paths from
-  the older flat convention.
+  separator. Restarts keep the stored branch and worktree path, including paths
+  from the older flat convention.
 
 ### Agents
 
@@ -550,8 +522,8 @@ the same commit. The commit message records why it changed.
   replaced by a fresh review session with the implementer's agent.
 - **Headless turns with a structured outcome.** Each turn ends in a final message that
   matches `internal/agent/outcome.schema.json`: `planned`, `checkpoint`, `pr_opened`,
-  `review_ready`, `blocked` with questions, or `failed`. `pr_opened` and `review_ready`
-  may carry `claims`. `agent.ParseOutcome` is the only way an implementer's output
+  `review_ready`, `blocked` with questions, or `failed`. `agent.ParseOutcome` is the
+  only way an implementer's output
   enters the program, and it rejects questions with fewer than two options or duplicate
   labels. The reviewer, the routing selector, and the evaluator have
   their own schemas and parsers, `agent.ParseReview`, `agent.ParseSelection`,
@@ -563,7 +535,9 @@ the same commit. The commit message records why it changed.
   use a `foreman-git` permission profile with worktree writes and network access. The
   profile grants the linked worktree's Git directory and the clone's shared Git
   directory for add, commit, fetch, and push. Permission roots are directories,
-  including when Git's top-level files already exist. Reviews stay read-only.
+  including when Git's top-level files already exist. All Codex turns explicitly
+  set `approval_policy="never"`. Reviews stay read-only, with Git diff and file
+  reads available without human approval.
 - **The agent pushes and opens the PR.** Foreman then checks with `gh` that the PR is
   open, in the task's repo, from the task branch, against the task's base, and records
   the verified number and head. A PR the developer retargets keeps its new base.
@@ -669,14 +643,14 @@ the same commit. The commit message records why it changed.
   a route error, so the selector never chooses from part of the issue. It runs with no tools in a scratch
   directory. A selector failure, an unknown rule, or 0 uses `default`, and the reason
   says so.
-- **Check provider quota before model calls.** Starts, resumes, reviews, selector and
-  branch proposals, diagnostics, learning, and knowledge merging consult quota first.
+- **Check provider quota before model calls.** Starts, resumes, reviews, routing, diagnostics,
+  learning, and knowledge merging consult quota first.
   Confirmed exhaustion or absent setup prevents the call. Unknown quota preserves
   the selected provider. At a runner stage boundary or restart, an unavailable
   implementer hands existing work to the configured competing provider only when
   it is positively available. The handoff clears provider-specific sessions and
-  profiles; it retains the branch, checkpoint progress, local proposal, PR, plan,
-  claims, decisions, and verification. Both unavailable providers stop implementation
+  profiles. It retains the branch, checkpoint progress, local proposal, PR, plan,
+  decisions, and verification. Both unavailable providers stop implementation
   without calling either. Mid-call failures stop the turn; a retry checks quota
   again before handing off. New manual tasks refuse an unavailable provider.
   The routing selector may use the available competing provider with its configured
@@ -805,34 +779,15 @@ the same commit. The commit message records why it changed.
 
 ### Review
 
-- **Initial self-review covers explicit file areas.** Git supplies the complete
-  changed-path inventory and line counts, including deleted paths and both sides
-  of renames. Foreman groups source files with colocated tests and balances their
-  changed lines into up to three areas. Small changes stay in one area. The
-  800-line target is scheduling guidance, not an accepted-change limit. Every
-  changed path has one owner, and assignments are deterministic. Reviewers receive
-  pinned, literal-path diff commands and may read surrounding code to trace effects.
-  No task requirements, plan, claims, decisions, or implementation transcript enters
-  self-review. Each area uses a fresh, read-only session of the implementing agent's
-  review model and `review_rounds` passes. It collects every concrete finding in its
-  assigned area before returning.
-- **Collect area findings before correcting code.** Area calls run sequentially on
-  the committed change. The existing reviewer dollar budget is divided across the
-  batch without increasing its total. All areas must return before findings reach
-  the retained implementer. Foreman merges their findings without a synthesis model
-  call, deduplicates exact findings, and retains the strongest severity. It records
-  one review round with all assigned `areas`; individual calls remain metered and
-  logged. A failed area stops the run without recording completed coverage or
-  advancing to fixes or adversarial review. No extra agent-output fields are needed.
-- **Self-review after fixes focuses on the delta.** A prior area review supplies
-  the baseline only for the same reviewer and base ref and commit, with a verified
-  ancestor head and no recorded limitations. It supplies only earlier code findings
-  that the implementer did not reject. Changed files and earlier finding locations
-  get bounded areas; reviewers trace fix effects without restarting unrelated work.
-  Task wording changes alone do not invalidate code-only coverage. Missing area
-  metadata, recorded limitations, changed base, or rewritten history requires a full
-  pass. Older records remain readable; when they need a new self-review without this
-  coverage metadata, it starts with the full file inventory.
+- **Both reviewers read the complete diff.** Foreman pins the verified base and
+  head commits and gives each reviewer their three-dot diff. The command disables
+  external diff and text conversion and includes changes to submodule pointers.
+  Each reviewer gets one fresh, read-only call per round with its configured model and review
+  budget. `review_rounds` sets the number of passes in the call. The same instructions
+  apply after a fix. Reviewers may read surrounding code and tests to verify concrete
+  defects. Code review prompts exclude task requirements, plans, decisions,
+  acceptance claims, PR text, validation results, earlier review findings, and
+  implementation transcripts.
 - **Review-ready work need not advance on every turn.** Checkpoints still require
   a new commit. A `review_ready` turn may reuse an existing clean commit, including
   work committed before a previous turn's output failed validation. When that commit
@@ -852,118 +807,48 @@ the same commit. The commit message records why it changed.
   findings do not consume fix rounds. A lost implementation session is rebuilt from
   the checked plan, all answered decisions, committed work, and outstanding findings.
 - **Review kinds live on the record.** Each review records its kind (`self`, or empty
-  for competing), head, requirement and claim digests, and the PR text digest for
-  audit. Self-review coverage depends on the commit and PR. Adversarial coverage also
-  depends on the confirmed scope, plan, claims, and `decisions_digest`, so a changed
-  answer or option meaning invalidates an earlier verdict. A title or description edit alone does not start model reviews again.
-  Empty PR descriptions still block review and handoff through local checks.
-  Publishing a locally reviewed change still verifies that the actual PR holds the
-  exact proposed title and description, allowing only a trailing codesmith-marked
-  footer added after publication. A clean self-review newer than the latest
-  competing review leaves the competing review pending, so a restart finishes it.
-- **Adversarial review uses the authoritative task context.** The other agent runs
-  in a fresh disposable session with the checked Requirements and Work plan, all
-  answered decisions including option meanings, claims, reported checks, full-suite
-  evidence, and self-review rejection reasons. Later decisions override conflicting
-  earlier requirements. Implementation transcripts are excluded. Claims and reported
-  checks are evidence to examine, not facts to trust. A fresh quota report confirming
-  exhaustion skips this review without calling the provider. Foreman stores a
-  `skipped` verdict and reason bound to the same head, proposal, requirements, and
-  claims as a review. It permits progress without claiming a clean verdict and
-  never supplies an incremental-review baseline. Unknown quota, absent setup,
-  provider errors, and missing adapters do not grant a skip. Self-review and the
-  full-suite gate still apply. Foreman never substitutes the implementing agent.
-- **Adversarial re-reviews can focus on fixes.** The first adversarial review reads
-  the complete diff. Later reviews may start at that reviewer's previous head with
-  its earlier findings. This requires the same base ref and commit, unchanged scope
-  and plan, the same PRD digest when claims are enabled, and a previous head that is
-  an ancestor of the current one. Missing metadata, rewritten history, or changed
-  requirements or base triggers a full review. Each review records its base and
-  starting head. Self-review uses its own completed area coverage and code findings.
-- **Both reviewers are read-only.** Claude gets `Read, Grep, Glob` and read-only git;
-  Codex uses its read-only sandbox. Reviewers never resume the implementation session.
-- **Validation commands run in implementation, not review.** Reviewers read code and
-  tests but do not run vet, tests, builds, or end-to-end scripts. A reported passing
-  check is still a claim about execution, not proof that the tests establish the
-  behavior. If review permissions alone prevent rerunning it, the reviewer records a
-  nonblocking limitation rather than requesting changes. A visible failure, a plausible
-  untested failure path, or a concrete defect remains a finding. Reviewers use Read for
-  cited line ranges, Grep for symbols and fixture setup, and Glob for test files. They
-  check the repository themselves rather than asking the developer to run commands
-  that the review session cannot run.
-- **Confirmed triage is checked before implementation.** Foreman verifies Requirements
-  against current triage and checks that Work plan covers each rule. Adversarial review checks the change against both documents and answered decisions.
-  Self-review inspects only code changes.
-  Both use `git diff origin/<base>...HEAD` and may inspect surrounding code to verify
-  a concrete defect. A blank PR description still stops the review because Foreman
-  requires a usable PR, although reviewers do not receive its text. A task with claim
-  verification also adds the PRD as acceptance
-  criteria and the implementer's claims. When screenshots are requested
-  or the agent captured them, the opening agent attaches them in a PR comment after
-  the PR exists, without editing the reviewed description. The comment carries the agent
-  marker so feedback and learning do not mistake it for a developer comment. A retry
-  checks existing comments before posting again. Foreman supplies no screenshot data;
-  the agent uses documented local setup and repository seed, fixture, or demo data,
-  and names missing evidence in its outcome when none is suitable.
-- **Claim verification is set when a planning task starts.** `claim_verification` is
-  copied onto the delegation when a task that will plan starts (the CLI always enables
-  it; a task that continues a PR has no PRD and starts without it). A restart keeps it,
-  and a task file without it keeps the review workflow above. Its implementer returns,
-  with every `pr_opened` or `review_ready`, a full claim set: per PRD acceptance criterion (criteria may share a claim), the
-  behavior, the code and test evidence, and the check performed or why none was. A
-  turn without claims is resumed once to add them; any answer but the same status with
-  claims fails the task, on every turn path, a gate-started conflict repair included. The latest set replaces the stored one. The turn that opens a
-  reviewed PR is given the reviewed claims and must return them unchanged, and before
-  it runs, or a matching PR is adopted, the PRD is read again: a changed PRD sends the
-  change back to review, and a missing one fails the task. Claims stay in the task file: the prompts keep them out of
-  the PR, comments, commits, and worktree files, and Foreman never posts them. No extra agent
-  call exists to verify them; the adversarial review does.
-- **Reviews test claims against the live PRD.** Before each review, the review step
-  reads the PRD comment the task recorded, strips its marker and heading, and stores
-  its digest; Linear and GitHub read alike. A missing, unmarked, or empty PRD fails the
-  task with the cause, and an unreadable one fails it with the error, before any review
-  runs. The adversarial reviewer maps each effective acceptance criterion to a claim, check that cited evidence
-  establishes it, look for counterexamples, and treat claims and reported checks as
-  unproven. An unsupported material claim is a finding. A behavior the reviewer cannot
-  check is a limitation; a blocking one (it prevents judging a criterion or hides a
-  plausible serious defect) cannot come with a clean verdict, so `agent.ParseReview`
-  rejects that pair. It also rejects a blocking limitation without a blocking finding,
-  because the implementer receives findings, not limitations. Limitations are stored on
-  the round. Each finding declares whether it is a defect or an unavailable check.
-  `agent.ParseReview` moves unavailable checks to nonblocking limitations; a response
-  requesting changes only for unavailable checks becomes clean. A response that also
-  reports a defect still requests changes for that defect. For older review wording,
-  a location-free finding that explicitly says the review environment denied commands
-  is handled the same way even if it is labeled as a defect.
+  for competing) and the revision it covers. A clean self-review newer than the latest
+  competing review leaves competing review pending after a restart. Older task records
+  remain readable.
+- **Only confirmed quota exhaustion skips competing review.** Foreman records a
+  `skipped` verdict and reason for the revision. Unknown quota, absent setup, provider
+  errors, and missing adapters do not grant a skip. Self-review and the full-suite
+  gate still apply.
+- **Both reviewers are read-only.** Claude gets `Read, Grep, Glob` and read-only git.
+  Codex uses its read-only permission profile. The implementer runs validation
+  commands and verifies the checked requirements. Reviewers report concrete defects
+  and explicit limitations. A review that cannot inspect the diff cannot advance
+  the task.
+- **Confirmed triage is checked before implementation.** Foreman checks Requirements
+  against current triage and checks that Work plan covers each rule in a separate,
+  text-only review. The implementer uses the checked documents and answered decisions.
+  Foreman checks the PR description separately. When screenshots are requested
+  or the agent captured them, the opening agent attaches them in a marked PR comment
+  after the PR exists. A retry checks existing comments before posting again. The
+  agent uses the repository's documented setup and data, and names missing evidence
+  in its outcome when none is suitable.
 - **`review_before_pr` reviews before the PR opens.** Repositories that review every new
   PR automatically would otherwise review code Foreman's fixes still change. The setting
   is copied into the task when it starts, and a restart keeps it, so a config change never
   alters a started task; only a reset takes the current value. A task that has a PR
   follows the PR workflow. The implementer commits, validates,
-  and returns `review_ready` with a proposed title and description; nothing is pushed. The
-  proposed description is saved for the publishing step. Reviewers use the checked
-  requirements and code. Reviews,
-  reviewer selection, and both round settings work as for a PR. At the fix cap, B stops
+  and returns `review_ready` with a proposed title and description before pushing.
+  Foreman saves the proposal for publishing. Code review, reviewer selection, and
+  both round settings work as for a PR. At the fix cap, B stops
   the task without a PR instead of accepting the findings: only a clean review opens one.
-  The agent still pushes and runs `gh pr create`, because Foreman's GitHub port is read
-  only and the agent's turn runs under the pinned account; Foreman then checks that the
-  PR's head, title, and body are the ones reviewed. The clean review becomes the review
-  of the PR's head, so the gate goes straight to CI. Each local review records the
-  commit and a digest of the title and description it read, and a restart resumes from the record:
-  an unreviewed commit goes to review; a clean commit goes to the PR step.
+  The agent pushes and runs `gh pr create` under the pinned account. Foreman
+  checks that the PR's head matches the reviewed commit and its title and body
+  match the proposal. The clean review covers the published head, so the gate
+  goes straight to CI. On restart, an unreviewed commit goes to review and a
+  clean commit goes to the PR step.
   The opening turn may capture requested screenshots after the PR exists and post them
-  as a marked comment. Screenshot uploads never relax the exact title and body
-  comparison with the clean review.
-- **A code review covers one commit and its requirements.** Each review records its
-  head, scope, and plan, and with claim verification the claim set and PRD digests too;
-  a review of other claims or another PRD does not cover the change. A WAITING_FOR_CI
-  task whose head, scope, plan, claims, decisions, or PRD changed is reviewed again.
-  A changed head needs self-review first; changed task context alone goes to adversarial review
-  (the gate reads the PRD of such a task, and of a claim-verified PR it finds
-  reopened, on each refresh before CI, and fails the task when it cannot load it; paths
-  that answer comments leave a claim-verified task in WAITING_FOR_CI for that check); new commits on a READY_FOR_HUMAN PR are only
-  flagged, because that PR is the developer's now. A crash mid-review restarts at the
-  review, not the implementation.
+  as a marked comment.
+- **A code review covers one revision.** Foreman verifies that the review covers
+  the change before handoff. A changed head or retargeted PR in `WAITING_FOR_CI`
+  needs self-review followed by competing review. Foreman tracks checked scope
+  and plan separately for handoff. A changed plan goes back to the implementer
+  before review, including after a restart on an existing PR. Foreman flags new commits on a `READY_FOR_HUMAN` PR for the
+  developer. A crash mid-review resumes at review.
 - **Conflicts are checked before every review** with `git merge-tree` on
   `origin/<branch>` and `origin/<base>`, which writes nothing (needs git 2.38+).
   GitHub's `mergeable` was rejected for this: it reads UNKNOWN after a push and names no
@@ -1037,8 +922,8 @@ the same commit. The commit message records why it changed.
   the selected inbox item, including Linear's stable issue ID. Routing reads the
   issue and recent comments from that tracker. In-flight starts and auto routing
   retries use the same key to release slots and retain routing selections.
-  When no repository branch guidance exists, a Linear task uses Linear's suggested
-  name when available, otherwise its display identifier and title. GitHub tasks
+  A Linear task uses Linear's suggested branch name when available. Without a
+  suggestion, Foreman uses the display identifier and title. GitHub tasks
   use their numeric issue name by default.
 - **Runner issue source.** A runner reads the issue through the source stored on
   the task. Planning documents are posted through that source and retain its

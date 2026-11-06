@@ -685,7 +685,7 @@ func TestStoreRoundTripsClaimsAndTheirReviewDigests(t *testing.T) {
 	want.Delegation.ScopeDigest = task.Digest("confirmed triage")
 	want.Delegation.PlanScopeDigest = want.Delegation.ScopeDigest
 	want.Delegation.PlanDigest = task.Digest("checked plan")
-	want.Reviews[1].Claims = task.ClaimsDigest(want.Delegation.Claims)
+	want.Reviews[1].Claims = task.Digest("historical claim set")
 	want.Reviews[1].PRD = want.Delegation.PRDDigest
 	want.Reviews[1].Scope = want.Delegation.ScopeDigest
 	want.Reviews[1].Plan = want.Delegation.PlanDigest
@@ -878,6 +878,7 @@ func TestOldFileLoadsWithoutAFullResult(t *testing.T) {
 func TestStoreRoundTripsFocusedReviewContext(t *testing.T) {
 	s := Markdown{Dir: t.TempDir()}
 	want := delegated()
+	want.Delegation.PlanImplementationPending = true
 	want.Reviews = []task.Review{{Round: 1, Kind: task.SelfReview, Reviewer: task.Claude, Head: "new", BaseRef: "origin/main", BaseHead: "base", FromHead: "old", Clean: true}}
 	if err := s.Save(ctx, want); err != nil {
 		t.Fatal(err)
@@ -889,6 +890,9 @@ func TestStoreRoundTripsFocusedReviewContext(t *testing.T) {
 	r := got.Reviews[0]
 	if r.BaseRef != "origin/main" || r.BaseHead != "base" || r.FromHead != "old" {
 		t.Fatalf("review %+v", r)
+	}
+	if !got.Delegation.PlanImplementationPending {
+		t.Fatal("reloading the task lost the pending implementation of the checked plan")
 	}
 }
 

@@ -90,6 +90,40 @@ func TestNewCommitsAfterACleanReviewAreReviewedBeforeHandover(t *testing.T) {
 	}
 }
 
+func TestRetargetedPRIsReviewedBeforeHandoffEvenWhenTheHeadIsUnchanged(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	pr := f.gh.prs[912]
+	pr.BaseRefName = "release"
+	f.gh.prs[912] = pr
+	setCI(f, task.CIStatus{State: task.CIPassing})
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.SelfReviewing || got.Delegation.BaseRef != "origin/release" || len(f.runners.spawned) != 2 {
+		t.Fatalf("state %s, base %s, launches %d", got.State, got.Delegation.BaseRef, len(f.runners.spawned))
+	}
+	got := run(t, f, key)
+	if got.State != task.WaitingForCI || kinds(got) != "self competing self competing" || got.LatestCompeting().BaseRef != "origin/release" {
+		t.Fatalf("state %s, reviews %+v", got.State, got.Reviews)
+	}
+}
+
+func TestRestartAppliesTheRecheckedPlanBeforeReviewingAnExistingPR(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	rec := f.store.recs[key]
+	rec.State = task.Failed
+	rec.Delegation.PlanImplementationPending = true
+	previousStarts := f.claude.starts
+	key = started(t, f, startReq(t))
+	f.claude.turn = prTurn("revised-plan")
+	got := run(t, f, key)
+	if f.claude.starts != previousStarts+1 || !strings.Contains(f.claude.prompt, "## Checked work") || got.Delegation.PlanImplementationPending {
+		t.Fatalf("implementation starts %d, pending plan %t", f.claude.starts-previousStarts, got.Delegation.PlanImplementationPending)
+	}
+}
+
 func TestDescriptionEditsKeepCodeReviewsAndEmptyTextBlocksHandoff(t *testing.T) {
 	for _, body := range []string{"Retry 5xx and 429.\n\nCloses #825", ""} {
 		f := newFixture()

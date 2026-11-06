@@ -179,7 +179,7 @@ task's state. The selected row is drawn in reverse video with no color inside it
 | `?` | show the keys and the version |
 | `q`, `ctrl+c` | quit |
 
-The branch prompt shows the complete proposal rationale, including repository guidance.
+The branch prompt shows why Foreman proposed the name or needs a manual choice.
 Its heading marks proposals that need your choice. The line range shows where you are
 when the rationale is longer than the screen. The branch field scrolls horizontally
 around the cursor for long names. Press Enter to start with the edited name, or Escape
@@ -265,25 +265,20 @@ confirmed triage decisions before delegation.
 
 ### What a start does
 
-1. For a new task, it fast-forwards the managed checkout's default branch from
-   origin, then proposes a branch from the issue and repository guidance in
-   `AGENTS.md` and the files it names as branch naming guidance (for example
-   "Branch naming: see `docs/branches.md`"). Other linked documents are not read.
-   If the checkout cannot fast-forward safely, the start stops and says why.
-   Manual starts show the name for editing;
-   auto mode waits if the workstream or guidance is unclear. Foreman checks the chosen
-   name, then creates the branch and worktree. A branch named
-   `fix/825-provider-retries` uses
+1. For a new task, Foreman proposes a branch from the issue. Manual starts let
+   you edit the name. Auto mode waits if the proposal is invalid or reserved by a
+   prior PR. Foreman validates the chosen name and fetches the remote base when it
+   creates a new branch. A branch named `fix/825-provider-retries` uses
    `<worktrees_dir>/<owner>-<repo>/fix/825-provider-retries`. Each slash in the branch
    name separates directories. Existing tasks keep their stored branch and worktree
    path, including paths from before this convention.
-   Without repository guidance, the default is `fix/825-provider-retries` for a fix
-   issue; its slug is capped at 5 words.
-   - The prefix is a conventional-commit type. Foreman takes it from the title's own
-     prefix (`fix: …`), otherwise from a label (`bug` → `fix`, `documentation` →
-     `docs`, …), otherwise it uses `feat`.
-   - For a Linear issue without repository guidance, Foreman uses Linear's suggested
-     branch when available. Repository conventions take precedence over that suggestion.
+   - A GitHub issue defaults to a name like `fix/825-provider-retries`. Foreman
+     takes the type from a title prefix (`fix: …`) or a label (`bug` → `fix`,
+     `documentation` → `docs`). It uses `feat` if neither supplies a type.
+     The slug is capped at five words and 40 characters.
+   - A Linear issue uses the suggested branch when provided. If Linear returns no
+     name, Foreman uses the type, identifier, and title, as in
+     `fix/linear-web-42-fix-cache`. An invalid suggestion requires a manual choice.
 2. It launches a detached runner that logs to `~/.local/share/foreman/logs/`. The
    runner keeps going after you quit the dashboard.
 3. The runner has the agent implement the issue, run validation, push, and open a PR
@@ -293,24 +288,16 @@ confirmed triage decisions before delegation.
    could not. It uses the repository's documented setup and sample data when taking
    screenshots; Foreman does not create sample data. It leaves the PR description as
    written for review.
-4. The initial self-review assigns all changed files to explicit areas, keeping
-   source and colocated tests together. A large change uses up to three fresh,
-   read-only sessions without task context, sharing the existing review budget.
-   Foreman combines their findings before returning to the retained implementation
-   session. Small changes use one area. The implementer fixes valid defects,
-   rejects invalid findings with concrete evidence, and asks you for product
-   decisions. Fixes get a focused self-review of the fix diff, unresolved findings,
-   and their effects. Rejecting every finding without changing the reviewed commit
-   ends this loop early.
-   The other agent then performs an adversarial review with the checked Requirements
-   and Work plan, your answered decisions, claims, and reported verification.
-   Later decisions override earlier requirements on the same point. This review
-   cannot fall back to the implementing agent. Either review failing stops the task.
-   Retries can reuse completed commits after a failed output; no empty commit is
-   required. An assessment of an older finding cannot waive review of newer code.
-   Both reviews read code and tests without running validation commands. The
-   implementer runs those commands; inability to rerun them in review alone does not
-   request changes.
+4. Foreman starts a fresh, read-only self-review using the implementing provider.
+   The competing provider then reviews the same code in its own session. Each
+   reviewer reads the complete branch diff between the verified base and head
+   commits, including after a fix, and can inspect surrounding code and tests.
+   Task requirements, plans, decisions, PR text, validation results, and earlier
+   findings stay out of both code review prompts.
+   The implementer validates the checked requirements, fixes concrete defects,
+   and can reject invalid self-review findings with evidence. Rejecting every
+   finding on the reviewed commit ends self-review. Retries can reuse commits
+   from a turn that failed to return valid output. Changes to code need a new review.
    The implementer runs the repository's full documented suite before the first
    review and focused checks for each fix. Before handoff, Foreman needs a full-suite
    result that covers the final commit. If a fix changed behavior or a validation
@@ -330,12 +317,11 @@ confirmed triage decisions before delegation.
    - A repo with no checks shows `✓ CI (no checks)`.
    - A merged PR marks the task DONE. A PR closed without merging marks it
      `PR_CLOSED` and stops the run.
-6. Every review records the commit and description it covered. If the PR gets new
-   commits or a new description after a clean review, the next refresh has both
-   reviews look at it again before the task is
-   `READY_FOR_HUMAN`. Once it is, the PR is yours: new commits are flagged but not taken
-   back. A runner that crashes during a review picks up at the review when you start
-   the `FAILED` task again from the inbox.
+6. Every review records the revision it covered. If the PR gets new commits
+   before `READY_FOR_HUMAN`, the next refresh sends the change through both
+   reviews again. Once the PR is ready, Foreman flags new commits for you.
+   If the runner crashes during review, restart the `FAILED` task from the inbox
+   to resume at review.
 
 ## Planning
 
@@ -354,9 +340,11 @@ supplied text without reading the repository and reports only mismatches. An unr
 or inconclusive check fails with a reason; a nonblocking limitation on a clean
 check does not stop planning. Requirements says what must work and how to check it.
 Work plan gives ordered tasks that refer to requirement IDs without copying the rules.
-Foreman checks the two documents together against triage. The implementer and adversarial reviewer receive both. Self-review receives only
-the code-review scope and diff instructions. A changed scope or document invalidates earlier
-checks before handoff.
+Foreman checks the two documents together against triage. The implementer receives
+both and validates the requirements against the implementation. The separate
+text-only plan check covers changes to scope or planning documents. If the plan
+changes after implementation starts, the implementer applies the updated plan
+before the next code review.
 
 The `s` view links the two comments. A task that plans again, for example after a
 failed run, edits the same comments instead of adding new ones. A task that already
@@ -382,6 +370,11 @@ Foreman never reads or changes those files.
 - The four global files are required. The dashboard won't open when one is missing,
   and says which. `make config` installs the defaults from `defaults/stages/`, and the
   release archives carry them in `stages/`. Edit your copies freely.
+- When upgrading to complete-diff review, run `make config` to see whether your
+  installed `review.md` differs from the default. Use the printed copy command to
+  replace an unmodified old default, or merge the changes into your customized
+  file. Update any repository `.foreman/review.md` that still refers to assigned
+  areas, focused re-reviews, or acceptance-claim verification.
 - Repo files are optional.
 - When both files exist, the agent gets both: global first, then the repo's more
   specific rules.
@@ -447,10 +440,9 @@ stages. If the adversarial reviewer is confirmed out of quota, Foreman records
 `review skipped (quota)` and continues. Self-review and full verification still
 apply. Unknown quota does not grant a skip.
 
-The implementer and reviewers take turns. Every changed commit gets scoped
-self-review before adversarial review. The task records the covered file areas,
-and the log distinguishes initial coverage
-from a focused check of fixes. Fixes requested by either reviewer share
+The implementer and reviewers take turns. Each new revision gets a complete
+self-review before competing review. The task records the reviewed revision.
+Fixes requested by either reviewer share
 `fix_rounds`. The implementer may reject invalid self-review findings with numbered
 reasons in `reviewAssessment`; the original verdict and reasons remain in the task
 file. Rejecting every finding without changing the reviewed commit ends self-review.
@@ -461,11 +453,10 @@ existing PR; a local change can instead be stopped without opening a PR.
 
 With `review_before_pr: true`, a new task is reviewed before its PR opens, so
 automated reviews that run on new PRs see the finished change. The implementer
-commits locally and proposes a PR title and description. Both reviews read that
-description and the local diff, and fixes stay local. After a clean review, the
-implementer pushes the reviewed commit and opens the PR with the reviewed description,
-and foreman checks that the PR matches. Requested screenshots go in a PR comment
-after it opens; they never alter the reviewed description. If the fix limit is reached
+commits locally and proposes a PR title and description. Both reviewers read the
+local diff and fixes stay local. After a clean review, the implementer pushes the
+reviewed commit and opens the PR with the proposed title and description. Foreman
+checks that the PR matches. Requested screenshots go in a PR comment after it opens. If the fix limit is reached
 first, you choose another round or stopping the task without a PR. A task keeps the
 setting it started with, including when you restart it.
 
@@ -482,8 +473,7 @@ The run did not fail, so there is no failure notification.
 Reopen the PR and the task comes back on the following refresh. Foreman reads the PR's
 CI and uses the review it already has: a clean review of the PR's current head with
 finished CI makes the task `READY_FOR_HUMAN`, and with CI still running it waits in
-`WAITING_FOR_CI`. A clean review of an earlier head or description starts a run that
-reviews the PR again. Without a clean review, the task shows the stage it needs next and
+`WAITING_FOR_CI`. A clean review of an earlier head starts a run that reviews the PR again. Without a clean review, the task shows the stage it needs next and
 waits for a start.
 
 If the agent does not stop at once, the task is `PR_CLOSED` but keeps its runner, and
@@ -626,7 +616,7 @@ worktrees_dir: ~/.local/share/foreman/worktrees
 repositories_dir: ~/.local/share/foreman/repositories # source checkouts for delegated work
 log_dir: ~/.local/share/foreman/logs
 knowledge_dir: ~/.local/share/foreman/knowledge # what foreman learns, per repository
-review_rounds: 1                     # passes per review; first full, then focused on fixes
+review_rounds: 1                     # complete diff passes per review call
 fix_rounds: 3                        # fixes asked by either review before foreman asks you
 review_before_pr: false              # open the PR before review; set true to review locally first
 mentions: true                       # show items found only because they mention you
@@ -640,7 +630,7 @@ budgets:
   planning_tokens: 400000            # planning and plan checks
   call_timeout_seconds: 1800         # cancels one call; 0 disables each limit
   implementer_usd: 3.00              # Claude maximum per implementation turn
-  reviewer_usd: 1.00                 # Claude maximum per review; shared across self-review areas
+  reviewer_usd: 1.00                 # Claude maximum per review call
 learning:
   enabled: true                      # evaluate finished tasks; off keeps existing knowledge in prompts
   budget_usd: 0.50                   # Claude maximum per evaluation; 0 sets no cap; Codex has none
@@ -674,12 +664,10 @@ and `routing.yaml` sit beside the selected config file; neither has a separate
 config key. Auto mode's on/off choice lives in
 `~/.local/share/foreman/state.json`, outside `config.yaml`.
 
-Each reviewer starts with one full pass. Later reviews start with the changes since
-that reviewer's previous commit and its own findings. The reviewer can read more
-when needed. Changed requirements or bases, rewritten history, and missing saved
-context cause a full review. Existing explicit `review_rounds` settings keep their
-value; set it to `1` to use one pass. B1 writing advice is recorded locally and never
-adds a correction turn. Missing or unclear requirements still block.
+Each code reviewer gets one call per round. `review_rounds` controls how many
+passes that call makes over the complete diff and defaults to one. Foreman records
+B1 writing advice locally without adding a correction turn. Missing or unclear
+requirements still block planning.
 
 Planning drafts and their checks are saved in the local task file. A restart can
 finish posting a checked draft without planning again. If a revision changes no
@@ -731,8 +719,7 @@ refreshes and restarts.
 Foreman reads and comments on Linear issues but does not change their status.
 Branches and pull requests stay on GitHub. A Linear task's PR title includes its
 Linear identifier, and its body links to the Linear issue instead of using a GitHub
-`Closes #N` line. New Linear tasks use Linear's suggested branch name when it is
-available. If Linear returns no name, Foreman uses its conventional type prefix.
+`Closes #N` line. New Linear tasks use the branch naming rules described under [What a start does](#what-a-start-does).
 
 Planning, implementation, and review can use separate models. PR creation is part of
 implementation. The agent chosen for the task plans and implements; the competing

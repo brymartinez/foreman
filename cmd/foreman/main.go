@@ -109,7 +109,6 @@ func run(argv []string) int {
 	}
 	a := app.App{
 		ReplyToPRFeedback: false,
-		ClaimVerification: true,
 		FullSuiteGate:     true,
 		Store:             store.Markdown{Dir: cfg.TasksDir},
 		GitHub:            github.New(),
@@ -120,7 +119,6 @@ func run(argv []string) int {
 		Accounts:          github.New(),
 		RemoteAuth:        worktree.Git{},
 		Agents:            map[task.Agent]app.AgentAdapter{task.Claude: claude, task.Codex: codex},
-		BranchProposer:    agent.BranchProposers{Claude: claude, Codex: codex},
 		Routing:           routes,
 		RoutingErr:        routesErr,
 		RoutingDefaults: routing.Defaults{

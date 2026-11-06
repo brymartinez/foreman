@@ -26,10 +26,9 @@ const (
 	PROpened   Status = "pr_opened"
 	// ReviewReady is a committed, validated change that is not pushed, with the PR
 	// the implementer proposes for it. Only a task reviewed before its PR returns it.
-	ReviewReady    Status = "review_ready"
-	Blocked        Status = "blocked"
-	FailedRun      Status = "failed"
-	BranchProposed Status = "branch_proposed"
+	ReviewReady Status = "review_ready"
+	Blocked     Status = "blocked"
+	FailedRun   Status = "failed"
 )
 
 type Check = task.Check
@@ -46,15 +45,10 @@ type Outcome struct {
 	Validation       []Check
 	Questions        []task.Question
 	// Documents are the planning documents a planned turn wrote, by task.PlanDocs.
-	Documents  map[task.PlanDoc]string
-	BranchName string
-	Uncertain  bool
+	Documents map[task.PlanDoc]string
 	// PRTitle and PRBody are the pull request a review_ready turn proposes.
 	PRTitle string
 	PRBody  string
-	// Claims tie a pr_opened or review_ready change to the PRD acceptance criteria.
-	// The runner decides whether the task needs them.
-	Claims []task.Claim
 	// FullSuite is the full-suite report of a pr_opened or review_ready turn, or nil.
 	FullSuite *FullSuite
 }
@@ -100,11 +94,8 @@ type wireOutcome struct {
 	Validation       []Check                `json:"validation"`
 	Questions        []task.Question        `json:"questions"`
 	Documents        *wireDocuments         `json:"documents"`
-	BranchName       *string                `json:"branchName"`
-	Uncertain        *bool                  `json:"uncertain"`
 	PRTitle          *string                `json:"prTitle"`
 	PRBody           *string                `json:"prBody"`
-	Claims           []task.Claim           `json:"claims"`
 	FullSuite        *wireFullSuite         `json:"fullSuite"`
 }
 
@@ -150,11 +141,6 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 	out := Outcome{Status: w.Status, Summary: w.Summary, ReviewAssessment: w.ReviewAssessment}
 	var err error
 	switch w.Status {
-	case BranchProposed:
-		if w.BranchName == nil || strings.TrimSpace(*w.BranchName) == "" || w.Uncertain == nil {
-			return Outcome{}, errors.New("branch proposal needs a name and uncertainty")
-		}
-		out.BranchName, out.Uncertain = strings.TrimSpace(*w.BranchName), *w.Uncertain
 	case Planned:
 		if w.Documents == nil {
 			return Outcome{}, errors.New("planned outcome has no documents")
@@ -173,9 +159,6 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 			out.PRURL = *w.PRURL
 		}
 		out.Validation = w.Validation
-		if out.Claims, err = parseClaims(w.Claims); err != nil {
-			return Outcome{}, err
-		}
 		if out.FullSuite, err = parseFullSuite(w.FullSuite); err != nil {
 			return Outcome{}, err
 		}
@@ -196,9 +179,6 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 		}
 		out.PRTitle, out.PRBody = strings.TrimSpace(*w.PRTitle), strings.TrimSpace(*w.PRBody)
 		out.Validation = w.Validation
-		if out.Claims, err = parseClaims(w.Claims); err != nil {
-			return Outcome{}, err
-		}
 		if out.FullSuite, err = parseFullSuite(w.FullSuite); err != nil {
 			return Outcome{}, err
 		}
@@ -238,17 +218,6 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 		return Outcome{}, fmt.Errorf("unknown outcome status %q", w.Status)
 	}
 	return out, nil
-}
-
-// parseClaims checks each claim's shape. Whether a turn must return claims depends on
-// the task, so an empty set is left for the runner to judge.
-func parseClaims(claims []task.Claim) ([]task.Claim, error) {
-	for i, c := range claims {
-		if err := c.Validate(); err != nil {
-			return nil, fmt.Errorf("claim %d: %w", i+1, err)
-		}
-	}
-	return claims, nil
 }
 
 // parseFullSuite checks a full-suite report's shape. Whether each path's evidence is

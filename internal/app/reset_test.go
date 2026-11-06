@@ -347,7 +347,7 @@ func TestStartAfterResetContinuesAnOpenPRFromItsRemoteBranch(t *testing.T) {
 	}
 }
 
-func TestOpenPRWithoutPlanRunsPlanningBeforeReview(t *testing.T) {
+func TestOpenPRWithoutPlanChecksAndImplementsThePlanBeforeReview(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		docs []task.PlanDoc
@@ -363,7 +363,7 @@ func TestOpenPRWithoutPlanRunsPlanningBeforeReview(t *testing.T) {
 			if len(tc.docs) > 0 {
 				f.gh.issueComments = githubPlanComments(f, task.DescriptionFingerprint(f.gh.issue.Body), tc.docs...)
 			}
-			f.claude.turn = plannedTurn("sid-plan")
+			f.claude.turns = []agent.Turn{plannedTurn("sid-plan"), prTurn("sid-implementation")}
 			if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 				t.Fatal(err)
 			}
@@ -371,7 +371,7 @@ func TestOpenPRWithoutPlanRunsPlanningBeforeReview(t *testing.T) {
 			if !rec.PlanPosted() {
 				t.Fatalf("plan %+v", rec.Plan)
 			}
-			if !slices.Equal(f.claude.stages, []task.Stage{task.StagePlan}) || !strings.Contains(f.claude.prompt, "## Plan first") {
+			if !slices.Equal(f.claude.stages, []task.Stage{task.StagePlan, task.StageImplement}) || !strings.Contains(f.claude.prompt, "## Checked work") {
 				t.Fatalf("implementer stages %v prompt %q", f.claude.stages, f.claude.prompt)
 			}
 			if rec.Delegation.PR != 912 || rec.LatestReview() == nil {

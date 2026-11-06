@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -94,9 +93,10 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, token string, l
 		if current && reviewCovers(rec, rec.Delegation.PRHead) && !rec.FinalCheckPending() {
 			// A task left by the old feedback flow already passed review. Hand it
 			// back without resuming the implementer on the same comments.
+			_, _, planErr := a.reviewRequirements(ctx, rec)
 			_, err = a.update(final, rec.Key, existing(func(cur *task.Record) {
 				cur.State = task.WaitingForCI
-				if handsOverNow(cur, cur.CI) {
+				if planErr == nil && handsOverNow(cur, cur.CI) {
 					cur.State = task.ReadyForHuman
 				}
 				cur.Feedback = nil
@@ -152,6 +152,8 @@ func firstStep(rec *task.Record, waiting int) step {
 	switch {
 	case waiting > 0:
 		return stepAnswer
+	case rec.Delegation.PlanImplementationPending:
+		return stepImplement
 	case rec.OpenPending():
 		return stepOpenPR
 	case rec.ReviewPending() && rec.LocalReview():
@@ -287,7 +289,7 @@ func (r *taskRun) scopeBoundary(next step) (step, bool, error) {
 			r.rec = rec
 		}
 	}
-	if next != stepImplement && r.planNeeded() {
+	if next != stepImplement && (r.planNeeded() || r.rec.Delegation.PlanImplementationPending) {
 		return stepImplement, false, nil
 	}
 	return next, false, nil
@@ -335,6 +337,9 @@ func (r *taskRun) implement() (step, error) {
 	}
 	rec, err := a.finishTurn(r.ctx, r.final, r.rec.Key, during, res, func(cur *task.Record) {
 		applyTurnResult(cur, res, a.Now())
+		if res.err == nil && finishesChange(res.turn.Outcome.Status) {
+			cur.Delegation.PlanImplementationPending = false
+		}
 		if res.err == nil && res.turn.Outcome.Status == agent.Planned {
 			cur.Delegation.PlanDraft = &task.PlanDraft{Scope: r.scope.digest, Fingerprint: r.plan.fingerprint, Documents: mergePlanTexts(r.plan.texts(), res.turn.Outcome.Documents), Sources: r.plan.texts()}
 		}
@@ -353,9 +358,6 @@ func (r *taskRun) implement() (step, error) {
 	if res.err == nil && res.turn.Outcome.Status == agent.Planned {
 		if r.rec, err = a.postPlan(r.ctx, r.final, rec, res.turn.Outcome.Documents, r.plan, r.log); err != nil || r.rec.State != task.Planning {
 			return stepDone, err
-		}
-		if r.rec.Delegation.PR != 0 {
-			return stepReview, nil
 		}
 		return stepImplement, nil
 	}
@@ -441,27 +443,11 @@ func (r *taskRun) review() (step, error) {
 	r.selfPassed = false
 	var err error
 	title, body, reviewErr := a.reviewDescription(r.ctx, rec)
-	var prd string
-	if reviewErr == nil && rec.Delegation.ClaimVerification {
-		prd, reviewErr = a.reviewPRD(r.ctx, rec)
-		if reviewErr == nil && len(rec.Delegation.Claims) == 0 {
-			reviewErr = errors.New("the change has no claim set to verify")
-		}
-	}
-	// Keep PR text for audit and publication checks. Requirements changes still
-	// invalidate code reviews even when the commit did not change.
-	if reviewErr == nil {
-		d, digest := rec.Delegation, task.ProposalDigest(title, body)
-		setPR := !rec.LocalReview() && d.PRDigest != digest
-		setPRD := d.ClaimVerification && d.PRDDigest != task.Digest(prd)
-		if setPR || setPRD {
+	if reviewErr == nil && !rec.LocalReview() {
+		digest := task.ProposalDigest(title, body)
+		if rec.Delegation.PRDigest != digest {
 			if rec, err = a.update(r.final, rec.Key, existing(func(cur *task.Record) {
-				if setPR {
-					cur.Delegation.PRDigest = digest
-				}
-				if setPRD {
-					cur.Delegation.PRDDigest = task.Digest(prd)
-				}
+				cur.Delegation.PRDigest = digest
 			})); err != nil {
 				return stepDone, err
 			}
@@ -469,26 +455,20 @@ func (r *taskRun) review() (step, error) {
 		}
 	}
 	kind := rec.NextReview()
-	reviewer := rec.Delegation.Reviewer
-	if kind == task.SelfReview {
-		reviewer = rec.Delegation.Implementer.Agent
+	reviewer := rec.Delegation.Implementer.Agent
+	if kind == task.CompetingReview {
+		reviewer = reviewer.Reviewer()
+	}
+	if reviewErr == nil {
+		_, _, reviewErr = a.reviewRequirements(r.ctx, rec)
 	}
 	if err := r.enter(rec.ReviewStage()); err != nil {
 		return stepDone, err
 	}
 	rec = r.rec
 	var review agent.ReviewOutcome
-	switch {
-	case reviewErr != nil:
-	case kind == task.SelfReview:
-		review, reviewErr = a.selfReview(r.ctx, rec, r.log)
-	default:
-		review, reviewer, reviewErr = a.review(r.ctx, rec, title, body, prd, r.log)
-	}
 	if reviewErr == nil {
-		if rec.Delegation.ClaimVerification {
-			_, reviewErr = a.reviewPRD(r.ctx, rec)
-		}
+		review, reviewErr = a.codeReview(r.ctx, rec, kind, reviewer, r.log)
 	}
 	if reviewErr == nil {
 		_, _, reviewErr = a.reviewRequirements(r.ctx, rec)
@@ -662,10 +642,8 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 	if findings != nil && findings.Kind == task.SelfReview && rec.ChangeRequestsSinceDecision() > a.fixRounds() {
 		resume += agent.SelfReviewLimitInstruction
 	}
-	if resume != "" && d.ClaimVerification && !planning {
-		resume += agent.ClaimsMessage
-	}
 	if resume != "" && !planning {
+		resume += agent.RequirementsValidationInstruction
 		resume = fullSuiteResume(rec, req, resume)
 	}
 	if resume != "" && d.Implementer.ID != "" {
@@ -696,7 +674,6 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 	}
 	brief.Merge = merge
 	brief.LocalReview = d.BeforePR()
-	brief.Claims = d.ClaimVerification
 	brief.FullSuite, brief.FinalCheck = d.FullSuiteGate, req.finalCheck
 	brief.FocusedOnly = d.FullSuiteGate && !needsFullResult(rec, req)
 	brief.PR, brief.Feedback, brief.Conflict = d.PR, feedbackItems(feedback), conflict
@@ -768,10 +745,15 @@ func (a App) answerFeedback(ctx, final context.Context, rec *task.Record, commen
 	headBefore := d.PRHead
 	fmt.Fprintf(log, "foreman: %s\n", feedbackNote(len(comments), d.PR))
 	res := a.runTurn(ctx, rec, turnRequest{feedback: comments}, a.verifiedPR(log), log)
+	planCurrent := false
+	if res.err == nil && res.turn.Outcome.Status == agent.PROpened && res.pr.HeadSHA == headBefore {
+		_, _, err := a.reviewRequirements(ctx, rec)
+		planCurrent = err == nil
+	}
 	return a.finishTurn(ctx, final, rec.Key, "answering PR feedback", res, func(cur *task.Record) {
 		// The result is stored first, so the handover below judges coverage by it.
 		recordFull(cur, res)
-		applyFeedbackTurn(cur, res.turn, res.pr, res.err, comments, headBefore, a.Now())
+		applyFeedbackTurn(cur, res.turn, res.pr, res.err, comments, headBefore, planCurrent, a.Now())
 	}, log)
 }
 
@@ -781,7 +763,7 @@ func (a App) answerFeedback(ctx, final context.Context, rec *task.Record, commen
 // leaves the code its review already covers, so the task goes straight back to the
 // developer with its CI result; a turn that pushed goes through the review and CI flow
 // like any other change.
-func applyFeedbackTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error, comments []PRComment, headBefore string, now time.Time) {
+func applyFeedbackTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error, comments []PRComment, headBefore string, planCurrent bool, now time.Time) {
 	ci := rec.CI
 	applyTurn(rec, turn, pr, runErr, now)
 	if runErr != nil || turn.Outcome.Status != agent.PROpened {
@@ -807,7 +789,7 @@ func applyFeedbackTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runEr
 		return
 	}
 	rec.State = task.WaitingForCI
-	if handsOverNow(rec, ci) {
+	if planCurrent && handsOverNow(rec, ci) {
 		rec.State = task.ReadyForHuman
 		rec.LastOutcome = &task.Outcome{Status: "feedback_answered",
 			Summary: fmt.Sprintf("answered %d %s on PR #%d; no change was needed", len(comments), plural(len(comments), "comment", "comments"), d.PR), At: now}
@@ -815,7 +797,6 @@ func applyFeedbackTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runEr
 }
 
 // reviewDescription checks that the PR has text and reads it for audit.
-// Code reviews receive checked requirements and code, rather than this text.
 func (a App) reviewDescription(ctx context.Context, rec *task.Record) (title, body string, err error) {
 	d, target := rec.Delegation, reviewTarget(rec)
 	if rec.LocalReview() {
@@ -833,102 +814,12 @@ func (a App) reviewDescription(ctx context.Context, rec *task.Record) (title, bo
 	return title, body, nil
 }
 
-// reviewPRD is the current text of the PRD comment on the issue, which a review of a
-// task with claim verification judges the change against. A PRD that is gone, lost its
-// marker, or is empty stops the review: errPRDMissing names the cause. Planning posts
-// the PRD before any change exists, so a missing one is never waited for.
-func (a App) reviewPRD(ctx context.Context, rec *task.Record) (string, error) {
-	c := rec.PlanComment(task.PRD)
-	if c == nil || (c.CommentID == 0 && c.ExternalCommentID == "") {
-		return "", fmt.Errorf("%w: the task has no PRD comment on %s", errPRDMissing, issueLabel(rec.Key, rec.Identifier))
-	}
-	id := c.ExternalCommentID
-	if rec.IssueSource() != task.Linear {
-		id = strconv.FormatInt(c.CommentID, 10)
-	}
-	got, err := a.issueComment(ctx, rec.Key, id)
-	switch {
-	case errors.Is(err, ErrGone):
-		return "", fmt.Errorf("%w: the PRD comment %s was deleted", errPRDMissing, c.URL)
-	case err != nil:
-		return "", fmt.Errorf("load the PRD comment %s: %w", c.URL, err)
-	}
-	if doc, _, ok := task.ParsePlanMarker(got.Body); !ok || doc != task.PRD {
-		return "", fmt.Errorf("%w: the comment %s is no longer marked as the PRD", errPRDMissing, c.URL)
-	}
-	text := strings.ReplaceAll(planText(task.PRD, got.Body), "\r\n", "\n")
-	if text == "" {
-		return "", fmt.Errorf("%w: the PRD comment %s is empty", errPRDMissing, c.URL)
-	}
-	return text, nil
-}
-
-// errPRDMissing is a PRD the issue no longer holds, as opposed to one that could not
-// be read this time.
-var errPRDMissing = errors.New("no PRD to review against")
-
 // reviewTarget names the change under review for the log.
 func reviewTarget(rec *task.Record) string {
 	if rec.LocalReview() {
 		return "the local branch " + rec.Delegation.Branch
 	}
 	return fmt.Sprintf("PR #%d", rec.Delegation.PR)
-}
-
-// review runs the other agent with the checked task, decisions, and validation.
-// Confirmed exhausted quota skips this review; other provider failures stop it.
-func (a App) review(ctx context.Context, rec *task.Record, title, body, prd string, log io.Writer) (agent.ReviewOutcome, task.Agent, error) {
-	d := rec.Delegation
-	_, plan, requirementsErr := a.reviewRequirements(ctx, rec)
-	if requirementsErr != nil {
-		return agent.ReviewOutcome{}, d.Reviewer, requirementsErr
-	}
-	chosen := d.Implementer.Agent.Reviewer()
-	reviewer, ok := a.Agents[chosen]
-	if !ok {
-		return agent.ReviewOutcome{}, chosen, fmt.Errorf("reviewer %s is not configured", chosen)
-	}
-	// Scope and plan are verified before this fresh diff-based review. Claim
-	// verification explicitly adds the PRD and claims.
-	target := reviewTarget(rec)
-	instructions, err := a.Stages.Resolve(d.Worktree, task.StageReview)
-	if err != nil {
-		return agent.ReviewOutcome{}, chosen, err
-	}
-	brief := agent.ReviewBrief{Key: rec.Key, Branch: d.Branch, BaseBranch: strings.TrimPrefix(d.BaseRef, "origin/"),
-		StageInstructions: instructions.Content(), Passes: a.reviewRounds(),
-		Claimed: d.ClaimVerification, PRD: prd, Claims: d.Claims, Plan: plan, Decisions: rec.Decisions, Validation: rec.Validation, FullResult: rec.FullResult, Assessments: rec.Reviews}
-	if err := a.startAttempt(ctx, rec); err != nil {
-		return agent.ReviewOutcome{}, chosen, err
-	}
-	in := agent.StartInput{
-		Worktree:     d.Worktree,
-		Log:          log,
-		MaxBudgetUSD: a.ReviewerBudgetUSD,
-		Prompt:       agent.ReviewPrompt(brief),
-		Purpose:      "competing_review",
-		Step:         agent.StepReview,
-	}
-	fmt.Fprintf(log, "foreman: %s reviewing %s (round %d)\n", reviewer.Name(), target, len(rec.Reviews)+1)
-	brief = a.prepareReview(ctx, rec, task.CompetingReview, chosen, brief, log)
-	in.Prompt = agent.ReviewPrompt(brief)
-	if err := a.checkQuota(ctx, chosen, log); err != nil {
-		var unavailable quotaUnavailable
-		if errors.As(err, &unavailable) && unavailable.Status == QuotaExhausted {
-			summary := fmt.Sprintf("Adversarial review skipped: %s quota exhausted", chosen)
-			fmt.Fprintf(log, "foreman: %s\n", summary)
-			return reviewContext(agent.ReviewOutcome{Skipped: true, Summary: summary}, brief), chosen, nil
-		}
-		return agent.ReviewOutcome{}, chosen, err
-	}
-	out, err := reviewer.Review(ctx, in)
-	var unavailable quotaUnavailable
-	if errors.As(err, &unavailable) && unavailable.Status == QuotaExhausted {
-		out = agent.ReviewOutcome{Skipped: true, Summary: fmt.Sprintf("Adversarial review skipped: %s quota exhausted", chosen)}
-		fmt.Fprintf(log, "foreman: %s\n", out.Summary)
-		err = nil
-	}
-	return reviewContext(out, brief), chosen, err
 }
 
 func (a App) reviewRequirements(ctx context.Context, rec *task.Record) (confirmedScope, string, error) {
@@ -1118,6 +1009,9 @@ func applyTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error,
 	rec.LastOutcome = &task.Outcome{Status: string(o.Status), Summary: o.Summary, At: now}
 	switch o.Status {
 	case agent.PROpened:
+		if pr.BaseRefName != "" {
+			rec.Delegation.BaseRef = "origin/" + pr.BaseRefName
+		}
 		rec.Delegation.PR, rec.Delegation.PRURL, rec.Delegation.PRHead = pr.Key.Number, pr.URL, pr.HeadSHA
 		rec.Delegation.CheckpointNext = ""
 		rec.Validation = o.Validation
@@ -1132,10 +1026,6 @@ func applyTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error,
 		}
 	case agent.FailedRun:
 		rec.State = task.Failed
-	}
-	// A fix returns the full claim set, so it replaces the stored one whole.
-	if finishesChange(o.Status) && rec.Delegation.ClaimVerification && len(o.Claims) > 0 {
-		rec.Delegation.Claims = o.Claims
 	}
 }
 
@@ -1182,6 +1072,9 @@ func applyStop(ctx context.Context, rec *task.Record, during string, log io.Writ
 func applyPRHead(rec *task.Record, pr *PullRequest) {
 	rec.CI = nil
 	rec.Delegation.PRHead = pr.HeadSHA
+	if pr.BaseRefName != "" {
+		rec.Delegation.BaseRef = "origin/" + pr.BaseRefName
+	}
 	rec.State = rec.ReviewStage()
 }
 
@@ -1192,14 +1085,6 @@ func short(sha string) string {
 	return sha
 }
 
-// applyReview records a review round. Findings send the task back to IMPLEMENTING. A
-// clean self-review leaves the next review to enter its stage. An accepted competing
-// review of a local commit goes on to OPENING_PR, and of a PR waits for the readiness gate
-// (gate.go) in WAITING_FOR_CI.
-// A self-review's error fails the task too: it never falls through to the competing
-// review. The round records the head and description it read, and for a task with
-// claim verification the claim set and PRD, which is what later decides whether it
-// still covers the change.
 func applyReview(rec *task.Record, kind task.ReviewKind, reviewer task.Agent, r agent.ReviewOutcome, reviewErr error, now time.Time) {
 	name := "review"
 	if kind == task.SelfReview {
@@ -1211,11 +1096,10 @@ func applyReview(rec *task.Record, kind task.ReviewKind, reviewer task.Agent, r 
 	}
 	head, proposal := rec.CurrentChange()
 	review := task.Review{
-		BaseRef: r.BaseRef, BaseHead: r.BaseHead, FromHead: r.FromHead,
+		BaseRef: r.BaseRef, BaseHead: r.BaseHead,
 		Round:       len(rec.Reviews) + 1,
 		Kind:        kind,
 		Decisions:   task.DecisionsDigest(rec.Decisions),
-		Areas:       r.Areas,
 		Reviewer:    reviewer,
 		PR:          rec.Delegation.PR,
 		Head:        head,
@@ -1228,9 +1112,6 @@ func applyReview(rec *task.Record, kind task.ReviewKind, reviewer task.Agent, r 
 		At:          now,
 		Scope:       rec.Delegation.ScopeDigest,
 		Plan:        rec.Delegation.PlanDigest,
-	}
-	if d := rec.Delegation; d.ClaimVerification {
-		review.Claims, review.PRD = task.ClaimsDigest(d.Claims), d.PRDDigest
 	}
 	rec.Reviews = append(rec.Reviews, review)
 	if r.Clean || r.Skipped {

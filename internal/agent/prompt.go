@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -72,9 +71,6 @@ type TaskBrief struct {
 	// LocalReview is set for a task reviewed before its PR opens and with no PR yet.
 	// The turn commits and proposes the PR; foreman has it pushed after a clean review.
 	LocalReview bool
-	// Claims is set for a task with claim verification. A turn that finishes a change
-	// returns its claims for the reviewers.
-	Claims bool
 	// FullSuite is set for a task with the full-suite gate. The turn tags its checks
 	// and reports the full suite. FocusedOnly is set for a fix, answer, or merge turn,
 	// which runs focused checks only. FinalCheck is set for the final-check turn.
@@ -90,6 +86,8 @@ type MergeBrief struct {
 }
 
 const ConfirmedScopeRule = "A later correction overrides an earlier decision on the same point. Earlier decisions on other points still apply. Do not require both the old and new values of a corrected rule. If the correction is unclear, ask for a decision."
+
+const RequirementsValidationInstruction = "Implement every acceptance criterion in the checked Requirements and Work plan. Before handing off the change, verify each criterion with an appropriate test or check. Report the validation you ran in the current outcome schema and explain any verification gaps in the summary.\n"
 
 // ImplementationPrompt is the execution contract handed to the implementation agent.
 // It carries everything durable; the agent never depends on a prior conversation.
@@ -126,7 +124,7 @@ func ImplementationPrompt(b TaskBrief) string {
 		planningSection(&s, b.PlanInstructions)
 	} else if b.PlanText != "" {
 		s.WriteString("## Checked work\n\nThe requirements and work plan below are your complete task. Do not read the issue, triage, or other planning comments for requirements.\n\n")
-		s.WriteString(b.PlanText + "\n\n")
+		s.WriteString(RequirementsValidationInstruction + "\n" + b.PlanText + "\n\n")
 	}
 	if b.NextObjective != "" {
 		fmt.Fprintf(&s, "## Continue from checkpoint\n\nThe branch is clean at commit %s. This is a new session; inspect the committed code as needed. Your next objective is: %s\n\nDo not reconstruct or request the earlier session transcript.\n\n", b.CheckpointHead, b.NextObjective)
@@ -186,9 +184,6 @@ The next session receives the commit, nextObjective, and checked requirements an
 	} else if b.FullSuite && !b.Planning {
 		fullSuiteSection(&s, b.FocusedOnly)
 	}
-	if b.Claims && !b.Planning {
-		claimsSection(&s)
-	}
 	if b.Key.Source == task.Linear && !b.Planning {
 		s.WriteString("GitHub hosts the pull request. Put " + b.Identifier + " in the pull request title and " + b.URL + " in the pull request body. Do not add a GitHub Closes #N line. These issue link rules override conflicting developer PR instructions below.\n\n")
 	}
@@ -230,7 +225,7 @@ Set reviewAssessment to null except when assessing the current self-review; reje
 func correctionPrompt(b TaskBrief) string {
 	var s strings.Builder
 	fmt.Fprintf(&s, "You are correcting the latest review of %s in a fresh session. Assess the findings using the checked task and developer decisions below. Fix valid defects and reject invalid findings with concrete evidence. If a finding is ambiguous or requires another product decision, return blocked. Do not recover earlier agent transcripts, issue discussion, or planning documents.\n\n", b.Key.Repo)
-	s.WriteString("## Checked work\n\n" + b.PlanText + "\n\n")
+	s.WriteString("## Checked work\n\n" + RequirementsValidationInstruction + "\n" + b.PlanText + "\n\n")
 	s.WriteString("## Findings to correct\n\n")
 	writeFindings(&s, b.OpenFindings)
 	if b.FindingsReview != nil {
@@ -249,14 +244,11 @@ func correctionPrompt(b TaskBrief) string {
 	if b.FullSuite {
 		fullSuiteSection(&s, true)
 	}
-	if b.Claims {
-		claimsSection(&s)
-	}
 	fmt.Fprintf(&s, "## Workspace\n\nYou are in %s on branch %s, based on origin/%s. Change only what the findings require, run focused validation, commit, and update the same change.\n\n", b.Worktree, b.Branch, b.BaseBranch)
 	s.WriteString(openingSection(b))
 	s.WriteString(prSection(b.PRInstructions))
 	s.WriteString("\n## When you need a decision\n\nReturn blocked with questions when a finding is ambiguous or needs a product decision. Do not push or open a pull request while blocked.\n\n")
-	fmt.Fprintf(&s, "## Final response\n\nReply with JSON matching the provided schema. Set documents and nextObjective to null. Report validation and any claims required by the task. %s%s\n", finishedStatus(b), "Return blocked or failed when applicable.")
+	fmt.Fprintf(&s, "## Final response\n\nReply with JSON matching the provided schema. Set documents and nextObjective to null. Report validation. %s%s\n", finishedStatus(b), "Return blocked or failed when applicable.")
 	return s.String()
 }
 
@@ -269,7 +261,7 @@ func openingSection(b TaskBrief) string {
 Do not push the branch or open a pull request. Another agent reviews your local branch first, and foreman asks you to push and open the pull request once that review is clean.
 
 - When the change is review-ready: commit everything (the worktree must be clean) and run the validation.
-- Write the pull request you propose in prTitle and prBody. The description is the reviewer's only statement of what the change must do, so state the requirements it meets. %s
+- Write the pull request you propose in prTitle and prBody. State the requirements the change meets. %s
 - Defer requested screenshots until the PR-opening turn, which posts them in a PR comment. Do not put screenshot placeholders in prBody or leave untracked images before review_ready.
 `, prIssueRule(b))
 	}
@@ -596,9 +588,6 @@ type OpenPRBrief struct {
 	Unverified string
 	// Decisions are answers the implementer has not received yet.
 	Decisions []task.Decision
-	// Claims are the reviewed claims of a task with claim verification, which the
-	// turn returns unchanged.
-	Claims []task.Claim
 }
 
 // OpenPRPrompt has the implementer push the reviewed commit and open the PR. It is
@@ -640,10 +629,6 @@ Validation run on the reviewed commit:
 	}
 	if b.Unverified != "" {
 		fmt.Fprintf(&s, "\nNo full suite was run: %s. Name this in the outcome summary.\n", b.Unverified)
-	}
-	if len(b.Claims) > 0 {
-		claims, _ := json.Marshal(b.Claims)
-		fmt.Fprintf(&s, "\nWith \"pr_opened\", return these reviewed claims unchanged in \"claims\". Keep them out of the pull request and its comments.\n\n%s\n", claims)
 	}
 	return s.String()
 }
