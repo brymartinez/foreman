@@ -84,24 +84,11 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 	if _, ok := a.Agents[req.Agent]; !ok {
 		return nil, fmt.Errorf("agent %s is not configured", req.Agent)
 	}
-	// Restarts may hand existing work to the available provider. New manual starts
-	// retain the requested provider and refuse confirmed unavailable quota.
-	quotas := a.readQuotas(ctx, nil)
 	if existing != nil && existing.Delegation != nil {
-		// An outstanding adversarial review may complete or be skipped without
-		// any implementation call. Its own provider gets a separate preflight.
-		reviewOnly := req.Agent == existing.Delegation.Implementer.Agent && existing.ReviewPending() && existing.NextReview() == task.CompetingReview && !existing.Delegation.ConflictPending && len(existing.Undelivered()) == 0 && len(existing.UnhandledFeedback()) == 0
-		if !reviewOnly {
-			req.Agent, err = a.quotaImplementer(req.Agent, quotas)
-			if err != nil {
-				return nil, err
-			}
+		if existing.Delegation.Implementer.Agent != "" && existing.Delegation.Implementer.Agent != req.Agent {
+			return nil, fmt.Errorf("this task retains its %s implementer", existing.Delegation.Implementer.Agent)
 		}
-		if req.Profile != nil && req.Profile.Agent != req.Agent {
-			req.Profile = nil
-			req.RouteReason = ""
-		}
-	} else if err := quotaError(req.Agent, quotas); err != nil {
+	} else if err := quotaError(req.Agent, a.readQuotas(ctx, nil)); err != nil {
 		return nil, err
 	}
 	if req.ContextFile != "" {
@@ -231,6 +218,14 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		// and unreviewed local commits are never pushed by a PR-workflow turn. A reset
 		// discarded the run, so it starts with the current settings.
 		if prev != nil {
+			cur.Delegation.Planner = prev.Planner
+			cur.Delegation.Adversary = prev.Adversary
+			cur.Delegation.Action = prev.Action
+			cur.Delegation.Implementer.ID = prev.Implementer.ID
+			if !cur.PlanPosted() && prev.Planner.ID == "" && prev.Action == nil && prev.PR == 0 && prev.LocalHead == "" {
+				cur.Delegation.Planner = prev.Implementer
+				cur.Delegation.Implementer.ID = ""
+			}
 			cur.Delegation.ReviewBeforePR = prev.ReviewBeforePR
 			cur.Delegation.ClaimVerification = prev.ClaimVerification
 			cur.Delegation.Claims, cur.Delegation.PRDDigest = prev.Claims, prev.PRDDigest
@@ -276,8 +271,13 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		}
 		// A restart at the commit the last run returned for review keeps it with its
 		// proposal, so the review or the PR opening picks up where the run stopped.
-		if prev != nil && prev.Branch == wt.Branch && prev.ReviewBeforePR && prev.PR == 0 && prev.LocalHead == head {
-			cur.Delegation.LocalHead, cur.Delegation.ProposedTitle, cur.Delegation.ProposedBody = prev.LocalHead, prev.ProposedTitle, prev.ProposedBody
+		if prev != nil && prev.Branch == wt.Branch && prev.ReviewBeforePR && prev.PR == 0 {
+			recoveringChange := prev.Action != nil && prev.Action.Role() == task.ImplementerRole
+			if prev.LocalHead == head || recoveringChange {
+				cur.Delegation.LocalHead, cur.Delegation.ProposedTitle, cur.Delegation.ProposedBody = prev.LocalHead, prev.ProposedTitle, prev.ProposedBody
+			} else if prev.LocalHead != "" {
+				cur.Delegation.Action = nil
+			}
 		}
 		// A retry with the same agent keeps its route. Choosing another agent drops it.
 		if req.Profile == nil && sameAgent && prev.Profile != nil {

@@ -148,7 +148,6 @@ func (a App) inboxView(ctx context.Context, allRepos bool, source task.Source) (
 	if err := a.reap(ctx, recs, reapable(recs, dead, checked)); err != nil {
 		return InboxReport{}, err
 	}
-	a.startLearners(recs)
 	items, truncated, sourceWarnings, available, err := a.discoverSources(ctx, source, allRepos)
 	if err != nil {
 		return InboxReport{}, err

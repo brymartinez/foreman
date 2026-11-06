@@ -942,7 +942,31 @@ func TestQuotaSkippedReviewSurvivesReloadWithoutBecomingClean(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.Reviews[0].Skipped || got.Reviews[0].Clean || !got.Reviews[0].Accepted() || got.Reviews[0].Summary != want.Reviews[0].Summary {
+	if !got.Reviews[0].Skipped || got.Reviews[0].Clean || got.Reviews[0].Accepted() || got.Reviews[0].Summary != want.Reviews[0].Summary {
 		t.Fatalf("skip lost: %+v", got.Reviews[0])
+	}
+}
+
+func TestRoleSessionsAndPendingActionSurviveReload(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	want := delegated()
+	d := want.Delegation
+	d.Planner = task.Session{Agent: task.Claude, ID: "plan"}
+	d.Adversary = task.Session{Agent: task.Codex, ID: "review"}
+	d.Action = &task.Action{
+		ID: "action", Kind: task.SelfReviewAction, BaseRef: "origin/main",
+		BaseHead: "base", FromHead: "old", Head: "new", ReviewRound: 2, Started: true,
+	}
+	if err := s.Save(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, want.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloaded := got.Delegation
+	if reloaded.Planner != d.Planner || reloaded.Implementer != d.Implementer || reloaded.Adversary != d.Adversary ||
+		reloaded.Action == nil || *reloaded.Action != *d.Action {
+		t.Fatalf("role sessions or pending action lost: %+v", reloaded)
 	}
 }

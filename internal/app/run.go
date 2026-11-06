@@ -66,7 +66,7 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, token string, l
 	}
 
 	if rec.Delegation.ConflictPending {
-		rec, err = a.handoffForQuota(ctx, rec, log)
+		err = a.checkQuota(ctx, rec.Delegation.Implementer.Agent, log)
 		if err != nil {
 			_, saveErr := a.update(final, key, existing(func(cur *task.Record) { failTask(cur, err.Error(), a.Now()) }))
 			return saveErr
@@ -116,7 +116,6 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, token string, l
 	if err := r.loop(firstStep(rec, len(feedback))); err != nil {
 		return err
 	}
-	a.learnAfterRun(r.rec, log)
 	return nil
 }
 
@@ -149,6 +148,30 @@ const (
 // first, then a reviewed local commit that has no PR, then a verified PR head or a
 // local commit that has no review, and otherwise an implementer turn.
 func firstStep(rec *task.Record, waiting int) step {
+	if action := rec.Delegation.Action; action != nil {
+		switch action.Kind {
+		case task.PublishAction:
+			return stepOpenPR
+		case task.MergeAction:
+			if len(rec.Undelivered()) != 0 {
+				return stepImplement
+			}
+			return stepReview
+		case task.FinalCheckAction:
+			return stepFinalCheck
+		case task.SelfReviewAction, task.AdversarialAction:
+			if rec.Delegation.PR != 0 {
+				return stepPickUpReview
+			}
+			return stepReview
+		case task.FeedbackAction:
+			if waiting > 0 {
+				return stepAnswer
+			}
+		default:
+			return stepImplement
+		}
+	}
 	switch {
 	case waiting > 0:
 		return stepAnswer
@@ -220,17 +243,14 @@ func (r *taskRun) loop(next step) error {
 // scopeBoundary re-reads triage before every stage. A changed scope invalidates
 // prior plan and code reviews; a removed label or unreadable source stops the run.
 func (r *taskRun) scopeBoundary(next step) (step, bool, error) {
-	// Finish an available adversarial review before changing implementers. A
-	// quota skip and metadata-only handover need no implementation quota.
+	// Adversarial review and metadata-only handover have their own prerequisites.
 	needsImplementer := next != stepHandover && next != stepPickUpReview && !(next == stepReview && r.rec.NextReview() == task.CompetingReview)
 	if needsImplementer {
-		rec, quotaErr := r.a.handoffForQuota(r.ctx, r.rec, r.log)
-		if quotaErr != nil {
+		if quotaErr := r.a.checkQuota(r.ctx, r.rec.Delegation.Implementer.Agent, r.log); quotaErr != nil {
 			saved, err := r.a.update(r.final, r.rec.Key, existing(func(cur *task.Record) { failTask(cur, quotaErr.Error(), r.a.Now()) }))
 			r.rec = saved
 			return stepDone, true, err
 		}
-		r.rec = rec
 	}
 
 	scope, err := r.a.readScope(r.ctx, r.rec.Key)
@@ -241,13 +261,14 @@ func (r *taskRun) scopeBoundary(next step) (step, bool, error) {
 	}
 	r.scope = scope
 	if r.rec.Delegation.ScopeDigest != scope.digest {
-		clearSession := r.rec.Delegation.ScopeDigest != "" || r.rec.PlanPosted()
+		r.findings = nil
+		invalidateAction := r.rec.Delegation.ScopeDigest != "" || r.rec.PlanPosted()
 		rec, err := r.a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
 			cur.Delegation.ScopeDigest = scope.digest
 			cur.Delegation.PlanScopeDigest = ""
 			cur.Delegation.PlanDigest = ""
-			if clearSession {
-				cur.Delegation.Implementer.ID = ""
+			if invalidateAction {
+				cur.Delegation.Action = nil
 			}
 		}))
 		if err != nil {
@@ -278,10 +299,11 @@ func (r *taskRun) scopeBoundary(next step) (step, bool, error) {
 			}
 			r.rec = rec
 		} else if !plan.complete() || planDigest(plan.texts()) != r.rec.Delegation.PlanDigest {
+			r.findings = nil
 			rec, err := r.a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
 				cur.Delegation.PlanScopeDigest = ""
 				cur.Delegation.PlanDigest = ""
-				cur.Delegation.Implementer.ID = ""
+				cur.Delegation.Action = nil
 			}))
 			if err != nil {
 				return stepDone, true, err
@@ -303,14 +325,21 @@ func (r *taskRun) planNeeded() bool {
 // goes straight on to an implementation turn; a PR goes to review.
 func (r *taskRun) implement() (step, error) {
 	a := r.a
-	if r.forcePlan && !r.rec.PlanPosted() && r.rec.Delegation.PlanDraft == nil && r.rec.Delegation.Implementer.ID != "" {
-		rec, err := a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
-			cur.Delegation.Implementer.ID = ""
-		}))
-		if err != nil {
-			return stepDone, err
+	if r.findings == nil && r.rec.Delegation.Action != nil {
+		round := r.rec.Delegation.Action.ReviewRound
+		for i := range r.rec.Reviews {
+			if r.rec.Reviews[i].Round == round {
+				r.findings = &r.rec.Reviews[i]
+				break
+			}
 		}
-		r.rec = rec
+	}
+	if r.findings == nil && r.rec.Delegation.Action == nil && !r.planNeeded() && !r.rec.Delegation.PlanImplementationPending {
+		head, _ := r.rec.CurrentChange()
+		if latest := r.rec.LatestReview(); latest != nil && !latest.Accepted() && !latest.Skipped &&
+			!latest.AllFindingsRejected() && latest.Head != "" && latest.Head == head {
+			r.findings = latest
+		}
 	}
 	if r.planNeeded() {
 		if err := r.enter(task.Planning); err != nil {
@@ -324,7 +353,7 @@ func (r *taskRun) implement() (step, error) {
 		}
 	}
 	during, stage := "implementation", task.Implementing
-	req := turnRequest{findings: r.findings, forcePlan: r.forcePlan && !r.rec.PlanPosted()}
+	req := turnRequest{findings: r.findings, forcePlan: r.forcePlan && !r.rec.PlanPosted(), planSources: r.plan.texts()}
 	if r.planNeeded() {
 		during, stage = "planning", task.Planning
 	}
@@ -332,13 +361,27 @@ func (r *taskRun) implement() (step, error) {
 		return stepDone, err
 	}
 	res := a.runTurn(r.ctx, r.rec, req, a.verifiedPR(r.log), r.log)
-	if req.forcePlan && res.err == nil && res.turn.Outcome.Status != agent.Planned && res.turn.Outcome.Status != agent.Blocked && res.turn.Outcome.Status != agent.FailedRun {
+	if stage == task.Planning && res.err == nil && res.turn.Outcome.Status != agent.Planned && res.turn.Outcome.Status != agent.Blocked && res.turn.Outcome.Status != agent.FailedRun {
 		res.err = fmt.Errorf("planning turn returned %s instead of planned, blocked, or failed", res.turn.Outcome.Status)
 	}
 	rec, err := a.finishTurn(r.ctx, r.final, r.rec.Key, during, res, func(cur *task.Record) {
 		applyTurnResult(cur, res, a.Now())
 		if res.err == nil && finishesChange(res.turn.Outcome.Status) {
 			cur.Delegation.PlanImplementationPending = false
+			if r.findings != nil && stage == task.Implementing {
+				head, _ := cur.CurrentChange()
+				kind := task.SelfReviewAction
+				if r.findings.Kind == task.CompetingReview || cur.SelfReviewPassed() {
+					kind = task.AdversarialAction
+				}
+				cur.Delegation.Action = &task.Action{
+					Kind: kind, Head: head, FromHead: r.findings.Head,
+					BaseRef: r.findings.BaseRef, BaseHead: r.findings.BaseHead,
+				}
+				if res.turn.Outcome.Status == agent.PROpened {
+					cur.State = cur.ReviewStage()
+				}
+			}
 		}
 		if res.err == nil && res.turn.Outcome.Status == agent.Planned {
 			cur.Delegation.PlanDraft = &task.PlanDraft{Scope: r.scope.digest, Fingerprint: r.plan.fingerprint, Documents: mergePlanTexts(r.plan.texts(), res.turn.Outcome.Documents), Sources: r.plan.texts()}
@@ -347,7 +390,6 @@ func (r *taskRun) implement() (step, error) {
 			cur.Delegation.CheckpointHead = res.checkpointHead
 			cur.Delegation.CheckpointNext = res.turn.Outcome.NextObjective
 			cur.Delegation.Checkpoints++
-			cur.Delegation.Implementer.ID = ""
 			cur.Validation = res.turn.Outcome.Validation
 		}
 	}, r.log)
@@ -356,10 +398,8 @@ func (r *taskRun) implement() (step, error) {
 	}
 	r.rec = rec
 	if res.err == nil && res.turn.Outcome.Status == agent.Planned {
-		if r.rec, err = a.postPlan(r.ctx, r.final, rec, res.turn.Outcome.Documents, r.plan, r.log); err != nil || r.rec.State != task.Planning {
-			return stepDone, err
-		}
-		return stepImplement, nil
+		_, next, err := r.restorePlanDraft()
+		return next, err
 	}
 	if res.err == nil && res.turn.Outcome.Status == agent.Checkpoint {
 		return stepImplement, nil
@@ -412,6 +452,10 @@ func (r *taskRun) pickUpReview() (step, error) {
 		return stepImplement, nil
 	}
 	rec, err := a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
+		d := cur.Delegation
+		if pr.HeadSHA != d.PRHead || (pr.BaseRefName != "" && "origin/"+pr.BaseRefName != d.BaseRef) {
+			d.Action = &task.Action{Kind: task.SelfReviewAction, Head: pr.HeadSHA}
+		}
 		applyPRHead(cur, pr)
 	}))
 	if err != nil {
@@ -454,6 +498,21 @@ func (r *taskRun) review() (step, error) {
 			r.rec = rec
 		}
 	}
+	if pending := rec.Delegation.Action; reviewErr == nil && pending != nil &&
+		pending.Kind == task.AdversarialAction && pending.BaseHead != "" {
+		base, baseErr := a.Worktrees.ReviewBase(r.ctx, rec.Delegation.Worktree, rec.Delegation.BaseRef)
+		if baseErr != nil {
+			reviewErr = baseErr
+		} else if base != pending.BaseHead || pending.BaseRef != rec.Delegation.BaseRef {
+			rec, err = a.update(r.final, rec.Key, existing(func(cur *task.Record) {
+				cur.Delegation.Action = &task.Action{Kind: task.SelfReviewAction}
+			}))
+			if err != nil {
+				return stepDone, err
+			}
+			r.rec = rec
+		}
+	}
 	kind := rec.NextReview()
 	reviewer := rec.Delegation.Implementer.Agent
 	if kind == task.CompetingReview {
@@ -475,12 +534,31 @@ func (r *taskRun) review() (step, error) {
 	}
 	// Findings return to the implementer. At the self-review limit it must reject
 	// them with evidence or ask the developer before making another correction.
-	atLimit := reviewErr == nil && !review.Clean && !review.Skipped && rec.ChangeRequestsSinceDecision()+1 > a.fixRounds()
+	atLimit := reviewErr == nil && !review.Clean && rec.ChangeRequestsSinceDecision()+1 > a.fixRounds()
 	if rec, err = a.update(r.final, rec.Key, existing(func(cur *task.Record) {
 		if kind == task.CompetingReview {
 			cur.Delegation.Reviewer = reviewer
 		}
 		applyReview(cur, kind, reviewer, review, reviewErr, a.Now())
+		var missing missingRoleSession
+		if errors.As(reviewErr, &missing) && r.ctx.Err() == nil {
+			askForSession(cur, missing.role, a.Now())
+		}
+		if reviewErr == nil {
+			cur.Delegation.Action = nil
+			if kind == task.SelfReview && review.Clean {
+				head, _ := cur.CurrentChange()
+				cur.Delegation.Action = &task.Action{Kind: task.AdversarialAction, Head: head, BaseRef: review.BaseRef, BaseHead: review.BaseHead}
+			}
+			if !review.Clean {
+				fix := task.FixSelfAction
+				if kind == task.CompetingReview {
+					fix = task.FixAdverseAction
+				}
+				latest := cur.LatestReview()
+				cur.Delegation.Action = &task.Action{Kind: fix, Head: latest.Head, ReviewRound: latest.Round}
+			}
+		}
 		if reviewErr != nil {
 			applyStop(r.ctx, cur, "review", r.log, a.Now())
 		}
@@ -507,7 +585,7 @@ func (r *taskRun) review() (step, error) {
 	case rec.State == task.Implementing:
 		r.findings = rec.LatestReview()
 		return stepImplement, nil
-	case reviewErr == nil && (review.Clean || review.Skipped) && rec.State == task.WaitingForCI && a.ReplyToPRFeedback:
+	case reviewErr == nil && review.Clean && rec.State == task.WaitingForCI && a.ReplyToPRFeedback:
 		return stepHandover, nil
 	}
 	return stepDone, nil
@@ -584,9 +662,7 @@ func (a App) needsPlan(rec *task.Record) bool {
 		(rec.PlanPosted() && rec.Delegation.ScopeDigest != "" && rec.Delegation.PlanScopeDigest != rec.Delegation.ScopeDigest)
 }
 
-// implement runs one implementer turn. It resumes the session with a conflict repair,
-// an answered decision, or the work in req when there is one, and otherwise (or when
-// the session is gone) starts a fresh turn whose prompt is rebuilt from the task file.
+// implement prepares the pending planning or implementation turn.
 func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, log io.Writer) (agent.Turn, error) {
 	d := rec.Delegation
 	findings, feedback, merge := req.findings, req.feedback, req.merge
@@ -595,20 +671,33 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 		return agent.Turn{}, fmt.Errorf("agent %s is not configured", d.Implementer.Agent)
 	}
 	planning := a.needsPlan(rec) || req.forcePlan
+	action := task.Action{Kind: task.ImplementAction}
+	action.Head, _ = rec.CurrentChange()
+	if action.Head == "" {
+		action.Head = d.CheckpointHead
+	}
 	local := d.BeforePR() && !planning
 	stage, step := task.StageImplement, agent.StepImplement
 	switch {
 	case planning:
+		action.Kind = task.PlanAction
 		stage, step = task.StagePlan, agent.StepPlan
 	case merge != nil || d.ConflictPending:
+		action.Kind = task.MergeAction
 		step = agent.StepMerge
 	case len(feedback) > 0:
+		action.Kind = task.FeedbackAction
 		step = agent.StepFeedback
 	}
 	in := agent.StartInput{Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD, Stage: stage, Step: step, Profile: d.Profile}
 	if req.finalCheck != nil {
+		action.Kind = task.FinalCheckAction
 		in.Purpose = "final_check"
-	} else if !planning && findings != nil {
+	} else if !planning && findings != nil && merge == nil && !d.ConflictPending {
+		action.Kind, action.ReviewRound = task.FixSelfAction, findings.Round
+		if findings.Kind == task.CompetingReview {
+			action.Kind = task.FixAdverseAction
+		}
 		in.Purpose = "correction"
 	}
 	if req.openBodyFile != "" {
@@ -620,6 +709,9 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 	if d.ConflictPending {
 		conflict = &agent.Conflict{PR: d.PR, Base: strings.TrimPrefix(d.BaseRef, "origin/"), BaseHead: d.LastConflict().Base}
 		resume = agent.ConflictMessage(*conflict)
+		if decs := rec.Undelivered(); len(decs) > 0 {
+			resume += "\n" + agent.ResumeMessage(decs, nil, false, local)
+		}
 	} else if decs := rec.Undelivered(); len(decs) > 0 {
 		var open *task.Review
 		if latest := rec.LatestReview(); latest != nil && !latest.Accepted() {
@@ -646,17 +738,16 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 		resume += agent.RequirementsValidationInstruction
 		resume = fullSuiteResume(rec, req, resume)
 	}
-	if resume != "" && d.Implementer.ID != "" {
-		if err := a.startAttempt(ctx, rec); err != nil {
-			return agent.Turn{}, err
+	if resume != "" && !planning && d.Implementer.ID != "" {
+		if d.PlanImplementationPending {
+			_, plan, err := a.reviewRequirements(ctx, rec)
+			if err != nil {
+				return agent.Turn{}, err
+			}
+			resume += "\nUse this newly checked plan for the task.\n\n" + plan
 		}
-		fmt.Fprintf(log, "foreman: resuming %s session %s\n", adapter.Name(), d.Implementer.ID)
 		in.Prompt = resume
-		turn, err := adapter.Resume(ctx, d.Implementer, in)
-		if !errors.Is(err, agent.ErrNoSession) {
-			return turn, err
-		}
-		fmt.Fprintf(log, "foreman: session is gone (%v); starting a fresh turn rebuilt from the task file\n", err)
+		return a.callRole(ctx, rec, adapter, in, action)
 	}
 	brief, err := a.brief(ctx, rec, log)
 	if err != nil {
@@ -708,14 +799,17 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 		fmt.Fprintf(log, "foreman: starting %s in %s\n", adapter.Name(), d.Worktree)
 	}
 	in.Prompt = agent.ImplementationPrompt(brief)
-	if err := a.startAttempt(ctx, rec); err != nil {
-		return agent.Turn{}, err
+	if planning {
+		for _, doc := range task.PlanDocs {
+			if text := req.planSources[doc]; text != "" {
+				in.Prompt += "\n## Existing " + doc.Title() + "\n\n" + text + "\n"
+			}
+		}
+		if resume != "" {
+			in.Prompt += "\n" + resume
+		}
 	}
-	return adapter.Start(ctx, in, func(s task.Session) {
-		_, _ = a.update(ctx, rec.Key, existing(func(cur *task.Record) {
-			cur.Delegation.Implementer = s
-		}))
-	})
+	return a.callRole(ctx, rec, adapter, in, action)
 }
 
 // startAttempt stamps the attempt's first agent turn just before the agent starts, so
@@ -995,8 +1089,11 @@ func (a App) verifyPR(ctx context.Context, rec *task.Record, o agent.Outcome) (*
 // applyTurn maps a finished implementer turn onto the task. A completed turn has
 // received every answered decision. pr is the verified PR for pr_opened.
 func applyTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, runErr error, now time.Time) {
-	if turn.Session.ID != "" {
-		rec.Delegation.Implementer = turn.Session
+	if turn.Session.ID != "" && rec.Delegation.Action != nil {
+		session := rec.Delegation.RoleSession(rec.Delegation.Action.Role())
+		if session != nil && session.ID == "" {
+			*session = turn.Session
+		}
 	}
 	if runErr != nil {
 		failTask(rec, runErr.Error(), now)
@@ -1096,7 +1193,7 @@ func applyReview(rec *task.Record, kind task.ReviewKind, reviewer task.Agent, r 
 	}
 	head, proposal := rec.CurrentChange()
 	review := task.Review{
-		BaseRef: r.BaseRef, BaseHead: r.BaseHead,
+		BaseRef: r.BaseRef, BaseHead: r.BaseHead, FromHead: r.FromHead,
 		Round:       len(rec.Reviews) + 1,
 		Kind:        kind,
 		Decisions:   task.DecisionsDigest(rec.Decisions),
@@ -1114,11 +1211,8 @@ func applyReview(rec *task.Record, kind task.ReviewKind, reviewer task.Agent, r 
 		Plan:        rec.Delegation.PlanDigest,
 	}
 	rec.Reviews = append(rec.Reviews, review)
-	if r.Clean || r.Skipped {
+	if r.Clean {
 		status := "review_clean"
-		if r.Skipped {
-			status = "review_skipped"
-		}
 		if kind == task.SelfReview {
 			status = "self_review_clean"
 		}
@@ -1156,16 +1250,15 @@ func escalateReview(rec *task.Record, rounds int, now time.Time) {
 			recommend = "A"
 		}
 	}
+	pause := stopAtLimitOption
+	if local {
+		pause = stopBeforePROption
+	}
 	options := []task.Option{
 		{Label: "A", Description: "Address the remaining findings in another round"},
-		{Label: "B", Description: "Leave the code as is; treat the remaining findings as accepted"},
+		pause,
 	}
-	impact := "A spends more agent time on disputed findings; B sends the remaining findings to your review unfixed."
-	if local {
-		options[1], recommend = stopBeforePROption, "A"
-		ctx.WriteString("\nNo pull request is open. It opens only after a clean review.")
-		impact = "A spends more agent time on disputed findings; B ends the task without a pull request."
-	}
+	impact := "Another round spends more agent time. Stopping preserves the unresolved findings."
 	rec.State = task.NeedsDecision
 	rec.LastOutcome = &task.Outcome{Status: "blocked", Summary: "review not clean after " + roundsText(rounds), At: now}
 	rec.Decisions = append(rec.Decisions, task.Decision{AskedAt: now, Question: task.Question{

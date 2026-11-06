@@ -103,6 +103,32 @@ func (m meteredAgent) Resume(ctx context.Context, session task.Session, in agent
 }
 
 func (m meteredAgent) Review(ctx context.Context, in agent.StartInput) (agent.ReviewOutcome, error) {
+	return m.review(ctx, in, func(ctx context.Context) (agent.ReviewOutcome, error) {
+		return m.AgentAdapter.Review(ctx, in)
+	})
+}
+
+func (m meteredAgent) StartReview(ctx context.Context, in agent.StartInput, save func(task.Session)) (agent.ReviewOutcome, error) {
+	r, ok := m.AgentAdapter.(retainedReviewer)
+	if !ok {
+		return agent.ReviewOutcome{}, errors.New("adapter does not support retained reviews")
+	}
+	return m.review(ctx, in, func(ctx context.Context) (agent.ReviewOutcome, error) {
+		return r.StartReview(ctx, in, save)
+	})
+}
+
+func (m meteredAgent) ResumeReview(ctx context.Context, s task.Session, in agent.StartInput) (agent.ReviewOutcome, error) {
+	r, ok := m.AgentAdapter.(retainedReviewer)
+	if !ok {
+		return agent.ReviewOutcome{}, errors.New("adapter does not support retained reviews")
+	}
+	return m.review(ctx, in, func(ctx context.Context) (agent.ReviewOutcome, error) {
+		return r.ResumeReview(ctx, s, in)
+	})
+}
+
+func (m meteredAgent) review(ctx context.Context, in agent.StartInput, run func(context.Context) (agent.ReviewOutcome, error)) (agent.ReviewOutcome, error) {
 	if err := m.app.checkQuota(ctx, m.Name(), in.Log); err != nil {
 		return agent.ReviewOutcome{}, err
 	}
@@ -112,7 +138,7 @@ func (m meteredAgent) Review(ctx context.Context, in agent.StartInput) (agent.Re
 	}
 	defer cancel()
 	start := m.app.Now()
-	out, err := m.AgentAdapter.Review(child, in)
+	out, err := run(child)
 	if child.Err() != nil {
 		err = fmt.Errorf("agent call stopped (%v): %w", err, child.Err())
 	}

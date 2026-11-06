@@ -229,16 +229,6 @@ EOF
 # full is the validation of a full run on HEAD and its report, for a finished change.
 full() { printf '"validation":[{"command":"go test ./...","passed":true,"scope":"full"}],"fullSuite":{"status":"run","revision":"%s","docOnly":[],"explanation":null}' "$(git rev-parse HEAD)"; }
 for arg in "$@"; do case "$arg" in sonnet|opus) echo "claude model=$arg" >>"$E2E_STATE/models.log" ;; esac; done
-# The learner's evaluator turn: record it apart from the task's agents. It answers
-# with evaluation-<issue title>.json when the scenario wrote one, else learns nothing.
-if [[ "$*" == *"You evaluate one finished task"* ]]; then
-	title=$(printf '%s\n' "$*" | sed -n 's/^Title: //p' | head -n 1)
-	echo "claude evaluate $title" >>"$E2E_STATE/evaluations.log"
-	out='{"assessment":"went fine","signals":[],"proposals":[],"revisions":[]}'
-	[ ! -f "$E2E_STATE/evaluation-$title.json" ] || out=$(cat "$E2E_STATE/evaluation-$title.json")
-	printf '{"type":"result","session_id":"e1","subtype":"success","total_cost_usd":0.01,"structured_output":%s}\n' "$out"
-	exit 0
-fi
 # A knowledge ingest's merge turn answers with merge.json, or fails on merge-fail.
 if [[ "$*" == *"You merge two machines' learnings"* ]]; then
 	echo "claude merge-knowledge" >>"$E2E_STATE/merges.log"
@@ -249,40 +239,47 @@ if [[ "$*" == *"You merge two machines' learnings"* ]]; then
 	printf '{"type":"result","session_id":"m1","subtype":"success","total_cost_usd":0.01,"structured_output":%s}\n' "$(cat "$E2E_STATE/merge.json")"
 	exit 0
 fi
-if [[ " $* " == *" --no-session-persistence "* ]]; then
-	echo "claude review" >>"$E2E_STATE/agents.log"
-	if [[ "$2" == "You are the self-reviewer"* ]]; then
-		echo "claude self-review" >>"$E2E_STATE/agents.log"
-		printf '%s' "$2" >"$E2E_STATE/self-review-prompt.txt"
-		if [ -f "$E2E_STATE/self-findings-once" ]; then
-			cp "$E2E_STATE/self-review-prompt.txt" "$E2E_STATE/first-self-review-prompt.txt"
-			rm "$E2E_STATE/self-findings-once"
-			echo '{"type":"result","subtype":"success","structured_output":{"verdict":"changes_requested","summary":"Check the retry guard","findings":[{"category":"defect","severity":"should_fix","file":"widgets.go","line":1,"summary":"Retry guard may be missing","detail":"Check the caller"}],"limitations":[]}}'
-			exit 0
-		fi
-	fi
- if [[ "$2" == "You are checking planning documents"* && -f "$E2E_STATE/writing-advice" ]]; then
- echo '{"type":"result","session_id":"r1","subtype":"success","total_cost_usd":0.05,"structured_output":{"verdict":"changes_requested","summary":"Clear rules, long wording","findings":[{"category":"writing_advice","severity":"blocking","file":null,"line":null,"summary":"Shorten R1","detail":"Use two short sentences."}],"limitations":[]}}'
- exit 0
- fi
-	echo '{"type":"result","session_id":"r1","subtype":"success","total_cost_usd":0.05,"structured_output":{"verdict":"clean","summary":"looks right","findings":[]}}'
-	exit 0
+prompt=$2
+if [[ "$prompt" == *"You are the self-reviewer"* || "$prompt" == *"You are the adversarial reviewer"* || "$prompt" == *"You are reviewing this change"* ]]; then
+  role=self-review
+  [[ "$prompt" == *"adversarial reviewer"* ]] && role=adversarial-review
+  echo "claude $role" >>"$E2E_STATE/agents.log"
+  if [[ " $* " == *" --resume "* ]]; then echo "resume $role" >>"$E2E_STATE/review-sessions.log"; else echo "start $role" >>"$E2E_STATE/review-sessions.log"; fi
+  if [[ "$role" == self-review ]]; then
+    printf '%s' "$prompt" >"$E2E_STATE/self-review-prompt.txt"
+    if [ -f "$E2E_STATE/self-findings-once" ]; then
+      cp "$E2E_STATE/self-review-prompt.txt" "$E2E_STATE/first-self-review-prompt.txt"
+      rm "$E2E_STATE/self-findings-once"
+      echo '{"type":"result","session_id":"sr1","subtype":"success","structured_output":{"verdict":"changes_requested","summary":"Check the retry guard","findings":[{"category":"defect","severity":"should_fix","file":"widgets.go","line":1,"summary":"Retry guard may be missing","detail":"Check the caller"}],"limitations":[]}}'
+      exit 0
+    fi
+  else
+    printf '%s' "$prompt" >"$E2E_STATE/review-prompt.txt"
+  fi
+  echo '{"type":"result","session_id":"r1","subtype":"success","total_cost_usd":0.05,"structured_output":{"verdict":"clean","summary":"looks right","findings":[],"limitations":[]}}'
+  exit 0
 fi
+
 if [[ -f "$E2E_STATE/correction-committed" && "$2" != *"Push it and open the pull request now"* && "$2" != *"## Final full check"* ]]; then
 	echo "claude reuse-correction" >>"$E2E_STATE/agents.log"
 	echo '{"type":"result","session_id":"s1","subtype":"success","structured_output":{"status":"review_ready","summary":"The old finding is already fixed in this commit","reviewAssessment":{"round":1,"rejected":[{"finding":1,"reason":"Already fixed in the committed correction; no further edit is needed."}]},"nextObjective":null,"prNumber":null,"prUrl":null,'"$(full)"',"questions":[],"documents":null,"prTitle":"feat: add retries","prBody":"Retry 5xx and 429.\n\nCloses #42"}}'
 	exit 0
 fi
-# A planning turn starts with "## Plan first", or resumes one with its answers.
+# Planner and implementer prompts are dispatched to retained task sessions.
 planning=
-if [[ " $* " == *" --resume "* || "$2" == *"You are correcting the latest review"* || "$2" == *"## Final full check"* || "$2" == *"Push it and open the pull request now"* ]]; then
+if [[ "$2" == *"You are the planner"* || "$2" == *"## Plan first"* ]]; then
+	echo "claude planner" >>"$E2E_STATE/agents.log"
+	if [[ " $* " == *" --resume "* ]]; then echo "planner resume" >>"$E2E_STATE/role-sessions.log"; else echo "planner start" >>"$E2E_STATE/role-sessions.log"; fi
+	printf '%s' "$2" >"$E2E_STATE/prompt.txt"
+	planning=1
+elif [[ " $* " == *" --resume "* || "$2" == *"You are correcting the latest review"* || "$2" == *"## Final full check"* || "$2" == *"Push it and open the pull request now"* ]]; then
 	if [[ "$2" == *"foreman posted your documents"* ]]; then
 		echo "claude implement" >>"$E2E_STATE/agents.log"
 		printf '%s' "$2" >"$E2E_STATE/plan-posted-prompt.txt"
 	else
 		echo "claude resume" >>"$E2E_STATE/agents.log"
 		printf '%s' "$2" >"$E2E_STATE/resume-prompt.txt"
-		[[ "$2" == *"planned, blocked, or failed"* ]] && planning=1
+		[[ "$2" == *"You are the planner"* || "$2" == *"planned, blocked, or failed"* ]] && planning=1
 		# The final check before handoff: run the full suite on the reviewed commit.
 		if [[ "$2" == *"## Final full check"* ]]; then
 			echo "claude final-check" >>"$E2E_STATE/agents.log"
@@ -307,9 +304,11 @@ if [[ " $* " == *" --resume "* || "$2" == *"You are correcting the latest review
 			exit 0
 		fi
 		# review_before_pr: fix findings locally, or push the reviewed commit and open the PR.
-		if [[ "$2" == *"of your local change by"* || "$2" == *"You are correcting the latest review"* ]]; then
+		if [[ "$2" == *"of your local change by"* || "$2" == *"You are correcting the latest review"* || "$2" == *"review finding"* || "$2" == *"review findings"* ]]; then
 			echo "claude local-fix" >>"$E2E_STATE/agents.log"
 			echo "// retry 429" >>widgets.go
+			assessment='"reviewAssessment":null'
+			[[ "$2" == *"self-review"* || "$2" == *"self review"* ]] && assessment='"reviewAssessment":{"round":1,"rejected":[]}'
 			git commit -qam "fix: retry 429"
 			if [ -f "$E2E_STATE/fail-correction-output-once" ]; then
 				rm "$E2E_STATE/fail-correction-output-once"
@@ -320,7 +319,7 @@ if [[ " $* " == *" --resume "* || "$2" == *"You are correcting the latest review
 			# focused-fixes: the fix runs focused checks only and reports no full result.
 			v=$(full)
 			[ ! -f "$E2E_STATE/focused-fixes" ] || v='"validation":[{"command":"go test ./widgets","passed":true,"scope":"focused"}],"fullSuite":null'
-			echo '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"review_ready","summary":"retried 429","nextObjective":null,"prNumber":null,"prUrl":null,'"$v"',"questions":[],"documents":null,"prTitle":"feat: add retries","prBody":"Retry 5xx and 429.\n\nCloses #42"}}'
+			echo '{"type":"result","session_id":"s1","subtype":"success","total_cost_usd":0.01,"structured_output":{"status":"review_ready","summary":"retried 429",'"$assessment"',"nextObjective":null,"prNumber":null,"prUrl":null,'"$v"',"questions":[],"documents":null,"prTitle":"feat: add retries","prBody":"Retry 5xx and 429.\n\nCloses #42"}}'
 			exit 0
 		fi
 		if [[ "$2" == *"Push it and open the pull request now"* ]]; then
@@ -375,8 +374,9 @@ if [[ " $* " == *" --resume "* || "$2" == *"You are correcting the latest review
 		fi
 	fi
 
-elif [[ "$*" == *"## Plan first"* ]]; then
-	echo "claude plan" >>"$E2E_STATE/agents.log"
+elif [[ "$*" == *"You are the planner"* || "$*" == *"## Plan first"* ]]; then
+	echo "claude planner" >>"$E2E_STATE/agents.log"
+	if [[ " $* " == *" --resume "* ]]; then echo "planner resume" >>"$E2E_STATE/role-sessions.log"; else echo "planner start" >>"$E2E_STATE/role-sessions.log"; fi
 	printf '%s' "$*" >"$E2E_STATE/prompt.txt"
 	planning=1
 else
@@ -453,12 +453,24 @@ if [[ "$prompt" == *"You evaluate one finished task"* ]]; then
 	echo '{"assessment":"went fine","signals":[],"proposals":[],"revisions":[]}' >"$last"
 	exit 0
 fi
-if [[ " $* " == *" --ephemeral "* ]]; then echo "codex review"; printf '%s' "${@: -1}" >"$E2E_STATE/review-prompt.txt"; else echo "codex implement"; fi >>"$E2E_STATE/agents.log"
+review_role=
+[[ "$prompt" == *"You are the self-reviewer"* ]] && review_role=self-review
+[[ "$prompt" == *"You are the adversarial reviewer"* || "$prompt" == *"You are the competing reviewer"* || "$prompt" == *"You are reviewing this change"* ]] && review_role=adversarial-review
+if [ -n "$review_role" ]; then
+  echo "codex review" >>"$E2E_STATE/agents.log"
+  if [ "$review_role" = self-review ] && [ -f "$E2E_STATE/self-review-prompt.txt" ] && [ ! -f "$E2E_STATE/first-self-review-prompt.txt" ]; then cp "$E2E_STATE/self-review-prompt.txt" "$E2E_STATE/first-self-review-prompt.txt"; fi
+  printf '%s' "$prompt" >"$E2E_STATE/$review_role-prompt.txt"
+  [ "$review_role" != adversarial-review ] || cp "$E2E_STATE/$review_role-prompt.txt" "$E2E_STATE/review-prompt.txt"
+  if [[ " $* " == *"exec resume"* ]]; then echo "resume $review_role cwd=$PWD" >>"$E2E_STATE/review-sessions.log"; else echo "start $review_role cwd=$PWD" >>"$E2E_STATE/review-sessions.log"; fi
+else
+  echo "codex implement" >>"$E2E_STATE/agents.log"
+fi
 wt=
 prev=
 for arg in "$@"; do [ "$prev" = -C ] && wt=$arg; prev=$arg; done
-[[ " $* " == *" --ephemeral "* ]] || wt=
-if [ -n "$wt" ]; then
+[[ -n "$review_role" ]] || wt=
+if [ -n "$review_role" ]; then
+	wt=${wt:-$PWD}
 	b=$(git -C "$wt" branch --show-current)
 	if git --git-dir="$E2E_ORIGIN" show-ref --verify --quiet "refs/heads/$b"; then echo pushed; else echo local; fi >>"$E2E_STATE/review-origin.log"
 fi
@@ -468,8 +480,8 @@ echo '{"type":"thread.started","thread_id":"t1"}'
 echo "$$" >"$E2E_STATE/review-agent.pid"
 sleep "${E2E_REVIEW_SLEEP:-0}"
 echo '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":20,"reasoning_output_tokens":5}}'
-if [ -n "$wt" ] && [ -f "$E2E_STATE/findings-once" ]; then
-	rm "$E2E_STATE/findings-once"
+if { [ "$review_role" = adversarial-review ] && [ -f "$E2E_STATE/findings-once" ]; } || { [ "$review_role" = self-review ] && [ -f "$E2E_STATE/self-findings-once" ]; }; then
+	rm -f "$E2E_STATE/findings-once" "$E2E_STATE/self-findings-once"
 	echo '{"verdict":"changes_requested","summary":"429 is missing","findings":[{"category":"defect","severity":"blocking","file":"widgets.go","line":1,"summary":"429 is not retried","detail":"retry 429 too"}]}' >"$last"
 	exit 0
 fi
@@ -534,6 +546,10 @@ complete_review_diff() {
 	contains "$1" "\`git diff --no-ext-diff --no-textconv --ignore-submodules=none $2...$3 --\`"
 }
 
+complete_review_delta() {
+	contains "$1" "\`git diff --no-ext-diff --no-textconv --ignore-submodules=none $2..$3 --\`"
+}
+
 no_review_context() {
 	test -f "$1" && ! grep -qE 'Retry 5xx|Task 1: retries|do it|go test \./\.\.\.' "$1"
 }
@@ -549,11 +565,8 @@ scenario_runner() {
 	check "log lines are timestamped" grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$log"
 	check "agent stderr reached the log" contains "$log" "claude stderr progress"
 	check "no line is stamped twice" bash -c "! grep -qE '^[^ ]+ [0-9]{4}-[0-9]{2}-[0-9]{2}T' '$log'"
-	check "the clean review starts the learner" eventually 10 test -f "$sandbox/knowledge/acme/widgets/evaluations/42.yaml"
-	check "the learner evaluates with the implementer's agent" contains "$state/evaluations.log" "claude evaluate"
-	check "the learner logs to learning.log" contains "$sandbox/logs/learning.log" "learn: evaluated acme/widgets task 42"
 	check "planning carries the plan stage file" contains "$state/prompt.txt" "Write two short documents before changing code."
-	check "the first turn plans" contains "$state/prompt.txt" "## Plan first"
+	check "the first turn plans" contains "$state/prompt.txt" "You are the planner"
 	check "the two documents are posted on the issue" test "$(grep -c 'api --method POST repos/acme/widgets/issues/42/comments' "$state/gh.log")" = 2
 	check "the Requirements comment has its heading" contains "$state/comment-3001.md" "## Requirements"
 	check "a fresh session implements the posted plan text" contains "$state/plan-posted-prompt.txt" "### Task 1: retries"
@@ -561,15 +574,16 @@ scenario_runner() {
 	check "implementation uses its Claude model" contains "$state/models.log" "claude model=opus"
 	check "review uses its Codex model" contains "$state/models.log" "codex model=gpt-6-sol"
 	check "review uses medium Codex effort" contains "$state/models.log" 'codex model_reasoning_effort="medium"'
-	check "the implementer self-reviews before the competing review" bash -c "grep -E '^(claude|codex) review' '$state/agents.log' | tail -2 | tr '\n' ' ' | grep -qx 'claude review codex review '"
+	check "Codex recognizes the adversarial role prompt" contains "$state/adversarial-review-prompt.txt" "You are the competing reviewer"
+	check "Codex starts a retained adversarial session" contains "$state/review-sessions.log" "start adversarial-review cwd="
+	check "self-review precedes adversarial review" bash -c "grep -E '^(claude self-review|codex review)$' '$state/agents.log' | tail -2 | tr '\n' ' ' | grep -qx 'claude self-review codex review '"
 	local base head
 	base=$(git --git-dir="$sandbox/origin.git" rev-parse main)
 	head=$(jq -r '.headRefOid' "$state/pr-942.json")
 	check "self-review reads the complete published diff" complete_review_diff "$state/self-review-prompt.txt" "$base" "$head"
-	check "competing review reads the complete published diff" complete_review_diff "$state/review-prompt.txt" "$base" "$head"
+	check "adversarial review reads the complete published diff" complete_review_diff "$state/adversarial-review-prompt.txt" "$base" "$head"
 	check "self-review omits task context" no_review_context "$state/self-review-prompt.txt"
-	check "competing review omits task context" no_review_context "$state/review-prompt.txt"
-	check "the task records plan-check usage" contains "$sandbox/tasks/acme-widgets-42.md" "step: plan_check"
+	check "adversarial review omits task context" no_review_context "$state/adversarial-review-prompt.txt"
 	check "the task records self-review usage" contains "$sandbox/tasks/acme-widgets-42.md" "step: self_review"
 	task 42 sd >"$sandbox/show.txt"
 	check "the show pane lists the plan" contains "$sandbox/show.txt" "Requirements https://github.com/acme/widgets/issues/42#issuecomment-3001"
@@ -585,20 +599,22 @@ scenario_review_before_pr() {
 	touch "$state/findings-once"
 	check "the dashboard delegates #42" start 42
 	check "the runner reaches a clean review" wait_status "review ✓"
-	local task_file="$sandbox/tasks/acme-widgets-42.md" base head
+	local task_file="$sandbox/tasks/acme-widgets-42.md" base head first tree
+	tree=$(sed -n 's/^worktree: //p' "$task_file")
 	check "the implementer proposed the PR without pushing" contains "$state/agents.log" "claude review-ready"
 	check "the findings were fixed locally" contains "$state/agents.log" "claude local-fix"
-	check "two self-reviews ran" test "$(grep -c '^claude self-review$' "$state/agents.log")" = 2
-	check "two competing reviews ran" test "$(grep -c '^codex review$' "$state/agents.log")" = 2
+	check "self-review ran once" test "$(grep -c '^claude self-review$' "$state/agents.log")" = 1
+	check "the adversarial reviewer received the correction directly" test "$(grep -c '^codex review$' "$state/agents.log")" = 2
 	check "no review saw the branch on origin" bash -c "test \"\$(sort -u '$state/review-origin.log')\" = local"
 	check "the branch was pushed once" test "$(wc -l <"$state/pushes.log" | tr -d ' ')" = 1
 	base=$(git --git-dir="$sandbox/origin.git" rev-parse main)
 	head=$(git --git-dir="$sandbox/origin.git" rev-parse "$(sed -n 's/^branch: *//p' "$task_file")")
-	check "self-review rereads the complete diff after a fix" complete_review_diff "$state/self-review-prompt.txt" "$base" "$head"
-	check "competing review rereads the complete diff after a fix" complete_review_diff "$state/review-prompt.txt" "$base" "$head"
+	first=$(git --git-dir="$sandbox/origin.git" rev-parse "$head^")
+	check "self-review reads its full initial baseline" complete_review_diff "$state/self-review-prompt.txt" "$base" "$first"
+	check "adversarial reviewer reads the full diff after a fix" complete_review_diff "$state/adversarial-review-prompt.txt" "$base" "$head"
 	check "self-review omits task context" no_review_context "$state/self-review-prompt.txt"
-	check "competing review omits task context" no_review_context "$state/review-prompt.txt"
-	check "competing review omits its earlier finding" bash -c "! grep -qF 'retry 429 too' '$state/review-prompt.txt'"
+	check "adversarial review omits task context" no_review_context "$state/adversarial-review-prompt.txt"
+	check "adversarial review omits its earlier finding" bash -c "! grep -qF 'retry 429 too' '$state/adversarial-review-prompt.txt'"
 	check "the task records the pushed commit as the PR head" contains "$task_file" "pr_head: $head"
 	check "the last review covered the pushed commit" contains "$task_file" "head: $head"
 	check "the PR has the proposed description" contains "$state/pr-942.json" "Retry 5xx and 429."
@@ -640,26 +656,26 @@ scenario_complete_diff_review() {
 	first=$(git --git-dir="$sandbox/origin.git" rev-parse "$head^")
 	check "self-review ran once before the correction and once after" test "$(grep -c '^claude self-review$' "$state/agents.log")" = 2
 	check "the first self-review reads the complete large diff" complete_review_diff "$state/first-self-review-prompt.txt" "$base" "$first"
-	check "self-review rereads the complete large diff after a fix" complete_review_diff "$state/self-review-prompt.txt" "$base" "$head"
+	check "self-review follow-up reads only the verified fix range" complete_review_delta "$state/self-review-prompt.txt" "$first" "$head"
 	check "self-review omits its earlier finding" bash -c "! grep -qF 'Retry guard may be missing' '$state/self-review-prompt.txt'"
 	check "one competing review ran" test "$(grep -c '^codex review$' "$state/agents.log")" = 1
-	check "competing review reads the complete large diff after a fix" complete_review_diff "$state/review-prompt.txt" "$base" "$head"
+	check "adversarial reviewer reads the full diff after a fix" complete_review_diff "$state/adversarial-review-prompt.txt" "$base" "$head"
 	check "one final full check ran" test "$(grep -c '^claude final-check$' "$state/agents.log")" = 1
 }
 
-scenario_quota_skip() {
- echo "quota_skip: exhausted adversarial provider is skipped explicitly and the PR still opens"
- setup quota_skip
+scenario_quota_pause() {
+ echo "quota_pause: exhausted adversarial provider pauses without waiving its review"
+ setup quota_pause
  echo "review_before_pr: true" >>"$sandbox/config.yaml"
  touch "$state/codex-exhausted"
  check "the task starts with available Claude" start 42
- check "the task completes with an explicit skip" wait_status "review skipped (quota)"
- check "the task records the skipped verdict" contains "$sandbox/tasks/acme-widgets-42.md" "verdict: skipped"
- check "the log explains the skipped provider" contains "$sandbox/logs/acme-widgets-42.log" "Adversarial review skipped: codex quota exhausted"
- check "no exhausted Codex call ran" bash -c "! grep -q '^codex ' '$state/agents.log'"
- check "self-review still ran" contains "$state/agents.log" "claude self-review"
- check "the PR opened" contains "$state/agents.log" "claude open-pr"
- check "the final commit has full verification" contains "$sandbox/tasks/acme-widgets-42.md" "covered: true"
+ local file="$sandbox/tasks/acme-widgets-42.md"
+ check "the role pauses for quota exhaustion" eventually 15 grep -Eq '^state: FAILED$' "$file"
+ check "the pending adversarial action is retained" contains "$file" "kind: adversarial_review"
+ check "quota does not create a skipped verdict" bash -c "! grep -q 'verdict: skipped' '$file'"
+ check "the PR does not open before a clean adversarial review" bash -c "! grep -q '^claude open-pr$' '$state/agents.log'"
+ check "self-review ran before the pause" contains "$state/agents.log" "claude self-review"
+ check "the quota reason is recorded" contains "$file" "codex"
 }
 
 scenario_self_assessment() {
@@ -674,8 +690,8 @@ scenario_self_assessment() {
 	check "one independent self-review ran" test "$(grep -c '^claude self-review$' "$state/agents.log")" = 1
 	check "one adversarial review ran" test "$(grep -c '^codex review$' "$state/agents.log")" = 1
 	check "self-review omits task context" no_review_context "$state/self-review-prompt.txt"
-	check "competing review omits task context" no_review_context "$state/review-prompt.txt"
-	check "competing review omits rejection evidence" bash -c "! grep -qF 'caller in widgets.go already guards' '$state/review-prompt.txt'"
+	check "adversarial review omits task context" no_review_context "$state/adversarial-review-prompt.txt"
+	check "adversarial review omits rejection evidence" bash -c "! grep -qF 'caller in widgets.go already guards' '$state/adversarial-review-prompt.txt'"
 	check "the task preserves rejected finding reasons" contains "$task_file" "rejected_findings:"
 	check "the original reviewer verdict remains unchanged" contains "$task_file" "verdict: changes_requested"
 	check "no unnecessary correction commit ran" bash -c "! grep -qF 'claude local-fix' '$state/agents.log'"
@@ -723,14 +739,14 @@ scenario_planning_advice() {
  touch "$state/writing-advice"
  start 42 >/dev/null
  check "writing advice does not block the run" wait_status "review ✓"
- check "one planning turn ran" test "$(grep -c '^claude plan$' "$state/agents.log")" = 1
+ check "one planning turn ran" test "$(grep -c '^claude planner$' "$state/agents.log")" = 1
  check "writing advice is saved locally" contains "$sandbox/tasks/acme-widgets-42.md" 'planning_advice:'
  check "the note is saved" contains "$sandbox/tasks/acme-widgets-42.md" 'Shorten R1'
  check "advice is absent from tracker comments" bash -c "! grep -qF 'Shorten R1' '$state'/comment-*.md"
 }
 
 scenario_plan_reuse() {
-	echo "plan_reuse: a task whose record lost its plan adopts the plan on the issue"
+	echo "plan_reuse: the planner rechecks existing documents when the digest is absent"
 	setup plan_reuse
 	local comments='' entry i=0 doc title
 	for doc in prd:Requirements "plan:Work plan"; do
@@ -742,9 +758,10 @@ scenario_plan_reuse() {
 	printf '[[{"id":1999,"html_url":"https://github.com/acme/widgets/issues/42#issuecomment-1999","body":"Thanks, looking.","updated_at":"2026-09-20T09:00:00Z","user":{"login":"brymartinez"}},%s]]\n' "$comments" >"$state/conv-repos-acme-widgets-issues-42-comments.json"
 	check "the dashboard delegates #42" start 42
 	check "the runner reaches a clean review" wait_status "review ✓"
-	check "no planning turn runs" bash -c "! grep -qx 'claude plan' '$state/agents.log'"
+	check "the planner inspects existing documents when their digest is absent" contains "$state/prompt.txt" "Posted earlier."
+	check "the planner role runs once" test "$(grep -c '^claude planner$' "$state/agents.log")" = 1
 	check "nothing is posted on the issue" bash -c "! grep -qF 'api --method POST repos/acme/widgets/issues/42/comments' '$state/gh.log'"
-	check "the implementation follows the plan text on the issue" contains "$state/plan-posted-prompt.txt" "Posted earlier."
+	check "the planner receives existing plan text" contains "$state/prompt.txt" "Posted earlier."
 	check "the task records the adopted comments" grep -q 'comment_id: 2002' "$sandbox/tasks/acme-widgets-42.md"
 }
 
@@ -1505,7 +1522,7 @@ scenario_account() {
 	unset E2E_CLONE_URL
 }
 
-scenarios=${*:-runner review_before_pr retry_committed_correction self_assessment complete_diff_review quota_skip full_check final_check_stop planning_advice plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui routing history linear account learning knowledge_transfer}
+scenarios=${*:-runner review_before_pr retry_committed_correction self_assessment complete_diff_review quota_pause full_check final_check_stop plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui history linear account knowledge_transfer}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"

@@ -24,11 +24,15 @@ func (a App) codeReview(ctx context.Context, rec *task.Record, kind task.ReviewK
 	if base == "" || head == "" {
 		return agent.ReviewOutcome{}, errors.New("code review requires a verified base and head")
 	}
-	instructions, err := a.Stages.Resolve(d.Worktree, task.StageReview)
+	self := kind == task.SelfReview
+	stage := task.StageReview
+	if self {
+		stage = task.StageSelfReview
+	}
+	instructions, err := a.Stages.Resolve(d.Worktree, stage)
 	if err != nil {
 		return agent.ReviewOutcome{}, err
 	}
-	self := kind == task.SelfReview
 	purpose := "competing_review"
 	if self {
 		purpose = "self_review"
@@ -37,34 +41,78 @@ func (a App) codeReview(ctx context.Context, rec *task.Record, kind task.ReviewK
 		return agent.ReviewOutcome{}, err
 	}
 	fmt.Fprintf(log, "foreman: %s reviewing %s (round %d, %s)\n", reviewer.Name(), reviewTarget(rec), len(rec.Reviews)+1, purpose)
+	action := task.Action{Kind: task.SelfReviewAction, BaseRef: d.BaseRef, BaseHead: base, Head: head}
+	if !self {
+		action.Kind = task.AdversarialAction
+	}
+	if self && d.Action != nil && d.Action.Kind == task.SelfReviewAction &&
+		d.Action.Head == head && d.Action.BaseHead == base && d.Action.BaseRef == d.BaseRef &&
+		d.Action.FromHead != "" && d.Action.FromHead != head {
+		if _, err := a.Worktrees.ChangedPaths(ctx, d.Worktree, d.Action.FromHead, head); err == nil {
+			action.FromHead = d.Action.FromHead
+		}
+	}
+	in := agent.StartInput{
+		Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ReviewerBudgetUSD,
+		Prompt: agent.ReviewPrompt(agent.ReviewBrief{
+			BaseHead: base, FromHead: action.FromHead, Head: head, Self: self, Passes: a.reviewRounds(),
+			StageInstructions: instructions.Content(),
+		}),
+		Purpose: purpose, Step: agent.StepReview,
+	}
+	rec, err = a.beginAction(ctx, rec, action)
+	if err != nil {
+		return agent.ReviewOutcome{}, err
+	}
 	var out agent.ReviewOutcome
-	if !a.metered {
-		err = a.checkQuota(ctx, chosen, log)
+	if err = a.checkQuota(ctx, chosen, log); err == nil {
+		if self {
+			out, err = reviewer.Review(ctx, in)
+		} else {
+			out, err = a.retainedReview(ctx, rec, reviewer, in)
+		}
 	}
-	if err == nil {
-		out, err = reviewer.Review(ctx, agent.StartInput{
-			Worktree:     d.Worktree,
-			Log:          log,
-			MaxBudgetUSD: a.ReviewerBudgetUSD,
-			Prompt: agent.ReviewPrompt(agent.ReviewBrief{
-				BaseHead: base, Head: head, Self: self, Passes: a.reviewRounds(),
-				StageInstructions: instructions.Content(),
-			}),
-			Purpose: purpose,
-			Step:    agent.StepReview,
-		})
-	}
-	var unavailable quotaUnavailable
-	if !self && errors.As(err, &unavailable) && unavailable.Status == QuotaExhausted {
-		out = agent.ReviewOutcome{Skipped: true, Summary: fmt.Sprintf("Adversarial review skipped: %s quota exhausted", chosen)}
-		fmt.Fprintf(log, "foreman: %s\n", out.Summary)
-		err = nil
+	if out.Skipped && err == nil {
+		err = errors.New("review must complete before the task can advance")
 	}
 	for _, limitation := range out.Limitations {
 		if limitation.Blocking && err == nil {
 			err = fmt.Errorf("review incomplete for %s: %s", limitation.Behavior, limitation.Reason)
 		}
 	}
-	out.BaseRef, out.BaseHead = d.BaseRef, base
+	out.BaseRef, out.BaseHead, out.FromHead = d.BaseRef, base, action.FromHead
 	return out, err
+}
+
+func (a App) retainedReview(ctx context.Context, rec *task.Record, adapter AgentAdapter, in agent.StartInput) (agent.ReviewOutcome, error) {
+	reviewer, ok := adapter.(retainedReviewer)
+	if !ok {
+		return agent.ReviewOutcome{}, errors.New("adapter does not support retained reviews")
+	}
+	role := task.AdversarialRole
+	s := rec.Delegation.Adversary
+	if rec.Delegation.Action.Started && s.ID == "" {
+		return agent.ReviewOutcome{}, missingRoleSession{role}
+	}
+	rec, err := a.startAction(ctx, rec)
+	if err != nil {
+		return agent.ReviewOutcome{}, err
+	}
+	if s.ID != "" {
+		out, err := reviewer.ResumeReview(ctx, s, in)
+		if errors.Is(err, agent.ErrNoSession) {
+			err = missingRoleSession{role}
+		}
+		return out, err
+	}
+	var saveErr error
+	out, err := reviewer.StartReview(ctx, in, func(s task.Session) {
+		if s.ID != "" {
+			saveErr = a.saveRoleSession(ctx, rec, role, s)
+		}
+	})
+	if errors.Is(err, agent.ErrNoSession) {
+		err = missingRoleSession{role}
+	}
+	return out, errors.Join(err, saveErr)
 }

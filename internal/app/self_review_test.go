@@ -67,10 +67,16 @@ func TestSelfReviewRunsBeforeTheCompetingReviewOfAPR(t *testing.T) {
 	}
 }
 
+func selfFix(turn agent.Turn, round int) agent.Turn {
+	turn.Outcome.ReviewAssessment = &task.ReviewAssessment{Round: round}
+	return turn
+}
+
 func TestSelfReviewFindingsGoToTheImplementerAndAFreshSelfReviewFollows(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
-	f.claude.turns = []agent.Turn{prTurn("sid-1"), prTurn("sid-1")}
+	f.claude.turns = []agent.Turn{prTurn("sid-1"), selfFix(prTurn("sid-1"), 1)}
+	f.claude.onResume = func() { setHead(f, "c0ffee2") }
 	f.claude.reviews = []agent.ReviewOutcome{selfFindings()}
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
@@ -90,7 +96,7 @@ func TestSelfReviewFindingsGoToTheImplementerAndAFreshSelfReviewFollows(t *testi
 	}
 }
 
-func TestCompetingFindingsAreFixedThenSelfReviewedBeforeTheNextCompetingReview(t *testing.T) {
+func TestCompetingFindingsAreFixedAndReturnedToTheCompetingReviewer(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	f.claude.turns = []agent.Turn{prTurn("sid-1"), prTurn("sid-1"), prTurn("sid-1")}
@@ -110,7 +116,7 @@ func TestCompetingFindingsAreFixedThenSelfReviewedBeforeTheNextCompetingReview(t
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if kinds(got) != "self competing! self! self competing" {
+	if kinds(got) != "self competing! competing" {
 		t.Fatalf("reviews %s", kinds(got))
 	}
 	last := f.codex.reviewed[1]
@@ -140,7 +146,8 @@ func TestFixesFromBothReviewersShareTheFixLimit(t *testing.T) {
 	f := newFixture()
 	f.app.FixRounds = 1
 	key := started(t, f, startReq(t))
-	f.claude.turn = prTurn("sid-1")
+	f.claude.turns = []agent.Turn{prTurn("sid-1"), selfFix(prTurn("sid-1"), 1)}
+	f.claude.onResume = func() { setHead(f, "c0ffee2") }
 	f.claude.reviews = []agent.ReviewOutcome{selfFindings()}
 	f.codex.reviews = []agent.ReviewOutcome{findings("blocking")}
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
@@ -220,7 +227,7 @@ func TestLocalChangeIsSelfReviewedBeforeTheCompetingReviewAndThePR(t *testing.T)
 	f := newFixture()
 	key := localTask(t, f)
 	f.wt.checkpointHeads = []string{"commit1", "commit2"}
-	f.claude.turns = []agent.Turn{reviewReadyTurn("sid-1", proposedBody), reviewReadyTurn("sid-1", proposedBody)}
+	f.claude.turns = []agent.Turn{reviewReadyTurn("sid-1", proposedBody), selfFix(reviewReadyTurn("sid-1", proposedBody), 1)}
 	f.claude.reviews = []agent.ReviewOutcome{selfFindings()}
 	opensPR(t, f, "commit2", proposedTitle, proposedBody, 1)
 	f.claude.turn = prTurn("sid-1")

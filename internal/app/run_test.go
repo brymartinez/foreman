@@ -107,7 +107,7 @@ func TestReviewLoopEscalatesAfterRoundCapAndResumesOnAnswer(t *testing.T) {
 		t.Errorf("escalation question invalid: %v", err)
 	}
 
-	if _, err := f.app.Respond(context.Background(), key, "B"); err != nil {
+	if _, err := f.app.Respond(context.Background(), key, "A"); err != nil {
 		t.Fatal(err)
 	}
 	resumesBefore := len(f.claude.resumed)
@@ -118,10 +118,10 @@ func TestReviewLoopEscalatesAfterRoundCapAndResumesOnAnswer(t *testing.T) {
 	if got.State != task.WaitingForCI || !got.LatestReview().Clean || len(got.CompetingReviews()) != 5 {
 		t.Fatalf("after answer: state %s reviews %d", got.State, len(got.Reviews))
 	}
-	if len(f.claude.resumed) <= resumesBefore || !strings.Contains(f.claude.resumed[len(f.claude.resumed)-1], "Decision: B. Leave the code as is") {
+	if len(f.claude.resumed) <= resumesBefore || !strings.Contains(f.claude.resumed[len(f.claude.resumed)-1], "Decision: A. Address the remaining findings in another round") {
 		t.Errorf("answer not delivered to retained implementation session: %q", f.claude.prompts)
 	}
-	if strings.Contains(f.codex.reviewed[len(f.codex.reviewed)-1], "Leave the code as is") {
+	if strings.Contains(f.codex.reviewed[len(f.codex.reviewed)-1], "Address the remaining findings in another round") {
 		t.Error("code reviewer was shown the developer's decision")
 	}
 }
@@ -216,21 +216,6 @@ func TestUnavailableAdversarialAgentFailsTheTask(t *testing.T) {
 	}
 }
 
-func TestFreshTurnCarriesOpenFindingsWhenSessionIsGone(t *testing.T) {
-	f := newFixture()
-	key := started(t, f, startReq(t))
-	f.claude.turns = []agent.Turn{prTurn("sid-1"), prTurn("sid-2")}
-	f.claude.resumeErr = errors.Join(errors.New("gone"), agent.ErrNoSession)
-	f.codex.reviews = []agent.ReviewOutcome{findings("blocking")}
-	f.run(context.Background(), key, 4242, io.Discard)
-	if !strings.Contains(f.claude.prompt, "## Findings to correct") || !strings.Contains(f.claude.prompt, "[blocking] 4xx retried") {
-		t.Errorf("fresh prompt lacks findings:\n%s", f.claude.prompt)
-	}
-	if got := f.store.recs[key]; got.State != task.WaitingForCI || !got.LatestReview().Clean {
-		t.Errorf("state %s", got.State)
-	}
-}
-
 // The implementer opens the PR in the same turn, so it gets implement and pr.
 func TestImplementationPromptGetsImplementAndPRInstructionsOnly(t *testing.T) {
 	f := newFixture()
@@ -284,7 +269,7 @@ func TestReviewPromptGetsOnlyReviewInstructions(t *testing.T) {
 	if strings.Contains(p, "implement instructions") || strings.Contains(p, "pr instructions") {
 		t.Errorf("review prompt carries another stage's instructions:\n%s", p)
 	}
-	if got := f.stages.calls; len(got) != 4 || got[0] != "/wt/testorg-example/feat/825-provider-retries implement" || got[1] != "/wt/testorg-example/feat/825-provider-retries pr" || got[2] != "/wt/testorg-example/feat/825-provider-retries review" || got[3] != got[2] {
+	if got := f.stages.calls; len(got) != 4 || got[0] != "/wt/testorg-example/feat/825-provider-retries implement" || got[1] != "/wt/testorg-example/feat/825-provider-retries pr" || got[2] != "/wt/testorg-example/feat/825-provider-retries self-review" || got[3] != "/wt/testorg-example/feat/825-provider-retries review" {
 		t.Errorf("lookups %q; want implement, pr, then two review lookups", got)
 	}
 }
@@ -440,7 +425,7 @@ func TestRunTaskRecordsACancelledTurn(t *testing.T) {
 	if got.State != task.Failed || got.LastOutcome.Status != Cancelled || got.LastOutcome.Summary != "run cancelled during planning (terminated signal received)" {
 		t.Fatalf("state %s outcome %+v", got.State, got.LastOutcome)
 	}
-	if got.Delegation.Implementer.ID != "sid-1" || got.Usage.ClaudeCostUSD != 1.25 || got.Delegation.RunnerPID != 0 {
+	if got.Delegation.Planner.ID != "sid-1" || got.Usage.ClaudeCostUSD != 1.25 || got.Delegation.RunnerPID != 0 {
 		t.Errorf("a cancelled turn must keep its session and usage: %+v %+v", got.Delegation, got.Usage)
 	}
 	if !strings.Contains(log.String(), "foreman: stopped during planning: terminated signal received") {
@@ -568,7 +553,7 @@ func TestAnsweredPlanningQuestionResumesThePlanning(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	rec := f.store.recs[key]
-	rec.Delegation.Implementer.ID = "sid-1"
+	rec.Delegation.Planner = task.Session{Agent: task.Claude, ID: "sid-1"}
 	rec.Decisions = []task.Decision{{Question: task.Question{Issue: "Retry 4xx?"}, Answer: "A. 5xx only", AnsweredAt: f.app.Now()}}
 	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2")}
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {

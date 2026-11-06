@@ -276,6 +276,8 @@ type fakeAgent struct {
 	reviewErr     error
 	reviewErrs    []error
 	reviewed      []string
+	reviewStarts  int
+	reviewResumes []task.Session
 	during        func() // runs inside Start, while the turn is in progress
 	onResume      func() // the same, inside Resume
 	onReview      func() // the same, inside Review
@@ -293,6 +295,17 @@ func (f *fakeAgent) next() (agent.Turn, error) {
 		return t, nil
 	}
 	return f.turn, f.err
+}
+
+func (f *fakeAgent) StartReview(ctx context.Context, in agent.StartInput, save func(task.Session)) (agent.ReviewOutcome, error) {
+	f.reviewStarts++
+	save(task.Session{Agent: f.Name(), ID: "retained-review"})
+	return f.Review(ctx, in)
+}
+
+func (f *fakeAgent) ResumeReview(ctx context.Context, s task.Session, in agent.StartInput) (agent.ReviewOutcome, error) {
+	f.reviewResumes = append(f.reviewResumes, s)
+	return f.Review(ctx, in)
 }
 
 func (f *fakeAgent) Review(_ context.Context, in agent.StartInput) (agent.ReviewOutcome, error) {
@@ -415,6 +428,19 @@ func newFixture() fixture {
 func (f fixture) run(ctx context.Context, key task.Key, pid int, log io.Writer) error {
 	token := ""
 	if rec := f.store.recs[key]; rec != nil && rec.Delegation != nil {
+		if !rec.PlanPosted() && rec.Delegation.PR == 0 && rec.Delegation.PlanDraft == nil && len(rec.Plan) == 0 && len(f.gh.issueComments) == 0 {
+			provider := f.claude
+			if rec.Delegation.Implementer.Agent == task.Codex {
+				provider = f.codex
+			}
+			turn := provider.turn
+			if len(provider.turns) > 0 {
+				turn = provider.turns[0]
+			}
+			if finishesChange(turn.Outcome.Status) || turn.Outcome.Status == agent.Checkpoint {
+				postedPlan(f, rec)
+			}
+		}
 		if rec.Delegation.Launch == nil {
 			rec.Delegation.Launch = &task.Launch{Token: "test-launch", PID: os.Getpid(), Since: now}
 		}
@@ -577,53 +603,22 @@ func TestStartAcceptsPRClosed(t *testing.T) {
 	}
 }
 
-func TestRestartWithAnotherAgentKeepsThePRWithCommentsWaiting(t *testing.T) {
-	f := newFixture()
-	key := task.Key{Repo: "testorg/example", Number: 825}
-	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.Failed,
-		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex, ID: "old"}, Branch: "feat/825-provider-retries", PR: 912, PRHead: "abc"},
-		Feedback:   []task.Feedback{{Kind: task.IssueComment, ID: 1, Digest: "d"}}}
-	rec, err := f.app.Start(context.Background(), startReq(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	d := rec.Delegation
-	if d.Implementer.Agent != task.Claude || d.Implementer.ID != "" {
-		t.Errorf("implementer = %+v, want a fresh claude session", d.Implementer)
-	}
-	if d.PR != 912 || d.PRHead != "abc" || len(rec.UnhandledFeedback()) != 1 {
-		t.Errorf("pr %d head %q unanswered %d; the comments lost their PR", d.PR, d.PRHead, len(rec.UnhandledFeedback()))
-	}
-}
-
-func TestRestartWithAnotherAgentKeepsExistingPR(t *testing.T) {
-	f := newFixture()
-	key := task.Key{Repo: "testorg/example", Number: 825}
-	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.Failed,
-		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex}, Branch: "feat/825-provider-retries", PR: 912}}
-	rec, err := f.app.Start(context.Background(), startReq(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rec.Delegation.PR != 912 {
-		t.Errorf("pr = %d; a handoff must keep the existing PR", rec.Delegation.PR)
-	}
-}
-
 func TestRestartKeepsBranchWhenTitleChanged(t *testing.T) {
 	f := newFixture()
 	key := task.Key{Repo: "testorg/example", Number: 825}
 	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.Failed,
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex}, Branch: "agent/825-old-title", Worktree: "/wt/testorg-example/825-old-title"}}
 	f.gh.issue.Title = "A completely new title"
-	rec, err := f.app.Start(context.Background(), startReq(t))
+	req := startReq(t)
+	req.Agent = task.Codex
+	rec, err := f.app.Start(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if rec.Delegation.Branch != "agent/825-old-title" || f.wt.reqs[0].Path != "/wt/testorg-example/825-old-title" {
 		t.Errorf("branch %s path %s", rec.Delegation.Branch, f.wt.reqs[0].Path)
 	}
-	if rec.Delegation.Implementer.Agent != task.Claude {
+	if rec.Delegation.Implementer.Agent != task.Codex {
 		t.Errorf("agent not switched: %v", rec.Delegation.Implementer)
 	}
 }
@@ -670,11 +665,14 @@ func TestRunTaskAppliesOutcome(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := f.store.recs[rec.Key]
-			if got.State != c.state || got.Delegation.RunnerPID != 0 || got.Delegation.Implementer.ID != "sid-9" {
-				t.Errorf("state %s pid %d session %+v", got.State, got.Delegation.RunnerPID, got.Delegation.Implementer)
-			}
-			if !strings.Contains(f.claude.prompt, "Retry failed requests.") || strings.Contains(f.claude.prompt, "5xx-only retry semantics") {
+			session := got.Delegation.Planner
+			if c.turn.Outcome.Status == agent.PROpened {
+				session = got.Delegation.Implementer
+			} else if !strings.Contains(f.claude.prompt, "Retry failed requests.") || strings.Contains(f.claude.prompt, "5xx-only retry semantics") {
 				t.Error("planner should receive the issue description without the context file")
+			}
+			if got.State != c.state || got.Delegation.RunnerPID != 0 || session.ID != "sid-9" {
+				t.Errorf("state %s pid %d session %+v", got.State, got.Delegation.RunnerPID, session)
 			}
 			if c.check != nil {
 				c.check(t, got)

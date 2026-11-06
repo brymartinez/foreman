@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"fmt"
 	"maps"
 	"slices"
@@ -35,13 +34,6 @@ func clonePlanDraft(d *task.PlanDraft) *task.PlanDraft {
 	return &out
 }
 
-func (a App) savePlanDraft(ctx context.Context, key task.Key, draft *task.PlanDraft) (*task.Record, error) {
-	return a.update(ctx, key, existing(func(cur *task.Record) {
-		cur.Delegation.PlanDraft = clonePlanDraft(draft)
-		cur.PlanningAdvice = slices.Clone(draft.Advice)
-	}))
-}
-
 // restorePlanDraft continues local planning work only while triage, the issue
 // description, and every existing target comment still match its saved sources.
 func (r *taskRun) restorePlanDraft() (bool, step, error) {
@@ -61,30 +53,27 @@ func (r *taskRun) restorePlanDraft() (bool, step, error) {
 	for _, doc := range task.PlanDocs {
 		found, exists := current.found[doc]
 		source, wasPresent := draft.Sources[doc]
+		if exists && wasPresent && draft.Documents[doc] == source {
+			id := found.comment.ExternalCommentID
+			if r.rec.IssueSource() != task.Linear {
+				id = fmt.Sprint(found.comment.CommentID)
+			}
+			still, err := r.a.stillPlanComment(r.ctx, r.rec.Key, doc, id)
+			if err != nil {
+				r.rec, err = r.a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
+					failTask(cur, "reading saved plan comment: "+err.Error(), r.a.Now())
+				}))
+				return true, stepDone, err
+			}
+			exists = still != ""
+		}
 		if (!exists && wasPresent) || (exists && found.text != source && found.text != draft.Documents[doc]) {
 			valid = false
 		}
 	}
 	if !valid {
-		r.rec, err = r.a.update(r.final, r.rec.Key, existing(func(cur *task.Record) { cur.Delegation.PlanDraft = nil; cur.Delegation.Implementer.ID = "" }))
+		r.rec, err = r.a.update(r.final, r.rec.Key, existing(func(cur *task.Record) { cur.Delegation.PlanDraft = nil; cur.Delegation.Action = nil }))
 		return false, stepImplement, err
-	}
-	if draft.Stopped || draft.Revisions >= 3 {
-		answer := scopePlanAnswer(r.rec, r.scope.digest, planDigest(draft.Documents))
-		if strings.HasPrefix(answer, "B.") {
-			r.rec, err = r.a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
-				failTask(cur, "confirmed triage has not changed; correct the triage comment and restart", r.a.Now())
-			}))
-			return true, stepDone, err
-		}
-		if strings.HasPrefix(answer, "A.") {
-			draft.Stopped = false
-			draft.Revisions = 0
-			r.rec, err = r.a.savePlanDraft(r.final, r.rec.Key, draft)
-			if err != nil {
-				return true, stepDone, err
-			}
-		}
 	}
 	r.plan = current
 	r.rec, err = r.a.postPlan(r.ctx, r.final, r.rec, draft.Documents, current, r.log)

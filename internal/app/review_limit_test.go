@@ -52,8 +52,13 @@ func TestSelfReviewLimitIsAssessedByTheImplementer(t *testing.T) {
 		} else {
 			last.Outcome = agent.Outcome{Status: agent.Blocked, Summary: "The remaining finding needs your decision", Questions: []task.Question{{Issue: "Should this case be supported?", Context: "The remaining finding changes the approved scope.", Options: []task.Option{{Label: "A", Description: "Keep the scope"}, {Label: "B", Description: "Extend it"}}, Recommendation: "A", ImpactIfWrong: "Extra behavior"}}}
 		}
-		f.claude.turns = []agent.Turn{prTurn("sid"), prTurn("sid"), last}
+		f.claude.turns = []agent.Turn{prTurn("sid"), selfFix(prTurn("sid"), 1), last}
 		f.claude.reviews = []agent.ReviewOutcome{selfFindings(), selfFindings()}
+		f.claude.onResume = func() {
+			if len(f.claude.resumed) == 1 {
+				setHead(f, "c0ffee2")
+			}
+		}
 		if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 			t.Fatal(err)
 		}
@@ -78,11 +83,13 @@ func TestSelfReviewLimitRejectsAnotherCorrectionWithoutDecision(t *testing.T) {
 	f.app.FixRounds = 1
 	key := started(t, f, startReq(t))
 	postedPlan(f, f.store.recs[key])
-	f.claude.turns = []agent.Turn{prTurn("sid"), prTurn("sid"), prTurn("sid")}
+	f.claude.turns = []agent.Turn{prTurn("sid"), selfFix(prTurn("sid"), 1), selfFix(prTurn("sid"), 2)}
 	f.claude.reviews = []agent.ReviewOutcome{selfFindings(), selfFindings()}
 	f.claude.onResume = func() {
-		if len(f.claude.resumed) == 2 {
+		if len(f.claude.resumed) == 1 {
 			pushHead(f, "c0ffee2")
+		} else {
+			pushHead(f, "c0ffee3")
 		}
 	}
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {

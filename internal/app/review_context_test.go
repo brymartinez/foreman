@@ -23,41 +23,6 @@ func TestReviewStopsWhenTheBaseCannotBeResolved(t *testing.T) {
 	}
 }
 
-func TestWritingAdvicePostsPlanWithoutRevisionAndKeepsLocalNotes(t *testing.T) {
-	f := newFixture()
-	key := started(t, f, startReq(t))
-	f.claude.turns = []agent.Turn{plannedTurn("plan"), prTurn("implementation")}
-	f.claude.scopeReviews = []agent.ReviewOutcome{{Clean: true, Advice: []task.Advice{{Summary: "Shorter sentences", Detail: "Split the first sentence."}}}}
-	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	rec := f.store.recs[key]
-	if !rec.PlanPosted() || len(f.claude.resumed) != 0 || len(f.claude.scopeReviewed) != 1 || len(rec.PlanningAdvice) != 1 || rec.Delegation.PlanDraft != nil {
-		t.Fatalf("state %s advice %+v", rec.State, rec.PlanningAdvice)
-	}
-	for _, comment := range f.gh.comments {
-		if strings.Contains(comment.Body, "Shorter sentences") {
-			t.Fatal("writing advice was posted to the issue")
-		}
-	}
-}
-
-func TestAdoptingPlanKeepsWritingAdviceWithoutARevision(t *testing.T) {
-	f := newFixture()
-	key := started(t, f, startReq(t))
-	postedPlan(f, f.store.recs[key])
-	f.store.recs[key].Delegation.PlanDigest = ""
-	f.store.recs[key].Delegation.PlanScopeDigest = ""
-	f.claude.scopeReviews = []agent.ReviewOutcome{{Clean: true, Advice: []task.Advice{{Summary: "Shorten R1"}}}}
-	f.claude.turns = []agent.Turn{prTurn("implementation")}
-	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	if rec := f.store.recs[key]; len(rec.PlanningAdvice) != 1 || len(f.claude.resumed) != 0 || !rec.PlanPosted() {
-		t.Fatalf("state %s advice %+v", rec.State, rec.PlanningAdvice)
-	}
-}
-
 func TestFixLoopReviewsTheCompleteDiffWithoutSharingFindings(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
@@ -75,7 +40,7 @@ func TestFixLoopReviewsTheCompleteDiffWithoutSharingFindings(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := f.store.recs[key]
-	if kinds(rec) != "self competing! self competing" {
+	if kinds(rec) != "self competing! competing" {
 		t.Fatalf("reviews %s", kinds(rec))
 	}
 	for _, r := range rec.Reviews[2:] {
@@ -83,7 +48,7 @@ func TestFixLoopReviewsTheCompleteDiffWithoutSharingFindings(t *testing.T) {
 			t.Fatalf("context %+v", r)
 		}
 	}
-	for _, reviews := range [][]string{f.claude.reviewed, f.codex.reviewed} {
+	for _, reviews := range [][]string{f.codex.reviewed} {
 		if len(reviews) != 2 || !strings.Contains(reviews[1], "git diff --no-ext-diff --no-textconv --ignore-submodules=none "+f.wt.reviewBase+"...c0ffee2 --") || strings.Contains(reviews[1], "4xx retried") {
 			t.Fatalf("follow-up review omitted the complete diff or included prior findings: %q", reviews)
 		}

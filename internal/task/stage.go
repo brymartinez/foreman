@@ -9,14 +9,15 @@ import (
 type Stage string
 
 const (
-	StagePlan      Stage = "plan"
-	StageImplement Stage = "implement"
-	StageReview    Stage = "review"
-	StagePR        Stage = "pr"
+	StagePlan       Stage = "plan"
+	StageImplement  Stage = "implement"
+	StageSelfReview Stage = "self-review"
+	StageReview     Stage = "review"
+	StagePR         Stage = "pr"
 )
 
 // Stages lists every stage in workflow order.
-var Stages = []Stage{StagePlan, StageImplement, StageReview, StagePR}
+var Stages = []Stage{StagePlan, StageImplement, StageSelfReview, StageReview, StagePR}
 
 func ParseStage(s string) (Stage, error) {
 	for _, st := range Stages {

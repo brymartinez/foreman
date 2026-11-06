@@ -40,7 +40,7 @@ func postedPlan(f fixture, rec *task.Record) {
 	rec.Delegation.PlanDigest = planDigest(texts)
 }
 
-func TestCheckpointStartsFreshImplementationSessionWithOnlyDurableHandoff(t *testing.T) {
+func TestCheckpointContinuesTheSameImplementationSession(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	postedPlan(f, f.store.recs[key])
@@ -50,8 +50,8 @@ func TestCheckpointStartsFreshImplementationSessionWithOnlyDurableHandoff(t *tes
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if f.claude.starts != 2 || len(f.claude.resumed) != 0 {
-		t.Fatalf("starts %d resumes %d, want two fresh sessions", f.claude.starts, len(f.claude.resumed))
+	if f.claude.starts != 1 || len(f.claude.resumed) != 1 {
+		t.Fatalf("starts %d resumes %d, want one start and one resume", f.claude.starts, len(f.claude.resumed))
 	}
 	if got.State != task.WaitingForCI || got.Delegation.Checkpoints != 1 || got.Delegation.CheckpointHead != "commit1" || got.Delegation.CheckpointNext != "" {
 		t.Fatalf("checkpoint and PR state = %+v", got.Delegation)
@@ -59,13 +59,13 @@ func TestCheckpointStartsFreshImplementationSessionWithOnlyDurableHandoff(t *tes
 	if got.Usage.ClaudeCostUSD != 1.25 || got.Usage.ClaudeTurns != 1 {
 		t.Fatalf("checkpoint usage = %+v", got.Usage)
 	}
-	p := f.claude.prompts[1]
-	for _, want := range []string{"commit1", "Add the dashboard log pager", "Posted plan."} {
+	p := f.claude.resumed[0]
+	for _, want := range []string{"first-session: ", "commit1", "Add the dashboard log pager", "Posted plan."} {
 		if !strings.Contains(p, want) {
 			t.Errorf("fresh prompt missing %q", want)
 		}
 	}
-	for _, unwanted := range []string{"Committed the first part", "first-session"} {
+	for _, unwanted := range []string{"Committed the first part"} {
 		if strings.Contains(p, unwanted) {
 			t.Errorf("fresh prompt carried %q", unwanted)
 		}
@@ -85,7 +85,7 @@ func TestFailedCheckpointValidationResumesSameSessionForRepair(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.WaitingForCI || got.Delegation.Checkpoints != 1 || f.claude.starts != 2 || len(f.claude.resumed) != 1 {
+	if got.State != task.WaitingForCI || got.Delegation.Checkpoints != 1 || f.claude.starts != 1 || len(f.claude.resumed) != 2 {
 		t.Fatalf("state %s checkpoints %d starts %d resumes %v", got.State, got.Delegation.Checkpoints, f.claude.starts, f.claude.resumed)
 	}
 	if !strings.Contains(f.claude.resumed[0], "first-session") || !strings.Contains(f.claude.resumed[0], "pnpm lint") {

@@ -52,7 +52,7 @@ type TaskBrief struct {
 	CorrectionAnswers  []task.Decision
 	// PriorPR is the pull request of a run the developer reset, or nil.
 	PriorPR *PriorPR
-	// A checkpoint starts a new implementation session from committed work.
+	// A checkpoint resumes implementation from committed work.
 	CheckpointHead string
 	NextObjective  string
 	// PRD is the posted PRD's text, for the reviewer, who has no network.
@@ -127,7 +127,7 @@ func ImplementationPrompt(b TaskBrief) string {
 		s.WriteString(RequirementsValidationInstruction + "\n" + b.PlanText + "\n\n")
 	}
 	if b.NextObjective != "" {
-		fmt.Fprintf(&s, "## Continue from checkpoint\n\nThe branch is clean at commit %s. This is a new session; inspect the committed code as needed. Your next objective is: %s\n\nDo not reconstruct or request the earlier session transcript.\n\n", b.CheckpointHead, b.NextObjective)
+		fmt.Fprintf(&s, "## Continue from checkpoint\n\nThe branch is clean at commit %s. Inspect the committed code as needed. Your next objective is: %s\n\nDo not reconstruct or request the earlier session transcript.\n\n", b.CheckpointHead, b.NextObjective)
 	}
 
 	if answered := answeredDecisions(b.Decisions); len(answered) > 0 {
@@ -173,9 +173,9 @@ func ImplementationPrompt(b TaskBrief) string {
 		}
 		fmt.Fprintf(&s, `## Implementation checkpoints
 
-For a multi-part change, complete one coherent, testable part at a time. When that part is committed and more work remains, end this session with status "checkpoint". Ensure the worktree is clean, report the validation you ran, and set nextObjective to one short, concrete objective for a fresh session. Do not push or open a pull request at a checkpoint. When the whole change is ready, %s.
+For a multi-part change, complete one coherent, testable part at a time. When that part is committed and more work remains, end this turn with status "checkpoint". Ensure the worktree is clean, report the validation you ran, and set nextObjective to one short, concrete objective for the next turn. Do not push or open a pull request at a checkpoint. When the whole change is ready, %s.
 
-The next session receives the commit, nextObjective, and checked requirements and work plan, not this transcript. Keep nextObjective short and concrete; the committed code and documents hold the details.
+The next turn resumes this session with the commit, nextObjective, and checked plan. Keep nextObjective short and concrete; the committed code and documents hold the details.
 
 `, finish)
 	}

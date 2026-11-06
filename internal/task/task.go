@@ -199,7 +199,10 @@ type PlanDraft struct {
 // Delegation exists once the user has run start; tracked-only items have none.
 type Delegation struct {
 	PlanDraft   *PlanDraft
+	Planner     Session
 	Implementer Session
+	Adversary   Session
+	Action      *Action
 	// Profile is set when routing chose the implementer; RouteReason says why.
 	// RouteLogged is set once the runner has written the route line to the log.
 	Profile     *Profile
@@ -731,9 +734,9 @@ type Review struct {
 	Limitations []Limitation
 }
 
-// Accepted permits progress after a clean review or an explicit adversarial quota skip.
+// Accepted permits progress after a clean review.
 func (r *Review) Accepted() bool {
-	return r != nil && (r.Clean || (r.Kind == CompetingReview && r.Skipped))
+	return r != nil && r.Clean
 }
 
 // LatestReview is the most recent review round of either kind, or nil. Its findings
@@ -800,6 +803,14 @@ func (r *Record) SelfReviewPassed() bool {
 // NextReview is the review the current change needs next: the self-review until a
 // clean one covers it, then the competing review.
 func (r *Record) NextReview() ReviewKind {
+	if d := r.Delegation; d != nil && d.Action != nil {
+		switch d.Action.Kind {
+		case SelfReviewAction:
+			return SelfReview
+		case AdversarialAction:
+			return CompetingReview
+		}
+	}
 	if r.SelfReviewPassed() {
 		return CompetingReview
 	}
@@ -878,7 +889,7 @@ func (r *Record) ReviewPending() bool {
 		// restart must not skip even when that review read the same head.
 		return true
 	}
-	if r.competingCovers(r.LatestCompeting()) {
+	if latest := r.LatestCompeting(); r.competingCovers(latest) && !latest.Skipped {
 		return false
 	}
 	return !r.selfCovers(self) || r.SelfReviewPassed()
@@ -992,6 +1003,8 @@ func (r *Record) NextStage() State {
 	switch {
 	case d == nil:
 		return Planning
+	case d.Action != nil:
+		return d.Action.State()
 	case d.ConflictPending, d.PlanImplementationPending, r.FinalCheckPending():
 		return Implementing
 	case r.OpenPending():

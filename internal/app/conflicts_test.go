@@ -58,21 +58,6 @@ func TestConflictRunsMergeTurnThenReview(t *testing.T) {
 	}
 }
 
-func TestFreshMergeTurnWhenSessionIsGone(t *testing.T) {
-	f := newFixture()
-	key := started(t, f, startReq(t))
-	f.claude.turns = []agent.Turn{prTurn("sid-1"), prTurn("sid-2")}
-	f.claude.resumeErr = errors.Join(errors.New("gone"), agent.ErrNoSession)
-	f.wt.conflicts = [][]string{{"retry.go"}}
-	got := run(t, f, key)
-	if !strings.Contains(f.claude.prompt, "## Merge conflicts") || !strings.Contains(f.claude.prompt, "- retry.go\n") {
-		t.Errorf("fresh prompt lacks the merge:\n%s", f.claude.prompt)
-	}
-	if got.State != task.WaitingForCI || len(got.CompetingReviews()) != 1 {
-		t.Errorf("state %s reviews %d", got.State, len(got.CompetingReviews()))
-	}
-}
-
 func TestConflictAfterCleanReviewStillReviewsNewHead(t *testing.T) {
 	f := newFixture()
 	key := reviewed(t, f)

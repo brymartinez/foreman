@@ -3,11 +3,6 @@ package app
 import (
 	"context"
 	"errors"
-	"fmt"
-	"os"
-	"slices"
-	"strings"
-	"unicode/utf8"
 
 	"github.com/brymartinez/foreman/internal/agent"
 	"github.com/brymartinez/foreman/internal/task"
@@ -16,20 +11,6 @@ import (
 // ErrRoutingOff means there is no routing.yaml, so dashboard starts use the agent
 // the developer or auto.agent names.
 var ErrRoutingOff = errors.New("routing is off")
-
-// Limits on what the selector reads, in runes. Each input has its own budget, and
-// with routing.MaxRulesRunes they sum to under 20000, so no input crowds out another
-// and the prompt needs no overall cut.
-const (
-	routeTitleRunes    = 300
-	routeLabelsRunes   = 500
-	routeBodyRunes     = 6000
-	routeComments      = 10
-	routeCommentRunes  = 1000
-	routeCommentsRunes = 5000 // all kept comments together
-	routeContextRunes  = 4000
-	routeReasonRunes   = 120
-)
 
 type RouteRequest struct {
 	Key         task.Key // source-qualified inbox identity; legacy callers use Repo and Issue
@@ -51,168 +32,18 @@ type Decision struct {
 	Selection agent.Selection
 }
 
-// Route picks the profile a new task starts with. Fit comes first: the selector
-// picks a rule, and only that rule's profiles are candidates, in the order the rule
-// lists them. Quota then drops candidates whose agent is confirmed exhausted or
-// not set up. When quota is unknown the default wins if it is a candidate.
-func (a App) Route(ctx context.Context, req RouteRequest) (Decision, error) {
+// Route resolves the configured default profile without a model call.
+func (a App) Route(ctx context.Context, _ RouteRequest) (Decision, error) {
 	if a.RoutingErr != nil {
 		return Decision{}, a.RoutingErr
 	}
 	cfg := a.Routing
-	if cfg == nil || a.Selector == nil {
+	if cfg == nil {
 		return Decision{}, ErrRoutingOff
 	}
-	quotas := a.readQuotas(ctx, nil)
-	sel, note := agent.Selection{}, ""
-	if req.Prior != nil {
-		sel = *req.Prior
-	} else {
-		prompt, err := a.routePrompt(ctx, req)
-		if err != nil {
-			return Decision{}, err
-		}
-		s := cfg.SelectorFor(a.RoutingDefaults)
-		chosen, quotaErr := a.quotaImplementer(s.Agent, quotas)
-		if quotaErr != nil {
-			blocked := quotaErr.Error()
-			if otherErr := quotaError(s.Agent.Reviewer(), quotas); otherErr != nil {
-				blocked += "; " + otherErr.Error()
-			}
-			return Decision{Wait: blocked, Reason: "selector unavailable"}, nil
-		}
-		if chosen != s.Agent {
-			inherit := a.RoutingDefaults[chosen]
-			s.Agent, s.Model, s.ReasoningEffort = chosen, inherit.PlanModel, inherit.PlanReasoningEffort
-			if s.Model == "" {
-				s.Model = inherit.Model
-			}
-			if s.ReasoningEffort == "" {
-				s.ReasoningEffort = inherit.ReasoningEffort
-			}
-		}
-		sel, err = a.Selector.Select(ctx, agent.SelectInput{Agent: s.Agent, Model: s.Model, ReasoningEffort: s.ReasoningEffort, Prompt: prompt})
-		if err != nil {
-			sel, note = agent.Selection{}, "selector failed: "+err.Error()
-		}
+	p := cfg.Resolve(cfg.Default, a.RoutingDefaults)
+	if err := a.checkQuota(ctx, p.Agent, nil); err != nil {
+		return Decision{Wait: err.Error(), Reason: "default profile unavailable"}, nil
 	}
-	if sel.Rule > len(cfg.Rules) {
-		note = fmt.Sprintf("selector named unknown rule %d", sel.Rule)
-		sel.Rule = 0
-	}
-	candidates, reason := []string{cfg.Default}, "default"
-	switch {
-	case sel.Rule > 0:
-		rule := cfg.Rules[sel.Rule-1]
-		candidates, reason = rule.Profiles, rule.Reason()
-	case note != "":
-		reason = note + "; default"
-	default:
-		reason = "no rule fits; default"
-	}
-
-	var runnable []string
-	var blockedAgents []task.Agent
-	var blocked []string
-	unknown := false
-	for _, name := range candidates {
-		ag := cfg.Profiles[name].Agent
-		switch quotas[ag].Status {
-		case QuotaExhausted:
-			if !slices.Contains(blockedAgents, ag) {
-				blockedAgents = append(blockedAgents, ag)
-				blocked = append(blocked, string(ag)+" quota exhausted")
-			}
-			continue
-		case QuotaNotSetUp:
-			if !slices.Contains(blockedAgents, ag) {
-				blockedAgents = append(blockedAgents, ag)
-				blocked = append(blocked, string(ag)+" not set up")
-			}
-			continue
-		case QuotaUnknown:
-			unknown = true
-		}
-		runnable = append(runnable, name)
-	}
-	if len(runnable) == 0 {
-		return Decision{Wait: strings.Join(blocked, "; "), Reason: clip(reason, routeReasonRunes), Selection: sel}, nil
-	}
-	pick := runnable[0]
-	if unknown && slices.Contains(runnable, cfg.Default) {
-		pick = cfg.Default
-	}
-	if len(blocked) > 0 {
-		reason += "; " + strings.Join(blocked, "; ")
-	}
-	if quotas[cfg.Profiles[pick].Agent].Status == QuotaUnknown {
-		reason += "; quota unknown"
-	}
-	p := cfg.Resolve(pick, a.RoutingDefaults)
-	return Decision{Profile: &p, Reason: clip(reason, routeReasonRunes), Selection: sel}, nil
-}
-
-// routePrompt asks the selector for a rule number, giving it the rules, the issue,
-// its recent comments, and the context file, each cut to its own budget.
-func (a App) routePrompt(ctx context.Context, req RouteRequest) (string, error) {
-	key := req.Key
-	if key == (task.Key{}) {
-		key = task.Key{Repo: req.Repo, Number: req.Issue}
-	}
-	issue, err := a.issue(ctx, key)
-	if err != nil {
-		return "", err
-	}
-	var b strings.Builder
-	b.WriteString("Pick the routing rule that fits this issue. The rules are in order. Answer with the number of the first rule whose description fits the work, or 0 if none fits or you are unsure. Give a reason of at most ten words. Do not use any tools.\n\nRules:\n")
-	b.WriteString(a.Routing.RulesText())
-	fmt.Fprintf(&b, "\nRepository: %s\nIssue: %s %s\n", key.Repo, issueLabel(key, issue.Identifier), clip(oneLine(issue.Title), routeTitleRunes))
-	if len(issue.Labels) > 0 {
-		fmt.Fprintf(&b, "Labels: %s\n", clip(strings.Join(issue.Labels, ", "), routeLabelsRunes))
-	}
-	fmt.Fprintf(&b, "\nBody:\n%s\n", clip(issue.Body, routeBodyRunes))
-	// Routing details often live in the comments, so a failed read stops the route
-	// rather than choosing from part of the issue.
-	comments, err := a.issueComments(ctx, key)
-	if err != nil {
-		return "", fmt.Errorf("read the issue's comments: %w", err)
-	}
-	comments = slices.DeleteFunc(comments, func(c TrackerComment) bool {
-		return strings.HasPrefix(strings.TrimSpace(c.Body), "<!-- foreman:")
-	})
-	// The newest comments are kept, as many as fit the count and the budget.
-	var kept []string
-	used := 0
-	for i := len(comments) - 1; i >= 0 && len(kept) < routeComments; i-- {
-		body := clip(comments[i].Body, routeCommentRunes)
-		if used += utf8.RuneCountInString(body); used > routeCommentsRunes {
-			break
-		}
-		kept = append(kept, body)
-	}
-	if len(kept) > 0 {
-		b.WriteString("\nComments, oldest first:\n")
-		for _, body := range slices.Backward(kept) {
-			fmt.Fprintf(&b, "---\n%s\n", body)
-		}
-	}
-	if req.ContextFile != "" {
-		raw, err := os.ReadFile(req.ContextFile)
-		if err != nil {
-			return "", fmt.Errorf("context file: %w", err)
-		}
-		fmt.Fprintf(&b, "\nContext from the developer:\n%s\n", clip(string(raw), routeContextRunes))
-	}
-	return b.String(), nil
-}
-
-func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
-
-// clip cuts s to at most n runes, ending in "…" when it was cut.
-func clip(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n-1]) + "…"
+	return Decision{Profile: &p, Reason: "configured default profile"}, nil
 }

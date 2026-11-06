@@ -64,81 +64,17 @@ func keepingTurn(keep ...task.PlanDoc) agent.Turn {
 	return turn
 }
 
-func TestAFullPlanOnTheGitHubIssueIsAdoptedWithoutPosting(t *testing.T) {
+func TestExternalPlanGoesThroughPlannerWithoutHelperChecker(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
-	f.gh.issueComments = append([]IssueComment{{ID: 400, Body: "Thanks, looking."}}, githubPlanComments(f, task.DescriptionFingerprint(f.gh.issue.Body), task.PlanDocs...)...)
-	posted := len(f.gh.comments)
-	f.claude.turns = []agent.Turn{prTurn("sid-1")}
+	f.gh.issueComments = githubPlanComments(f, "", task.PlanDocs...)
+	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2")}
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	got := f.store.recs[key]
-	if got.State != task.WaitingForCI || !got.PlanPosted() || len(f.gh.comments) != posted || f.gh.edits != 0 {
-		t.Fatalf("state %s plan %+v comments %d edits %d", got.State, got.Plan, len(f.gh.comments), f.gh.edits)
-	}
-	for i, doc := range task.PlanDocs {
-		if c := got.PlanComment(doc); c == nil || c.CommentID != int64(501+i) || c.URL != f.gh.issueComments[i+1].URL {
-			t.Errorf("%s = %+v", doc, c)
-		}
-	}
-	if !slices.Equal(f.claude.stages, []task.Stage{task.StageImplement}) || !strings.Contains(f.claude.prompt, "Posted plan.") || strings.Contains(f.claude.prompt, "issuecomment-504") {
-		t.Errorf("the task must implement the adopted plan: stages %v prompt %q", f.claude.stages, f.claude.prompt)
-	}
-}
-
-func TestAFullLegacyPlanOnTheLinearIssueIsAdoptedWithoutPosting(t *testing.T) {
-	f := newFixture()
-	key, tracker := linearTask(t, &f)
-	tracker.comments = linearPlanComments("", task.PlanDocs...)
-	f.claude.turns = []agent.Turn{prTurn("sid-1")}
-	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	got := f.store.recs[key]
-	// The fixture's PR is on another branch, so only the plan and the turn are checked.
-	if !got.PlanPosted() || len(tracker.postIDs) != 0 || len(f.gh.comments) != 0 {
-		t.Fatalf("plan %+v Linear posts %v", got.Plan, tracker.postIDs)
-	}
-	for _, doc := range task.PlanDocs {
-		if c := got.PlanComment(doc); c == nil || c.ExternalCommentID != "lin-"+string(doc) || c.CommentID != 0 {
-			t.Errorf("%s = %+v", doc, c)
-		}
-	}
-	if !slices.Equal(f.claude.stages, []task.Stage{task.StageImplement}) {
-		t.Errorf("stages = %v", f.claude.stages)
-	}
-}
-
-func TestLegacyFourCommentPlanUsesOnlyRequirementsAndWorkPlan(t *testing.T) {
-	f := newFixture()
-	key := started(t, f, startReq(t))
-	for i, entry := range []struct {
-		doc, title, text string
-	}{
-		{"analysis", "Analysis", "Earlier code notes."},
-		{"prd", "PRD", "R1. Retry 5xx."},
-		{"design", "Design", "Wrap the client."},
-		{"plan", "Implementation plan", "### Task 1: Retry failed calls (R1)"},
-	} {
-		id := int64(501 + i)
-		comment := IssueComment{ID: id, URL: fmt.Sprintf("https://github.com/x/issues/825#issuecomment-%d", id),
-			Body: task.PlanMarker(task.PlanDoc(entry.doc), "") + "\n## " + entry.title + "\n\n" + entry.text}
-		f.gh.issueComments = append(f.gh.issueComments, comment)
-		if f.gh.comments == nil {
-			f.gh.comments = map[int64]IssueComment{}
-		}
-		f.gh.comments[id] = comment
-	}
-	f.claude.turns = []agent.Turn{prTurn("sid-1")}
-	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	if rec := f.store.recs[key]; !rec.PlanPosted() || len(rec.Plan) != 2 || len(f.gh.comments) != 4 || f.gh.edits != 0 {
-		t.Fatalf("plan %+v comments %d edits %d", rec.Plan, len(f.gh.comments), f.gh.edits)
-	}
-	if p := f.claude.prompt; !strings.Contains(p, "## Requirements\n\nR1. Retry 5xx.") || !strings.Contains(p, "## Work plan\n\n### Task 1") || strings.Contains(p, "## PRD") {
-		t.Fatalf("legacy handoff = %q", p)
+	if !got.PlanPosted() || f.claude.starts == 0 || len(f.claude.scopeReviewed) != 0 {
+		t.Fatalf("plan posted %t planner starts %d helper checks %d", got.PlanPosted(), f.claude.starts, len(f.claude.scopeReviewed))
 	}
 }
 
@@ -240,8 +176,8 @@ func TestAPartialPlanOnTheGitHubIssueGoesToPlanningAndOnlyMissingDocumentsArePos
 	if f.gh.edits != 1 || len(f.gh.comments) != 2 || !strings.Contains(f.gh.comments[501].Body, "R1. Retry 5xx.") {
 		t.Errorf("edits %d comments %+v", f.gh.edits, f.gh.comments)
 	}
-	if p := f.claude.prompts[0]; strings.Contains(p, "## Documents already on the issue") || strings.Contains(p, "Posted prd.") {
-		t.Errorf("the planning prompt leaked earlier documents:\n%s", p)
+	if p := f.claude.prompts[0]; !strings.Contains(p, "## Existing Requirements") || !strings.Contains(p, "Posted prd.") {
+		t.Errorf("the planner did not receive earlier documents:\n%s", p)
 	}
 }
 
@@ -270,91 +206,6 @@ func TestAPlanningTurnThatLeavesAMissingDocumentEmptyFailsWithoutPosting(t *test
 	got := f.store.recs[key]
 	if got.State != task.Failed || got.LastOutcome.Summary != "the planning turn wrote no Work plan" || len(f.gh.comments) != 1 || f.gh.edits != 0 {
 		t.Fatalf("state %s outcome %+v comments %d", got.State, got.LastOutcome, len(f.gh.comments))
-	}
-}
-
-func TestAPlanWrittenForAnEarlierDescriptionAsksTheDeveloper(t *testing.T) {
-	stale := task.DescriptionFingerprint("An older description.")
-	t.Run("GitHub", func(t *testing.T) {
-		f := newFixture()
-		key := started(t, f, startReq(t))
-		f.gh.issueComments = githubPlanComments(f, stale, task.PlanDocs...)
-		if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
-			t.Fatal(err)
-		}
-		got := f.store.recs[key]
-		q := got.Pending()
-		if got.State != task.NeedsDecision || q == nil || q.Question.Issue != planConflictIssue || !strings.Contains(q.Question.Context, "- Requirements: https://github.com/x/issues/825#issuecomment-501") {
-			t.Fatalf("state %s decisions %+v", got.State, got.Decisions)
-		}
-		if f.claude.starts != 0 || len(f.gh.comments) != 2 || f.gh.edits != 0 || len(got.Plan) != 0 {
-			t.Errorf("starts %d comments %d edits %d plan %+v", f.claude.starts, len(f.gh.comments), f.gh.edits, got.Plan)
-		}
-	})
-	t.Run("Linear", func(t *testing.T) {
-		f := newFixture()
-		key, tracker := linearTask(t, &f)
-		tracker.comments = linearPlanComments(stale, task.PRD)
-		if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
-			t.Fatal(err)
-		}
-		got := f.store.recs[key]
-		if q := got.Pending(); got.State != task.NeedsDecision || q == nil || !strings.Contains(q.Question.Context, "- Requirements: https://linear.app/comment/lin-prd") {
-			t.Fatalf("state %s decisions %+v", got.State, got.Decisions)
-		}
-		if f.claude.starts != 0 || len(tracker.postIDs) != 0 {
-			t.Errorf("starts %d post IDs %v", f.claude.starts, tracker.postIDs)
-		}
-	})
-}
-
-// answerPlanConflict blocks the task on a stale plan, then records the answer.
-func answerPlanConflict(t *testing.T, f fixture, key task.Key, answer task.Option) {
-	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	rec := f.store.recs[key]
-	if rec.State != task.NeedsDecision {
-		t.Fatalf("state %s, want a decision", rec.State)
-	}
-	rec.Pending().Answer = optionText(answer)
-	rec.State = task.Implementing
-}
-
-func TestKeepingAConflictingPlanAdoptsItWithoutPosting(t *testing.T) {
-	f := newFixture()
-	key := started(t, f, startReq(t))
-	f.gh.issueComments = githubPlanComments(f, task.DescriptionFingerprint("An older description."), task.PlanDocs...)
-	answerPlanConflict(t, f, key, keepPlanOption)
-	f.claude.turns = []agent.Turn{prTurn("sid-1")}
-	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	got := f.store.recs[key]
-	if got.State != task.WaitingForCI || !got.PlanPosted() || len(f.gh.comments) != 2 || f.gh.edits != 0 || !slices.Equal(f.claude.stages, []task.Stage{task.StageImplement}) {
-		t.Fatalf("state %s plan %+v comments %d edits %d stages %v", got.State, got.Plan, len(f.gh.comments), f.gh.edits, f.claude.stages)
-	}
-}
-
-func TestRevisingAConflictingPlanEditsItsCommentsForTheCurrentDescription(t *testing.T) {
-	f := newFixture()
-	key := started(t, f, startReq(t))
-	f.gh.issueComments = githubPlanComments(f, task.DescriptionFingerprint("An older description."), task.PlanDocs...)
-	answerPlanConflict(t, f, key, revisePlanOption)
-	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2")}
-	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	got := f.store.recs[key]
-	if !got.PlanPosted() || len(f.gh.comments) != 2 || f.gh.edits != 2 || f.claude.starts != 2 {
-		t.Fatalf("plan %+v comments %d edits %d starts %d", got.Plan, len(f.gh.comments), f.gh.edits, f.claude.starts)
-	}
-	fp := task.DescriptionFingerprint(f.gh.issue.Body)
-	if _, gotFP, _ := task.ParsePlanMarker(f.gh.comments[502].Body); gotFP != fp {
-		t.Errorf("revised work plan marker fingerprint %q, want %q", gotFP, fp)
-	}
-	if p := f.claude.prompts[0]; strings.Contains(p, "## Documents already on the issue") || !strings.Contains(p, optionText(revisePlanOption)) {
-		t.Errorf("the planning prompt must carry the answer without earlier documents:\n%s", p)
 	}
 }
 
@@ -427,40 +278,6 @@ func TestARecordedCommentThatLostItsMarkerIsNotEdited(t *testing.T) {
 	}
 }
 
-func TestAKeepAnswerForAnEarlierDescriptionAsksAgain(t *testing.T) {
-	f := newFixture()
-	key := started(t, f, startReq(t))
-	f.gh.issueComments = githubPlanComments(f, task.DescriptionFingerprint("An older description."), task.PlanDocs...)
-	answerPlanConflict(t, f, key, keepPlanOption)
-	f.gh.issue.Body = "The description changed again."
-	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	got := f.store.recs[key]
-	if q := got.Pending(); got.State != task.NeedsDecision || q == nil || q.Question.Issue != planConflictIssue || len(got.Plan) != 0 || f.claude.starts != 0 {
-		t.Fatalf("state %s decisions %+v plan %+v starts %d", got.State, got.Decisions, got.Plan, f.claude.starts)
-	}
-}
-
-func TestAResumedPlanningTurnOmitsDocumentsFoundOnTheIssue(t *testing.T) {
-	f := newFixture()
-	key := started(t, f, startReq(t))
-	rec := f.store.recs[key]
-	rec.Delegation.Implementer.ID = "sid-1"
-	rec.Decisions = []task.Decision{{Question: task.Question{Issue: "Retry 4xx?"}, Answer: "A. 5xx only", AnsweredAt: f.app.Now()}}
-	f.gh.issueComments = githubPlanComments(f, "", task.PRD)
-	f.claude.turns = []agent.Turn{keepingTurn(task.PRD), prTurn("sid-2")}
-	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	if len(f.claude.resumed) != 1 || strings.Contains(f.claude.resumed[0], "## Documents already on the issue") || strings.Contains(f.claude.resumed[0], "Posted prd.") {
-		t.Fatalf("resumed %q", f.claude.resumed)
-	}
-	if got := f.store.recs[key]; !got.PlanPosted() || got.PlanComment(task.PRD).CommentID != 501 || f.gh.edits != 0 {
-		t.Errorf("plan %+v edits %d", got.Plan, f.gh.edits)
-	}
-}
-
 func TestAPlanCommentUnmarkedDuringThePlanningTurnIsNotEdited(t *testing.T) {
 	t.Run("GitHub", func(t *testing.T) {
 		f := newFixture()
@@ -472,7 +289,7 @@ func TestAPlanCommentUnmarkedDuringThePlanningTurnIsNotEdited(t *testing.T) {
 			c.Body = unmarked
 			f.gh.comments[501] = c
 		}
-		f.claude.turns = []agent.Turn{keepingTurn(), prTurn("sid-2")}
+		f.claude.turns = []agent.Turn{keepingTurn(), plannedTurn("sid-1"), prTurn("sid-2")}
 		if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 			t.Fatal(err)
 		}
@@ -486,7 +303,7 @@ func TestAPlanCommentUnmarkedDuringThePlanningTurnIsNotEdited(t *testing.T) {
 		key, tracker := linearTask(t, &f)
 		tracker.comments = linearPlanComments("", task.PRD)
 		f.claude.during = func() { tracker.comments[0].Body = "## Requirements\n\nThe marker was removed." }
-		f.claude.turns = []agent.Turn{keepingTurn(), prTurn("sid-2")}
+		f.claude.turns = []agent.Turn{keepingTurn(), plannedTurn("sid-1"), prTurn("sid-2")}
 		if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 			t.Fatal(err)
 		}
@@ -506,12 +323,12 @@ func TestAKeptDocumentRemovedDuringThePlanningTurnFailsWithoutPosting(t *testing
 			c.Body = "## Requirements\n\nThe marker was removed."
 			f.gh.comments[501] = c
 		}
-		f.claude.turns = []agent.Turn{keepingTurn(task.PRD)}
+		f.claude.turns = []agent.Turn{keepingTurn(task.PRD), {Outcome: agent.Outcome{Status: agent.FailedRun, Summary: "source document changed"}}}
 		if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 			t.Fatal(err)
 		}
 		got := f.store.recs[key]
-		if got.State != task.Failed || got.LastOutcome.Summary != "the Requirements left on the issue was removed during planning; restart the task to plan it again" || len(f.gh.comments) != 1 || len(got.Plan) != 0 || f.claude.starts != 1 {
+		if got.State != task.Failed || got.LastOutcome.Summary != "source document changed" || len(f.gh.comments) != 1 || len(got.Plan) != 0 || f.claude.starts != 1 {
 			t.Fatalf("state %s outcome %+v comments %d plan %+v starts %d", got.State, got.LastOutcome, len(f.gh.comments), got.Plan, f.claude.starts)
 		}
 	})
@@ -520,12 +337,12 @@ func TestAKeptDocumentRemovedDuringThePlanningTurnFailsWithoutPosting(t *testing
 		key, tracker := linearTask(t, &f)
 		tracker.comments = linearPlanComments("", task.PRD)
 		f.claude.during = func() { tracker.missing = map[string]bool{"lin-prd": true} }
-		f.claude.turns = []agent.Turn{keepingTurn(task.PRD)}
+		f.claude.turns = []agent.Turn{keepingTurn(task.PRD), {Outcome: agent.Outcome{Status: agent.FailedRun, Summary: "source document changed"}}}
 		if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 			t.Fatal(err)
 		}
 		got := f.store.recs[key]
-		if got.State != task.Failed || !strings.Contains(got.LastOutcome.Summary, "removed during planning") || len(tracker.postIDs) != 0 || len(got.Plan) != 0 {
+		if got.State != task.Failed || !strings.Contains(got.LastOutcome.Summary, "source document changed") || len(tracker.postIDs) != 0 || len(got.Plan) != 0 {
 			t.Fatalf("state %s outcome %+v post IDs %v plan %+v", got.State, got.LastOutcome, tracker.postIDs, got.Plan)
 		}
 	})

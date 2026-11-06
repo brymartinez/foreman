@@ -6,9 +6,9 @@ PR back to you once it is ready for your review.
 ```
 foreman  →  pick issue #825 in the inbox, choose Claude
         ↓
-  Claude implements in its own worktree, pushes, and opens the PR
+  Claude plans and implements in its own worktree, pushes, and opens the PR
         ↓
-  Codex reviews it, Claude fixes, repeat until clean
+  Claude self-reviews, Codex adversarially reviews, Claude fixes, repeat until clean
         ↓
   foreman reads the PR's CI checks on GitHub
         ↓
@@ -288,16 +288,20 @@ confirmed triage decisions before delegation.
    could not. It uses the repository's documented setup and sample data when taking
    screenshots; Foreman does not create sample data. It leaves the PR description as
    written for review.
-4. Foreman starts a fresh, read-only self-review using the implementing provider.
-   The competing provider then reviews the same code in its own session. Each
-   reviewer reads the complete branch diff between the verified base and head
-   commits, including after a fix, and can inspect surrounding code and tests.
+4. Each task has four roles: planner, implementer, self-reviewer, and adversarial
+   reviewer. Foreman starts a fresh, read-only self-review using the implementing
+   provider. Its first pass reads the full branch diff; follow-ups read the verified
+   fix range. The adversarial reviewer keeps one read-only session and reads the full
+   branch diff each round. Both can inspect surrounding code and tests.
    Task requirements, plans, decisions, PR text, validation results, and earlier
    findings stay out of both code review prompts.
-   The implementer validates the checked requirements, fixes concrete defects,
-   and can reject invalid self-review findings with evidence. Rejecting every
-   finding on the reviewed commit ends self-review. Retries can reuse commits
-   from a turn that failed to return valid output. Changes to code need a new review.
+   Findings return to the implementer, then directly to the reviewer that raised
+   them. The implementer fixes or rejects each self-review finding with evidence;
+   adversarial findings require a clean adversarial review. Findings cannot be
+   waived because of quota or a fix limit. A missing session or uncertain launch
+   pauses the role until it is available or explicitly replaced. Retries resume
+   retained planner, implementer, or adversarial sessions. A self-review retry
+   repeats its pinned range without earlier review messages. Code changes need review.
    The implementer runs the repository's full documented suite before the first
    review and focused checks for each fix. Before handoff, Foreman needs a full-suite
    result that covers the final commit. If a fix changed behavior or a validation
@@ -325,20 +329,14 @@ confirmed triage decisions before delegation.
 
 ## Planning
 
-Before any code, the implementer writes two short documents: Requirements (`prd`)
+Before any code, the planner writes two short documents: Requirements (`prd`)
 and Work plan (`plan`). `plan.md` sets what each one covers and asks for B1 English:
 common words and short sentences. Foreman reads
 `## Triage decisions` and later `## Triage correction` comments in order; if there
 are none, the issue description is the confirmed scope. It gives that scope and its
-source links to the planner, checks the documents against it, then posts each as an
-issue comment. If the checker finds a concrete mismatch in a new plan, Foreman sends
-the findings back to the same planning session for up to three revisions. Only changed
-documents need to be returned; Foreman checks the combined set each time. Remaining
-findings then pause for a decision. Existing plans are checked before adoption unless
-the exact scope and document texts already passed the check. The checker compares the
-supplied text without reading the repository and reports only mismatches. An unreadable
-or inconclusive check fails with a reason; a nonblocking limitation on a clean
-check does not stop planning. Requirements says what must work and how to check it.
+source links to the planner, which checks its documents against the scope before
+returning them. Foreman posts each as an issue comment. Requirements says what must
+work and how to check it.
 Work plan gives ordered tasks that refer to requirement IDs without copying the rules.
 Foreman checks the two documents together against triage. The implementer receives
 both and validates the requirements against the implementation. The separate
@@ -362,19 +360,18 @@ Foreman never reads or changes those files.
 
 | Stage | Given to | Global file | Repo file (committed) |
 |---|---|---|---|
-| `plan` | the implementer, for the two planning documents | `~/.config/foreman/stages/plan.md` | `.foreman/plan.md` |
+| `plan` | the planner, for the two planning documents | `~/.config/foreman/stages/plan.md` | `.foreman/plan.md` |
 | `implement` | the implementer | `~/.config/foreman/stages/implement.md` | `.foreman/implement.md` |
-| `review` | the self-review and the competing reviewer | `~/.config/foreman/stages/review.md` | `.foreman/review.md` |
+| `self-review` | the self-reviewer | `~/.config/foreman/stages/self-review.md` | `.foreman/self-review.md` |
+| `review` | the adversarial reviewer | `~/.config/foreman/stages/review.md` | `.foreman/review.md` |
 | `pr` | the implementer, for the PR description | `~/.config/foreman/stages/pr.md` | `.foreman/pr.md` |
 
-- The four global files are required. The dashboard won't open when one is missing,
+- The five global files are required. The dashboard won't open when one is missing,
   and says which. `make config` installs the defaults from `defaults/stages/`, and the
   release archives carry them in `stages/`. Edit your copies freely.
-- When upgrading to complete-diff review, run `make config` to see whether your
-  installed `review.md` differs from the default. Use the printed copy command to
-  replace an unmodified old default, or merge the changes into your customized
-  file. Update any repository `.foreman/review.md` that still refers to assigned
-  areas, focused re-reviews, or acceptance-claim verification.
+- Update installed stage files with the copy commands printed by `make config`.
+  Review the new `self-review.md` and update customized `.foreman/` stage files to
+  assign self-review and adversarial review separately.
 - Repo files are optional.
 - When both files exist, the agent gets both: global first, then the repo's more
   specific rules.
@@ -385,7 +382,7 @@ Foreman never reads or changes those files.
 - Tasks read `.foreman/` from their worktree, so only the version committed on the base
   branch counts.
 - A GitHub issue PR body includes `Closes #N`; a Linear issue PR links its issue URL.
-  A review always ends in foreman's JSON format.
+  A review always ends in foreman's JSON format. Profile selection is deterministic: Foreman uses an explicitly selected profile or the configured default; it does not ask an agent to choose or route a profile in prose. Quota checks can pause work but cannot skip a review. Automatic learning and diagnostic calls do not run in a task.
   Otherwise the text is passed through as written.
 
 ## Cleaning up worktrees
@@ -433,23 +430,13 @@ After review findings it resumes the implementation session with the findings an
 your answer. If the session is unavailable, the replacement gets the checked plan,
 answered decisions, and outstanding findings. The answer also appears in the PR description.
 
-Foreman checks provider quota before model calls. If the implementer runs out,
-restarting the task hands its existing branch, proposal, PR, and decisions to the
-other agent when that agent has confirmed quota. The runner also checks between
-stages. If the adversarial reviewer is confirmed out of quota, Foreman records
-`review skipped (quota)` and continues. Self-review and full verification still
-apply. Unknown quota does not grant a skip.
-
-The implementer and reviewers take turns. Each new revision gets a complete
-self-review before competing review. The task records the reviewed revision.
-Fixes requested by either reviewer share
-`fix_rounds`. The implementer may reject invalid self-review findings with numbered
-reasons in `reviewAssessment`; the original verdict and reasons remain in the task
-file. Rejecting every finding without changing the reviewed commit ends self-review.
-At its fix limit, the implementer assesses the remaining findings and asks you before
-another correction. No separate diagnostic model call runs. After the adversarial
-fix limit, Foreman offers another round or accepting the remaining findings on an
-existing PR; a local change can instead be stopped without opening a PR.
+Foreman checks provider quota before each role call. Exhaustion pauses the role and
+preserves its session and work. Quota never skips a review. Each new revision gets a
+self-review before adversarial review. Self-review follow-ups inspect the verified fix
+range; adversarial review reads the full branch diff. Findings go back to the
+implementer, then directly to the reviewer that raised them. The task pauses at its
+fix limit until you choose another round; unresolved adversarial findings cannot be
+accepted.
 
 With `review_before_pr: true`, a new task is reviewed before its PR opens, so
 automated reviews that run on new PRs see the finished change. The implementer
@@ -519,15 +506,8 @@ Each task then appears as a note, and the frontmatter shows up as properties.
 
 ## Learning
 
-Foreman evaluates each task once it has a clean adversarial review and again when
-new evidence arrives: a later review, an answered decision, a PR comment, a new PR head, or the PR
-merging or closing. CI results are not evidence. The evaluation is one turn with the
-task's implementer agent, with no tools, run by a detached `foreman __learn` process.
-It reads the task file, the PR's comments from people (not bots), and the
-repository's current learnings and recent evaluations, never the logs or the agent
-transcripts. A turn that calls a tool anyway is discarded. Its output goes to
-`<log_dir>/learning.log`. An evaluation that fails
-never changes the task or sends an alert.
+Task runs do not evaluate or update repository knowledge. Knowledge export and ingest
+remain explicit commands and operate separately from the four task roles.
 
 What it learns is kept per repository under `knowledge_dir`:
 
@@ -627,7 +607,7 @@ auto:                                # on/off is not here; press a or launch wit
   max_concurrent: 3                  # active runs, manual ones included
 budgets:
   task_tokens: 2000000               # reported input + output across task calls
-  planning_tokens: 400000            # planning and plan checks
+  planning_tokens: 400000            # planning turns
   call_timeout_seconds: 1800         # cancels one call; 0 disables each limit
   implementer_usd: 3.00              # Claude maximum per implementation turn
   reviewer_usd: 1.00                 # Claude maximum per review call
@@ -753,94 +733,10 @@ in a dashboard that includes their source. A failed refresh of either selected
 source keeps results from the successful source visible with a warning and pauses all
 automatic starts until both sources refresh successfully.
 
-## Routing
+## Agent profile
 
-`routing.yaml`, next to the selected `config.yaml`, lets foreman choose the agent
-and models for each new issue. Without it, routing is off. `make setup` installs
-the starter file without replacing an existing one. For a release archive, copy its
-`routing.yaml` to the same directory as `config.yaml` to enable routing. The starter
-file is:
-
-```yaml
-selector:
-  agent: claude                     # model "" uses claude.plan_model, else claude.model
-profiles:
-  claude:
-    agent: claude
-    plan_model: sonnet
-    model: opus
-  codex:
-    agent: codex
-    plan_model: gpt-6-luna
-    plan_reasoning_effort: xhigh
-    model: gpt-6-sol
-    reasoning_effort: medium
-rules:
-  - when: Broad or ambiguous work, design or architecture changes, or refactors across several packages.
-    profiles: [claude]
-    why: broad or ambiguous design work
-  - when: Narrow, well-specified change with clear steps or acceptance criteria, such as a small bug fix, a typo, or a single function.
-    profiles: [codex]
-    why: narrow, well-specified change
-  - when: Any other work.
-    profiles: [claude, codex]
-    why: general work
-default: claude
-```
-
-The rules' `when` texts may take up to 2500 characters in all, so the issue always
-fits in the selector's input. A profile sets `agent`, and may set `plan_model`, `model`, and for Codex
-`plan_reasoning_effort` and `reasoning_effort`. A field you leave out uses the
-`claude.*` or `codex.*` value in `config.yaml`. Budgets, notifications, repository
-filters, cleanup, auto mode, and review settings stay in `config.yaml`.
-
-Before a new task starts, the selector agent reads the issue's title, labels, body,
-recent comments, and your context file, and picks the first rule whose `when` fits.
-Foreman then tries that rule's profiles in order and skips one whose agent `quota-axi`
-reports as out of quota. A profile the rule does not list is never tried. If the
-selector is unsure or fails, foreman uses `default`. If no listed profile can run,
-nothing starts and the dashboard says why. If `quota-axi` is missing or cannot tell,
-foreman uses `default` when the rule lists it and says the quota is unknown.
-
-In the dashboard, press `3` after `enter` on a new issue to route it. The footer shows
-the chosen profile, its models, and the reason: `enter` starts it, and `esc` goes back
-to `1` and `2`, which still pick an agent yourself.
-
-The task keeps its profile: a retry with the same agent uses it, and starting with the
-other agent drops it. The competing agent still reviews with its review settings.
-The `s` view lists the profile and the reason, and the task's log starts with a
-`route:<profile>:<agent>:<reason>` line. An error in `routing.yaml` shows when you
-route an issue, and nothing routed starts until you fix it.
-
-## Permissions
-
-- **Claude as implementer.** Runs with `--permission-mode acceptEdits`, with only
-  `Bash`, `WebFetch`, and `WebSearch` pre-approved.
-- **Codex as implementer.** Runs in the `workspace-write` sandbox with network access,
-  so it can push and use `gh`.
-- **Reviewers.** Read-only sessions that can't change the worktree.
-- The CLIs' dangerous bypass flags are never used.
-
-## Development
-
-```bash
-go vet ./... && go test ./...
-go build -o dist/foreman ./cmd/foreman
-scripts/e2e.sh            # the built binary against a local origin, stand-in gh, stub agents
-scripts/probe-agents.sh   # re-checks the real agent CLIs (a few cents of model calls)
-scripts/release.sh v0.1.0 # build the release archives locally into dist/release
-```
-
-To publish a release, push a tag. The release workflow runs vet and the tests, builds
-the archives, and creates the GitHub release:
-
-```bash
-git tag v0.1.0 && git push origin v0.1.0
-```
-
-Design references are in [`docs/control-layer/`](docs/control-layer/):
-
-- [architecture.md](docs/control-layer/architecture.md) covers the package layout, the
-  execution model, and the design rules with their reasons.
-- [capabilities.md](docs/control-layer/capabilities.md) lists the verified CLI
-  behavior.
+Foreman uses the explicitly selected provider for a manual start, or the configured
+default for auto-starts and tasks without an explicit choice. Profile selection is
+deterministic; no model reads an issue to choose a profile. Quota checks may pause a
+role but cannot change its profile or waive review. The profile stays with the task
+across retries.

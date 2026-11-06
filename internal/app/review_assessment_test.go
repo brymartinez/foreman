@@ -109,55 +109,6 @@ func TestLocalImplementerCanRejectSelfReviewAndOpenReviewedCommit(t *testing.T) 
 	}
 }
 
-func TestLostCorrectionSessionRebuildsPlanAndPriorDecisions(t *testing.T) {
-	f := newFixture()
-	key := started(t, f, startReq(t))
-	rec := f.store.recs[key]
-	postedPlan(f, rec)
-	rec.Decisions = []task.Decision{{Question: task.Question{Issue: "Hide it?"}, Answer: "Hide it.", AnsweredAt: now, DeliveredAt: now}}
-	f.claude.turns = []agent.Turn{prTurn("sid"), prTurn("new-session")}
-	f.claude.reviews = []agent.ReviewOutcome{selfFindings()}
-	f.claude.resumeErr = agent.ErrNoSession
-	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	if f.store.recs[key].State != task.WaitingForCI || f.claude.starts != 2 {
-		t.Fatalf("state %s starts %d", f.store.recs[key].State, f.claude.starts)
-	}
-	for _, want := range []string{"Posted plan.", "Hide it.", "no test covers the 4xx path", "reviewAssessment"} {
-		if !strings.Contains(f.claude.prompts[1], want) {
-			t.Errorf("replacement session lacks %q", want)
-		}
-	}
-}
-
-func TestLostSelfReviewLimitSessionKeepsTheAssessmentOnlyInstruction(t *testing.T) {
-	f := newFixture()
-	f.app.FixRounds = 1
-	key := started(t, f, startReq(t))
-	rec := f.store.recs[key]
-	postedPlan(f, rec)
-	rec.Delegation.Implementer.ID = "lost-session"
-	rec.Delegation.PR = 912
-	rec.Delegation.PRHead = "c0ffee1"
-	for i := 1; i <= 2; i++ {
-		rec.Reviews = append(rec.Reviews, task.Review{Round: i, Kind: task.SelfReview, PR: 912, Head: "c0ffee1", Findings: selfFindings().Findings, At: now})
-	}
-	f.claude.resumeErr = agent.ErrNoSession
-	f.claude.turn = agent.Turn{Session: task.Session{Agent: task.Claude, ID: "replacement"}, Outcome: agent.Outcome{Status: agent.Blocked, Summary: "Need your decision"}}
-	if _, err := f.app.implement(context.Background(), rec, turnRequest{findings: rec.LatestReview()}, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	if f.claude.starts != 1 || len(f.claude.resumed) != 1 {
-		t.Fatalf("starts %d resumes %d", f.claude.starts, len(f.claude.resumed))
-	}
-	for _, want := range []string{"self-review fix limit is reached", "without changing code", "Posted plan."} {
-		if !strings.Contains(f.claude.prompt, want) {
-			t.Errorf("replacement session lost %q", want)
-		}
-	}
-}
-
 func TestFullCheckRepairCannotIntroduceAStaleReviewAssessment(t *testing.T) {
 	f := newFixture()
 	key := gatedLocalTask(t, f)

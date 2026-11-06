@@ -55,7 +55,7 @@ func TestRespondRecordsAnswerAndResumesSession(t *testing.T) {
 		t.Errorf("body = %q", rec.Body)
 	}
 
-	f.claude.turn = agent.Turn{Session: task.Session{Agent: task.Claude, ID: "sid-1"}, Outcome: agent.Outcome{Status: agent.PROpened, Summary: "done", PRNumber: 912}}
+	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("implementation")}
 	starts := f.claude.starts
 	if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
 		t.Fatal(err)
@@ -63,32 +63,12 @@ func TestRespondRecordsAnswerAndResumesSession(t *testing.T) {
 	if len(f.claude.resumed) != 1 || !strings.HasPrefix(f.claude.resumed[0], "sid-1: ") || !strings.Contains(f.claude.resumed[0], "Decision: A. 5xx only") {
 		t.Errorf("resumed = %q", f.claude.resumed)
 	}
-	if f.claude.starts != starts {
-		t.Error("started a fresh turn although the session resumed")
+	if f.claude.starts != starts+1 {
+		t.Error("expected one separate implementation session")
 	}
 	got := f.store.recs[key]
 	if got.State != task.WaitingForCI || got.Decisions[0].DeliveredAt.IsZero() {
 		t.Errorf("after resume: %s %+v", got.State, got.Decisions[0])
-	}
-}
-
-func TestRunTaskFallsBackToFreshTurnWhenSessionIsGone(t *testing.T) {
-	f, key := blockedTask(t)
-	if _, err := f.app.Respond(context.Background(), key, "B"); err != nil {
-		t.Fatal(err)
-	}
-	f.claude.resumeErr = fmt.Errorf("claude printed no result: %w", agent.ErrNoSession)
-	f.claude.turn = agent.Turn{Session: task.Session{Agent: task.Claude, ID: "sid-2"}, Outcome: agent.Outcome{Status: agent.FailedRun, Summary: "x"}}
-	starts := f.claude.starts
-	if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	if f.claude.starts != starts+1 || !strings.Contains(f.claude.prompt, "## Decisions already made") ||
-		!strings.Contains(f.claude.prompt, "A: B. 4xx + 5xx") {
-		t.Errorf("fresh turn prompt lacks the decision:\n%s", f.claude.prompt)
-	}
-	if f.store.recs[key].Delegation.Implementer.ID != "sid-2" {
-		t.Error("new session not recorded")
 	}
 }
 
@@ -175,7 +155,7 @@ func TestRespondWaitsForEveryQuestionThenResumesOnce(t *testing.T) {
 		t.Fatalf("after both answers: state %s spawned %d", second.State, len(f.runners.spawned))
 	}
 
-	f.claude.turn = prTurn("sid-1")
+	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("implementation")}
 	if err := f.run(context.Background(), rec.Key, 4243, io.Discard); err != nil {
 		t.Fatal(err)
 	}

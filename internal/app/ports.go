@@ -288,6 +288,11 @@ type AgentAdapter interface {
 	Review(ctx context.Context, in agent.StartInput) (agent.ReviewOutcome, error)
 }
 
+type retainedReviewer interface {
+	StartReview(context.Context, agent.StartInput, func(task.Session)) (agent.ReviewOutcome, error)
+	ResumeReview(context.Context, task.Session, agent.StartInput) (agent.ReviewOutcome, error)
+}
+
 // StageInstructionResolver loads the developer's instructions for a workflow stage:
 // the global layer, then repoRoot/.foreman. Missing files resolve to empty.
 type StageInstructionResolver interface {

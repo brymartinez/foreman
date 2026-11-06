@@ -2,11 +2,11 @@
 
 ```
 cmd/foreman           wiring: build adapters, open the dashboard or run a task
-internal/cli          argv -> Command (launch flags, knowledge export and ingest, __run,
-                      and __learn); no I/O beyond parsing
+internal/cli          argv -> Command (launch flags, knowledge export and ingest, __run);
+                      no I/O beyond parsing
 internal/config       config.yaml: directories, budgets, learning, default source, and
                       their validation, rejecting unknown keys
-internal/routing      routing.yaml: profiles, rules, default, and their validation
+internal/routing      configured profiles and defaults, with validation
 internal/render       terminal formatting of app results
 internal/tui          the dashboard: pure Model and Frame, one terminal loop
 internal/app          orchestration + ports.go (the interfaces below)
@@ -14,13 +14,12 @@ internal/app          orchestration + ports.go (the interfaces below)
   ├── linear          IssueTracker over Linear GraphQL using a personal API key
   ├── store           TaskStore over Markdown + YAML frontmatter
   ├── worktree        WorktreeManager over `git worktree`; RemoteAuth over `ssh -T`
-  ├── agent           outcome contract, prompt, claude.go / codex.go adapters, selector,
-  │                   evaluator, knowledge merger
+  ├── agent           outcome contract, role prompts, claude.go / codex.go adapters,
+  │                   knowledge merger
   ├── knowledge       KnowledgeStore: per-repository learnings, evaluations, knowledge.md,
   │                   and their export, merge, and atomic replace
   ├── quota           QuotaChecker over the optional `quota-axi`
-  ├── runner          spawns and checks the detached `foreman __run` process, and
-  │                   spawns the detached `foreman __learn` process
+  ├── runner          spawns and checks the detached `foreman __run` process
   └── stages          resolves ~/.config/foreman/stages/<stage>.md + <repo>/.foreman/<stage>.md
 internal/task         the durable model: Record, State, Delegation, Decision, Attempt
 ```
@@ -72,98 +71,28 @@ runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR)
     (a repair runner that cannot spawn or dies is also NEEDS_DECISION)
   if the verified PR head has no review (crash mid-review, or new commits):
     re-verify the PR, record its head, skip to the review below
-  turn = implementer.Start(worktree, prompt)          # later: Resume(session, msg)
-  until every planning document is checked against current scope, the turn plans,
-  including when an open PR already exists
-  (PLANNING, through the posting of the two comments; IMPLEMENTING after):
-    planned      -> read-only checker must explicitly agree that both documents
-                    match confirmed scope; concrete findings resume the same planning
-                    session for up to three revisions, checking each revision;
-                    then post Requirements (prd) and Work plan (plan)
-                    as two issue comments
-                    (edit the earlier comments on a re-plan), record their ids and URLs,
-                    then turn = implementer.Start(new session, checked Requirements and Work plan text)
-  while implementing before a PR exists, a turn may return checkpoint:
-    verify the expected branch, a clean worktree, and a new descendant commit;
-    save the commit and one short next objective, then Start a fresh session
-    from the checked Requirements and Work plan, committed code, and that objective
-    (no prior transcript); after eight checkpoints, fail instead of looping
-  switch turn.Outcome.Status
-    blocked      -> save each of Questions as a decision, state NEEDS_DECISION, exit
-    failed       -> state FAILED, exit
-    pr_opened    -> (the agent pushed and ran gh pr create) gh: confirm PR exists
-                    record PR and its head commit, state SELF_REVIEW
-                    before every review: git fetch base and branch, then
-                      git merge-tree origin/<branch> origin/<base>
-                      clean    -> review; the branch is left as is
-                      conflict -> implementer.Resume(session, merge the base, never
-                                  rebase or force-push, push); recheck; after two
-                                  turns still conflicting -> NEEDS_DECISION, exit
-                    check that the PR description is usable
-                    SELF_REVIEW: self = implementer.Review(fresh read-only session,
-                                              complete pinned base...head diff and surrounding code),
-                                              until clean, or all findings are rejected
-                                              on this unchanged head
-                    self error -> FAILED, exit (never falls back to the competing review)
-                    self clean -> the competing review of the same change, in this run
-                    ADVERSARIAL_REVIEW: review = reviewer.Review(fresh read-only session,
-                                             complete pinned base...head diff and surrounding code)
-                    clean    -> record review and the head it covered; WAITING_FOR_CI, exit
-                                (with the full-suite gate and no full result covering
-                                the head: final check first, see below)
-                    findings (either review) -> IMPLEMENTING; implementer.Resume(retained session,
-                                latest findings); agent pushes fixes and reports pr_opened
-                                again; re-verify; self-review, then re-review
-                    findings after fix_rounds reviewed fixes since the last answer ->
-                      competing: NEEDS_DECISION (A: another round, B: accept remaining), exit
-                      self:      implementer assesses on the unchanged commit; reject all
-                                 invalid findings or ask the developer, exit
-  with review_before_pr captured on the task and no PR yet, a finished turn returns
-  review_ready instead of pr_opened (pr_opened there fails the task):
-    review_ready -> verify the branch, a clean worktree, and committed branch work
-                    (an existing commit is allowed after a checkpoint or retry),
-                    and that no PR is open and origin has no such branch (else FAILED);
-                    save the commit with the proposed PR title and description
-                    before every review: git fetch base, then
-                      git merge-tree HEAD origin/<base>
-                      conflict -> implementer.Resume(session, merge the base locally, no
-                                  push); after two turns still conflicting -> NEEDS_DECISION
-                    self = implementer.Review(complete pinned base...head diff), as above
-                    review = reviewer.Review(complete pinned base...head diff), as above
-                    findings -> IMPLEMENTING; implementer.Resume(retained session, latest findings); assess,
-                                commit locally,
-                                review_ready again with the updated description;
-                                self-review, then re-review
-                    findings after fix_rounds reviewed fixes since the last answer ->
-                                NEEDS_DECISION as above, with stop (no PR) in place of
-                                accept, exit
-                    clean    -> OPENING_PR: an open PR for the branch with the reviewed
-                                head, title, and description is adopted; otherwise
-                                implementer turn: push exactly that commit, gh pr create
-                                with that title and --body-file; gh: confirm the PR and its
-                                head, title, and body match the verified handoff (mismatch -> FAILED)
-                                record PR and head, the clean review covers it,
-                                WAITING_FOR_CI, exit
-  a stop answered at the fix limit -> FAILED with the unresolved findings; any PR and
-  branch stay, and the task is never handed over
-  when the loop ends on a clean adversarial review and the evidence changed since
-  the stored evaluation: spawn
-  detached `foreman __learn owner/repo#825`, then exit
+  planner = Planner.Start or Resume(retained planner session, confirmed triage)
+    planned -> validate document shape and scope fingerprints; post or edit the two
+               issue comments idempotently; continue in retained implementer session
+    blocked / failed -> save outcome and stop
+  implementer = Start or Resume(retained implementation session, checked plan)
+    checkpoint -> verify clean descendant commit and continue same session
+    pr_opened / review_ready -> verify Git and PR facts; enter SELF_REVIEW
+  for each reviewed revision:
+    self-reviewer = fresh read-only session
+      first pass: pinned base...head; follow-up: verified reviewedHead..fixedHead
+      findings -> implementer.Resume, then self-reviewer reviews the fix range
+    adversarial reviewer = Resume(retained read-only session, full pinned base...head)
+      findings -> implementer.Resume, then return directly to adversarial reviewer
+      clean -> record verdict and covered head; run final-check and CI handoff gates
+  missing or uncertain session / unavailable provider -> preserve progress and pause;
+    resume when available or wait for explicit role replacement
+  quota and fix limits pause work; they never skip review or accept unresolved findings
+  task lifecycle starts no learning or diagnostic model calls
 
-foreman __learn       -> one evaluation of one task; output goes to <log_dir>/learning.log
-  ├─ knowledge: take the repository's lock without waiting; held -> exit 0, a later
-  │             refresh retries
-  ├─ build the evidence packet from the task file (decisions, review findings,
-  │  phase times, cost or tokens, tool-call counts, PR outcome) and every human
-  │  comment on the PR from gh; no logs, transcripts, CI, or tool arguments. The
-  │  prompt adds the repository's current learnings, which revisions cite by id, and
-  │  its 12 newest other evaluations, so recurrence is visible
-  ├─ evaluator turn: the task's implementer agent, no tools, a scratch directory,
-  │  learning.budget_usd for Claude; a turn that called a tool is discarded;
-  │  agent.ParseEvaluation reads its output
-  └─ knowledge.Apply: store the evaluation, fold its proposals and revisions into
-     learnings.yaml, rewrite knowledge.md. A failed turn writes nothing, and never
-     changes the task, its alerts, or the runner's exit code
+  with review_before_pr captured on the task and no PR yet, the same four-role
+  review sequence covers the local diff before the implementer pushes and opens it
+
 
 app.Resume            -> disabled for legacy REVIEWED tasks; the next refresh
                          returns them to READY_FOR_HUMAN
@@ -266,13 +195,6 @@ app.InboxView         -> runner pid dead in a stage -> FAILED
                            check keeps the worktree for the next refresh
                          Reconcile, per item: issue closed, no runner -> DONE, including
                            FAILED and PR_CLOSED; a DONE task stays DONE if it reopens
-                         learning on, per learnable task (a clean competing review, or
-                         stalled at the self-review limit on a missed practice) no runner drives
-                         (in no stage), at most one per repository:
-                           evidence fingerprint differs from the stored evaluation, the
-                           repository is not locked, no failed attempt on the same
-                           evidence in the last hour -> spawn `foreman __learn`
-                           (a merged or closed task never evaluated is skipped)
 
 foreman -c            -> open the config in $VISUAL, $EDITOR, or vi, before the config
                          loads, so an invalid file can be fixed; check it after
@@ -294,13 +216,12 @@ the same commit. The commit message records why it changed.
 ### Processes
 
 - **No daemon.** Nothing runs while the dashboard is closed except a task's own runner
-  and a learner it started. The gate, liveness checks, cleanup, and the learning due
-  check run on each dashboard refresh. Rejected: a
-  daemon, a watcher, or a runner that waits for CI.
+  and nothing else. The gate, liveness checks, and cleanup run on each dashboard
+  refresh. Rejected: a daemon, a watcher, or a runner that waits for CI.
 - **The dashboard is the only interface for tasks.** Bare `foreman` opens it;
   `-c` edits the config. The other verbs are
   `knowledge export` and `knowledge ingest`, which move a repository's knowledge and
-  need no stage files, and the hidden `__run` and `__learn`. Task subcommands were
+  need no stage files, and the hidden `__run`. Task subcommands were
   dropped because they duplicated the dashboard, and a piped `foreman` still prints
   usage.
 - **Launch flags override; files configure.** A dashboard launch flag overrides one
@@ -359,8 +280,8 @@ the same commit. The commit message records why it changed.
   |---|---|---|
   | `stepAnswer` | legacy PR feedback turn, disabled by the CLI | unused |
   | `stepPickUpReview` | re-verify the PR, record its head | PR not open: implement. Else review |
-  | `stepImplement` | a plan, implement, or fix turn | plan posted or checkpoint verified: implement. Commit or PR to review: review. Else done |
-  | `stepReview` | conflict check, self-review or competing review, escalate | findings: implement. Clean self-review: review. Clean local: open PR. Clean: done |
+  | `stepImplement` | resume planner or implementer; then validate and publish the plan | planned: implement. Checkpoint: resume implementer. Commit or PR: review. Else done |
+  | `stepReview` | conflict check, self-review then adversarial review | findings: implement, then return to the finding reviewer. Clean: handoff or open PR |
   | `stepOpenPR` | adopt or open the PR for a cleanly reviewed local commit | done |
   | `stepHandover` | legacy comment handover, disabled by the CLI | unused |
 
@@ -517,17 +438,14 @@ the same commit. The commit message records why it changed.
 
 ### Agents
 
-- **Claude and Codex are interchangeable.** Every feature works with either as the
-  implementer and the other as the initial reviewer. An unavailable reviewer can be
-  replaced by a fresh review session with the implementer's agent.
+- **Claude and Codex are interchangeable.** The configured or explicitly selected profile determines the implementer. The
+  adversarial role uses its configured provider and retained session; quota cannot skip it.
 - **Headless turns with a structured outcome.** Each turn ends in a final message that
   matches `internal/agent/outcome.schema.json`: `planned`, `checkpoint`, `pr_opened`,
   `review_ready`, `blocked` with questions, or `failed`. `agent.ParseOutcome` is the
   only way an implementer's output
   enters the program, and it rejects questions with fewer than two options or duplicate
-  labels. The reviewer, the routing selector, and the evaluator have
-  their own schemas and parsers, `agent.ParseReview`, `agent.ParseSelection`,
-  `agent.ParseEvaluation`, and `agent.ParseDiagnosis`.
+  labels. Reviewers have their own schema and parser, `agent.ParseReview`.
   Rejected: interactive sessions with terminal scraping.
 - **Permissions.** The dangerous bypass flags are never used. Claude runs with
   `acceptEdits` and the fixed `Bash,WebFetch,WebSearch` tool list; the list is not
@@ -542,139 +460,33 @@ the same commit. The commit message records why it changed.
   open, in the task's repo, from the task branch, against the task's base, and records
   the verified number and head. A PR the developer retargets keeps its new base.
 - **Resume retained implementation context.** Answers, PR comments, and review
-  findings resume the implementation session when present. A missing session or
-  provider handoff rebuilds context from the checked plan, all answered decisions,
-  committed work, and outstanding findings. Only `agent.ErrNoSession` falls back
-  after a resume error; other errors stop the turn.
-- **Planning is its own session.** Until the two planning documents are posted, the
-  turn plans, including for an existing open PR. The runner, not the agent, posts them as issue
-  comments with a `<!-- foreman:<doc> desc=<fingerprint> -->` marker and edits them on a
-  re-plan. The fingerprint is the first 12 hex digits of the SHA-256 of the trimmed
-  issue description. There is no approval gate. Implementation then starts a fresh
-  session. Planning receives the issue description and confirmed triage decisions;
-  the implementation session receives the checked Requirements and Work plan text,
-  not the planning transcript. Requirements states each rule and check once; Work
-  plan maps its tasks to requirement IDs. Both documents use short, plain English. Writing
-  advice uses the `writing_advice` review category and is saved locally in
-  `planning_advice`, shown in the task view. Advice cannot become a blocking finding,
-  trigger a correction turn, or add tracker comments. Real missing or unclear
-  requirements still block. Drafts retain this advice across partial-post retries.
-  The planner and checker share the same rule: a later correction replaces an earlier
-  decision on the same point; other earlier decisions still apply. Neither should
-  require both values of a corrected rule. The read-only checker verifies that
-  Requirements covers triage and every rule has a task in Work plan. It compares only the supplied text and returns
-  concise findings. A complete issue plan skips this check on adoption when its
-  document digest and the current scope digest match the last clean check. A clean
-  check may report nonblocking
-  limitations; only blocking limitations prevent agreement. Concrete findings on a
-  new plan go back to the same planning session with a short correction prompt. The
-  planner returns changed documents only, and the runner checks the combined set
-  before posting. After three revisions with remaining findings, the task asks for a
-  decision. Draft documents, source fingerprints, check results, and the revision
-  count are saved locally after each completed call. A restart reuses the draft only
-  when triage, the issue description, and existing planning comments still match. A clean
-  check is reused while finishing partial comment posts; unchanged comments are
-  kept. Changed requirements or comments invalidate the saved draft. A missing
-  planner session starts a correction with only the draft, findings, and confirmed
-  scope. An unchanged revision stops before another model check and asks for a
-  decision. Revision limits survive restarts; an explicit choice to revise grants a
-  new set of attempts. Older four-comment plans keep their Analysis and Design comments on the
-  issue. Foreman reads their legacy digest once; if all four comments and triage still
-  match the clean check, it saves the two-document digest without a model turn. A
-  changed comment or triage still needs a new check.
-- **The issue, not the record, says whether a plan exists.** A task record can lose its
-  plan comments (a recreated task, another machine), so before a planning turn the
-  runner reads the description and every comment from the task's source. Only a
-  comment whose first line is one of the two required document markers counts; unmarked
-  comments, other `foreman:` markers, and description text never do, and none of them
-  is changed. A recorded comment that is still marked wins; otherwise the newest marked
-  comment per document wins. A recorded comment that lost its marker is left alone and
-  its document is posted anew. A complete plan is recorded and the task implements it
-  without posting. An absent or partial plan goes to the planning turn using only the issue and
-  confirmed triage as supplied task context. Existing document text stays out of the
-  prompt; the runner can still preserve a document returned empty, edit revised ones,
-  and post missing ones. After the turn the runner reads each target comment again: an edit
-  whose comment is gone or unmarked becomes a new post, and a kept comment that is
-  gone or unmarked fails the task before anything is posted. A document whose fingerprint differs from the current description
-  blocks the task with a keep-or-revise decision before any turn. The answer covers
-  only the description it was asked about, so a later edit asks again. Comments
-  without a fingerprint predate it and count as consistent. A failed read of the issue
-  or its comments fails the task before any turn or post.
-- **Implementation checkpoints reset context within the implement phase.** Before a
-  PR exists, an implementer may finish one tested part with `checkpoint`, one short
-  next objective, and reported passing validation. Brevity is prompt guidance;
-  objectives have no character limit. Foreman accepts it only when the
-  worktree is clean on the task branch and HEAD advances from the last accepted
-  commit. It saves the commit, objective, and usage together, clears the old session,
-  and starts a fresh one. The new prompt includes the checked Requirements and Work plan,
-  stage instructions, commit, and objective; it omits the issue body, triage,
-  other planning documents, and previous transcript. A retry keeps the objective only
-  when the worktree still points at the accepted commit. Checkpoints are limited to
-  eight per task. Planning, merge repair, and review fixes do not
-  checkpoint. Validation remains agent reported; Foreman verifies Git state.
-  If a checkpoint reports failed validation, Foreman resumes the same session
-  with the failed commands and allows two repair turns. A passing checkpoint
-  then follows the usual Git checks; repeated failed validation fails the task.
-  A later `review_ready` may use the accepted checkpoint commit without another
-  commit when validation shows that its work is complete.
+  findings resume the implementation session when present. A missing or uncertain session pauses the role with progress preserved. Resume it
+  when available or wait for explicit role replacement; other provider errors stop the turn.
+- **Planning is its own retained role.** The planner receives the issue description and
+  confirmed triage decisions, writes Requirements and Work plan, and checks both against
+  that scope before returning `planned`. Foreman keeps document shape validation,
+  source fingerprints, and idempotent comment publication in Go. The implementer then
+  receives the checked documents in its retained session. A changed confirmed scope
+  returns to the planner and implementer before review.
+- **No task-triggered model calls sit outside the four roles.** Automatic learning and
+  diagnostic calls do not run in the task lifecycle. Standalone knowledge commands
+  remain separate operations.
 - **Models and effort are set per step:** `plan_model`, `model` (implementation, fixes,
   merges, PR creation), and `review_model`; Codex also takes reasoning effort
-  per step. Each turn logs an `agent:model:step` line. A routed task's stored profile
-  replaces the plan and implementation settings for its turns; review settings never
-  change.
+  per step. Each turn logs an `agent:model:step` line. The chosen profile fixes provider and model settings across every role and retry.
 
-### Routing
+### Profiles and quota
 
-- **`routing.yaml` sits next to `config.yaml`** and holds the selector, named
-  profiles, ordered rules (`when`, `profiles`, `why`), and a `default`. A profile sets
-  `agent` and may set `plan_model`, `model`, and, for Codex, the two efforts; omitted
-  fields inherit `claude.*` or `codex.*`. Budgets, notifications, repository filters,
-  cleanup, auto mode, and review settings stay in `config.yaml`. No file means routing
-  is off. A file that fails to load is an error on every route, and nothing that needed
-  a route starts; the rest of the dashboard still works.
-- **Only starts of never-delegated issues are routed:** auto mode, and `3` in the agent
-  choice. `1` and `2` select a provider directly. Quota preflight applies to both.
-- **Fit comes first.** A selector turn (Claude with `claude.plan_model` unless
-  `selector` says otherwise) reads the repository, title, labels, body (6000 runes), up
-  to 10 of the newest non-foreman comments (1000 runes each, 5000 in all), and the
-  context file (4000 runes), and names a rule or 0. Each input has its own budget, and
-  `routing.yaml` rejects rules longer than 2500 runes, so the prompt stays under 20000
-  runes without cutting any input short. A failed read of the issue or its comments is
-  a route error, so the selector never chooses from part of the issue. It runs with no tools in a scratch
-  directory. A selector failure, an unknown rule, or 0 uses `default`, and the reason
-  says so.
-- **Check provider quota before model calls.** Starts, resumes, reviews, routing, diagnostics,
-  learning, and knowledge merging consult quota first.
-  Confirmed exhaustion or absent setup prevents the call. Unknown quota preserves
-  the selected provider. At a runner stage boundary or restart, an unavailable
-  implementer hands existing work to the configured competing provider only when
-  it is positively available. The handoff clears provider-specific sessions and
-  profiles. It retains the branch, checkpoint progress, local proposal, PR, plan,
-  decisions, and verification. Both unavailable providers stop implementation
-  without calling either. Mid-call failures stop the turn; a retry checks quota
-  again before handing off. New manual tasks refuse an unavailable provider.
-  The routing selector may use the available competing provider with its configured
-  planning settings; if neither can run, routing waits without a selector call.
-- **Quota only removes candidates.** Candidates are the chosen rule's profiles in the
-  order listed, or `default` alone. `quota-axi` removes those whose agent it confirms
-  exhausted (a fresh `all_models` reading at 0%) or not set up (`notSetUp: true`
-  on a fresh provider row). Another profile runs only when the rule lists it. With
-  no candidate left, nothing starts: the dashboard shows why, and auto mode keeps
-  the selection and routes again after the next GitHub refresh. A stale, missing,
-  or failed reading is unknown. When quota is unknown, the default runs if it is a
-  candidate, else the first, and the reason says `quota unknown`. Ranking by percent
-  left was rejected: it would override the cost order the rule sets.
-- **The choice is stored resolved** on the delegation (`profile`, `route_reason`), so
-  editing either file never changes a running task. The runner writes
-  `route:<profile>:<agent>:<reason>` once, before the run's first `agent:model:step`
-  line (`route_logged`). A restart with the same agent keeps the profile; another agent
-  drops it. The reviewer starts as the competing agent and uses its review settings.
-- Rejected: routing inside `app.Start` (a manual start could not confirm first) and in
-  the runner (the task is already running, so it could neither wait nor change agents).
+- **Profile choice is deterministic.** A manual explicit choice or the configured
+  default supplies the profile. No model call selects a profile or routes in prose.
+  The chosen profile remains fixed across retries.
+- **Check provider quota before each role call.** Confirmed exhaustion or absent setup
+  pauses the role with its session and progress preserved. Unknown quota does not
+  change the selected profile. Quota never skips review or transfers a role silently.
 - **Dollar budgets cap Claude only.** Codex reports no cost and its tokens arrive only
   when a turn ends, so foreman records Codex tokens and never invents a price. The
   Codex log states that the per-call dollar setting is unsupported. Each runner call
-  (including plan checks, revisions, self-review, and competing review)
+  (including planning, self-review, and adversarial review)
   saves its stage, model, times, reported usage, and error before processing its outcome.
   Totals include failed calls when usage was reported. Claude input includes cache
   creation and cache reads; cached input is also shown separately. Codex reasoning is
@@ -682,12 +494,11 @@ the same commit. The commit message records why it changed.
   reconstructed from missing usage. Calls with no final provider usage keep what is
   known; Foreman does not estimate missing tokens or cost.
 - **Runner limits apply across restarts.** `budgets.task_tokens` (2,000,000) caps reported
-  task input plus output; `budgets.planning_tokens` (400,000) covers planning turns and
-  plan checks recorded after this feature. Limits are checked before each call and
+  task input plus output; `budgets.planning_tokens` (400,000) covers planning turns. Limits are checked before each call and
   can be exceeded by the last call. Cached input counts. Reaching a limit fails the
   task with the setting to change. `budgets.call_timeout_seconds` (1,800) cancels a
   call and its process group. Zero disables each limit; negative values are invalid.
-  These limits use the current config. Learning runs separately under its own budget.
+  These limits use the current config. Knowledge export and ingest are separate commands.
 - **Validation is self-reported.** Foreman records what the agent ran and doesn't re-run
   it, because that would run untrusted commands outside the sandbox. CI is the
   independent check. Each check carries a scope, `focused` or `full` (absent reads as
@@ -746,14 +557,13 @@ the same commit. The commit message records why it changed.
 
 ### Stage instructions
 
-- **The developer's workflow lives in stage files**, not in Go. `plan`, `implement`,
-  `review`, and `pr` each resolve `stages/<stage>.md` next to the config file, then the
+- **The developer's workflow lives in stage files**, not in Go. `plan`, `implement`, `self-review`, `review`, and `pr` each resolve `stages/<stage>.md` next to the config file, then the
   committed `.foreman/<stage>.md` in the task's worktree. Foreman never parses them and
   never reads CLAUDE.md or AGENTS.md.
 - **Repository PR conventions take precedence.** The implementation prompt tells the
   agent to read the repository's `AGENTS.md` and PR template before opening or updating
   the PR. Their title and body rules override conflicting global `pr.md` defaults.
-- **The global files are required.** The dashboard and the runner fail naming the
+- **The five global files are required.** The dashboard and the runner fail naming the
   missing files; `foreman -c` and a piped `foreman` don't check them. `make config` (`scripts/install-stages.sh`) installs the defaults from
   `defaults/stages/` and never overwrites an installed file. It names each installed
   file that differs from its default and prints the `cp` command that replaces it.
@@ -779,94 +589,57 @@ the same commit. The commit message records why it changed.
 
 ### Review
 
-- **Both reviewers read the complete diff.** Foreman pins the verified base and
-  head commits and gives each reviewer their three-dot diff. The command disables
-  external diff and text conversion and includes changes to submodule pointers.
-  Each reviewer gets one fresh, read-only call per round with its configured model and review
-  budget. `review_rounds` sets the number of passes in the call. The same instructions
-  apply after a fix. Reviewers may read surrounding code and tests to verify concrete
-  defects. Code review prompts exclude task requirements, plans, decisions,
-  acceptance claims, PR text, validation results, earlier review findings, and
-  implementation transcripts.
-- **Review-ready work need not advance on every turn.** Checkpoints still require
-  a new commit. A `review_ready` turn may reuse an existing clean commit, including
-  work committed before a previous turn's output failed validation. When that commit
-  is only the starting head and has no prior verified handoff, Foreman verifies it
-  has commits beyond the base branch. An untouched or behind-base branch fails.
-  A retry may assess the latest old finding, but changed code needs fresh self-review.
-- **The implementer assesses findings in its retained session.** Valid findings get
-  focused fixes and another independent self-review. Invalid self-review findings
-  may be rejected through `reviewAssessment`, naming the current review round and
-  unique one-based finding numbers with concrete reasons. An empty rejection list
-  means all findings were fixed; it does not waive another review. Go checks the
-  latest self-review round and that the findings exist. The assessment stays bound
-  to the original reviewed commit; it cannot waive review of newer code. Reasons
-  are saved as `rejected_findings` on the original review without changing its
-  verdict. Rejecting every finding on an unchanged reviewed commit ends self-review
-  early. Partial rejections or changed commits need another self-review. Rejected
-  findings do not consume fix rounds. A lost implementation session is rebuilt from
-  the checked plan, all answered decisions, committed work, and outstanding findings.
-- **Review kinds live on the record.** Each review records its kind (`self`, or empty
-  for competing) and the revision it covers. A clean self-review newer than the latest
-  competing review leaves competing review pending after a restart. Older task records
-  remain readable.
-- **Only confirmed quota exhaustion skips competing review.** Foreman records a
-  `skipped` verdict and reason for the revision. Unknown quota, absent setup, provider
-  errors, and missing adapters do not grant a skip. Self-review and the full-suite
-  gate still apply.
+- **Each task uses four roles.** The planner has one retained session. It receives
+  confirmed triage and returns Requirements and Work plan after checking both against
+  that scope. The implementer has one retained session across fixes, questions,
+  checkpoints, merge repairs, final checks, and publishing. The self-reviewer uses a
+  fresh read-only session for each pass. The adversarial reviewer keeps one retained,
+  read-only session. Foreman records each role's session and pending action before
+  starting the next action, so retries resume the same work.
+- **Session uncertainty pauses safely.** If a session is missing, its launch is
+  uncertain, or its provider is unavailable, Foreman preserves progress and explains
+  the reason. Work resumes when the session is available or the user explicitly
+  replaces that role. Older task records remain readable; ambiguous recovery asks for
+  a dashboard decision.
+- **Self-review starts broad, then checks the fix.** The first pass reads the full
+  pinned `base...head` diff. After a fix, Foreman uses `reviewedHead..fixedHead` only
+  when Git verifies the earlier head is an ancestor and the base remains valid.
+  Retargets, rewritten history, or missing ranges start a new full baseline. The
+  self-review prompt contains its stage file, the pinned diff command, and read-only
+  access to relevant code; it excludes the plan, implementation, and earlier reviews.
+- **Findings return to their reviewer.** The retained implementer accounts for every
+  self-review finding as fixed or rejected with evidence tied to its round. The
+  self-reviewer checks the fix range. After an adversarial finding, Foreman resumes
+  the implementer and returns directly to the retained adversarial reviewer, which
+  reads the full branch diff. A changed plan or invalidated base restarts at
+  self-review. Only an explicit clean adversarial verdict advances the task.
+- **No findings are waived.** Quota and fix limits pause work; they cannot skip a
+  review or accept unresolved adversarial findings. If final validation changes code,
+  the changed revision returns to the review that covers it. `review_rounds` (1) sets
+  passes over a review diff and `fix_rounds` (3) sets reviewed fix attempts before a
+  pause for the developer. There are no automatic learning or diagnostic model calls
+  during a task.
+- **Quota and profile choice are deterministic.** Foreman uses an explicitly selected
+  profile or the configured default. It does not ask an agent to choose a profile or
+  route itself in prose. Quota checks may pause a role; they never waive review.
 - **Both reviewers are read-only.** Claude gets `Read, Grep, Glob` and read-only git.
-  Codex uses its read-only permission profile. The implementer runs validation
-  commands and verifies the checked requirements. Reviewers report concrete defects
-  and explicit limitations. A review that cannot inspect the diff cannot advance
-  the task.
-- **Confirmed triage is checked before implementation.** Foreman checks Requirements
-  against current triage and checks that Work plan covers each rule in a separate,
-  text-only review. The implementer uses the checked documents and answered decisions.
-  Foreman checks the PR description separately. When screenshots are requested
-  or the agent captured them, the opening agent attaches them in a marked PR comment
-  after the PR exists. A retry checks existing comments before posting again. The
-  agent uses the repository's documented setup and data, and names missing evidence
-  in its outcome when none is suitable.
-- **`review_before_pr` reviews before the PR opens.** Repositories that review every new
-  PR automatically would otherwise review code Foreman's fixes still change. The setting
-  is copied into the task when it starts, and a restart keeps it, so a config change never
-  alters a started task; only a reset takes the current value. A task that has a PR
-  follows the PR workflow. The implementer commits, validates,
-  and returns `review_ready` with a proposed title and description before pushing.
-  Foreman saves the proposal for publishing. Code review, reviewer selection, and
-  both round settings work as for a PR. At the fix cap, B stops
-  the task without a PR instead of accepting the findings: only a clean review opens one.
-  The agent pushes and runs `gh pr create` under the pinned account. Foreman
-  checks that the PR's head matches the reviewed commit and its title and body
-  match the proposal. The clean review covers the published head, so the gate
-  goes straight to CI. On restart, an unreviewed commit goes to review and a
-  clean commit goes to the PR step.
-  The opening turn may capture requested screenshots after the PR exists and post them
-  as a marked comment.
-- **A code review covers one revision.** Foreman verifies that the review covers
-  the change before handoff. A changed head or retargeted PR in `WAITING_FOR_CI`
-  needs self-review followed by competing review. Foreman tracks checked scope
-  and plan separately for handoff. A changed plan goes back to the implementer
-  before review, including after a restart on an existing PR. Foreman flags new commits on a `READY_FOR_HUMAN` PR for the
-  developer. A crash mid-review resumes at review.
+  Codex uses its read-only permission profile. Reviewers report concrete defects and
+  explicit limitations. A review that cannot inspect its assigned diff cannot advance.
+- **Confirmed scope and publication remain verified.** The planner validates the
+  documents against triage; Go retains document validation, fingerprints, and
+  idempotent comment publication. Foreman checks the PR description separately.
+  Screenshots requested or captured are attached in a marked PR comment after the PR
+  exists, with retries checking for an existing comment first. Existing PR creation,
+  branch verification, and repository PR conventions remain unchanged.
+- **A code review covers a revision.** Foreman verifies review coverage before
+  handoff. Changed heads and retargeted PRs need self-review then adversarial review.
+  A changed checked scope or plan returns to the planner and implementer before
+  review. Foreman flags new commits on a `READY_FOR_HUMAN` PR for the developer. A
+  crash resumes the saved role and action.
 - **Conflicts are checked before every review** with `git merge-tree` on
   `origin/<branch>` and `origin/<base>`, which writes nothing (needs git 2.38+).
-  GitHub's `mergeable` was rejected for this: it reads UNKNOWN after a push and names no
-  files. The implementer merges the base, never rebases or force-pushes. After two
-  turns that still conflict, the developer is asked.
-- **Two round settings.** `review_rounds` (1) is how many passes each review, self or
-  competing, makes over a PR or a local change. `fix_rounds` (3) is how many reviewed
-  fixes run before the developer is asked; fixes requested by either review count
-  against it. The cap is checked after a review, so no fix reaches the developer
-  unreviewed, and answering resets it. At the cap after a competing review, the
-  developer can accept the rest (stop, for a local change) or go again.
-- **The implementer owns self-review questions at the fix limit.** The retained
-  implementation session receives the remaining findings and the limit instruction.
-  It may reject every invalid finding with evidence on the unchanged commit or
-  return `blocked` with questions for the developer. A turn that changes the commit
-  or returns without a complete rejection fails until a developer answer resets the
-  limit. No tool-less diagnosis call or generated self-review question runs.
-  Existing stored diagnosis and stop decisions remain readable and actionable.
+  The implementer merges the base, never rebases or force-pushes. After two turns that
+  still conflict, the developer is asked.
 
 ### CI and handover
 
@@ -1021,7 +794,8 @@ the same commit. The commit message records why it changed.
 
 ### Learning
 
-- **Foreman evaluates each finished task and keeps what it learns per repository.**
+- **Learning is explicit and separate from delegated tasks.** The `knowledge` commands
+  export and ingest repository knowledge; the task runner does not evaluate finished tasks.
   The store is `<knowledge_dir>/<owner>/<repo>/` (default `<data>/knowledge`):
   `learnings.yaml` is the source of truth (id, kind, text, status, evidence entries,
   and history), `evaluations/<task>.yaml` holds each task's evaluation and evidence
@@ -1031,16 +805,6 @@ the same commit. The commit message records why it changed.
   retry. Paths
   come from a validated `owner/repo`, so one repository cannot reach another's
   directory. Writes use a temp file and rename.
-- **Two triggers, no daemon.** The runner spawns `foreman __learn` when its loop ends
-  on a clean review. The refresh spawns it for a learnable task whose evidence fingerprint
-  changed. A task is learnable with a clean competing review, or while its latest
-  decision is a `practice_gap` limit that waits for an answer or was answered with a
-  stop. The fingerprint covers review count, answered decisions, PR comments, PR
-  number, head, and outcome, and the attempt's end. CI is not in the fingerprint, so a
-  CI change never re-evaluates. A failed evaluation of the same evidence waits an hour.
-  Merged or closed tasks that were never evaluated are not started, so turning
-  learning on does not pay for old work. Rejected: evaluating inside the runner, which
-  delays the handover and misses later feedback; a scheduled job, which is a daemon.
 - **The agent judges; Go keeps the books.** One evaluator turn reads the evidence and
   the repository's current learnings and returns proposals and revisions. Go decides
   what is stored, so the rules below are tested and a model cannot argue past them.

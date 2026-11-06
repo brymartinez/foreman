@@ -118,22 +118,6 @@ func TestLinearSuggestionUsesFullBranchWorktreePath(t *testing.T) {
 	}
 }
 
-func TestLinearRouteReadsIssueAndCommentsFromLinear(t *testing.T) {
-	f, selector := routed(t, agent.Selection{}, known)
-	key := task.Key{Repo: f.gh.repo.Repo, Source: task.Linear, ExternalID: "uuid-42"}
-	tracker := &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", Body: "Use bounded retries.", State: "open"}, comments: []TrackerComment{{Body: "Keep the old TTL."}}}
-	f.app.Linear = tracker
-	if _, err := f.app.Route(context.Background(), RouteRequest{Repo: key.Repo, Key: key}); err != nil {
-		t.Fatal(err)
-	}
-	if len(tracker.reads) != 1 || tracker.reads[0] != key || len(tracker.commentReads) != 1 || tracker.commentReads[0] != key {
-		t.Fatalf("reads = %+v, comment reads = %+v", tracker.reads, tracker.commentReads)
-	}
-	if len(selector.calls) != 1 || !strings.Contains(selector.calls[0].Prompt, "WEB-42") || !strings.Contains(selector.calls[0].Prompt, "Keep the old TTL.") {
-		t.Fatalf("route prompt = %+v", selector.calls)
-	}
-}
-
 func TestLinearRunnerReadsStoredSourceAndPostsTwoPlanningComments(t *testing.T) {
 	f := newFixture()
 	key := task.Key{Repo: f.gh.repo.Repo, Source: task.Linear, ExternalID: "uuid-42"}

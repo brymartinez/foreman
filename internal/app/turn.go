@@ -15,10 +15,11 @@ import (
 // turnRequest is the work an implementer turn resumes with when no answered decision
 // or conflict repair comes first. At most one of findings, feedback, and merge is set.
 type turnRequest struct {
-	forcePlan bool              // an open PR needs a planning turn before work resumes
-	findings  *task.Review      // open findings from the latest review
-	feedback  []PRComment       // PR comments to answer
-	merge     *agent.MergeBrief // a base branch to merge before the next review
+	planSources map[task.PlanDoc]string
+	forcePlan   bool              // an open PR needs a planning turn before work resumes
+	findings    *task.Review      // open findings from the latest review
+	feedback    []PRComment       // PR comments to answer
+	merge       *agent.MergeBrief // a base branch to merge before the next review
 	// openBodyFile is set for the turn that pushes a reviewed local commit and opens
 	// its PR. It holds the reviewed description.
 	openBodyFile string
@@ -84,6 +85,17 @@ func (a App) runTurn(ctx context.Context, rec *task.Record, req turnRequest, che
 	res := a.requireFullCheck(ctx, rec, req, a.checkChange(ctx, rec, req, turn, check, log), check, log)
 	if res.err == nil {
 		res.err = validateReviewAssessment(rec, res)
+	}
+	if res.err == nil && finishesChange(res.turn.Outcome.Status) && req.findings != nil && req.findings.Kind == task.SelfReview {
+		assessment := res.turn.Outcome.ReviewAssessment
+		if assessment == nil || assessment.Round != req.findings.Round {
+			res.err = errors.New("self-review correction must account for the findings in reviewAssessment")
+		} else if len(assessment.Rejected) < len(req.findings.Findings) {
+			head, _ := rec.CurrentChange()
+			if res.head() == head {
+				res.err = errors.New("self-review correction reported fixes but did not change the reviewed commit")
+			}
+		}
 	}
 	if res.err == nil && finishesChange(res.turn.Outcome.Status) && req.findings != nil && req.findings.Kind == task.SelfReview && rec.ChangeRequestsSinceDecision() > a.fixRounds() {
 		head, _ := rec.CurrentChange()
@@ -294,7 +306,23 @@ func finishesChange(s agent.Status) bool { return s == agent.PROpened || s == ag
 // turn's usage always counts.
 func (a App) finishTurn(ctx, final context.Context, key task.Key, during string, res turnResult, apply func(cur *task.Record), log io.Writer) (*task.Record, error) {
 	return a.update(final, key, existing(func(cur *task.Record) {
+		completed := cur.Delegation.Action
 		apply(cur)
+		var missing missingRoleSession
+		if errors.As(res.err, &missing) && !errors.Is(ctx.Err(), context.Canceled) {
+			askForSession(cur, missing.role, a.Now())
+		}
+		if res.err == nil && completed == cur.Delegation.Action {
+			switch cur.State {
+			case task.NeedsDecision:
+				if completed != nil {
+					completed.Started = false
+				}
+			case task.Failed:
+			default:
+				cur.Delegation.Action = nil
+			}
+		}
 		if res.err != nil {
 			applyStop(ctx, cur, during, log, a.Now())
 		}

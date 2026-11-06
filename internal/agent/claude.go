@@ -88,18 +88,36 @@ var ReviewTools = []string{"Read", "Grep", "Glob", "Bash(git diff:*)", "Bash(git
 
 // Review runs a disposable, read-only session.
 func (c Claude) Review(ctx context.Context, in StartInput) (ReviewOutcome, error) {
+	return c.review(ctx, in, []string{"--no-session-persistence"})
+}
+
+func (c Claude) StartReview(ctx context.Context, in StartInput, save func(task.Session)) (ReviewOutcome, error) {
+	newID := c.NewSessionID
+	if newID == nil {
+		newID = NewUUID
+	}
+	id := newID()
+	save(task.Session{Agent: task.Claude, ID: id})
+	return c.review(ctx, in, []string{"--session-id", id})
+}
+
+func (c Claude) ResumeReview(ctx context.Context, s task.Session, in StartInput) (ReviewOutcome, error) {
+	return c.review(ctx, in, []string{"--resume", s.ID})
+}
+
+func (c Claude) review(ctx context.Context, in StartInput, sessionArgs []string) (ReviewOutcome, error) {
 	if c.ReviewModel != "" {
 		c.Model = c.ReviewModel
 	}
 	logTurn(in.Log, task.Claude, c.Model, in.Step)
 	args := []string{
 		"-p", in.Prompt,
-		"--no-session-persistence",
 		"--output-format", "stream-json", "--verbose",
 		"--json-schema", string(ReviewSchema),
 		"--permission-mode", "dontAsk",
 		"--allowedTools=" + strings.Join(ReviewTools, ","),
 	}
+	args = append(args, sessionArgs...)
 	if in.MaxBudgetUSD > 0 {
 		args = append(args, "--max-budget-usd", fmt.Sprintf("%.2f", in.MaxBudgetUSD))
 	}

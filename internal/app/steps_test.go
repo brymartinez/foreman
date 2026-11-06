@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"io"
 	"slices"
 	"testing"
@@ -49,19 +48,5 @@ func TestMergeGateTurnCarriesTheMergeStep(t *testing.T) {
 	// The first turn opens the PR; the merge turn follows it, then the self-review.
 	if len(f.claude.steps) != 3 || f.claude.steps[1] != agent.StepMerge {
 		t.Errorf("implementer steps = %q, want the second to be %q", f.claude.steps, agent.StepMerge)
-	}
-}
-
-func TestConflictRepairFallbackGivesEachTurnTheMergeStep(t *testing.T) {
-	f := newFixture()
-	key := repairing(t, f)
-	f.claude.steps = nil
-	f.claude.resumeErr = errors.Join(errors.New("gone"), agent.ErrNoSession)
-	f.claude.during = func() { pushHead(f, "merged1") }
-	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	if want := []string{agent.StepMerge, agent.StepMerge, agent.StepReview}; !slices.Equal(f.claude.steps, want) {
-		t.Errorf("implementer steps = %q, want the resume and the fresh turn both %q", f.claude.steps, want)
 	}
 }

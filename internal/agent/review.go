@@ -22,6 +22,7 @@ type ReviewOutcome struct {
 	// These fields are set by the runner, never parsed from model output.
 	BaseRef  string
 	BaseHead string
+	FromHead string
 	Advice   []task.Advice
 	Clean    bool
 	Summary  string
@@ -115,6 +116,7 @@ func ParseReview(raw []byte) (ReviewOutcome, error) {
 // ReviewBrief pins the code under review to two Git revisions.
 type ReviewBrief struct {
 	BaseHead          string
+	FromHead          string
 	Head              string
 	Self              bool
 	Passes            int
@@ -128,13 +130,17 @@ func ReviewPrompt(b ReviewBrief) string {
 	if b.Self {
 		role = "self-reviewer"
 	}
-	fmt.Fprintf(&s, "You are the %s for this change. This is a fresh, read-only session. Do not edit files, commit, or push.\n\n", role)
-	s.WriteString("## Review scope\n\nJudge concrete defects and regressions introduced by the complete diff. Read surrounding code and tests as needed to verify a finding. Do not read the issue, plan, claims, decisions, PR description, previous reviews, or implementation transcript.\n\n")
-	fmt.Fprintf(&s, "Read the complete diff with `git diff --no-ext-diff --no-textconv --ignore-submodules=none %s...%s --` from the current working directory. Review every change before returning. If the tool truncates the output, inspect the missing paths separately using the same revisions.\n\n", b.BaseHead, b.Head)
-	if b.Passes <= 1 {
-		s.WriteString("Read the complete diff once.\n\n")
+	fmt.Fprintf(&s, "You are the %s for this change. This is a read-only review session. Do not edit files, commit, or push.\n\n", role)
+	s.WriteString("## Review scope\n\nJudge concrete defects and regressions introduced by the supplied diff. Read surrounding code and tests as needed to verify a finding. Do not read the issue, plan, claims, decisions, PR description, previous reviews, or implementation transcript.\n\n")
+	if b.FromHead != "" {
+		fmt.Fprintf(&s, "Read the fix diff with `git diff --no-ext-diff --no-textconv --ignore-submodules=none %s..%s --`. Review every changed line in this range.\n\n", b.FromHead, b.Head)
 	} else {
-		fmt.Fprintf(&s, "Read the complete diff %d times, looking for missed problems on each pass.\n\n", b.Passes)
+		fmt.Fprintf(&s, "Read the complete diff with `git diff --no-ext-diff --no-textconv --ignore-submodules=none %s...%s --` from the current working directory. Review every change before returning. If the tool truncates the output, inspect the missing paths separately using the same revisions.\n\n", b.BaseHead, b.Head)
+	}
+	if b.Passes > 1 {
+		fmt.Fprintf(&s, "Read the %s diff %d times, looking for missed problems on each pass.\n\n", diffLabel(b.FromHead), b.Passes)
+	} else if b.FromHead == "" {
+		s.WriteString("Read the complete diff once.\n\n")
 	}
 	silentWorkSection(&s)
 	if text := strings.TrimSpace(b.StageInstructions); text != "" {
@@ -142,8 +148,15 @@ func ReviewPrompt(b ReviewBrief) string {
 		s.WriteString(text + "\n\n")
 	}
 	s.WriteString("Use read-only tools to check files, callers, and test cases. Leave tests, builds, and execution of project code to the implementer.\n\n")
-	s.WriteString("## Final response\n\nReply with JSON matching the provided schema. Report concrete defects with a failing case and its effect. Severity is blocking or should_fix. Set file and line when available. Use clean when you inspected the entire diff and found no defects. If you cannot inspect the entire diff, return changes_requested and a blocking limitation with the reason. Report only verified defects as findings.\n")
+	s.WriteString("## Final response\n\nReply with JSON matching the provided schema. Report concrete defects with a failing case and its effect. Severity is blocking or should_fix. Set file and line when available. Use clean when you inspected the entire supplied diff and found no defects. If you cannot inspect the entire supplied diff, return changes_requested and a blocking limitation with the reason. Report only verified defects as findings.\n")
 	return s.String()
+}
+
+func diffLabel(from string) string {
+	if from != "" {
+		return "fix"
+	}
+	return "complete"
 }
 
 func oneLine(text string) string {
@@ -210,7 +223,7 @@ func orNone(s, fallback string) string {
 func assessmentInstructions(s *strings.Builder, r task.Review) {
 	s.WriteString("\nAssess each finding using your task context. Fix valid defects, reject invalid findings with concrete evidence, and ask the developer about product decisions or conflicting requirements. Do not change approved behavior merely to satisfy a reviewer.\n")
 	if r.Kind == task.SelfReview {
-		fmt.Fprintf(s, "For rejected self-review findings, set reviewAssessment to {\"round\": %d, \"rejected\": [{\"finding\": 1, \"reason\": \"concrete evidence\"}]}, using the one-based finding numbers above. Omit fixed findings from rejected; an empty rejected list means all findings were fixed and still requires review. Rejecting every finding without changing the reviewed commit ends self-review early. Otherwise the new commit gets another independent self-review.\n", r.Round)
+		fmt.Fprintf(s, "Always account for self-review findings in reviewAssessment when returning a correction. For rejected self-review findings, set reviewAssessment to {\"round\": %d, \"rejected\": [{\"finding\": 1, \"reason\": \"concrete evidence\"}]}, using the one-based finding numbers above. Omit fixed findings from rejected; an empty rejected list means all findings were fixed and still requires review. Rejecting every finding without changing the reviewed commit ends self-review early. Otherwise the new commit gets another independent self-review.\n", r.Round)
 	} else {
 		s.WriteString("Set reviewAssessment to null. An adversarial verdict requires a clean re-review; it cannot be waived by the implementer.\n")
 	}
