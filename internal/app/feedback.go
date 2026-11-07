@@ -187,9 +187,10 @@ func (a App) unanswered(ctx, final context.Context, rec *task.Record, log io.Wri
 		return nil, updated, true, err
 	}
 	fmt.Fprintf(log, "foreman: PR #%d has no comments left to answer\n", d.PR)
+	_, _, planErr := a.reviewRequirements(ctx, updated)
 	updated, err = a.update(final, rec.Key, existing(func(cur *task.Record) {
 		cur.State = task.WaitingForCI
-		if handsOverNow(cur, cur.CI) {
+		if planErr == nil && handsOverNow(cur, cur.CI) {
 			cur.State = task.ReadyForHuman
 		}
 		cur.LastOutcome = &task.Outcome{Status: "feedback_answered", Summary: fmt.Sprintf("every comment on PR #%d is answered", cur.Delegation.PR), At: a.Now()}
@@ -207,26 +208,29 @@ func (a App) currentPR(ctx, final context.Context, rec *task.Record) (updated *t
 		return rec, false, nil
 	}
 	digest := task.ProposalDigest(pr.Title, pr.Body)
-	if digest == rec.Delegation.PRDigest && pr.HeadSHA == rec.Delegation.PRHead {
+	baseRef := rec.Delegation.BaseRef
+	if pr.BaseRefName != "" {
+		baseRef = "origin/" + pr.BaseRefName
+	}
+	if digest == rec.Delegation.PRDigest && pr.HeadSHA == rec.Delegation.PRHead && baseRef == rec.Delegation.BaseRef {
 		return rec, true, nil
 	}
 	updated, err = a.update(final, rec.Key, existing(func(cur *task.Record) {
 		cur.Delegation.PRDigest, cur.Delegation.PRHead = digest, pr.HeadSHA
+		cur.Delegation.BaseRef = baseRef
 	}))
 	return updated, err == nil, err
 }
 
-// handsOverNow reports whether a task whose clean review covers its PR goes straight
-// to the developer once its comments are answered: CI has finished. A task with claim
-// verification waits for the gate instead, which reads the PRD before handing it over.
 func handsOverNow(rec *task.Record, ci *task.CIStatus) bool {
-	return ci != nil && ci.State != task.CIPending && !rec.Delegation.ClaimVerification && !rec.FinalCheckPending()
+	return ci != nil && ci.State != task.CIPending && !rec.Delegation.PlanImplementationPending && !rec.FinalCheckPending()
 }
 
-// reviewCovers requires an accepted competing review of the commit, scope, and claims.
 func reviewCovers(rec *task.Record, head string) bool {
 	latest := rec.LatestCompeting()
-	return latest != nil && rec.ClaimsCovered(latest) && rec.ScopeCovered(latest) && latest.Accepted() && latest.PR == rec.Delegation.PR && head != "" && latest.Head == head
+	return latest != nil && !rec.Delegation.PlanImplementationPending &&
+		(latest.BaseRef == "" || latest.BaseRef == rec.Delegation.BaseRef) &&
+		rec.ScopeCovered(latest) && latest.Accepted() && latest.PR == rec.Delegation.PR && head != "" && latest.Head == head
 }
 
 // beforeHandover answers comments that arrived while the run worked, so the developer

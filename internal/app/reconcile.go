@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/brymartinez/foreman/internal/agent"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -161,106 +160,24 @@ func askAboutPlanConflict(rec *task.Record, p issuePlan, now time.Time) {
 	}})
 }
 
-// reconcilePlan reads the plan on the issue before a planning turn, so a task whose
-// record lost its plan comments does not post them again. It reports whether the run
-// goes on to a turn. A complete plan is adopted and the turn implements it; a partial
-// one goes to the planning turn. A plan written for another description waits for the
-// developer, and a failed read fails the task before anything is posted.
 func (r *taskRun) reconcilePlan() (bool, error) {
 	a := r.a
-	p, readErr := a.readIssuePlan(r.ctx, r.rec)
-	answer, answered := planConflictAnswer(r.rec, p.fingerprint)
-	adopt := readErr == nil && p.complete() && (len(p.conflicts) == 0 || answer == optionText(keepPlanOption))
-	var missingPlanErr error
-	if readErr == nil && r.rec.PlanPosted() && !p.complete() && r.rec.Delegation.ClaimVerification {
-		_, missingPlanErr = a.reviewPRD(r.ctx, r.rec)
-	}
-	var emptyPlanErr error
-	if readErr == nil {
-		for _, doc := range task.PlanDocs {
-			if f, ok := p.found[doc]; ok && strings.TrimSpace(f.text) == "" {
-				emptyPlanErr = fmt.Errorf("the %s planning comment %s is empty", doc.Title(), f.comment.URL)
-				if doc == task.PRD && r.rec.Delegation.ClaimVerification {
-					_, emptyPlanErr = a.reviewPRD(r.ctx, r.rec)
-				}
-				break
-			}
-		}
-	}
-	var scopeCheckErr error
-	var scopeCheck agent.ReviewOutcome
-	checkedNow := false
-	if adopt {
-		if r.rec.Delegation.PlanScopeDigest == r.scope.digest && r.rec.Delegation.PlanDigest == planDigest(p.texts()) {
-			scopeCheck.Clean = true
-			fmt.Fprintln(r.log, "foreman: reusing the plan agreement check for unchanged scope and documents")
-		} else {
-			checkedNow = true
-			scopeCheck, scopeCheckErr = a.checkPlan(r.ctx, r.rec, r.scope, p.texts(), p, r.log)
-		}
-	}
-	scopeAnswer := scopePlanAnswer(r.rec, r.scope.digest, planDigest(p.texts()))
-	rec, err := a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
-		if checkedNow && scopeCheckErr == nil {
-			cur.PlanningAdvice = append([]task.Advice(nil), scopeCheck.Advice...)
-		}
-		switch {
-		case readErr != nil:
-			failTask(cur, fmt.Sprintf("reading the issue to reconcile its plan failed: %v", readErr), a.Now())
-			applyStop(r.ctx, cur, "planning", r.log, a.Now())
-		case emptyPlanErr != nil:
-			failTask(cur, emptyPlanErr.Error(), a.Now())
-		case r.rec.PlanPosted() && !p.complete():
-			if missingPlanErr != nil {
-				failTask(cur, missingPlanErr.Error(), a.Now())
-			} else {
-				var missing []string
-				for _, doc := range task.PlanDocs {
-					if _, ok := p.found[doc]; !ok {
-						if ref := cur.PlanComment(doc); ref != nil {
-							missing = append(missing, doc.Title()+": "+ref.URL)
-						}
-					}
-				}
-				failTask(cur, "recorded planning documents were deleted or lost their markers ("+strings.Join(missing, ", ")+"); restore or revise them before restarting", a.Now())
-			}
-		case scopeCheckErr != nil:
-			failTask(cur, scopeCheckErr.Error(), a.Now())
-		case adopt && !scopeCheck.Clean && len(scopeCheck.Findings) == 0:
-			failTask(cur, "plan agreement with confirmed triage is inconclusive; inspect the planning comments and retry", a.Now())
-		case adopt && !scopeCheck.Clean && strings.HasPrefix(scopeAnswer, "A."):
-			// The developer chose to revise; the next planning turn writes
-			// corrected documents from the issue and confirmed triage.
-		case adopt && !scopeCheck.Clean && strings.HasPrefix(scopeAnswer, "B."):
-			failTask(cur, "confirmed triage has not changed; correct the triage comment and restart", a.Now())
-		case adopt && !scopeCheck.Clean:
-			askScopePlanConflict(cur, r.scope, p, scopeCheck, a.Now())
-		case len(p.conflicts) > 0 && !answered:
-			askAboutPlanConflict(cur, p, a.Now())
-		case adopt:
-			for _, doc := range task.PlanDocs {
-				cur.SetPlanComment(p.found[doc].comment)
-			}
-			cur.Delegation.PlanScopeDigest = r.scope.digest
-			cur.Delegation.PlanDigest = planDigest(p.texts())
-		}
-	}))
+	p, err := a.readIssuePlan(r.ctx, r.rec)
 	if err != nil {
+		r.rec, err = a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
+			failTask(cur, fmt.Sprintf("reading the issue to reconcile its plan failed: %v", err), a.Now())
+			applyStop(r.ctx, cur, "planning", r.log, a.Now())
+		}))
 		return false, err
 	}
-	r.rec = rec
-	if rec.State != task.Planning {
-		return false, nil
-	}
-	if adopt && scopeCheck.Clean {
-		fmt.Fprintln(r.log, "foreman: the issue already has the plan; implementing it")
+	r.plan = p
+	if !p.complete() || r.rec.Delegation.PlanScopeDigest != r.scope.digest || r.rec.Delegation.PlanDigest != planDigest(p.texts()) {
 		return true, nil
 	}
-	r.plan = p
-	for _, doc := range task.PlanDocs {
-		if f, ok := p.found[doc]; ok {
-			fmt.Fprintf(r.log, "foreman: the issue already has the %s: %s\n", doc.Title(), f.comment.URL)
+	r.rec, err = a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
+		for _, doc := range task.PlanDocs {
+			cur.SetPlanComment(p.found[doc].comment)
 		}
-	}
-	return true, nil
+	}))
+	return err == nil, err
 }

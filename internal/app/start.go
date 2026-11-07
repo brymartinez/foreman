@@ -32,9 +32,6 @@ type StartRequest struct {
 	// keeps the task's stored profile when the agent is the same.
 	Profile     *task.Profile
 	RouteReason string
-	// managed is set when Dir is foreman's managed checkout rather than one the
-	// caller supplied. Only a managed checkout is synced before a proposal.
-	managed bool
 }
 
 // ErrDelegated is a NewOnly start for an issue that already has a delegation.
@@ -87,24 +84,11 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 	if _, ok := a.Agents[req.Agent]; !ok {
 		return nil, fmt.Errorf("agent %s is not configured", req.Agent)
 	}
-	// Restarts may hand existing work to the available provider. New manual starts
-	// retain the requested provider and refuse confirmed unavailable quota.
-	quotas := a.readQuotas(ctx, nil)
 	if existing != nil && existing.Delegation != nil {
-		// An outstanding adversarial review may complete or be skipped without
-		// any implementation call. Its own provider gets a separate preflight.
-		reviewOnly := req.Agent == existing.Delegation.Implementer.Agent && existing.ReviewPending() && existing.NextReview() == task.CompetingReview && !existing.Delegation.ConflictPending && len(existing.Undelivered()) == 0 && len(existing.UnhandledFeedback()) == 0
-		if !reviewOnly {
-			req.Agent, err = a.quotaImplementer(req.Agent, quotas)
-			if err != nil {
-				return nil, err
-			}
+		if existing.Delegation.Implementer.Agent != "" && existing.Delegation.Implementer.Agent != req.Agent {
+			return nil, fmt.Errorf("this task retains its %s implementer", existing.Delegation.Implementer.Agent)
 		}
-		if req.Profile != nil && req.Profile.Agent != req.Agent {
-			req.Profile = nil
-			req.RouteReason = ""
-		}
-	} else if err := quotaError(req.Agent, quotas); err != nil {
+	} else if err := quotaError(req.Agent, a.readQuotas(ctx, nil)); err != nil {
 		return nil, err
 	}
 	if req.ContextFile != "" {
@@ -134,21 +118,8 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		branch = prior.HeadRefName
 	} else {
 		branch = req.BranchName
-		// A confirmed name skips the proposal, but the checkout and its guidance can
-		// change while a person edits it, so the same checks still have to pass.
-		if branch != "" {
-			if err := a.refreshGuidance(ctx, req, info.DefaultBranch); err != nil {
-				return nil, err
-			}
-			if _, err := readBranchGuide(req.Dir); err != nil {
-				return nil, err
-			}
-		}
 		if branch == "" {
-			proposal, err := a.proposeBranch(ctx, req, info.DefaultBranch, issue)
-			if err != nil {
-				return nil, err
-			}
+			proposal := proposeBranch(req.BranchType, key, issue)
 			if proposal.Uncertain {
 				return nil, fmt.Errorf("branch needs a choice: %s", proposal.Reason)
 			}
@@ -247,13 +218,22 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		// and unreviewed local commits are never pushed by a PR-workflow turn. A reset
 		// discarded the run, so it starts with the current settings.
 		if prev != nil {
+			cur.Delegation.Planner = prev.Planner
+			cur.Delegation.Action = prev.Action
+			cur.Delegation.Implementer.ID = prev.Implementer.ID
+			if !cur.PlanPosted() && prev.Planner.ID == "" && prev.Action == nil && prev.PR == 0 && prev.LocalHead == "" {
+				cur.Delegation.Planner = prev.Implementer
+				cur.Delegation.Implementer.ID = ""
+			}
 			cur.Delegation.ReviewBeforePR = prev.ReviewBeforePR
 			cur.Delegation.ClaimVerification = prev.ClaimVerification
+			cur.Delegation.Claims, cur.Delegation.PRDDigest = prev.Claims, prev.PRDDigest
 			cur.Delegation.FullSuiteGate = prev.FullSuiteGate
 			cur.Delegation.ScopeDigest = prev.ScopeDigest
 			cur.Delegation.PlanScopeDigest = prev.PlanScopeDigest
 			cur.Delegation.PlanDigest = prev.PlanDigest
 			cur.Delegation.PlanDraft = clonePlanDraft(prev.PlanDraft)
+			cur.Delegation.PlanImplementationPending = prev.PlanImplementationPending
 		}
 		// The pin belongs to the task, not the agent, so every restart keeps it.
 		if prev != nil {
@@ -272,10 +252,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			}
 			cur.Reset = nil
 		}
-		// Claims answer the PRD, so only a task that plans can verify them. A task that
-		// continues a PR has no plan.
 		if prev == nil {
-			cur.Delegation.ClaimVerification = a.ClaimVerification && cur.Delegation.PR == 0
 			cur.Delegation.FullSuiteGate = a.FullSuiteGate
 		}
 		// The same branch has the same PR, so a restart can pick up at its review.
@@ -293,9 +270,13 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		}
 		// A restart at the commit the last run returned for review keeps it with its
 		// proposal, so the review or the PR opening picks up where the run stopped.
-		if prev != nil && prev.Branch == wt.Branch && prev.ReviewBeforePR && prev.PR == 0 && prev.LocalHead == head {
-			cur.Delegation.LocalHead, cur.Delegation.ProposedTitle, cur.Delegation.ProposedBody = prev.LocalHead, prev.ProposedTitle, prev.ProposedBody
-			cur.Delegation.Claims, cur.Delegation.PRDDigest = prev.Claims, prev.PRDDigest
+		if prev != nil && prev.Branch == wt.Branch && prev.ReviewBeforePR && prev.PR == 0 {
+			recoveringChange := prev.Action != nil && prev.Action.Role() == task.ImplementerRole
+			if prev.LocalHead == head || recoveringChange {
+				cur.Delegation.LocalHead, cur.Delegation.ProposedTitle, cur.Delegation.ProposedBody = prev.LocalHead, prev.ProposedTitle, prev.ProposedBody
+			} else if prev.LocalHead != "" {
+				cur.Delegation.Action = nil
+			}
 		}
 		// A retry with the same agent keeps its route. Choosing another agent drops it.
 		if req.Profile == nil && sameAgent && prev.Profile != nil {
@@ -306,8 +287,6 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			// The description digest goes with the head: without it, a review of an
 			// earlier description would cover the kept PR.
 			cur.Delegation.PRDigest = prev.PRDigest
-			// So do the claims returned with the head and the PRD its review last read.
-			cur.Delegation.Claims, cur.Delegation.PRDDigest = prev.Claims, prev.PRDDigest
 			// The same PR keeps its conflict repair: a spent one is not repeated, and one a
 			// dead runner left pending is finished by this run.
 			cur.Delegation.ConflictAttempts, cur.Delegation.ConflictPending = prev.ConflictAttempts, prev.ConflictPending
@@ -375,7 +354,7 @@ func (a App) sourceRepo(ctx context.Context, req *StartRequest) (RepoInfo, error
 	if err != nil {
 		return RepoInfo{}, fmt.Errorf("prepare checkout for %s: %w", req.Repo, err)
 	}
-	req.Dir, req.managed = path, true
+	req.Dir = path
 	return info, nil
 }
 

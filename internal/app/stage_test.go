@@ -29,12 +29,12 @@ func TestAPRRunEntersEachStageBeforeItsTurn(t *testing.T) {
 	if got := f.store.recs[key].State; got != task.Planning {
 		t.Fatalf("a new start is %s, want PLANNING", got)
 	}
-	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2"), prTurn("sid-2")}
+	f.claude.turns = []agent.Turn{plannedTurn("sid-1"), prTurn("sid-2"), selfFix(prTurn("sid-2"), 1)}
 	f.claude.reviews = []agent.ReviewOutcome{selfFindings(), {Clean: true}}
 	// Each turn sees the stage it runs in already saved.
 	var during []task.State
 	f.claude.during = func() { during = append(during, f.store.recs[key].State) }
-	f.claude.onResume = f.claude.during
+	f.claude.onResume = func() { f.claude.during(); setHead(f, "c0ffee2") }
 	seen := recordStages(f)
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
@@ -70,7 +70,7 @@ func TestALocalReviewRunEntersEachStageAndOpensThePRLast(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []task.State{task.Implementing, task.SelfReviewing, task.AdversarialReviewing, task.Implementing,
-		task.SelfReviewing, task.AdversarialReviewing, task.OpeningPR, task.WaitingForCI}
+		task.AdversarialReviewing, task.OpeningPR, task.WaitingForCI}
 	if !slices.Equal(*seen, want) {
 		t.Fatalf("stages = %v\nwant %v", *seen, want)
 	}
@@ -94,8 +94,8 @@ func TestARestartPicksUpAtTheStageTheRecordStillNeeds(t *testing.T) {
 		t.Fatalf("the restart is %s, want ADVERSARIAL_REVIEW after a clean self-review", f.store.recs[got].State)
 	}
 	f.claude.turns = []agent.Turn{prTurn("sid-1")}
-	// The restart starts a fresh session, whose turn opens the PR.
-	f.claude.during = func() {
+	// The retained implementation session opens the PR.
+	f.claude.onResume = func() {
 		pr := fixturePR()
 		pr.HeadSHA, pr.Title, pr.Body = head, proposedTitle, proposedBody
 		f.gh.prs[912] = pr

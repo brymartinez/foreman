@@ -249,11 +249,8 @@ type WorktreeManager interface {
 	// Contains fetches origin into the worktree at dir, then reports whether ancestor
 	// is an ancestor of descendant, or the same commit.
 	Contains(ctx context.Context, dir, ancestor, descendant string) (bool, error)
-	// ReviewRange reads the local base commit and checks the prior review ancestry.
-	ReviewRange(ctx context.Context, dir, baseRef, head, previous string) (ReviewRange, error)
-	// ReviewChanges lists all changed paths and line counts for the selected review range.
-	// An empty previous uses the merge-base diff; otherwise it uses previous..head.
-	ReviewChanges(ctx context.Context, dir, baseRef, head, previous string) ([]ReviewFile, error)
+	// ReviewBase resolves the fetched base ref to the commit reviewers must use.
+	ReviewBase(ctx context.Context, dir, baseRef string) (string, error)
 	// MergeConflicts fetches Base and Branch from origin and lists the files that
 	// conflict when origin/Base merges into origin/Branch. None means a clean merge. It
 	// changes neither the branch nor the worktree. A Local check fetches only Base and
@@ -270,20 +267,6 @@ type WorktreeManager interface {
 	CommonDir(ctx context.Context, dir string) (string, error)
 	// BranchExists reports whether the repository at dir has a local branch of that name.
 	BranchExists(ctx context.Context, dir, branch string) (bool, error)
-	// SyncDefaultBranch fetches origin's branch and fast-forwards the checkout at dir,
-	// which must have branch checked out with no uncommitted changes. It never
-	// overwrites local work; anything it cannot fast-forward safely is an error.
-	SyncDefaultBranch(ctx context.Context, dir, branch string) error
-}
-
-type ReviewFile struct {
-	Path         string
-	ChangedLines int
-}
-
-type ReviewRange struct {
-	BaseHead           string
-	PreviousIsAncestor bool
 }
 
 // MergeCheck names the worktree to fetch in, the PR's head branch, and its base branch.
@@ -303,11 +286,6 @@ type AgentAdapter interface {
 	Resume(ctx context.Context, s task.Session, in agent.StartInput) (agent.Turn, error)
 	// Review runs a disposable, read-only session.
 	Review(ctx context.Context, in agent.StartInput) (agent.ReviewOutcome, error)
-}
-
-// BranchProposer runs a disposable agent turn before a new task has a worktree.
-type BranchProposer interface {
-	Propose(ctx context.Context, in agent.BranchInput) (agent.Outcome, error)
 }
 
 // StageInstructionResolver loads the developer's instructions for a workflow stage:

@@ -548,7 +548,8 @@ func TestReviewAdaptersAreReadOnlyAndDisposable(t *testing.T) {
 	if argValue(got.Args, "-m") != "gpt-6-sol" {
 		t.Errorf("codex review without review_model must use model: %q", argValue(got.Args, "-m"))
 	}
-	if argValue(got.Args, "-s") != "read-only" || !slices.Contains(got.Args, "--ephemeral") || slices.Contains(got.Args, "sandbox_workspace_write.network_access=true") {
+	if argValue(got.Args, "-s") != "read-only" || !slices.Contains(got.Args, "--ephemeral") ||
+		!slices.Contains(got.Args, `approval_policy="never"`) || slices.Contains(got.Args, "sandbox_workspace_write.network_access=true") {
 		t.Errorf("codex review argv = %q", got.Args)
 	}
 }
@@ -685,7 +686,7 @@ func TestResumePromptsAskForSilentWork(t *testing.T) {
 }
 
 func TestReviewPromptAsksForSilentWork(t *testing.T) {
-	p := ReviewPrompt(ReviewBrief{Key: task.Key{Repo: "a/b", Number: 7}, Branch: "feat/7-x", BaseBranch: "main"})
+	p := ReviewPrompt(ReviewBrief{BaseHead: "abc1234", Head: "def5678"})
 	if !strings.Contains(p, "## Working silently") || !strings.Contains(p, "review findings") {
 		t.Errorf("review prompt lacks the silent work section:\n%s", p)
 	}
@@ -701,7 +702,7 @@ func TestSilentWorkRuleIsSharedByBothPrompts(t *testing.T) {
 	if !strings.Contains(ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}}), section) {
 		t.Error("implementation prompt does not carry the shared section")
 	}
-	if !strings.Contains(ReviewPrompt(ReviewBrief{Key: task.Key{Repo: "a/b", Number: 7}}), section) {
+	if !strings.Contains(ReviewPrompt(ReviewBrief{BaseHead: "abc1234", Head: "def5678"}), section) {
 		t.Error("review prompt does not carry the shared section")
 	}
 }

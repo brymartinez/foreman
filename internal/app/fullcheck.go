@@ -145,6 +145,13 @@ func (r *taskRun) finalCheck() (step, error) {
 	res := a.runTurn(r.ctx, r.rec, turnRequest{finalCheck: &check}, a.verifiedPR(r.log), r.log)
 	rec, err := a.finishTurn(r.ctx, r.final, r.rec.Key, "the final full check", res, func(cur *task.Record) {
 		applyTurnResult(cur, res, a.Now())
+		if res.err == nil && finishesChange(res.turn.Outcome.Status) && res.head() != head {
+			latest := cur.LatestCompeting()
+			if latest != nil {
+				cur.Delegation.Action = &task.Action{Kind: task.AdversarialAction, Head: res.head(), FromHead: latest.Head, BaseRef: latest.BaseRef, BaseHead: latest.BaseHead}
+				cur.State = cur.ReviewStage()
+			}
+		}
 		cur.Delegation.FinalChecks++
 		if res.err == nil && res.turn.Outcome.Status == agent.PROpened {
 			handOffIfReviewed(cur)

@@ -65,15 +65,14 @@ func TestRestartKeepsProfileForSameAgent(t *testing.T) {
 	}
 }
 
-func TestRestartWithOtherAgentDropsProfile(t *testing.T) {
+func TestRestartDoesNotSwitchTheStoredImplementer(t *testing.T) {
 	f := newFixture()
 	failedRouted(f)
-	rec, err := f.app.Start(context.Background(), startReq(t))
-	if err != nil {
-		t.Fatal(err)
+	if _, err := f.app.Start(context.Background(), startReq(t)); err == nil || !strings.Contains(err.Error(), "retains its codex implementer") {
+		t.Fatalf("got %v, want the stored implementer retained", err)
 	}
-	if d := rec.Delegation; d.Implementer.Agent != task.Claude || d.Profile != nil || d.RouteReason != "" {
-		t.Errorf("implementer %s profile %+v reason %q, want claude with no profile", d.Implementer.Agent, d.Profile, d.RouteReason)
+	if d := f.store.recs[task.Key{Repo: "testorg/example", Number: 825}].Delegation; d.Implementer.Agent != task.Codex || d.Profile == nil || *d.Profile != codexProfile {
+		t.Errorf("implementer %s profile %+v, want stored Codex profile", d.Implementer.Agent, d.Profile)
 	}
 }
 
@@ -138,7 +137,7 @@ func TestImplementTurnCarriesProfile(t *testing.T) {
 	if err := f.run(context.Background(), key, 4242, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.codex.resumed) != 1 || len(f.codex.profiles) != 1 || f.codex.profiles[0] == nil || *f.codex.profiles[0] != codexProfile {
-		t.Errorf("resumed %v with profiles %v, want the stored profile", f.codex.resumed, f.codex.profiles)
+	if len(f.codex.profiles) != 1 || f.codex.profiles[0] == nil || *f.codex.profiles[0] != codexProfile {
+		t.Errorf("turns %d with profiles %v, want the stored profile", f.codex.starts+len(f.codex.resumed), f.codex.profiles)
 	}
 }

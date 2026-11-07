@@ -3,55 +3,7 @@ package agent
 import (
 	"strings"
 	"testing"
-
-	"github.com/brymartinez/foreman/internal/task"
 )
-
-func claimedReviewBrief() ReviewBrief {
-	b := reviewBrief()
-	b.Claimed = true
-	b.PRD = "## Acceptance criteria\n\n- AC1. 5xx responses are retried.\n- AC2. 4xx responses are not."
-	b.Claims = []task.Claim{{Criteria: []string{"AC1", "AC2"}, Behavior: "only 5xx is retried", Evidence: "retry.go:40, retry_test.go TestRetry", Check: "go test ./... passed"}}
-	return b
-}
-
-func TestClaimedReviewPromptCarriesThePRDAndTheClaimsToTest(t *testing.T) {
-	for _, self := range []bool{false} {
-		b := claimedReviewBrief()
-		b.Self = self
-		b.Plan = "## Requirements\n\n- AC1. 5xx responses are retried.\n- AC2. 4xx responses are not.\n\n## Work plan\n\nR1. Retry only 5xx."
-		p := ReviewPrompt(b)
-		for _, want := range []string{"## Requirements", "> - AC1. 5xx responses are retried.", "acceptance criterion",
-			"## Implementer's claims", "only 5xx is retried", "retry.go:40, retry_test.go TestRetry", "go test ./... passed",
-			"criterion no claim covers", "counterexample", "not proof", "limitation", "blocking", "nonblocking",
-			"belongs to implementation validation", "Do not run tests, builds"} {
-			if !strings.Contains(p, want) {
-				t.Errorf("self %t: review prompt lacks %q:\n%s", self, want, p)
-			}
-		}
-		if strings.Contains(p, "only statement of what the change must do") {
-			t.Errorf("self %t: the description is still the only requirements", self)
-		}
-		if strings.Contains(p, "Retry 5xx responses only.") {
-			t.Errorf("self %t: the PR description leaked into review", self)
-		}
-		if strings.Count(p, "AC1. 5xx responses are retried.") != 1 {
-			t.Errorf("self-review repeated Requirements: %s", p)
-		}
-	}
-}
-
-func TestReviewPromptWithoutClaimsOmitsClaimRequirements(t *testing.T) {
-	p := ReviewPrompt(reviewBrief())
-	for _, unwanted := range []string{"## Requirements", "## Implementer's claims", "counterexample to each claim"} {
-		if strings.Contains(p, unwanted) {
-			t.Errorf("review prompt of a task without claims has %q", unwanted)
-		}
-	}
-	if !strings.Contains(p, "Set limitations to null") {
-		t.Error("the prompt does not say what to put in the required limitations field")
-	}
-}
 
 func TestParseReviewReturnsLimitations(t *testing.T) {
 	got, err := ParseReview([]byte(`{"verdict":"clean","summary":"ok","findings":[],"limitations":[{"behavior":"retry under load","reason":"no load harness","blocking":false}]}`))
@@ -91,30 +43,18 @@ func TestParseReviewRejectsABlockingLimitationWithoutABlockingFinding(t *testing
 	}
 }
 
-func TestUnavailableReviewCheckCannotRequestChanges(t *testing.T) {
-	raw := []byte(`{"verdict":"changes_requested","summary":"I could not run the gates","findings":[{"category":"unavailable_check","severity":"blocking","file":null,"line":null,"summary":"go vet and e2e","detail":"review shell access was denied"}],"limitations":[]}`)
-	got, err := ParseReview(raw)
-	if err != nil || !got.Clean || len(got.Findings) != 0 || len(got.Limitations) != 1 || got.Limitations[0].Blocking {
-		t.Fatalf("unavailable check blocked review: %+v, %v", got, err)
-	}
-	if got.Limitations[0].Behavior != "go vet and e2e" || got.Limitations[0].Reason != "review shell access was denied" {
-		t.Fatalf("unavailable check lost its reason: %+v", got.Limitations[0])
+func TestDeprecatedUnavailableCheckCannotPassAsClean(t *testing.T) {
+	raw := []byte(`{"verdict":"clean","summary":"diff unavailable","findings":[{"category":"unavailable_check","severity":"blocking","file":null,"line":null,"summary":"complete diff","detail":"review shell access was denied"}],"limitations":[]}`)
+	if _, err := ParseReview(raw); err == nil {
+		t.Fatal("accepted a clean verdict with a blocking unavailable check")
 	}
 }
 
-func TestUnavailableReviewCheckDoesNotHideADefect(t *testing.T) {
-	raw := []byte(`{"verdict":"changes_requested","summary":"one defect and one limit","findings":[{"category":"unavailable_check","severity":"blocking","file":null,"line":null,"summary":"go vet","detail":"shell denied"},{"category":"defect","severity":"blocking","file":"retry.go","line":40,"summary":"4xx retried","detail":"guard missing"}],"limitations":[]}`)
-	got, err := ParseReview(raw)
-	if err != nil || got.Clean || len(got.Findings) != 1 || got.Findings[0].Summary != "4xx retried" || len(got.Limitations) != 1 || got.Limitations[0].Blocking {
-		t.Fatalf("defect or limitation lost: %+v, %v", got, err)
-	}
-}
-
-func TestDeniedReviewCommandsAreNotCodeDefectsWhenMislabeled(t *testing.T) {
+func TestParseReviewKeepsTheReviewersExplicitDefectCategory(t *testing.T) {
 	raw := []byte(`{"verdict":"changes_requested","summary":"checks unverified","findings":[{"category":"defect","severity":"blocking","file":null,"line":null,"summary":"I could not run go vet or e2e in this review session","detail":"Bash was denied by the review permissions"}],"limitations":[]}`)
 	got, err := ParseReview(raw)
-	if err != nil || !got.Clean || len(got.Findings) != 0 || len(got.Limitations) != 1 || got.Limitations[0].Blocking {
-		t.Fatalf("denied review commands blocked review: %+v, %v", got, err)
+	if err != nil || got.Clean || len(got.Findings) != 1 || len(got.Limitations) != 0 {
+		t.Fatalf("review rewrote the reported defect: %+v, %v", got, err)
 	}
 	actualFailure := []byte(`{"verdict":"changes_requested","summary":"vet failed","findings":[{"category":"defect","severity":"blocking","file":null,"line":null,"summary":"go vet failed in the review session","detail":"The package refers to an undefined name"}],"limitations":[]}`)
 	got, err = ParseReview(actualFailure)
@@ -123,7 +63,7 @@ func TestDeniedReviewCommandsAreNotCodeDefectsWhenMislabeled(t *testing.T) {
 	}
 }
 
-func TestUnavailableReviewCheckNeedsAReasonAndNoCodeLocation(t *testing.T) {
+func TestParseReviewRejectsInvalidFindingCategories(t *testing.T) {
 	for _, raw := range []string{
 		`{"verdict":"changes_requested","findings":[{"category":"unavailable_check","severity":"blocking","file":"retry.go","line":40,"summary":"go vet","detail":"shell denied"}]}`,
 		`{"verdict":"changes_requested","findings":[{"category":"unavailable_check","severity":"blocking","file":null,"line":null,"summary":"go vet","detail":""}]}`,
@@ -137,12 +77,12 @@ func TestUnavailableReviewCheckNeedsAReasonAndNoCodeLocation(t *testing.T) {
 }
 
 func TestWritingAdviceNeverBecomesABlockingFinding(t *testing.T) {
-	for _, verdict := range []string{"clean", "changes_requested"} {
-		raw := `{"verdict":"` + verdict + `","summary":"Clear requirements","findings":[{"category":"writing_advice","severity":"blocking","file":null,"line":null,"summary":"Use shorter sentences","detail":"Split R1 into two sentences."}],"limitations":[]}`
-		out, err := ParseReview([]byte(raw))
-		if err != nil || !out.Clean || len(out.Findings) != 0 || len(out.Advice) != 1 {
-			t.Fatalf("advice %+v error %v", out, err)
-		}
+	raw := `{"verdict":"clean","summary":"Clear requirements","findings":[{"category":"writing_advice","severity":"blocking","file":null,"line":null,"summary":"Use shorter sentences","detail":"Split R1 into two sentences."}],"limitations":[]}`
+	if out, err := ParseReview([]byte(raw)); err != nil || !out.Clean || len(out.Findings) != 0 || len(out.Advice) != 1 {
+		t.Fatalf("advice %+v error %v", out, err)
+	}
+	if _, err := ParseReview([]byte(strings.Replace(raw, "clean", "changes_requested", 1))); err == nil {
+		t.Fatal("accepted a change request with only writing advice")
 	}
 	mixed := `{"verdict":"changes_requested","findings":[{"category":"writing_advice","severity":"should_fix","summary":"Shorten R1"},{"category":"defect","severity":"blocking","summary":"Missing retention rule"}]}`
 	out, err := ParseReview([]byte(mixed))
@@ -152,5 +92,12 @@ func TestWritingAdviceNeverBecomesABlockingFinding(t *testing.T) {
 	unclear := `{"verdict":"clean","findings":[{"category":"writing_advice","severity":"should_fix","summary":"Shorten R1"}],"limitations":[{"behavior":"Retention period","reason":"No period is given","blocking":true}]}`
 	if _, err := ParseReview([]byte(unclear)); err == nil {
 		t.Fatal("unclear requirement was accepted")
+	}
+}
+
+func TestIncompleteDiffReviewCannotAdvance(t *testing.T) {
+	_, err := ParseReview([]byte(`{"verdict":"changes_requested","summary":"diff unreadable","findings":[],"limitations":[{"behavior":"complete diff","reason":"Git could not read the base commit","blocking":true}]}`))
+	if err == nil || !strings.Contains(err.Error(), "Git could not read the base commit") {
+		t.Fatalf("expected the incomplete review reason, got %v", err)
 	}
 }

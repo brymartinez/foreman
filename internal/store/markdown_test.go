@@ -685,7 +685,7 @@ func TestStoreRoundTripsClaimsAndTheirReviewDigests(t *testing.T) {
 	want.Delegation.ScopeDigest = task.Digest("confirmed triage")
 	want.Delegation.PlanScopeDigest = want.Delegation.ScopeDigest
 	want.Delegation.PlanDigest = task.Digest("checked plan")
-	want.Reviews[1].Claims = task.ClaimsDigest(want.Delegation.Claims)
+	want.Reviews[1].Claims = task.Digest("historical claim set")
 	want.Reviews[1].PRD = want.Delegation.PRDDigest
 	want.Reviews[1].Scope = want.Delegation.ScopeDigest
 	want.Reviews[1].Plan = want.Delegation.PlanDigest
@@ -878,6 +878,7 @@ func TestOldFileLoadsWithoutAFullResult(t *testing.T) {
 func TestStoreRoundTripsFocusedReviewContext(t *testing.T) {
 	s := Markdown{Dir: t.TempDir()}
 	want := delegated()
+	want.Delegation.PlanImplementationPending = true
 	want.Reviews = []task.Review{{Round: 1, Kind: task.SelfReview, Reviewer: task.Claude, Head: "new", BaseRef: "origin/main", BaseHead: "base", FromHead: "old", Clean: true}}
 	if err := s.Save(ctx, want); err != nil {
 		t.Fatal(err)
@@ -889,6 +890,9 @@ func TestStoreRoundTripsFocusedReviewContext(t *testing.T) {
 	r := got.Reviews[0]
 	if r.BaseRef != "origin/main" || r.BaseHead != "base" || r.FromHead != "old" {
 		t.Fatalf("review %+v", r)
+	}
+	if !got.Delegation.PlanImplementationPending {
+		t.Fatal("reloading the task lost the pending implementation of the checked plan")
 	}
 }
 
@@ -938,7 +942,30 @@ func TestQuotaSkippedReviewSurvivesReloadWithoutBecomingClean(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.Reviews[0].Skipped || got.Reviews[0].Clean || !got.Reviews[0].Accepted() || got.Reviews[0].Summary != want.Reviews[0].Summary {
+	if !got.Reviews[0].Skipped || got.Reviews[0].Clean || got.Reviews[0].Accepted() || got.Reviews[0].Summary != want.Reviews[0].Summary {
 		t.Fatalf("skip lost: %+v", got.Reviews[0])
+	}
+}
+
+func TestRoleSessionsAndPendingActionSurviveReload(t *testing.T) {
+	s := Markdown{Dir: t.TempDir()}
+	want := delegated()
+	d := want.Delegation
+	d.Planner = task.Session{Agent: task.Claude, ID: "plan"}
+	d.Action = &task.Action{
+		ID: "action", Kind: task.SelfReviewAction, BaseRef: "origin/main",
+		BaseHead: "base", FromHead: "old", Head: "new", ReviewRound: 2, Started: true,
+	}
+	if err := s.Save(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, want.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloaded := got.Delegation
+	if reloaded.Planner != d.Planner || reloaded.Implementer != d.Implementer ||
+		reloaded.Action == nil || *reloaded.Action != *d.Action {
+		t.Fatalf("role sessions or pending action lost: %+v", reloaded)
 	}
 }

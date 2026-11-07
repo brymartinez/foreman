@@ -50,16 +50,12 @@ type App struct {
 	// ReplyToPRFeedback is disabled in the CLI. It remains available to exercise
 	// the older feedback flow in tests while stored tasks are migrated.
 	ReplyToPRFeedback bool
-	// ClaimVerification is enabled in the CLI. A task that plans copies it when it
-	// starts. Off, tests exercise the review workflow of tasks started before claims.
-	ClaimVerification bool
 	FullSuiteGate     bool // enabled in the CLI; every task copies it when it starts
 	Linear            IssueTracker
 	LinearTeam        string
 	Repositories      RepositoryManager
 	Worktrees         WorktreeManager
 	Agents            map[task.Agent]AgentAdapter
-	BranchProposer    BranchProposer
 	Runners           Runners
 	Stages            StageInstructionResolver
 	WorktreesDir      string
@@ -152,7 +148,6 @@ func (a App) inboxView(ctx context.Context, allRepos bool, source task.Source) (
 	if err := a.reap(ctx, recs, reapable(recs, dead, checked)); err != nil {
 		return InboxReport{}, err
 	}
-	a.startLearners(recs)
 	items, truncated, sourceWarnings, available, err := a.discoverSources(ctx, source, allRepos)
 	if err != nil {
 		return InboxReport{}, err

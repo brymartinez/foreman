@@ -30,9 +30,6 @@ func (r *taskRun) openPR() (step, error) {
 		r.rec = rec
 		return stepDone, err
 	}
-	if next, err := r.checkPRDBeforeOpening(); err != nil || next != stepOpenPR {
-		return next, err
-	}
 	d := r.rec.Delegation
 	found, err := a.GitHub.OpenPullRequestForBranch(r.ctx, r.rec.Repo, d.Branch)
 	if err == nil && found != nil {
@@ -44,6 +41,7 @@ func (r *taskRun) openPR() (step, error) {
 			}
 			fmt.Fprintf(r.log, "foreman: PR #%d already has the reviewed commit and description; adopting it\n", pr.Key.Number)
 			adoptOpenedPR(cur, pr, a.Now())
+			cur.Delegation.Action = nil
 		}))
 		return stepDone, err
 	}
@@ -70,63 +68,18 @@ func (r *taskRun) openPR() (step, error) {
 	return stepDone, err
 }
 
-// checkPRDBeforeOpening reads the PRD again for a task with claim verification, because
-// it may have changed since the clean review, even across a restart. A changed PRD
-// sends the change back to review, and a PRD the review could not load stops the task.
-func (r *taskRun) checkPRDBeforeOpening() (step, error) {
-	a := r.a
-	if !r.rec.Delegation.ClaimVerification {
-		return stepOpenPR, nil
-	}
-	prd, err := a.reviewPRD(r.ctx, r.rec)
-	if err != nil {
-		r.rec, err = a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
-			failTask(cur, fmt.Sprintf("open the reviewed pull request: %v", err), a.Now())
-			applyStop(r.ctx, cur, "opening the pull request", r.log, a.Now())
-		}))
-		return stepDone, err
-	}
-	if task.Digest(prd) == r.rec.Delegation.PRDDigest {
-		return stepOpenPR, nil
-	}
-	fmt.Fprintf(r.log, "foreman: the PRD changed since the clean review of %s; reviewing again\n", short(r.rec.Delegation.LocalHead))
-	r.rec, err = a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
-		cur.Delegation.PRDDigest = task.Digest(prd)
-		cur.State = cur.ReviewStage()
-	}))
-	return stepReview, err
-}
-
-// openTurn runs the turn that pushes the reviewed commit and opens its PR. Its prompt
-// stands alone, so a session that is gone is replaced by a fresh one with the same
-// prompt.
+// openTurn resumes the implementer to publish its reviewed commit.
 func (a App) openTurn(ctx context.Context, rec *task.Record, adapter AgentAdapter, in agent.StartInput, bodyFile string, log io.Writer) (agent.Turn, error) {
 	d := rec.Delegation
 	brief := agent.OpenPRBrief{
 		Branch: d.Branch, BaseBranch: strings.TrimPrefix(d.BaseRef, "origin/"), Head: d.LocalHead,
 		Title: d.ProposedTitle, IssueURL: rec.URL, BodyFile: bodyFile, Validation: rec.Validation, Decisions: rec.Undelivered(),
-		Claims: d.Claims,
 	}
 	if f := rec.FullResult; f != nil {
 		brief.Unverified = f.Unverified
 	}
 	in.Prompt = agent.OpenPRPrompt(brief)
-	if err := a.startAttempt(ctx, rec); err != nil {
-		return agent.Turn{}, err
-	}
-	if d.Implementer.ID != "" {
-		fmt.Fprintf(log, "foreman: resuming %s session %s\n", adapter.Name(), d.Implementer.ID)
-		turn, err := adapter.Resume(ctx, d.Implementer, in)
-		if !errors.Is(err, agent.ErrNoSession) {
-			return turn, err
-		}
-		fmt.Fprintf(log, "foreman: session is gone (%v); starting a fresh turn to open the PR\n", err)
-	}
-	return adapter.Start(ctx, in, func(s task.Session) {
-		_, _ = a.update(ctx, rec.Key, existing(func(cur *task.Record) {
-			cur.Delegation.Implementer = s
-		}))
-	})
+	return a.callRole(ctx, rec, adapter, in, task.Action{Kind: task.PublishAction, Head: d.LocalHead})
 }
 
 // openedPR is the check of the open turn's pr_opened claim.

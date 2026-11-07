@@ -24,6 +24,26 @@ func (a App) Respond(ctx context.Context, key task.Key, raw string) (*task.Recor
 		if err != nil {
 			return nil, err
 		}
+		if d.Question.Issue == replaceSessionQuestion && cur.LastOutcome != nil && cur.LastOutcome.Status == "session_unavailable" {
+			if answer != optionText(d.Question.Options[0]) && answer != optionText(d.Question.Options[1]) {
+				return nil, fmt.Errorf("choose A to replace the session or B to pause")
+			}
+			d.DeliveredAt = now
+			if answer == optionText(d.Question.Options[1]) {
+				d.Answer, d.AnsweredAt = answer, now
+				failTask(cur, "paused with the pending agent session and work saved", now)
+				return cur, nil
+			}
+			action := cur.Delegation.Action
+			if action == nil {
+				return nil, fmt.Errorf("the pending action is missing")
+			}
+			if session := cur.Delegation.RoleSession(action.Role()); session != nil {
+				session.ID = ""
+			}
+			action.ID = ""
+			action.Started = false
+		}
 		d.Answer, d.AnsweredAt = answer, now
 		cur.Body = appendDecisionNote(cur.Body, *d)
 		if cur.Pending() == nil {
@@ -35,7 +55,7 @@ func (a App) Respond(ctx context.Context, key task.Key, raw string) (*task.Recor
 		cur.LastOutcome = &task.Outcome{Status: "answered", Summary: answer, At: now}
 		return cur, nil
 	})
-	if err != nil || rec.State == task.NeedsDecision {
+	if err != nil || token == "" {
 		return rec, err
 	}
 	return a.launch(ctx, key, token)

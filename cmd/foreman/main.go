@@ -109,7 +109,6 @@ func run(argv []string) int {
 	}
 	a := app.App{
 		ReplyToPRFeedback: false,
-		ClaimVerification: true,
 		FullSuiteGate:     true,
 		Store:             store.Markdown{Dir: cfg.TasksDir},
 		GitHub:            github.New(),
@@ -120,17 +119,14 @@ func run(argv []string) int {
 		Accounts:          github.New(),
 		RemoteAuth:        worktree.Git{},
 		Agents:            map[task.Agent]app.AgentAdapter{task.Claude: claude, task.Codex: codex},
-		BranchProposer:    agent.BranchProposers{Claude: claude, Codex: codex},
 		Routing:           routes,
 		RoutingErr:        routesErr,
 		RoutingDefaults: routing.Defaults{
 			task.Claude: {Model: cfg.Claude.Model, PlanModel: cfg.Claude.PlanModel},
 			task.Codex:  {Model: cfg.Codex.Model, PlanModel: cfg.Codex.PlanModel, ReasoningEffort: cfg.Codex.ReasoningEffort, PlanReasoningEffort: cfg.Codex.PlanReasoningEffort},
 		},
-		Selector:             agent.Selectors{Claude: claude, Codex: codex},
 		Knowledge:            knowledge.Store{Dir: cfg.KnowledgeDir},
 		Evaluator:            agent.Evaluators{Claude: claude, Codex: codex},
-		Diagnoser:            agent.Diagnosers{Claude: claude, Codex: codex},
 		Learning:             cfg.Learning.Enabled,
 		LearningBudgetUSD:    cfg.Learning.BudgetUSD,
 		Quota:                quota.Axi{Command: "quota-axi", Exec: agent.RunCommand},

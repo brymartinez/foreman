@@ -221,22 +221,6 @@ func TestRepairResumesImplementer(t *testing.T) {
 	}
 }
 
-func TestRepairFallsBackToFreshTurn(t *testing.T) {
-	f := newFixture()
-	key := repairing(t, f)
-	f.claude.resumeErr = errors.Join(errors.New("gone"), agent.ErrNoSession)
-	f.claude.during = func() { pushHead(f, "merged1") }
-	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	if f.claude.starts != 2 || !strings.Contains(f.claude.prompt, "## Merge conflict") || !strings.Contains(f.claude.prompt, "git merge origin/main") {
-		t.Fatalf("starts %d prompt:\n%s", f.claude.starts, f.claude.prompt)
-	}
-	if got := f.store.recs[key]; got.State != task.WaitingForCI {
-		t.Errorf("state %s", got.State)
-	}
-}
-
 func TestRepairSuccessGoesToReviewThenReady(t *testing.T) {
 	f := newFixture()
 	key := repairing(t, f)
@@ -376,7 +360,7 @@ func TestRepairAnsweredResumesWithTheDecision(t *testing.T) {
 		t.Fatal(err)
 	}
 	last := f.claude.resumed[len(f.claude.resumed)-1]
-	if !strings.Contains(last, "Decision: A. Merge origin/main") || strings.Contains(last, "now has merge conflicts") {
+	if !strings.Contains(last, "Decision: A. Merge origin/main") {
 		t.Errorf("resume message:\n%s", last)
 	}
 	if got := f.store.recs[key]; got.State != task.WaitingForCI || got.Delegation.PRHead != "merged1" {

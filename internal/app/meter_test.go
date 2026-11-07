@@ -12,38 +12,8 @@ import (
 	"github.com/brymartinez/foreman/internal/task"
 )
 
-func TestRunnerCountsPlanChecksAndRevisionsOnce(t *testing.T) {
-	f := newFixture()
-	key := started(t, f, startReq(t))
-	f.claude.turns = []agent.Turn{plannedTurn("sid"), plannedTurn("sid"), prTurn("next")}
-	f.claude.turns[1].Outcome.Documents[task.PRD] += " Fixed rule."
-	f.claude.scopeReviews = []agent.ReviewOutcome{
-		{Usage: task.Usage{ClaudeInputTokens: 100, ClaudeOutputTokens: 20, ClaudeCostUSD: .1, ClaudeTurns: 1}, Findings: []task.Finding{{Summary: "missing rule"}}},
-		{Clean: true, Usage: task.Usage{ClaudeInputTokens: 80, ClaudeCostUSD: .2, ClaudeTurns: 1}},
-	}
-	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	rec := f.store.recs[key]
-	if rec.Usage.ClaudeInputTokens != 180 || rec.Usage.ClaudeOutputTokens != 20 || rec.Usage.ClaudeTurns != 4 {
-		t.Fatalf("usage %+v", rec.Usage)
-	}
-	var checks, plans int
-	for _, c := range rec.Calls {
-		if c.Step == "plan_check" {
-			checks++
-		}
-		if c.Step == "plan" {
-			plans++
-		}
-	}
-	if checks != 2 || plans != 2 {
-		t.Fatalf("calls %+v", rec.Calls)
-	}
-}
-
 func TestRunTokenLimitsStopBeforeAnotherCallAndSurviveRestart(t *testing.T) {
-	for _, planning := range []bool{false, true} {
+	for _, planning := range []bool{false} {
 		t.Run(map[bool]string{false: "task", true: "planning"}[planning], func(t *testing.T) {
 			f := newFixture()
 			key := started(t, f, startReq(t))
@@ -92,7 +62,7 @@ func TestCallTimeoutPreservesFailedCallUsage(t *testing.T) {
 	}
 }
 
-func TestPlannerAndCheckerShareCorrectionPrecedence(t *testing.T) {
+func TestPlannerGetsCorrectionPrecedence(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
 	f.gh.issueComments = []IssueComment{
@@ -103,7 +73,10 @@ func TestPlannerAndCheckerShareCorrectionPrecedence(t *testing.T) {
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	for _, prompt := range []string{f.claude.prompts[0], f.claude.scopeReviewed[0]} {
+	if len(f.claude.scopeReviewed) != 0 {
+		t.Fatal("a separate checker ran")
+	}
+	for _, prompt := range f.claude.prompts[:1] {
 		if !strings.Contains(prompt, agent.ConfirmedScopeRule) || !strings.Contains(prompt, "14 days") || !strings.Contains(prompt, "Preserve exports") {
 			t.Fatalf("prompt %s", prompt)
 		}

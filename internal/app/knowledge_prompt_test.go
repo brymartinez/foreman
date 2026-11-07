@@ -115,16 +115,3 @@ func TestRunsWithoutTheKnowledgeSectionWhenTheStoreIsEmptyOrUnreadable(t *testin
 		}
 	})
 }
-
-func TestSelectorPromptDoesNotCarryRepositoryKnowledge(t *testing.T) {
-	f, s := routed(t, agent.Selection{Rule: 1}, known)
-	ks := knowledge.Store{Dir: t.TempDir()}
-	f.app.Knowledge = ks
-	learn(t, ks, fixtureRepo, "gh-1", "Run make lint before pushing.")
-	if _, err := f.app.Route(context.Background(), routeReq); err != nil {
-		t.Fatal(err)
-	}
-	if p := s.calls[0].Prompt; strings.Contains(p, "make lint") {
-		t.Errorf("selector prompt carries knowledge:\n%s", p)
-	}
-}

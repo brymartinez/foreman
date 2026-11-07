@@ -199,7 +199,9 @@ type PlanDraft struct {
 // Delegation exists once the user has run start; tracked-only items have none.
 type Delegation struct {
 	PlanDraft   *PlanDraft
+	Planner     Session
 	Implementer Session
+	Action      *Action
 	// Profile is set when routing chose the implementer; RouteReason says why.
 	// RouteLogged is set once the runner has written the route line to the log.
 	Profile     *Profile
@@ -254,27 +256,23 @@ type Delegation struct {
 	LocalHead     string
 	ProposedTitle string
 	ProposedBody  string
-	// ClaimVerification is set when a task that plans starts. Its implementer then
-	// returns Claims with each change; adversarial review checks them against the PRD.
-	// Tasks started without it keep the review workflow they started with.
+	// ClaimVerification, Claims, and PRDDigest preserve older task records.
 	ClaimVerification bool
+	Claims            []Claim
+	PRDDigest         string
 	// FullSuiteGate is set when a task starts. Its change is then handed off only with
 	// a full-suite result that covers it, and FinalChecks counts the final-check turns
 	// run toward the current handoff. Tasks started without it keep the workflow they
 	// started with.
 	FullSuiteGate bool
 	FinalChecks   int
-	// Claims is the latest full claim set the implementer returned. It stays in the
-	// task file and is never published.
-	Claims []Claim
-	// PRDDigest is the Digest of the PRD text the review step last loaded from the
-	// issue. A review covers one PRD.
-	PRDDigest string
 	// ScopeDigest is the effective triage scope last read at a stage boundary.
 	// PlanScopeDigest and PlanDigest identify the plan checked against that scope.
 	ScopeDigest     string
 	PlanScopeDigest string
 	PlanDigest      string
+	// PlanImplementationPending survives a restart between checking a revised plan and implementing it.
+	PlanImplementationPending bool
 }
 
 // Launch is taken under the task lock before a runner is spawned, by the foreman
@@ -695,6 +693,14 @@ const (
 	SelfReview ReviewKind = "self"
 )
 
+// Limitation is a behavior a reviewer could not check, and why. A blocking one keeps
+// the review from being clean when the missing evidence prevents a verdict.
+type Limitation struct {
+	Behavior string `json:"behavior" yaml:"behavior"`
+	Reason   string `json:"reason" yaml:"reason"`
+	Blocking bool   `json:"blocking" yaml:"blocking,omitempty"`
+}
+
 type Review struct {
 	// Skipped records a controller waiver for an exhausted adversarial provider.
 	Skipped bool
@@ -718,8 +724,7 @@ type Review struct {
 	// Proposal records the PR text at review time for audit and publish checks.
 	// A wording edit does not invalidate a code review.
 	Proposal string
-	// Claims and PRD are the ClaimsDigest and the PRD digest the review read, for a
-	// task with claim verification.
+	// Claims and PRD preserve older review records.
 	Claims string
 	PRD    string
 	Scope  string // confirmed triage scope the reviewer checked
@@ -728,9 +733,9 @@ type Review struct {
 	Limitations []Limitation
 }
 
-// Accepted permits progress after a clean review or an explicit adversarial quota skip.
+// Accepted permits progress after a clean review.
 func (r *Review) Accepted() bool {
-	return r != nil && (r.Clean || (r.Kind == CompetingReview && r.Skipped))
+	return r != nil && r.Clean
 }
 
 // LatestReview is the most recent review round of either kind, or nil. Its findings
@@ -784,7 +789,8 @@ func (r *Record) CurrentChange() (head, proposal string) {
 // selfCovers binds a contextless self-review only to the code and PR it read.
 func (r *Record) selfCovers(review *Review) bool {
 	head, _ := r.CurrentChange()
-	return review != nil && review.Kind == SelfReview && review.PR == r.Delegation.PR && review.Head == head
+	return review != nil && review.Kind == SelfReview && review.PR == r.Delegation.PR && review.Head == head &&
+		(review.BaseRef == "" || review.BaseRef == r.Delegation.BaseRef)
 }
 
 // SelfReviewPassed reports clean or fully rejected findings on the current code.
@@ -796,6 +802,14 @@ func (r *Record) SelfReviewPassed() bool {
 // NextReview is the review the current change needs next: the self-review until a
 // clean one covers it, then the competing review.
 func (r *Record) NextReview() ReviewKind {
+	if d := r.Delegation; d != nil && d.Action != nil {
+		switch d.Action.Kind {
+		case SelfReviewAction:
+			return SelfReview
+		case AdversarialAction:
+			return CompetingReview
+		}
+	}
 	if r.SelfReviewPassed() {
 		return CompetingReview
 	}
@@ -874,7 +888,7 @@ func (r *Record) ReviewPending() bool {
 		// restart must not skip even when that review read the same head.
 		return true
 	}
-	if r.competingCovers(r.LatestCompeting()) {
+	if latest := r.LatestCompeting(); r.competingCovers(latest) && !latest.Skipped {
 		return false
 	}
 	return !r.selfCovers(self) || r.SelfReviewPassed()
@@ -897,13 +911,10 @@ func (r *Record) newer(a, b *Review) bool {
 	return false
 }
 
-// competingCovers checks the commit, requirements, and claims that review covered.
+// competingCovers checks the commit and scope that review covered.
 func (r *Record) competingCovers(review *Review) bool {
 	d := r.Delegation
-	if review == nil || review.Kind != CompetingReview {
-		return false
-	}
-	if !r.ClaimsCovered(review) {
+	if review == nil || review.Kind != CompetingReview || (review.BaseRef != "" && review.BaseRef != d.BaseRef) {
 		return false
 	}
 	if !r.ScopeCovered(review) {
@@ -991,7 +1002,9 @@ func (r *Record) NextStage() State {
 	switch {
 	case d == nil:
 		return Planning
-	case d.ConflictPending, r.FinalCheckPending():
+	case d.Action != nil:
+		return d.Action.State()
+	case d.ConflictPending, d.PlanImplementationPending, r.FinalCheckPending():
 		return Implementing
 	case r.OpenPending():
 		return OpeningPR

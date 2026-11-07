@@ -83,36 +83,6 @@ func TestAReviewFixWithFocusedChecksGetsOneFinalCheckAndNoSecondReviewOfTheSameH
 
 // A fix turn whose session is gone starts fresh from the task file. Its prompt keeps it
 // to focused checks, as the resume would have, and the final check still runs.
-func TestAFreshFixTurnAfterALostSessionRunsFocusedChecks(t *testing.T) {
-	f := newFixture()
-	key := gatedLocalTask(t, f)
-	f.wt.checkpointHeads = []string{"commit1", "commit2", "commit2"}
-	f.claude.turns = []agent.Turn{
-		withFullRun(readyTurn(), fullRun("commit1")),
-		focusedOnly(readyTurn()),
-		withFullRun(readyTurn(), fullRun("commit2")),
-		prTurn("sid-1"),
-	}
-	f.codex.reviews = []agent.ReviewOutcome{findings("blocking")}
-	f.codex.onReview = func() { f.claude.resumeErr = agent.ErrNoSession }
-	opensPR(t, f, "commit2", proposedTitle, proposedBody, 2)
-	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	if got := f.store.recs[key]; got.State != task.WaitingForCI || !got.FullResult.Covers("commit2") {
-		t.Fatalf("state %s full result %+v outcome %+v", got.State, got.FullResult, got.LastOutcome)
-	}
-	if len(f.claude.prompts) < 3 {
-		t.Fatalf("fresh prompts = %d, want the fix and the final check rebuilt", len(f.claude.prompts))
-	}
-	if fix := f.claude.prompts[1]; !strings.Contains(fix, "Do not rerun the full suite in this turn") || strings.Contains(fix, "Run the full suite once before") {
-		t.Errorf("the fresh fix turn must run focused checks only:\n%s", fix)
-	}
-	if final := f.claude.prompts[2]; !strings.Contains(final, "## Final full check") {
-		t.Errorf("the fresh final check lost its instructions:\n%s", final)
-	}
-}
-
 func TestADocumentationOnlyFixWithEvidenceReusesTheFullResult(t *testing.T) {
 	f := newFixture()
 	key := gatedLocalTask(t, f)
@@ -142,6 +112,10 @@ func TestAFinalCheckThatFixesAFailureSendsTheNewCommitThroughReviewAgain(t *test
 	f := newFixture()
 	key := gatedLocalTask(t, f)
 	f.wt.checkpointHeads = []string{"commit1", "commit2", "commit3"}
+	f.wt.changed = map[string][]string{
+		"commit1..commit2": {"retry.go"},
+		"commit2..commit3": {"retry_test.go"},
+	}
 	f.claude.turns = []agent.Turn{
 		withFullRun(readyTurn(), fullRun("commit1")),
 		focusedOnly(readyTurn()),
@@ -159,7 +133,8 @@ func TestAFinalCheckThatFixesAFailureSendsTheNewCommitThroughReviewAgain(t *test
 		t.Fatalf("state %s head %s outcome %+v", got.State, got.Delegation.PRHead, got.LastOutcome)
 	}
 	last := got.LatestCompeting()
-	if len(f.codex.reviewed) != 3 || last.Head != "commit3" || !last.Clean {
+	if len(f.codex.reviewed) != 3 || last.Head != "commit3" || !last.Clean ||
+		last.FromHead != "commit2" || !strings.Contains(f.codex.reviewed[2], "commit2..commit3") {
 		t.Fatalf("competing reviews %d, latest %+v", len(f.codex.reviewed), last)
 	}
 }

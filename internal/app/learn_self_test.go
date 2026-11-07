@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"io"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -135,36 +134,5 @@ func TestSelfReviewPracticeGapsFromTwoTasksFollowTheUsualPromotionAndWithdrawal(
 		if got := status(); got != step.want {
 			t.Fatalf("after evaluating #%d (proposes %v): status %s, want %s", step.key.Number, step.proposes, got, step.want)
 		}
-	}
-}
-
-func TestSelfReviewLimitDoesNotLaunchTheDiagnosticLearner(t *testing.T) {
-	for name, tc := range map[string]struct {
-		raw      string
-		learning bool
-		want     bool
-	}{
-		"practice gap":               {diagnosedGap, true, false},
-		"no cause found":             {diagnosedNone, true, false},
-		"practice gap, learning off": {diagnosedGap, false, false},
-	} {
-		t.Run(name, func(t *testing.T) {
-			f := newFixture()
-			f.app.Knowledge, f.app.Learning = knowledge.Store{Dir: t.TempDir()}, tc.learning
-			f.app.FixRounds = 1
-			f.app.Diagnoser = &fakeDiagnoser{raw: tc.raw}
-			key := started(t, f, startReq(t))
-			f.claude.turns = []agent.Turn{prTurn("sid-1"), prTurn("sid-1"), {Session: task.Session{Agent: task.Claude, ID: "sid-1"}, Outcome: agent.Outcome{Status: agent.Blocked, Summary: "Stop and ask", Questions: []task.Question{{Issue: "Continue?", Context: "Fix limit reached", Options: []task.Option{{Label: "A", Description: "Continue"}, {Label: "B", Description: "Stop"}}, Recommendation: "A", ImpactIfWrong: "More work"}}}}}
-			f.claude.reviews = []agent.ReviewOutcome{selfFindings(), selfFindings()}
-			if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
-				t.Fatal(err)
-			}
-			if got := f.store.recs[key]; got.State != task.NeedsDecision {
-				t.Fatalf("state %s", got.State)
-			}
-			if started := slices.Equal(f.runners.learned, []task.Key{key}); started != tc.want {
-				t.Fatalf("learners started = %v; want started %v", f.runners.learned, tc.want)
-			}
-		})
 	}
 }

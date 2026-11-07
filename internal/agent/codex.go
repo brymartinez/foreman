@@ -110,13 +110,8 @@ func (c Codex) Review(ctx context.Context, in StartInput) (ReviewOutcome, error)
 	}
 	logTurn(in.Log, task.Codex, c.Model, in.Step)
 	_, raw, usage, err := c.exec(ctx, in, ReviewSchema, func(schema, last string) []string {
-		return []string{
-			"exec", "--json", "--ephemeral",
-			"-C", in.Worktree,
-			"-s", "read-only",
-			"--output-schema", schema,
-			"-o", last,
-		}
+		return []string{"exec", "--json", "-C", in.Worktree,
+			"-s", "read-only", "--output-schema", schema, "-o", last, "--ephemeral"}
 	}, "", func(task.Session) {})
 	if err != nil {
 		return ReviewOutcome{Usage: usage}, err
@@ -162,6 +157,7 @@ func (c Codex) exec(ctx context.Context, in StartInput, schema []byte, baseArgs 
 		return task.Session{}, nil, task.Usage{}, err
 	}
 	args := baseArgs(schemaPath, lastPath)
+	args = append(args, "-c", `approval_policy="never"`)
 	if c.Model != "" {
 		args = append(args, "-m", c.Model)
 	}

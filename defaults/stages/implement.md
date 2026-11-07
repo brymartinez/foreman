@@ -2,16 +2,16 @@
 
 ## Work
 
-- Follow the repository's AGENTS.md, CLAUDE.md, and relevant skills. Use the implementation plan in Foreman's prompt as the task specification. Inspect committed branch work and nearby code, but do not seek requirements in the issue, triage, or other planning documents.
-- Follow the plan's task order. Explain any deviation in the PR. Match local code style and reuse existing helpers.
-- For each behavior change, write tests for its acceptance criteria first. Confirm they fail because the behavior is missing, then change the code and rerun the tests until they pass. If a test still fails, check the implementation against the criteria before changing the test. Never weaken an assertion just to pass. Correct a test expectation only when it conflicts with the criteria; explain why in your summary.
-- Run the repository's focused checks while editing and after checkpoints, review fixes, answers, and merges. Before the first review, run its full supported suite once: tests, typecheck, lint, build, and practical behavior checks. Do not repeat the full suite for review fixes. Foreman requests another full run after clean review if later changes affect behavior or a validation input. Treat a path as documentation-only only with repository-specific evidence that it cannot affect either; its name or extension alone is insufficient.
+- Follow the repository's AGENTS.md, CLAUDE.md, and relevant skills. Use the implementation plan in the prompt as the task specification. Inspect committed branch work and nearby code, but do not seek requirements in the issue, triage, or other planning documents.
+- Follow the implementation plan in order. Do not add scope, change expected behavior, or skip planned work. If the plan is incomplete, conflicts with the code, or cannot be followed, report `blocked` with the problem and a clear question. Do not revise the plan yourself. Match local code style and reuse existing helpers.
+- For each behavior change in the plan, write tests for its acceptance criteria first. Confirm they fail because the behavior is missing, then change the code and rerun the tests until they pass. If a test still fails, check the implementation against the criteria before changing the test. Never weaken an assertion just to pass. Correct a test expectation only when it conflicts with the criteria; explain why in your summary.
+- Run the repository's focused checks while editing and after checkpoints, review fixes, answers, and merges. Before the first review, run its full supported suite once: tests, typecheck, lint, build, and practical behavior checks. Do not repeat the full suite for review fixes. After clean review, run the full suite again when requested if later changes affect behavior or a validation input. Treat a path as documentation-only only with repository-specific evidence that it cannot affect either; its name or extension alone is insufficient.
 - Review your diff for bugs, regressions, missing tests, and needless complexity.
 
 ## Correction turns
 
-- Keep the implementation session and assess every finding using the checked task and developer decisions. If the session is lost, use the rebuilt task context. Do not recover old transcripts.
-- Fix valid findings and rerun their focused checks. Reject invalid self-review findings by number and concrete evidence in `reviewAssessment`. Rejecting all findings without changing the reviewed commit ends self-review early. Any code change receives a fresh self-review. Foreman preserves the reviewer verdict and your rejection reasons.
+- Assess every finding in your retained implementation session using the checked task and developer decisions.
+- Fix valid findings and rerun their focused checks. Explain any rejected finding with concrete evidence. Report which findings you fixed and which you rejected using the response format provided in the prompt.
 - Report `blocked` when a finding needs a product decision or conflicts with requirements you cannot reconcile. At the self-review fix limit, reject the remaining invalid findings or ask the developer before another correction. Adversarial findings require a clean re-review; the implementer cannot waive its verdict.
 
 ## Questions

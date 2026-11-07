@@ -90,6 +90,40 @@ func TestNewCommitsAfterACleanReviewAreReviewedBeforeHandover(t *testing.T) {
 	}
 }
 
+func TestRetargetedPRIsReviewedBeforeHandoffEvenWhenTheHeadIsUnchanged(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	pr := f.gh.prs[912]
+	pr.BaseRefName = "release"
+	f.gh.prs[912] = pr
+	setCI(f, task.CIStatus{State: task.CIPassing})
+	if _, _, err := f.app.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.recs[key]; got.State != task.SelfReviewing || got.Delegation.BaseRef != "origin/release" || len(f.runners.spawned) != 2 {
+		t.Fatalf("state %s, base %s, launches %d", got.State, got.Delegation.BaseRef, len(f.runners.spawned))
+	}
+	got := run(t, f, key)
+	if got.State != task.WaitingForCI || kinds(got) != "self competing self competing" || got.LatestCompeting().BaseRef != "origin/release" {
+		t.Fatalf("state %s, reviews %+v", got.State, got.Reviews)
+	}
+}
+
+func TestRestartAppliesTheRecheckedPlanBeforeReviewingAnExistingPR(t *testing.T) {
+	f := newFixture()
+	key := reviewed(t, f)
+	rec := f.store.recs[key]
+	rec.State = task.Failed
+	rec.Delegation.PlanImplementationPending = true
+	previousStarts := f.claude.starts
+	key = started(t, f, startReq(t))
+	f.claude.turn = prTurn("revised-plan")
+	got := run(t, f, key)
+	if f.claude.starts != previousStarts || len(f.claude.resumed) != 1 || !strings.Contains(f.claude.resumed[0], "## Checked work") || got.Delegation.PlanImplementationPending {
+		t.Fatalf("implementation starts %d, pending plan %t", f.claude.starts-previousStarts, got.Delegation.PlanImplementationPending)
+	}
+}
+
 func TestDescriptionEditsKeepCodeReviewsAndEmptyTextBlocksHandoff(t *testing.T) {
 	for _, body := range []string{"Retry 5xx and 429.\n\nCloses #825", ""} {
 		f := newFixture()
@@ -154,23 +188,7 @@ func TestRestartImplementsWhenThePendingReviewsPRIsNoLongerOpen(t *testing.T) {
 	if err := f.run(context.Background(), key, 4243, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if f.claude.starts != starts+1 {
-		t.Errorf("the implementer didn't take over from a closed PR (%d starts)", f.claude.starts-starts)
-	}
-}
-
-func TestRestartWithTheOtherAgentKeepsThePendingReview(t *testing.T) {
-	f := newFixture()
-	key := started(t, f, startReq(t))
-	f.claude.turn = prTurn("sid-1")
-	f.codex.reviewErr = errors.New("killed")
-	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	req := startReq(t)
-	req.Agent = task.Codex
-	key = started(t, f, req)
-	if got := f.store.recs[key]; got.Delegation.PR != 912 || !got.ReviewPending() {
-		t.Fatalf("lost pending review of PR #%d during provider handoff", got.Delegation.PR)
+	if f.claude.starts != starts || len(f.claude.resumed) != 1 {
+		t.Errorf("the retained implementer did not take over from a closed PR (%d starts, %d resumes)", f.claude.starts-starts, len(f.claude.resumed))
 	}
 }

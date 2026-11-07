@@ -12,7 +12,6 @@
     "documents",
     "prTitle",
     "prBody",
-    "claims",
     "fullSuite",
     "reviewAssessment"
   ],
@@ -153,39 +152,6 @@
         "string",
         "null"
       ]
-    },
-    "claims": {
-      "type": [
-        "array",
-        "null"
-      ],
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "criteria",
-          "behavior",
-          "evidence",
-          "check"
-        ],
-        "properties": {
-          "criteria": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "behavior": {
-            "type": "string"
-          },
-          "evidence": {
-            "type": "string"
-          },
-          "check": {
-            "type": "string"
-          }
-        }
-      }
     },
     "fullSuite": {
       "type": [

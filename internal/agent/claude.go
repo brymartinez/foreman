@@ -94,12 +94,12 @@ func (c Claude) Review(ctx context.Context, in StartInput) (ReviewOutcome, error
 	logTurn(in.Log, task.Claude, c.Model, in.Step)
 	args := []string{
 		"-p", in.Prompt,
-		"--no-session-persistence",
 		"--output-format", "stream-json", "--verbose",
 		"--json-schema", string(ReviewSchema),
 		"--permission-mode", "dontAsk",
 		"--allowedTools=" + strings.Join(ReviewTools, ","),
 	}
+	args = append(args, "--no-session-persistence")
 	if in.MaxBudgetUSD > 0 {
 		args = append(args, "--max-budget-usd", fmt.Sprintf("%.2f", in.MaxBudgetUSD))
 	}

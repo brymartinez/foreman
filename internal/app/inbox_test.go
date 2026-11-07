@@ -151,6 +151,10 @@ func (f *fakeStore) Update(ctx context.Context, k task.Key, fn func(*task.Record
 		c := *cur
 		if c.Delegation != nil {
 			d := *c.Delegation
+			if d.Action != nil {
+				action := *d.Action
+				d.Action = &action
+			}
 			c.Delegation = &d
 		}
 		c.Attempts = slices.Clone(c.Attempts)

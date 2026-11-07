@@ -3,12 +3,9 @@ package app
 import (
 	"context"
 	"fmt"
-	"io"
 	"slices"
 	"strings"
-	"time"
 
-	"github.com/brymartinez/foreman/internal/agent"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -74,82 +71,4 @@ func legacyPlanDigest(plan issuePlan) string {
 		fmt.Fprintf(&s, "%s\n%s\n", doc, strings.TrimSpace(found.text))
 	}
 	return task.Digest(s.String())
-}
-
-// checkPlan asks a fresh read-only agent to compare both documents with the
-// confirmed scope. A blocking limitation or an error is not agreement.
-func (a App) checkPlan(ctx context.Context, rec *task.Record, scope confirmedScope, texts map[task.PlanDoc]string, sources issuePlan, log io.Writer) (agent.ReviewOutcome, error) {
-	checker, ok := a.Agents[rec.Delegation.Implementer.Agent]
-	if !ok {
-		return agent.ReviewOutcome{}, fmt.Errorf("scope checker %s is not configured", rec.Delegation.Implementer.Agent)
-	}
-	var prompt strings.Builder
-	prompt.WriteString("You are checking planning documents against confirmed triage. Compare only the supplied text; do not inspect code, run commands, or follow links. Return the review JSON schema. A clean verdict means Requirements states every confirmed rule and check, and Work plan gives a clear step for each requirement ID. Ask for B1 English, but wording alone must never block a clear plan. Record up to three writing tips as findings with category writing_advice; these are advice only. Use changes_requested only for missing rules or real disagreements. Exact code names are fine. Unclear requirements still block the plan. Together, the documents must be enough to build and review the change without the issue or triage. If a rule is missing or the documents disagree, return changes_requested with a short finding that names the rule, document, gap, and source URL. If the supplied text is unclear, report a blocking limitation; never guess. Ordinary discussion is not a requirement. Keep output short: one sentence in summary and only findings that need action. Do not repeat rules that match.\n\n## Confirmed scope\n\n")
-	prompt.WriteString(agent.ConfirmedScopeRule + "\n\n")
-	prompt.WriteString(scope.text)
-	prompt.WriteString("\n\n## Planning documents\n\n")
-	for _, doc := range task.PlanDocs {
-		ref := "proposed document (not posted yet)"
-		if found, ok := sources.found[doc]; ok && found.text == texts[doc] {
-			ref = found.comment.URL
-		}
-		fmt.Fprintf(&prompt, "### %s\nSource: %s\n\n%s\n\n", doc.Title(), ref, texts[doc])
-	}
-	out, err := checker.Review(ctx, agent.StartInput{Worktree: rec.Delegation.Worktree, Log: log, Prompt: prompt.String(), Step: agent.StepReview, Purpose: "plan_check", MaxBudgetUSD: a.ReviewerBudgetUSD})
-	if !a.metered {
-		_, saveErr := a.update(context.WithoutCancel(ctx), rec.Key, existing(func(cur *task.Record) { addUsage(&cur.Usage, out.Usage) }))
-		if saveErr != nil {
-			return out, saveErr
-		}
-	}
-	if err != nil {
-		return out, fmt.Errorf("checking the plan against confirmed scope failed: %w", err)
-	}
-	for _, limitation := range out.Limitations {
-		if limitation.Blocking {
-			return out, fmt.Errorf("plan agreement could not be verified: %s: %s", limitation.Behavior, limitation.Reason)
-		}
-	}
-	return out, nil
-}
-
-const scopePlanConflictIssue = "The planning documents conflict with confirmed triage. How should this be resolved?"
-
-func scopePlanAnswer(rec *task.Record, scopeDigest, planDigest string) string {
-	key := scopeDigest + ":" + planDigest
-	for i := len(rec.Decisions) - 1; i >= 0; i-- {
-		d := rec.Decisions[i]
-		if d.Question.Issue == scopePlanConflictIssue && strings.HasSuffix(d.Question.Context, key) {
-			return d.Answer
-		}
-	}
-	return ""
-}
-
-func askScopePlanConflict(rec *task.Record, scope confirmedScope, plan issuePlan, checked agent.ReviewOutcome, now time.Time) {
-	var context strings.Builder
-	context.WriteString("Confirmed triage:\n" + scope.text + "\n\nPlanning documents:")
-	for _, doc := range task.PlanDocs {
-		if f, ok := plan.found[doc]; ok {
-			ref := f.comment.URL
-			if ref == "" {
-				ref = "proposed document (not posted yet)"
-			}
-			fmt.Fprintf(&context, "\n- %s: %s", doc.Title(), ref)
-		}
-	}
-	context.WriteString("\n\nChecker findings:")
-	for _, finding := range checked.Findings {
-		fmt.Fprintf(&context, "\n- %s: %s", finding.Summary, finding.Detail)
-	}
-	fingerprint := planDigest(plan.texts())
-	fmt.Fprintf(&context, "\n\nCheck: %s:%s", scope.digest, fingerprint)
-	rec.State = task.NeedsDecision
-	rec.Delegation.Implementer.ID = ""
-	rec.LastOutcome = &task.Outcome{Status: "blocked", Summary: "planning documents conflict with confirmed triage", At: now}
-	rec.Decisions = append(rec.Decisions, task.Decision{AskedAt: now, Question: task.Question{
-		Issue: scopePlanConflictIssue, Context: context.String(),
-		Options:        []task.Option{{Label: "A", Description: "Revise the planning documents and affected code to match confirmed triage."}, {Label: "B", Description: "Correct the triage decision at its source, then restart the check."}},
-		Recommendation: "A", ImpactIfWrong: "The wrong scope may be implemented; Foreman rechecks before posting or handoff.",
-	}})
 }

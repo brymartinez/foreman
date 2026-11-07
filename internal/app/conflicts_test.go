@@ -58,21 +58,6 @@ func TestConflictRunsMergeTurnThenReview(t *testing.T) {
 	}
 }
 
-func TestFreshMergeTurnWhenSessionIsGone(t *testing.T) {
-	f := newFixture()
-	key := started(t, f, startReq(t))
-	f.claude.turns = []agent.Turn{prTurn("sid-1"), prTurn("sid-2")}
-	f.claude.resumeErr = errors.Join(errors.New("gone"), agent.ErrNoSession)
-	f.wt.conflicts = [][]string{{"retry.go"}}
-	got := run(t, f, key)
-	if !strings.Contains(f.claude.prompt, "## Merge conflicts") || !strings.Contains(f.claude.prompt, "- retry.go\n") {
-		t.Errorf("fresh prompt lacks the merge:\n%s", f.claude.prompt)
-	}
-	if got.State != task.WaitingForCI || len(got.CompetingReviews()) != 1 {
-		t.Errorf("state %s reviews %d", got.State, len(got.CompetingReviews()))
-	}
-}
-
 func TestConflictAfterCleanReviewStillReviewsNewHead(t *testing.T) {
 	f := newFixture()
 	key := reviewed(t, f)
@@ -253,8 +238,8 @@ func TestRetargetedPRIsCheckedAgainstItsNewBase(t *testing.T) {
 	if got.State != task.WaitingForCI || got.Delegation.BaseRef != "origin/release" || len(got.CompetingReviews()) != 1 {
 		t.Fatalf("state %s base %s reviews %d", got.State, got.Delegation.BaseRef, len(got.CompetingReviews()))
 	}
-	if p := f.codex.reviewed[len(f.codex.reviewed)-1]; !strings.Contains(p, "git diff origin/release...HEAD") {
-		t.Errorf("review prompt uses the old base:\n%s", p)
+	if last := f.wt.baseRefs[len(f.wt.baseRefs)-1]; last != "origin/release" {
+		t.Errorf("review resolved %s, want origin/release", last)
 	}
 }
 

@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -119,12 +118,6 @@ func (a App) checkRepair(ctx context.Context, rec *task.Record, o agent.Outcome)
 func applyConflictTurn(rec *task.Record, turn agent.Turn, pr *PullRequest, err error, now time.Time) {
 	if err == nil && turn.Outcome.Status == agent.PROpened {
 		applyTurn(rec, turn, pr, nil, now)
-		return
-	}
-	// The merge may have worked; only the claims are missing, which no repeat of the
-	// merge would fix.
-	if missing := (*missingClaimsError)(nil); errors.As(err, &missing) {
-		applyTurn(rec, turn, nil, err, now)
 		return
 	}
 	if err == nil && turn.Outcome.Status == agent.Blocked {

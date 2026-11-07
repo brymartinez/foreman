@@ -16,11 +16,9 @@ import (
 )
 
 type fakeWorktrees struct {
-	reviewFiles     []ReviewFile
-	reviewFilesErr  error
-	reviewSpans     []string
 	reviewBase      string
-	reviewRangeErr  error
+	reviewBaseErr   error
+	baseRefs        []string
 	reqs            []WorktreeRequest
 	head            string
 	checkpointHeads []string
@@ -43,10 +41,6 @@ type fakeWorktrees struct {
 	// identities records each ConfigureIdentity call as "dir name <email>".
 	identities  []string
 	identityErr error
-	// syncs records each SyncDefaultBranch call as "dir branch"; onSync runs inside it.
-	syncs   []string
-	syncErr error
-	onSync  func(dir string)
 	// changed answers ChangedPaths by "from..to"; a pair it lacks is not an ancestor.
 	changed map[string][]string
 }
@@ -60,17 +54,6 @@ func (f *fakeWorktrees) ChangedPaths(_ context.Context, _, from, to string) ([]s
 		return nil, fmt.Errorf("%s is not an ancestor of %s", from, to)
 	}
 	return paths, nil
-}
-
-func (f *fakeWorktrees) SyncDefaultBranch(_ context.Context, dir, branch string) error {
-	f.syncs = append(f.syncs, dir+" "+branch)
-	if f.syncErr != nil {
-		return f.syncErr
-	}
-	if f.onSync != nil {
-		f.onSync(dir)
-	}
-	return nil
 }
 
 func (f *fakeWorktrees) ConfigureIdentity(_ context.Context, dir, name, email string) error {
@@ -132,28 +115,15 @@ func (f *fakeWorktrees) RemoteBranchHead(_ context.Context, _, branch string) (s
 	return f.remoteHeads[branch], nil
 }
 
-func (f *fakeWorktrees) ReviewRange(ctx context.Context, dir, baseRef, head, previous string) (ReviewRange, error) {
-	if f.reviewRangeErr != nil {
-		return ReviewRange{}, f.reviewRangeErr
+func (f *fakeWorktrees) ReviewBase(_ context.Context, _, baseRef string) (string, error) {
+	f.baseRefs = append(f.baseRefs, baseRef)
+	if f.reviewBaseErr != nil {
+		return "", f.reviewBaseErr
 	}
-	result := ReviewRange{BaseHead: f.reviewBase}
-	if previous != "" {
-		var err error
-		result.PreviousIsAncestor, err = f.Contains(ctx, dir, previous, head)
-		return result, err
+	if f.reviewBase == "" {
+		return "basehead", nil
 	}
-	return result, nil
-}
-
-func (f *fakeWorktrees) ReviewChanges(_ context.Context, _, base, head, previous string) ([]ReviewFile, error) {
-	f.reviewSpans = append(f.reviewSpans, base+":"+previous+":"+head)
-	if f.reviewFilesErr != nil {
-		return nil, f.reviewFilesErr
-	}
-	if f.reviewFiles != nil {
-		return f.reviewFiles, nil
-	}
-	return []ReviewFile{{Path: "retry.go", ChangedLines: 10}}, nil
+	return f.reviewBase, nil
 }
 
 func (f *fakeWorktrees) Contains(_ context.Context, dir, ancestor, descendant string) (bool, error) {
@@ -445,6 +415,19 @@ func newFixture() fixture {
 func (f fixture) run(ctx context.Context, key task.Key, pid int, log io.Writer) error {
 	token := ""
 	if rec := f.store.recs[key]; rec != nil && rec.Delegation != nil {
+		if !rec.PlanPosted() && rec.Delegation.PR == 0 && rec.Delegation.PlanDraft == nil && len(rec.Plan) == 0 && len(f.gh.issueComments) == 0 {
+			provider := f.claude
+			if rec.Delegation.Implementer.Agent == task.Codex {
+				provider = f.codex
+			}
+			turn := provider.turn
+			if len(provider.turns) > 0 {
+				turn = provider.turns[0]
+			}
+			if finishesChange(turn.Outcome.Status) || turn.Outcome.Status == agent.Checkpoint {
+				postedPlan(f, rec)
+			}
+		}
 		if rec.Delegation.Launch == nil {
 			rec.Delegation.Launch = &task.Launch{Token: "test-launch", PID: os.Getpid(), Since: now}
 		}
@@ -607,53 +590,22 @@ func TestStartAcceptsPRClosed(t *testing.T) {
 	}
 }
 
-func TestRestartWithAnotherAgentKeepsThePRWithCommentsWaiting(t *testing.T) {
-	f := newFixture()
-	key := task.Key{Repo: "testorg/example", Number: 825}
-	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.Failed,
-		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex, ID: "old"}, Branch: "feat/825-provider-retries", PR: 912, PRHead: "abc"},
-		Feedback:   []task.Feedback{{Kind: task.IssueComment, ID: 1, Digest: "d"}}}
-	rec, err := f.app.Start(context.Background(), startReq(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	d := rec.Delegation
-	if d.Implementer.Agent != task.Claude || d.Implementer.ID != "" {
-		t.Errorf("implementer = %+v, want a fresh claude session", d.Implementer)
-	}
-	if d.PR != 912 || d.PRHead != "abc" || len(rec.UnhandledFeedback()) != 1 {
-		t.Errorf("pr %d head %q unanswered %d; the comments lost their PR", d.PR, d.PRHead, len(rec.UnhandledFeedback()))
-	}
-}
-
-func TestRestartWithAnotherAgentKeepsExistingPR(t *testing.T) {
-	f := newFixture()
-	key := task.Key{Repo: "testorg/example", Number: 825}
-	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.Failed,
-		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex}, Branch: "feat/825-provider-retries", PR: 912}}
-	rec, err := f.app.Start(context.Background(), startReq(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rec.Delegation.PR != 912 {
-		t.Errorf("pr = %d; a handoff must keep the existing PR", rec.Delegation.PR)
-	}
-}
-
 func TestRestartKeepsBranchWhenTitleChanged(t *testing.T) {
 	f := newFixture()
 	key := task.Key{Repo: "testorg/example", Number: 825}
 	f.store.recs[key] = &task.Record{Key: key, Kind: task.Issue, State: task.Failed,
 		Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Codex}, Branch: "agent/825-old-title", Worktree: "/wt/testorg-example/825-old-title"}}
 	f.gh.issue.Title = "A completely new title"
-	rec, err := f.app.Start(context.Background(), startReq(t))
+	req := startReq(t)
+	req.Agent = task.Codex
+	rec, err := f.app.Start(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if rec.Delegation.Branch != "agent/825-old-title" || f.wt.reqs[0].Path != "/wt/testorg-example/825-old-title" {
 		t.Errorf("branch %s path %s", rec.Delegation.Branch, f.wt.reqs[0].Path)
 	}
-	if rec.Delegation.Implementer.Agent != task.Claude {
+	if rec.Delegation.Implementer.Agent != task.Codex {
 		t.Errorf("agent not switched: %v", rec.Delegation.Implementer)
 	}
 }
@@ -700,11 +652,14 @@ func TestRunTaskAppliesOutcome(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := f.store.recs[rec.Key]
-			if got.State != c.state || got.Delegation.RunnerPID != 0 || got.Delegation.Implementer.ID != "sid-9" {
-				t.Errorf("state %s pid %d session %+v", got.State, got.Delegation.RunnerPID, got.Delegation.Implementer)
-			}
-			if !strings.Contains(f.claude.prompt, "Retry failed requests.") || strings.Contains(f.claude.prompt, "5xx-only retry semantics") {
+			session := got.Delegation.Planner
+			if c.turn.Outcome.Status == agent.PROpened {
+				session = got.Delegation.Implementer
+			} else if !strings.Contains(f.claude.prompt, "Retry failed requests.") || strings.Contains(f.claude.prompt, "5xx-only retry semantics") {
 				t.Error("planner should receive the issue description without the context file")
+			}
+			if got.State != c.state || got.Delegation.RunnerPID != 0 || session.ID != "sid-9" {
+				t.Errorf("state %s pid %d session %+v", got.State, got.Delegation.RunnerPID, session)
 			}
 			if c.check != nil {
 				c.check(t, got)
@@ -748,7 +703,7 @@ func TestStatusReapsDeadRunner(t *testing.T) {
 
 func TestRunTaskVerifiesReportedPR(t *testing.T) {
 	good := func() PullRequest {
-		return PullRequest{Key: task.Key{Repo: "testorg/example", Number: 913}, URL: "u913", State: "open", HeadRefName: "feat/825-provider-retries", BaseRefName: "main", Body: "Retry 5xx only."}
+		return PullRequest{Key: task.Key{Repo: "testorg/example", Number: 913}, URL: "u913", State: "open", HeadSHA: "c0ffee1", HeadRefName: "feat/825-provider-retries", BaseRefName: "main", Body: "Retry 5xx only."}
 	}
 	cases := []struct {
 		name     string
@@ -828,11 +783,21 @@ func TestLinearStartRejectsUnsafeTrackerBranchName(t *testing.T) {
 	f := newFixture()
 	key := task.Key{Repo: f.gh.repo.Repo, Source: task.Linear, ExternalID: "uuid-42"}
 	f.app.Linear = &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", BranchName: "../outside", Title: "Fix cache", State: "open", Labels: []string{"triaged"}}}
-	if _, err := f.app.Start(context.Background(), StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude}); err == nil || !strings.Contains(err.Error(), "invalid branch name") {
+	req := StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude}
+	if _, err := f.app.Start(context.Background(), req); err == nil || !strings.Contains(err.Error(), "invalid branch name") {
 		t.Fatalf("start error = %v", err)
 	}
 	if len(f.wt.reqs) != 0 {
 		t.Fatalf("worktree was created: %+v", f.wt.reqs)
+	}
+
+	req.BranchName = "fix/linear-web-42-cache"
+	rec, err := f.app.Start(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Delegation.Branch != req.BranchName || f.wt.reqs[0].Branch != req.BranchName {
+		t.Fatalf("confirmed branch was not used: %+v, %+v", rec.Delegation, f.wt.reqs)
 	}
 }
 

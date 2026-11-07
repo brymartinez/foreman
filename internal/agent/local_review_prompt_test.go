@@ -82,8 +82,8 @@ func TestResumeMessageBeforeReviewEndsWithReviewReady(t *testing.T) {
 }
 
 func TestReviewPromptForALocalChangeReadsTheDiff(t *testing.T) {
-	p := ReviewPrompt(ReviewBrief{Key: task.Key{Repo: "a/b", Number: 7}, Branch: "feat/7", BaseBranch: "main", Passes: 3})
-	for _, want := range []string{"competing reviewer", "git diff origin/main...HEAD", "Read the complete diff 3 times"} {
+	p := ReviewPrompt(ReviewBrief{BaseHead: "abc1234", Head: "def5678", Passes: 3})
+	for _, want := range []string{"competing reviewer", "git diff --no-ext-diff --no-textconv --ignore-submodules=none abc1234...def5678 --", "Read the complete diff 3 times"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("prompt lacks %q", want)
 		}

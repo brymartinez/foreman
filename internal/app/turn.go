@@ -15,10 +15,11 @@ import (
 // turnRequest is the work an implementer turn resumes with when no answered decision
 // or conflict repair comes first. At most one of findings, feedback, and merge is set.
 type turnRequest struct {
-	forcePlan bool              // an open PR needs a planning turn before work resumes
-	findings  *task.Review      // open findings from the latest review
-	feedback  []PRComment       // PR comments to answer
-	merge     *agent.MergeBrief // a base branch to merge before the next review
+	planSources map[task.PlanDoc]string
+	forcePlan   bool              // an open PR needs a planning turn before work resumes
+	findings    *task.Review      // open findings from the latest review
+	feedback    []PRComment       // PR comments to answer
+	merge       *agent.MergeBrief // a base branch to merge before the next review
 	// openBodyFile is set for the turn that pushes a reviewed local commit and opens
 	// its PR. It holds the reviewed description.
 	openBodyFile string
@@ -64,14 +65,6 @@ func (a App) runTurn(ctx context.Context, rec *task.Record, req turnRequest, che
 	}
 	turn, err := a.implement(ctx, rec, req, log)
 	turn, err = a.repairFailedCheckpoint(ctx, rec, req, turn, err, log)
-	if err == nil {
-		turn, err = a.requireClaims(ctx, rec, turn, req.openBodyFile != "", log)
-	}
-	// The open turn pushes the reviewed change, so it returns the reviewed claims.
-	if d := rec.Delegation; err == nil && req.openBodyFile != "" && d.ClaimVerification && turn.Outcome.Status == agent.PROpened &&
-		task.ClaimsDigest(turn.Outcome.Claims) != task.ClaimsDigest(d.Claims) {
-		err = errors.New("the implementer opened the pull request with claims that are not the reviewed claims")
-	}
 	if err != nil {
 		return turnResult{turn: turn, err: err}
 	}
@@ -92,6 +85,17 @@ func (a App) runTurn(ctx context.Context, rec *task.Record, req turnRequest, che
 	res := a.requireFullCheck(ctx, rec, req, a.checkChange(ctx, rec, req, turn, check, log), check, log)
 	if res.err == nil {
 		res.err = validateReviewAssessment(rec, res)
+	}
+	if res.err == nil && finishesChange(res.turn.Outcome.Status) && req.findings != nil && req.findings.Kind == task.SelfReview {
+		assessment := res.turn.Outcome.ReviewAssessment
+		if assessment == nil || assessment.Round != req.findings.Round {
+			res.err = errors.New("self-review correction must account for the findings in reviewAssessment")
+		} else if len(assessment.Rejected) < len(req.findings.Findings) {
+			head, _ := rec.CurrentChange()
+			if res.head() == head {
+				res.err = errors.New("self-review correction reported fixes but did not change the reviewed commit")
+			}
+		}
 	}
 	if res.err == nil && finishesChange(res.turn.Outcome.Status) && req.findings != nil && req.findings.Kind == task.SelfReview && rec.ChangeRequestsSinceDecision() > a.fixRounds() {
 		head, _ := rec.CurrentChange()
@@ -141,14 +145,14 @@ func (a App) checkReviewReady(ctx context.Context, rec *task.Record, req turnReq
 		return turnResult{turn: turn, err: fmt.Errorf("verify the change for review: %w", err)}
 	}
 	if head == d.CheckpointHead && d.LocalHead == "" && d.Checkpoints == 0 {
-		base, err := a.Worktrees.ReviewRange(ctx, d.Worktree, d.BaseRef, head, "")
+		base, err := a.Worktrees.ReviewBase(ctx, d.Worktree, d.BaseRef)
 		if err != nil {
 			return turnResult{turn: turn, err: fmt.Errorf("read the review base: %w", err)}
 		}
-		if base.BaseHead == "" {
+		if base == "" {
 			return turnResult{turn: turn, err: errors.New("read the review base: no base commit")}
 		}
-		contained, err := a.Worktrees.Contains(ctx, d.Worktree, head, base.BaseHead)
+		contained, err := a.Worktrees.Contains(ctx, d.Worktree, head, base)
 		if err != nil {
 			return turnResult{turn: turn, err: fmt.Errorf("verify existing branch work: %w", err)}
 		}
@@ -261,14 +265,9 @@ func (a App) requireFullCheck(ctx context.Context, rec *task.Record, req turnReq
 	if err != nil {
 		return turnResult{turn: turn, err: err}
 	}
-	claims := turn.Outcome.Claims
 	turn.Outcome = next.Outcome
 	if turn.Outcome.Status != status {
 		return turnResult{turn: turn, err: fmt.Errorf("the implementer answered the request for a full-suite result with %s, not %s", turn.Outcome.Status, status)}
-	}
-	// The request asked for the same outcome, so claims it left out are the ones it had.
-	if len(turn.Outcome.Claims) == 0 {
-		turn.Outcome.Claims = claims
 	}
 	res = a.checkChange(ctx, rec, req, turn, check, log)
 	if res.err != nil {
@@ -298,57 +297,8 @@ func (r turnResult) head() string {
 	return r.localHead
 }
 
-// missingClaimsError fails a turn that did not supply its claims after one request.
-// Every path fails the task on it, whatever else the turn did.
-type missingClaimsError struct{ msg string }
-
-func (e *missingClaimsError) Error() string { return e.msg }
-
 // finishesChange reports a status that hands a change to review.
 func finishesChange(s agent.Status) bool { return s == agent.PROpened || s == agent.ReviewReady }
-
-// requireClaims gives a turn of a task with claim verification that finished a change
-// without its claims one resume of the same session to add them. A second miss fails
-// the turn, because Foreman does not review a change without its claims. The turn
-// that opens a reviewed PR is asked for the reviewed claims, which it must return.
-func (a App) requireClaims(ctx context.Context, rec *task.Record, turn agent.Turn, opening bool, log io.Writer) (agent.Turn, error) {
-	d, status := rec.Delegation, turn.Outcome.Status
-	if !d.ClaimVerification || !finishesChange(status) || len(turn.Outcome.Claims) > 0 {
-		return turn, nil
-	}
-	missing := fmt.Sprintf("the implementer returned %s without the claim set for the PRD acceptance criteria", status)
-	adapter := a.Agents[d.Implementer.Agent]
-	if adapter == nil || turn.Session.ID == "" {
-		return turn, &missingClaimsError{missing}
-	}
-	if err := a.checkAccount(ctx, rec); err != nil {
-		return turn, err
-	}
-	fmt.Fprintf(log, "foreman: %s returned %s without claims; resuming session %s for them\n", adapter.Name(), status, turn.Session.ID)
-	var reviewed []task.Claim
-	if opening {
-		reviewed = d.Claims
-	}
-	in := agent.StartInput{
-		Worktree: d.Worktree, Prompt: agent.MissingClaimsMessage(status, reviewed),
-		Stage: task.StageImplement, Step: agent.StepImplement,
-		Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD, Profile: d.Profile,
-	}
-	next, err := adapter.Resume(ctx, turn.Session, in)
-	addUsage(&turn.Usage, next.Usage)
-	if next.Session.ID != "" {
-		turn.Session = next.Session
-	}
-	if err != nil {
-		return turn, err
-	}
-	turn.Outcome = next.Outcome
-	// The resume asked for the claims alone, so any other answer fails the turn.
-	if turn.Outcome.Status != status || len(turn.Outcome.Claims) == 0 {
-		return turn, &missingClaimsError{fmt.Sprintf("%s, and its answer to the request for them was %s without claims", missing, turn.Outcome.Status)}
-	}
-	return turn, nil
-}
 
 // finishTurn writes a turn's result through final, so a cancelled run still records
 // it. apply maps the result onto the task the way its caller needs. A failed turn
@@ -356,7 +306,23 @@ func (a App) requireClaims(ctx context.Context, rec *task.Record, turn agent.Tur
 // turn's usage always counts.
 func (a App) finishTurn(ctx, final context.Context, key task.Key, during string, res turnResult, apply func(cur *task.Record), log io.Writer) (*task.Record, error) {
 	return a.update(final, key, existing(func(cur *task.Record) {
+		completed := cur.Delegation.Action
 		apply(cur)
+		var missing missingRoleSession
+		if errors.As(res.err, &missing) && !errors.Is(ctx.Err(), context.Canceled) {
+			askForSession(cur, missing.role, a.Now())
+		}
+		if res.err == nil && completed == cur.Delegation.Action {
+			switch cur.State {
+			case task.NeedsDecision:
+				if completed != nil {
+					completed.Started = false
+				}
+			case task.Failed:
+			default:
+				cur.Delegation.Action = nil
+			}
+		}
 		if res.err != nil {
 			applyStop(ctx, cur, during, log, a.Now())
 		}
