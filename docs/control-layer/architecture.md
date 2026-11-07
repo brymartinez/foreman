@@ -467,7 +467,10 @@ the same commit. The commit message records why it changed.
   confirmed triage decisions, writes Requirements and Work plan, and checks both against
   that scope before returning `planned`. Foreman keeps document shape validation,
   source fingerprints, and idempotent comment publication in Go. The implementer then
-  receives the checked documents in its retained session. A changed confirmed scope
+  receives the checked documents in its retained session. It follows the implementation
+  plan in order and tests each behavior change first. If the plan is incomplete, conflicts
+  with the code, or cannot be followed, it reports `blocked` instead of revising the plan,
+  adding scope, changing expected behavior, or skipping work. A changed confirmed scope
   returns to the planner and implementer before review.
 - **No task-triggered model calls sit outside the four roles.** Automatic learning and
   diagnostic calls do not run in the task lifecycle. Standalone knowledge commands
