@@ -40,6 +40,20 @@ func (f Files) Resolve(repoRoot string, stage task.Stage) (task.StageInstruction
 			return task.StageInstructions{}, err
 		}
 	}
+	if stage == task.StagePR && repoRoot != "" {
+		for _, dir := range []string{".github", ".", "docs"} {
+			for _, name := range []string{"pull_request_template.md", "PULL_REQUEST_TEMPLATE.md"} {
+				path, content, err := read(filepath.Join(repoRoot, dir, name))
+				if err != nil {
+					return task.StageInstructions{}, err
+				}
+				if strings.TrimSpace(content) != "" {
+					out.PRTemplatePath, out.PRTemplate = path, content
+					return out, nil
+				}
+			}
+		}
+	}
 	return out, nil
 }
 

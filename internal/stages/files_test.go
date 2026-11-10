@@ -123,3 +123,48 @@ func TestRequireGlobal(t *testing.T) {
 		t.Fatalf("all present: %v", err)
 	}
 }
+
+func TestPRTemplateOverridesFallbackFormatting(t *testing.T) {
+	l := setup(t, map[string]string{
+		"config/stages/pr.md":                   "Use ## Problem and omit test commands.",
+		"repo/.foreman/pr.md":                   "Use the repository's issue link rule.",
+		"repo/.github/pull_request_template.md": "## Snapshot\n\n## Verification\n\nExact commands and outcomes:",
+	})
+	got, err := (Files{GlobalDir: l.global}).Resolve(l.repo, task.StagePR)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := got.Content()
+	for _, want := range []string{"## Snapshot\n\n## Verification", "Preserve its section headings", "Report missing verification honestly", "fallback only", "Use the repository's issue link rule."} {
+		if !strings.Contains(content, want) {
+			t.Errorf("PR drafting instructions lack %q: %s", want, content)
+		}
+	}
+	if strings.Index(content, "## Snapshot") < strings.Index(content, "Use ## Problem") {
+		t.Error("the authoritative template must follow the fallback guidance")
+	}
+	implementation, err := (Files{GlobalDir: l.global}).Resolve(l.repo, task.StageImplement)
+	if err != nil || strings.Contains(implementation.Content(), "## Snapshot") {
+		t.Fatalf("template leaked into implementation stage: %q, %v", implementation.Content(), err)
+	}
+}
+
+func TestPRTemplateLookupLocations(t *testing.T) {
+	for _, location := range []string{".github/pull_request_template.md", "pull_request_template.md", "docs/pull_request_template.md", ".github/PULL_REQUEST_TEMPLATE.md"} {
+		t.Run(location, func(t *testing.T) {
+			l := setup(t, map[string]string{"repo/" + location: "## Repository-specific template"})
+			got, err := (Files{}).Resolve(l.repo, task.StagePR)
+			if err != nil || !strings.Contains(got.Content(), "## Repository-specific template") {
+				t.Fatalf("PR template absent: %q, %v", got.Content(), err)
+			}
+		})
+	}
+}
+
+func TestUnreadablePRTemplateFailsResolution(t *testing.T) {
+	l := setup(t, map[string]string{"repo/.github/pull_request_template.md/child": "not a template file"})
+	_, err := (Files{}).Resolve(l.repo, task.StagePR)
+	if err == nil || !strings.Contains(err.Error(), "pull_request_template.md") || !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("want error naming invalid template, got %v", err)
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/brymartinez/foreman/internal/stages"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -921,5 +922,45 @@ func TestClaudeKeepsReportedUsageWhenOutcomeFails(t *testing.T) {
 	review, err := c.Review(context.Background(), StartInput{})
 	if err == nil || review.Usage.ClaudeCostUSD != .7 || review.Usage.ClaudeOutputTokens != 4 {
 		t.Fatalf("review %+v error %v", review, err)
+	}
+}
+
+func TestPRDraftingPromptsCarryRepositoryTemplateAndCheckProposal(t *testing.T) {
+	root := t.TempDir()
+	for path, text := range map[string]string{
+		"config/pr.md":                          "Use ## Problem. Omit test results.",
+		"repo/.github/pull_request_template.md": "## Snapshot\n\n## Verification\n\nExact commands and outcomes:",
+	} {
+		path = filepath.Join(root, path)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	instructions, err := (stages.Files{GlobalDir: filepath.Join(root, "config")}).Resolve(filepath.Join(root, "repo"), task.StagePR)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, correction := range []bool{false, true} {
+		t.Run(fmt.Sprintf("correction=%t", correction), func(t *testing.T) {
+			brief := localBrief()
+			brief.PRInstructions, brief.Correction = instructions.Content(), correction
+			prompt := ImplementationPrompt(brief)
+			for _, want := range []string{
+				"## Snapshot\n\n## Verification\n\nExact commands and outcomes:",
+				"override conflicting PR stage guidance above, including instructions to omit test results",
+				"default body headings apply only when the repository has no template",
+				"Before returning prTitle and prBody, compare the proposal",
+			} {
+				if !strings.Contains(prompt, want) {
+					t.Errorf("drafting prompt lacks %q: %s", want, prompt)
+				}
+			}
+			if strings.Index(prompt, "## Repository pull request template") > strings.Index(prompt, "## Final response") {
+				t.Error("template must be available before the proposal is returned")
+			}
+		})
 	}
 }

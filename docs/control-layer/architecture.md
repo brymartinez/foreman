@@ -564,9 +564,17 @@ the same commit. The commit message records why it changed.
 - **The developer's workflow lives in stage files**, not in Go. `plan`, `implement`, `self-review`, `review`, and `pr` each resolve `stages/<stage>.md` next to the config file, then the
   committed `.foreman/<stage>.md` in the task's worktree. Foreman never parses them and
   never reads CLAUDE.md or AGENTS.md.
-- **Repository PR conventions take precedence.** The implementation prompt tells the
-  agent to read the repository's `AGENTS.md` and PR template before opening or updating
-  the PR. Their title and body rules override conflicting global `pr.md` defaults.
+- **Repository PR conventions take precedence.** Resolving `pr` also reads the first
+  nonblank `pull_request_template.md` or `PULL_REQUEST_TEMPLATE.md` in `.github/`,
+  the worktree root, then `docs/`. An unreadable template fails resolution. The
+  template is supplied verbatim after the PR stage guidance in implementation and
+  correction prompts. The agent preserves its sections, fills requested evidence,
+  reports missing verification, and checks its proposal against the template before
+  returning it. Global and repository `pr.md` guidance is fallback only where the
+  template and repository rules leave a choice. Without a template, the existing
+  global-then-repository guidance is unchanged. The agent still reads `AGENTS.md`
+  and selects any named template when the repository uses multiple templates.
+  Foreman does not parse Markdown or judge template compliance.
 - **The five global files are required.** The dashboard and the runner fail naming the
   missing files; `foreman -c` and a piped `foreman` don't check them. `make config` (`scripts/install-stages.sh`) installs the defaults from
   `defaults/stages/` and never overwrites an installed file. It names each installed
