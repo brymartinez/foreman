@@ -1,10 +1,22 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["verdict", "summary", "findings", "limitations"],
+  "required": ["verdict", "summary", "findings", "limitations", "docOnly"],
   "properties": {
     "verdict": { "type": "string", "enum": ["clean", "changes_requested"] },
     "summary": { "type": "string" },
+    "docOnly": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "evidence"],
+        "properties": {
+          "path": { "type": "string" },
+          "evidence": { "type": "string" }
+        }
+      }
+    },
     "findings": {
       "type": "array",
       "items": {

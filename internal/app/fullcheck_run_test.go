@@ -505,3 +505,35 @@ func TestAReviewedTaskWithACoveringResultIsHandedBack(t *testing.T) {
 		t.Fatalf("state %s", got.State)
 	}
 }
+
+func TestCleanReviewCanReuseEarlierFullResultWithDocumentationEvidence(t *testing.T) {
+	for _, paths := range [][]string{{"docs/guide.md"}, {"docs/guide.md", "retry.go"}} {
+		f := newFixture()
+		key := gatedLocalTask(t, f)
+		f.wt.checkpointHeads = []string{"commit1", "commit2", "commit2"}
+		f.wt.changed = map[string][]string{"commit1..commit2": paths}
+		f.claude.turns = []agent.Turn{
+			withFullRun(readyTurn(), fullRun("commit1")),
+			focusedOnly(readyTurn()),
+		}
+		needsFinalCheck := len(paths) > 1
+		if needsFinalCheck {
+			f.claude.turns = append(f.claude.turns, withFullRun(readyTurn(), fullRun("commit2")))
+		}
+		f.claude.turns = append(f.claude.turns, prTurn("sid-1"))
+		f.codex.reviews = []agent.ReviewOutcome{findings("should_fix"), {
+			Clean: true, Summary: "verified documentation change",
+			DocOnly: []task.DocOnlyPath{doc("docs/guide.md", "the test and build steps in Makefile do not read this guide")},
+		}}
+		opensPR(t, f, "commit2", proposedTitle, proposedBody, 2)
+		got := run(t, f, key)
+		if got.State != task.WaitingForCI || !got.FullResult.Covers("commit2") ||
+			(countResumed(f, "## Final full check") != 0) != needsFinalCheck {
+			t.Fatalf("paths=%v state=%s final checks=%d, outcome=%+v", paths, got.State,
+				countResumed(f, "## Final full check"), got.LastOutcome)
+		}
+		if !strings.Contains(f.codex.reviewed[1], "full suite passed on commit1") {
+			t.Fatal("review was missing the recorded full-suite revision")
+		}
+	}
+}

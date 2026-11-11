@@ -29,6 +29,7 @@ type ReviewOutcome struct {
 	Findings []task.Finding
 	// Limitations are the behaviors the reviewer could not check.
 	Limitations []task.Limitation
+	DocOnly     []task.DocOnlyPath
 	Usage       task.Usage
 }
 
@@ -44,12 +45,13 @@ func ParseReview(raw []byte) (ReviewOutcome, error) {
 			Summary  string  `json:"summary"`
 			Detail   string  `json:"detail"`
 		} `json:"findings"`
-		Limitations []task.Limitation `json:"limitations"`
+		Limitations []task.Limitation  `json:"limitations"`
+		DocOnly     []task.DocOnlyPath `json:"docOnly"`
 	}
 	if err := json.Unmarshal(raw, &w); err != nil {
 		return ReviewOutcome{}, fmt.Errorf("review is not valid JSON: %w", err)
 	}
-	out := ReviewOutcome{Summary: w.Summary}
+	out := ReviewOutcome{Summary: w.Summary, DocOnly: w.DocOnly}
 	for _, f := range w.Findings {
 		if f.Severity != "blocking" && f.Severity != "should_fix" {
 			return ReviewOutcome{}, fmt.Errorf("finding has unknown severity %q", f.Severity)
@@ -121,6 +123,7 @@ type ReviewBrief struct {
 	Self              bool
 	Passes            int
 	StageInstructions string
+	FullSuiteRevision string
 }
 
 // ReviewPrompt gives a fresh reviewer the pinned branch or fix diff.
@@ -148,6 +151,11 @@ func ReviewPrompt(b ReviewBrief) string {
 		s.WriteString(text + "\n\n")
 	}
 	s.WriteString("Use read-only tools to check files, callers, and test cases. Leave tests, builds, and execution of project code to the implementer.\n\n")
+	if b.FullSuiteRevision != "" {
+		fmt.Fprintf(&s, "The full suite passed on %s. If your verdict is clean and repository-specific evidence shows every path in `git diff --name-only %s %s --` is documentation-only and cannot affect behavior or the full suite, list each path with its evidence in docOnly. The path or extension alone is insufficient. Set docOnly to null if any path is a suite input or you are unsure. This evidence does not change your review verdict.\n\n", b.FullSuiteRevision, b.FullSuiteRevision, b.Head)
+	} else {
+		s.WriteString("Set docOnly to null.\n\n")
+	}
 	s.WriteString("## Final response\n\nReply with JSON matching the provided schema. Report concrete defects with a failing case and its effect. Severity is blocking or should_fix. Set file and line when available. Use clean when you inspected the entire supplied diff and found no defects. If you cannot inspect the entire supplied diff, return changes_requested and a blocking limitation with the reason. Report only verified defects as findings.\n")
 	return s.String()
 }

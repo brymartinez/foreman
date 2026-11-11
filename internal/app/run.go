@@ -535,6 +535,10 @@ func (r *taskRun) review() (step, error) {
 	// Findings return to the implementer. At the self-review limit it must reject
 	// them with evidence or ask the developer before making another correction.
 	atLimit := reviewErr == nil && !review.Clean && rec.ChangeRequestsSinceDecision()+1 > a.fixRounds()
+	var reused *task.FullResult
+	if reviewErr == nil && kind == task.CompetingReview {
+		reused = a.reuseReviewedFull(r.ctx, rec, review, r.log)
+	}
 	if rec, err = a.update(r.final, rec.Key, existing(func(cur *task.Record) {
 		if kind == task.CompetingReview {
 			cur.Delegation.Reviewer = reviewer
@@ -564,6 +568,9 @@ func (r *taskRun) review() (step, error) {
 		// Findings put the task back to IMPLEMENTING; only they can reach the limit.
 		if atLimit && kind == task.CompetingReview && cur.State == task.Implementing {
 			escalateReview(cur, a.fixRounds(), a.Now())
+		}
+		if head, _ := cur.CurrentChange(); reused != nil && reused.Covers(head) {
+			cur.FullResult = reused
 		}
 		holdForFinalCheck(cur)
 	})); err != nil {

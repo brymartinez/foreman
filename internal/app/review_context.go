@@ -52,11 +52,15 @@ func (a App) codeReview(ctx context.Context, rec *task.Record, kind task.ReviewK
 			action.FromHead = d.Action.FromHead
 		}
 	}
+	fullRevision := ""
+	if !self && rec.Delegation.FullSuiteGate && !rec.FullResult.Covers(head) && rec.FullResult != nil && rec.FullResult.Covered {
+		fullRevision = rec.FullResult.Revision
+	}
 	in := agent.StartInput{
 		Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ReviewerBudgetUSD,
 		Prompt: agent.ReviewPrompt(agent.ReviewBrief{
 			BaseHead: base, FromHead: action.FromHead, Head: head, Self: self, Passes: a.reviewRounds(),
-			StageInstructions: instructions.Content(),
+			StageInstructions: instructions.Content(), FullSuiteRevision: fullRevision,
 		}),
 		Purpose: purpose, Step: agent.StepReview,
 	}

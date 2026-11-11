@@ -522,11 +522,10 @@ the same commit. The commit message records why it changed.
   run lists only the checks it ran; when it names no full check, Foreman takes the
   full checks it recorded for a run on that revision, and a revision it has no
   passing run for covers nothing. Foreman cannot judge whether
-  evidence is sound. The implementer judges it under the stage instructions: a path is
-  documentation-only only with repository-specific evidence that it cannot affect
-  behavior or the supported suite; a name, extension, or directory alone is never
-  evidence, and absent or ambiguous evidence makes the path a validation input. No
-  path or extension list decides this in Foreman.
+  evidence is sound. The implementer or clean adversarial reviewer can supply evidence
+  for reuse. Each path needs repository-specific evidence that it cannot affect
+  behavior or the supported suite. A name, extension, or directory alone is insufficient.
+  Absent or ambiguous evidence makes the path a validation input.
 - **A stored result stops covering a head when the head moves.** A turn that reports
   no result keeps the old one, which then covers nothing until a new report passes the
   check. A merge of the base branch is judged by the same rule as any change, through
@@ -545,8 +544,10 @@ the same commit. The commit message records why it changed.
   reviewed PR, moving to WAITING_FOR_CI after a clean competing review, and every move
   to READY_FOR_HUMAN (the gate's, a reopened PR's, a REVIEWED task's whose comments are
   cleared or answered, and an answer turn's that pushed nothing) each require a stored result that covers the head. Without
-  one, the task goes to IMPLEMENTING for a final-check implementer turn (the gate
-  launches its runner). The prompt names the head, why the result does not cover it,
+  one, the task goes to IMPLEMENTING for a final-check implementer turn. The gate
+  launches the runner. A clean adversarial review can reuse an earlier passing
+  result before this turn when Git confirms that its documentation-only evidence
+  covers every changed path. The prompt names the head, why the result does not cover it,
   and the paths changed since the last full run. The agent reports the earlier run
   with evidence for every path, or runs the suite; a failure is fixed in the same
   turn. A turn that keeps the head and covers it hands off without another review; a

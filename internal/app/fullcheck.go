@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/brymartinez/foreman/internal/agent"
@@ -99,6 +100,23 @@ func recordFull(rec *task.Record, res turnResult) {
 	if res.err == nil && res.full != nil {
 		rec.FullResult = res.full
 	}
+}
+
+func (a App) reuseReviewedFull(ctx context.Context, rec *task.Record, review agent.ReviewOutcome, log io.Writer) *task.FullResult {
+	head, _ := rec.CurrentChange()
+	f := rec.FullResult
+	if !rec.Delegation.FullSuiteGate || !review.Clean || len(review.DocOnly) == 0 ||
+		f == nil || !f.Covered || f.Covers(head) {
+		return nil
+	}
+	res := a.evaluateFull(ctx, rec, agent.Outcome{FullSuite: &agent.FullSuite{
+		Status: agent.FullSuiteRun, Revision: f.Revision, DocOnly: review.DocOnly,
+	}}, head)
+	if !res.Covered {
+		return nil
+	}
+	fmt.Fprintf(log, "foreman: reusing the full suite on %s for %s with documentation-only evidence from review\n", short(f.Revision), short(head))
+	return res
 }
 
 // maxFinalChecks bounds the final-check turns toward one handoff.
