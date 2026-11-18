@@ -215,6 +215,8 @@ func (a App) repairFailedCheckpoint(ctx context.Context, rec *task.Record, req t
 			Stage:    task.StageImplement, Step: agent.StepImplement,
 			Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD, Profile: rec.Delegation.Profile,
 		}
+		model := a.modelPolicy(rec.Delegation).Implementation
+		in.Model, in.ReasoningEffort = model.Model, model.ReasoningEffort
 		next, resumeErr := adapter.Resume(ctx, turn.Session, in)
 		addUsage(&turn.Usage, next.Usage)
 		if next.Session.ID != "" {
@@ -256,6 +258,8 @@ func (a App) requireFullCheck(ctx context.Context, rec *task.Record, req turnReq
 		Stage: task.StageImplement, Step: agent.StepImplement,
 		Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD, Profile: d.Profile,
 	}
+	model := a.modelPolicy(d).Implementation
+	in.Model, in.ReasoningEffort = model.Model, model.ReasoningEffort
 	turn := res.turn
 	next, err := adapter.Resume(ctx, turn.Session, in)
 	addUsage(&turn.Usage, next.Usage)

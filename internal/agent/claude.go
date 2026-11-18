@@ -59,6 +59,9 @@ func (c Claude) run(ctx context.Context, in StartInput, session task.Session, se
 	if in.Stage == task.StagePlan && c.PlanModel != "" {
 		c.Model = c.PlanModel
 	}
+	if in.Model != "" {
+		c.Model = in.Model
+	}
 	logTurn(in.Log, task.Claude, c.Model, in.Step)
 	if in.Log != nil {
 		fmt.Fprintf(in.Log, "claude: transcript %s\n", ClaudeTranscript(in.Worktree, session.ID))
@@ -91,11 +94,18 @@ func (c Claude) Review(ctx context.Context, in StartInput) (ReviewOutcome, error
 	if c.ReviewModel != "" {
 		c.Model = c.ReviewModel
 	}
+	if in.Model != "" {
+		c.Model = in.Model
+	}
 	logTurn(in.Log, task.Claude, c.Model, in.Step)
+	schema, err := claudeReviewSchema()
+	if err != nil {
+		return ReviewOutcome{}, err
+	}
 	args := []string{
 		"-p", in.Prompt,
 		"--output-format", "stream-json", "--verbose",
-		"--json-schema", string(ReviewSchema),
+		"--json-schema", string(schema),
 		"--permission-mode", "dontAsk",
 		"--allowedTools=" + strings.Join(ReviewTools, ","),
 	}

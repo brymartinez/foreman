@@ -136,13 +136,15 @@ type Session struct {
 }
 
 type ModelCall struct {
-	Agent      Agent     `yaml:"agent"`
-	Step       string    `yaml:"step"`
-	Model      string    `yaml:"model"`
-	StartedAt  time.Time `yaml:"started_at"`
-	FinishedAt time.Time `yaml:"finished_at"`
-	Error      string    `yaml:"error,omitempty"`
-	Usage      Usage     `yaml:"usage"`
+	Agent                Agent     `yaml:"agent"`
+	Step                 string    `yaml:"step"`
+	Model                string    `yaml:"model"`
+	StartedAt            time.Time `yaml:"started_at"`
+	FinishedAt           time.Time `yaml:"finished_at"`
+	Error                string    `yaml:"error,omitempty"`
+	Usage                Usage     `yaml:"usage"`
+	ClaudeSessionID      string    `yaml:"claude_session_id,omitempty"`
+	ClaudeSessionCostUSD float64   `yaml:"claude_session_cost_usd,omitempty"`
 }
 
 // Tokens counts reported input and output, including cached input.
@@ -178,6 +180,21 @@ type Profile struct {
 	ReasoningEffort     string `yaml:"reasoning_effort,omitempty"`
 }
 
+// ModelTarget is the provider and model selected for one task stage.
+type ModelTarget struct {
+	Agent           Agent  `yaml:"agent"`
+	Model           string `yaml:"model"`
+	ReasoningEffort string `yaml:"reasoning_effort,omitempty"`
+}
+
+// ModelPolicy is resolved when a task starts and stays with it across retries.
+// Self-review uses the implementation target so both stages always share a model.
+type ModelPolicy struct {
+	Planning          ModelTarget `yaml:"planning"`
+	Implementation    ModelTarget `yaml:"implementation"`
+	AdversarialReview ModelTarget `yaml:"adversarial_review"`
+}
+
 type Advice struct {
 	Summary string `yaml:"summary"`
 	Detail  string `yaml:"detail,omitempty"`
@@ -198,13 +215,18 @@ type PlanDraft struct {
 
 // Delegation exists once the user has run start; tracked-only items have none.
 type Delegation struct {
-	PlanDraft   *PlanDraft
-	Planner     Session
-	Implementer Session
-	Action      *Action
+	LocalDocuments bool
+	TrackerTriage  bool // local planning with confirmed scope read from the tracker
+	LocalPlan      *LocalPlan
+	PlanRevision   string
+	PlanDraft      *PlanDraft
+	Planner        Session
+	Implementer    Session
+	Action         *Action
 	// Profile is set when routing chose the implementer; RouteReason says why.
 	// RouteLogged is set once the runner has written the route line to the log.
 	Profile     *Profile
+	Models      *ModelPolicy
 	RouteReason string
 	RouteLogged bool
 	StartedAt   time.Time
@@ -250,12 +272,15 @@ type Delegation struct {
 	// ReviewBeforePR is config's review_before_pr when the task started. Set, the
 	// agent review runs on the local branch and the PR opens only after a clean review.
 	ReviewBeforePR bool
+	// SkipSelfReview is set when a task starts. Adversarial review is still required.
+	SkipSelfReview bool
 	// LocalHead is the committed, unpushed change the implementer last returned for
 	// review, and ProposedTitle and ProposedBody are the PR it proposed with it. The
 	// three change together, so a commit is always reviewed with its own description.
-	LocalHead     string
-	ProposedTitle string
-	ProposedBody  string
+	LocalHead            string
+	ProposedTitle        string
+	ProposedBody         string
+	ScreenshotsRequested *bool
 	// ClaimVerification, Claims, and PRDDigest preserve older task records.
 	ClaimVerification bool
 	Claims            []Claim
@@ -654,8 +679,25 @@ func (r *Record) PlanComment(doc PlanDoc) *PlanComment {
 	return nil
 }
 
-// PlanPosted reports whether every planning document is on the issue.
+// LocalPlan holds the accepted planning documents and the issue description they cover.
+type LocalPlan struct {
+	Fingerprint string             `yaml:"description_fingerprint"`
+	Documents   map[PlanDoc]string `yaml:"documents"`
+}
+
+// PlanPosted reports whether every planning document is saved.
 func (r *Record) PlanPosted() bool {
+	if d := r.Delegation; d != nil && d.LocalDocuments {
+		if d.LocalPlan == nil {
+			return false
+		}
+		for _, doc := range PlanDocs {
+			if strings.TrimSpace(d.LocalPlan.Documents[doc]) == "" {
+				return false
+			}
+		}
+		return true
+	}
 	for _, d := range PlanDocs {
 		if c := r.PlanComment(d); c == nil || c.URL == "" {
 			return false
@@ -799,9 +841,19 @@ func (r *Record) SelfReviewPassed() bool {
 	return r.selfCovers(latest) && (latest.Clean || latest.AllFindingsRejected())
 }
 
-// NextReview is the review the current change needs next: the self-review until a
-// clean one covers it, then the competing review.
+// InitialReviewAction selects the first review for a new baseline.
+func (d *Delegation) InitialReviewAction() ActionKind {
+	if d != nil && d.SkipSelfReview {
+		return AdversarialAction
+	}
+	return SelfReviewAction
+}
+
+// NextReview is the review the current change needs next.
 func (r *Record) NextReview() ReviewKind {
+	if d := r.Delegation; d != nil && d.SkipSelfReview {
+		return CompetingReview
+	}
 	if d := r.Delegation; d != nil && d.Action != nil {
 		switch d.Action.Kind {
 		case SelfReviewAction:

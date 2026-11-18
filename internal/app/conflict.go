@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -26,6 +27,9 @@ func (a App) conflict(ctx context.Context, rec *task.Record, pr PullRequest) (*t
 	}
 	if d.ConflictAttempted(pr.HeadSHA, base) {
 		return rec, "", nil
+	}
+	if err := a.checkQuota(ctx, d.Implementer.Agent, nil); err != nil {
+		return rec, fmt.Sprintf("PR #%d conflicts with %s; repair is waiting: %v", d.PR, pr.BaseRefName, err), nil
 	}
 	var note, token string
 	updated, err := a.update(ctx, rec.Key, func(cur *task.Record) (*task.Record, error) {
@@ -69,6 +73,11 @@ func (a App) repairConflict(ctx, final context.Context, rec *task.Record, log io
 	}
 	res := a.runTurn(ctx, rec, turnRequest{}, check, log)
 	return a.finishTurn(ctx, final, rec.Key, "merge conflict repair", res, func(cur *task.Record) {
+		var quotaErr quotaUnavailable
+		if errors.As(res.err, &quotaErr) {
+			deferConflictRepair(cur, quotaErr, a.Now())
+			return
+		}
 		cur.Delegation.ConflictPending = false
 		if res.err != nil && ctx.Err() != nil {
 			// A cancelled run is FAILED like any other, and the attempt stays spent.
@@ -78,6 +87,17 @@ func (a App) repairConflict(ctx, final context.Context, rec *task.Record, log io
 			recordFull(cur, res)
 		}
 	}, log)
+}
+
+func deferConflictRepair(rec *task.Record, err error, now time.Time) {
+	d := rec.Delegation
+	d.ConflictPending = false
+	if n := len(d.ConflictAttempts); n > 0 {
+		d.ConflictAttempts = d.ConflictAttempts[:n-1]
+	}
+	d.Action = nil
+	rec.State = task.ReadyForHuman
+	rec.LastOutcome = &task.Outcome{Status: "conflict_repair_waiting", Summary: fmt.Sprintf("PR #%d still conflicts; repair is waiting: %v", d.PR, err), At: now}
 }
 
 func (a App) checkRepair(ctx context.Context, rec *task.Record, o agent.Outcome) (*PullRequest, error) {

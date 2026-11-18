@@ -6,7 +6,7 @@ internal/cli          argv -> Command (launch flags, knowledge export and ingest
                       no I/O beyond parsing
 internal/config       config.yaml: directories, budgets, learning, default source, and
                       their validation, rejecting unknown keys
-internal/routing      configured profiles and defaults, with validation
+internal/routing      legacy profile parsing for older task records/configs
 internal/render       terminal formatting of app results
 internal/tui          the dashboard: pure Model and Frame, one terminal loop
 internal/app          orchestration + ports.go (the interfaces below)
@@ -42,12 +42,12 @@ so tasks in one repository cannot share a `#0` log. The end-to-end fixture point
 
 ## Execution model
 
-Every agent interaction is one headless turn that runs to completion and returns a typed
-`agent.Outcome`. There are no interactive sessions and no terminal scraping.
+Runner turns are headless and return typed outcomes. The maintainer runs the
+standalone triage skill before starting an issue in Foreman.
 
 ```
 app.Start, from the dashboard (enter on an inbox issue, or auto mode)
-  ├─ require the exact triaged label for either start path
+  ├─ require confirmed triage for a new run
   ├─ gh: repo + default branch of the managed clone, fetch issue
   ├─ git: ensure worktree <root>/<owner>-<repo>/<branch> with branch slashes as directories
   ├─ store: task file, first stage (Record.NextStage), session id, launch claim
@@ -57,9 +57,8 @@ app.Start, from the dashboard (enter on an inbox issue, or auto mode)
   └─ spawn detached `foreman __run owner/repo#825` with the claim's token in
      FOREMAN_LAUNCH (pid + log recorded), exit
 
-runner (one process per task; before each stage it rereads the triaged label and
-confirmed scope from ordered triage decisions/correction comments, or the issue
-description when there are none; a changed scope invalidates plan and reviews;
+runner (one process per task; before each stage it rereads confirmed triage;
+a changed scope invalidates the plan and reviews;
 before each agent turn it writes the stage that turn
 runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR):
   if the gate flagged a merge conflict (IMPLEMENTING):
@@ -72,14 +71,15 @@ runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR)
   if the verified PR head has no review (crash mid-review, or new commits):
     re-verify the PR, record its head, skip to the review below
   planner = Planner.Start or Resume(retained planner session, confirmed triage)
-    planned -> validate document shape and scope fingerprints; post or edit the two
-               issue comments idempotently; continue in retained implementer session
+    planned -> validate documents and source fingerprints; save the checked plan
+               in the task file; continue implementation
+    plan_revision from the implementer -> replan before continuing
     blocked / failed -> save outcome and stop
   implementer = Start or Resume(retained implementation session, checked plan)
     checkpoint -> verify clean descendant commit and continue same session
     pr_opened / review_ready -> verify Git and PR facts; enter SELF_REVIEW
   for each reviewed revision:
-    self-reviewer = fresh read-only session
+    self-reviewer = fresh read-only session, when enabled
       first pass: pinned base...head; follow-up: verified reviewedHead..fixedHead
       findings -> implementer.Resume, then self-reviewer reviews the fix range
     adversarial reviewer = fresh read-only session
@@ -92,7 +92,7 @@ runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR)
   task lifecycle starts no learning or diagnostic model calls
 
   with review_before_pr captured on the task and no PR yet, the same four-role
-  review sequence covers the local diff before the implementer pushes and opens it
+  review sequence covers the local diff before Foreman publishes it
 
 
 app.Resume            -> disabled for legacy REVIEWED tasks; the next refresh
@@ -130,10 +130,8 @@ foreman [-a|--auto|--no-auto] [-s github|linear|all] [--mentions|--no-mentions]
                            app.InboxView, the refresh below
                          p -> app.History in the background: the PR history
                            in place of the dashboard, until esc
-                         enter on an inbox issue -> agent, context file, app.Start
-                           3 (routing on, never delegated) -> context file,
-                             app.Route, show the profile and reason; enter ->
-                             app.Start with the profile, esc -> agent choice
+                         enter on an inbox issue -> configured stage models,
+                           optional context file, app.Start
                          legacy REVIEWED issues return to READY_FOR_HUMAN on refresh
                          enter on delegated work -> open that task's log below the lists
                          enter on a NEEDS_DECISION task -> the oldest unanswered
@@ -152,12 +150,10 @@ foreman [-a|--auto|--no-auto] [-s github|linear|all] [--mentions|--no-mentions]
                          x on a FAILED task      -> confirm, app.Reset
                          a -> toggle auto mode, saved in state.json (D144)
                          auto mode, after each successful refresh, finished start,
-                           and 1s tick: app.Start with auto.agent for assigned,
+                           and 1s tick: app.Start with models.implementation.agent for assigned,
                            triaged, never delegated issues, oldest first, while fewer
                            than auto.max_concurrent runs are active (D144). A selected
-                           source refresh in progress or failed blocks auto starts. With routing
-                           on: app.Route, then app.Start with the profile, no
-                           confirmation; a wait holds the issue until the next refresh
+                           source refresh in progress or failed blocks auto starts
 
 app.InboxView         -> runner pid dead in a stage -> FAILED
                          runner pid dead in any other state -> clear the pid
@@ -282,7 +278,7 @@ the same commit. The commit message records why it changed.
   | `stepAnswer` | legacy PR feedback turn, disabled by the CLI | unused |
   | `stepPickUpReview` | re-verify the PR, record its head | PR not open: implement. Else review |
   | `stepImplement` | resume planner or implementer; then validate and publish the plan | planned: implement. Checkpoint: resume implementer. Commit or PR: review. Else done |
-  | `stepReview` | conflict check, self-review then adversarial review | findings: implement, then return to the finding reviewer. Clean: handoff or open PR |
+  | `stepReview` | conflict check, optional self-review, required adversarial review | findings: implement, then return to the finding reviewer. Clean: handoff or open PR |
   | `stepOpenPR` | adopt or open the PR for a cleanly reviewed local commit | done |
   | `stepHandover` | legacy comment handover, disabled by the CLI | unused |
 
@@ -294,9 +290,8 @@ the same commit. The commit message records why it changed.
   noreply address (`<id>+<login>@users.noreply.github.com`) that `gh api user` reports
   as `account` and `account_email`. Restarts and resumes keep the pin. A task file
   from before pinning takes the active account at its next launch. `checkAccount`
-  runs before every launch, in `runTurn` before every implementer turn, and before
-  each checkpoint repair resume, because the agent commits, pushes, and opens PRs
-  itself and `gh auth switch` can happen at any time. It fails the task when gh is on
+  runs before every launch, implementer turn, checkpoint repair resume, and direct
+  PR publication. It fails the task when gh is on
   another login, and sets `user.name` and `user.email` with `git config --worktree`
   (`extensions.worktreeConfig`). Then, for each SSH URL in
   `git remote get-url --push --all origin`, it runs `ssh -T` against the URL's host
@@ -355,8 +350,8 @@ the same commit. The commit message records why it changed.
   step writes its stage before its agent turn, so the task file, the dashboard list,
   and the `s` pane show what runs, across refreshes and restarts. Any turn that can
   change the branch is IMPLEMENTING: code, review fixes, answers, and merges. Findings
-  from either review go back to IMPLEMENTING, and a new change is self-reviewed before
-  the adversarial review. Which step runs next still comes from the record
+  from either review go back to IMPLEMENTING. New review baselines start with
+  self-review by default. Which step runs next comes from the record
   (`firstStep`, `Record.NextStage`), never from the state, so a stale state cannot
   skip a step. Task files that hold the old WORKING or REVIEWING load as the stage
   the record needs (`Record.UpgradeState`), and the next write saves it. Runners
@@ -423,7 +418,8 @@ the same commit. The commit message records why it changed.
   that plan as its task context. The `reset`
   block is cleared. The reset record keeps no plan links, attempts, decisions, or
   session. With an open PR and an absent or partial plan, the run plans before reviewing
-  that PR. Every run reads the issue's planning comments before it plans.
+  that PR. A new run saves its plan locally. Existing tracker-backed runs read
+  their planning comments.
 - **Names are chosen once, before worktree creation.** GitHub tasks default to
   `<type>/<issue>-<slug>`. The type comes from the title prefix, the labels, or
   `feat`, and the slug is capped at five words and 40 characters. Linear tasks
@@ -439,14 +435,19 @@ the same commit. The commit message records why it changed.
 
 ### Agents
 
-- **Claude and Codex are interchangeable.** The configured or explicitly selected profile determines the implementer. The
-  adversarial role uses its configured provider and retained session; quota cannot skip it.
+- **Task roles use configured model targets.** `config.yaml` selects a provider and
+  model for planning, implementation, and adversarial review. Self-review uses the
+  implementation target. The task stores the resolved targets so retries and config
+  edits cannot switch a retained role's provider or model.
 - **Headless turns with a structured outcome.** Each turn ends in a final message that
   matches `internal/agent/outcome.schema.json`: `planned`, `checkpoint`, `pr_opened`,
   `review_ready`, `blocked` with questions, or `failed`. `agent.ParseOutcome` is the
   only way an implementer's output
   enters the program, and it rejects questions with fewer than two options or duplicate
   labels. Reviewers have their own schema and parser, `agent.ParseReview`.
+  Claude may omit `findings` and `limitations` when they are empty; `ParseReview` treats
+  omitted arrays as empty. Codex keeps the complete required-property schema for strict
+  output mode.
   Rejected: interactive sessions with terminal scraping.
 - **Permissions.** The dangerous bypass flags are never used. Claude runs with
   `acceptEdits` and the fixed `Bash,WebFetch,WebSearch` tool list; the list is not
@@ -457,14 +458,19 @@ the same commit. The commit message records why it changed.
   including when Git's top-level files already exist. All Codex turns explicitly
   set `approval_policy="never"`. Reviews stay read-only, with Git diff and file
   reads available without human approval.
-- **The agent pushes and opens the PR.** Foreman then checks with `gh` that the PR is
-  open, in the task's repo, from the task branch, against the task's base, and records
-  the verified number and head. A PR the developer retargets keeps its new base.
+- **Foreman publishes the reviewed local commit.** If the implementer confirms that
+  the change needs no screenshots and has received every answer, Foreman verifies
+  the worktree is clean, pushes the reviewed SHA without force, and opens the PR with
+  the reviewed title and body. A retry adopts a matching open PR. The implementer
+  handles publication if screenshots are required or their status is unknown, or if
+  it has an unread answer. When review starts after opening the PR, the implementer
+  also publishes. Foreman verifies the repo, branch, base, state, and head of the PR.
+  A PR the developer retargets keeps its new base.
 - **Resume retained implementation context.** Answers, PR comments, and review
   findings resume the implementation session when present. A missing or uncertain session pauses the role with progress preserved. Resume it
   when available or wait for explicit role replacement; other provider errors stop the turn.
 - **Planning is its own retained role.** The planner receives the issue description and
-  confirmed triage decisions, writes Requirements and Work plan, and checks both against
+  confirmed triage decisions, writes Requirements and Implementation plan, and checks both against
   that scope before returning `planned`. Foreman keeps document shape validation,
   source fingerprints, and idempotent comment publication in Go. The implementer then
   receives the checked documents in its retained session. It follows the implementation
@@ -475,25 +481,28 @@ the same commit. The commit message records why it changed.
 - **No task-triggered model calls sit outside the four roles.** Automatic learning and
   diagnostic calls do not run in the task lifecycle. Standalone knowledge commands
   remain separate operations.
-- **Models and effort are set per step:** `plan_model`, `model` (implementation, fixes,
-  merges, PR creation), and `review_model`; Codex also takes reasoning effort
-  per step. Each turn logs an `agent:model:step` line. The chosen profile fixes provider and model settings across every role and retry.
+- **Stage model policy is explicit:** `models.planning`, `models.implementation`,
+  and `models.adversarial_review` each store an agent, model, and optional Codex
+  reasoning effort. Self-review shares the implementation target. Fixes, merges,
+  final checks, and PR creation use that same target. Each task snapshots the resolved
+  policy before its first call, and each turn logs an `agent:model:step` line.
 
 ### Profiles and quota
 
-- **Profile choice is deterministic.** A manual explicit choice or the configured
-  default supplies the profile. No model call selects a profile or routes in prose.
-  The chosen profile remains fixed across retries.
+- **Model choice is deterministic.** Configured targets assign the provider and model
+  for each role. No model call selects a provider or routes in prose. A task keeps its
+  saved targets across retries.
 - **Check provider quota before each role call.** Confirmed exhaustion or absent setup
   pauses the role with its session and progress preserved. Unknown quota does not
-  change the selected profile. Quota never skips review or transfers a role silently.
+  change the task's saved model policy. Quota never skips review or transfers a role silently.
 - **Dollar budgets cap Claude only.** Codex reports no cost and its tokens arrive only
   when a turn ends, so foreman records Codex tokens and never invents a price. The
   Codex log states that the per-call dollar setting is unsupported. Each runner call
   (including planning, self-review, and adversarial review)
   saves its stage, model, times, reported usage, and error before processing its outcome.
-  Totals include failed calls when usage was reported. Claude input includes cache
-  creation and cache reads; cached input is also shown separately. Codex reasoning is
+  Totals include failed calls when usage was reported. For a retained Claude session,
+  each call adds the increase in the reported session cost. Claude input includes
+  cache creation and cache reads. Cached input is also shown separately. Codex reasoning is
   a detail of output, so input plus output is the token total. Older totals cannot be
   reconstructed from missing usage. Calls with no final provider usage keep what is
   known; Foreman does not estimate missing tokens or cost.
@@ -603,9 +612,9 @@ the same commit. The commit message records why it changed.
 ### Review
 
 - **Each task uses four roles.** The planner has one retained session. It receives
-  confirmed triage and returns Requirements and Work plan after checking both against
+  confirmed triage and returns Requirements and Implementation plan after checking both against
   that scope. The implementer has one retained session across fixes, questions,
-  checkpoints, merge repairs, final checks, and publishing. Both reviewers use
+  checkpoints, merge repairs, final checks, and agent-assisted publishing. Both reviewers use
   a fresh read-only session for each pass. Foreman records the planner and
   implementer sessions and each pending action. Retried reviews use the saved
   diff range when it still matches the current revisions.
@@ -626,28 +635,32 @@ the same commit. The commit message records why it changed.
   self-reviewer checks the fix range. After an adversarial finding, the implementer
   verifies that every finding is resolved before Foreman sends the fix diff directly
   to a fresh adversarial reviewer.
-  A changed plan or invalidated base restarts at self-review. Only an explicit clean
-  adversarial verdict advances the task.
+  A changed plan or invalidated base restarts review on the new baseline. A new
+  task captures `skip_self_review` from config and keeps it across restarts. When
+  enabled, the task starts each baseline with adversarial review. Only an explicit
+  clean adversarial verdict advances the task.
 - **No findings are waived.** Quota and fix limits pause work; they cannot skip a
   review or accept unresolved adversarial findings. If final validation changes code,
   the changed revision returns to the review that covers it. `review_rounds` (1) sets
   passes over a review diff and `fix_rounds` (3) sets reviewed fix attempts before a
   pause for the developer. There are no automatic learning or diagnostic model calls
   during a task.
-- **Quota and profile choice are deterministic.** Foreman uses an explicitly selected
-  profile or the configured default. It does not ask an agent to choose a profile or
-  route itself in prose. Quota checks may pause a role; they never waive review.
+- **Quota and model choice are deterministic.** Foreman reads the saved task policy
+  for each role. It does not ask an agent to choose a provider or model. Quota checks
+  may pause a role; they never waive review.
 - **Both reviewers are read-only.** Claude gets `Read, Grep, Glob` and read-only git.
   Codex uses its read-only permission profile. Reviewers report concrete defects and
   explicit limitations. A review that cannot inspect its assigned diff cannot advance.
 - **Confirmed scope and publication remain verified.** The planner validates the
-  documents against triage; Go retains document validation, fingerprints, and
-  idempotent comment publication. Foreman checks the PR description separately.
+  documents against triage. Go checks the scope and issue description fingerprints
+  and saves the local plan in the locked task record. Existing tracker-backed runs
+  keep their comment publication path. Foreman checks the PR description separately.
   Screenshots requested or captured are attached in a marked PR comment after the PR
   exists, with retries checking for an existing comment first. Existing PR creation,
   branch verification, and repository PR conventions remain unchanged.
 - **A code review covers a revision.** Foreman verifies review coverage before
-  handoff. Changed heads and retargeted PRs need self-review then adversarial review.
+  handoff. Changed heads and retargeted PRs need adversarial review and follow the
+  task's self-review setting.
   A changed checked scope or plan returns to the planner and implementer before
   review. Foreman flags new commits on a `READY_FOR_HUMAN` PR for the developer. A
   crash resumes the saved role and action.
@@ -670,9 +683,10 @@ the same commit. The commit message records why it changed.
   WAITING_FOR_CI until CI finishes, without an agent turn. Reviews still read PR comments
   as history.
 - **A handed-over PR that conflicts is repaired once per (PR head, base head) pair.**
-  Every attempted pair is kept, so none is tried twice. A repair is accepted only if
-  the head moved, contains the base head, and every reported check passed; anything
-  else asks the developer.
+  If quota blocks the model call, the task stays ready for human review and the pair
+  remains eligible for repair. A repair is accepted only if the head moved, contains
+  the base head, and every reported check passed. Other repair failures ask the
+  developer.
 - **Cleanup never loses work.** `git worktree remove` without `--force`, so a dirty
   worktree stays. The local branch is deleted (`-D`, for squash merges) only when its PR
   merged. If branch deletion fails after worktree removal, cleanup keeps the task pending
@@ -698,18 +712,18 @@ the same commit. The commit message records why it changed.
   Work an agent holds stays in DELEGATED WORK, so an issue is never delegated
   twice. `mentions: false` hides mention-only items but never a delegated task that
   needs the developer.
-- **Every start requires current triage.** A never-delegated, open, assigned issue needs
-  the exact `triaged` label for auto mode or manual start. Without it, the inbox shows
-  "awaiting triage". Labels come from the selected tracker on each refresh, including
-  tracked-item lookups; they are not task-file state. Auto mode uses them only after a
-  successful selected-source refresh. Starting a refresh or failing one blocks auto starts from
-  the retained inbox until another refresh succeeds. The auto start's existing issue
-  fetch checks the label again through the issue's source before making a worktree,
-  so removal after the refresh also stops the start. Manual starts check it at the
-  same boundary. Dashboard start and routing requests carry the source-qualified key from
-  the selected inbox item, including Linear's stable issue ID. Routing reads the
-  issue and recent comments from that tracker. In-flight starts and auto routing
-  retries use the same key to release slots and retain routing selections.
+- **Every new run requires confirmed triage.** The standalone skill records
+  decisions on the issue and applies its `triaged` label. Foreman also reads
+  existing local triage records keyed by GitHub repository and issue number
+  or Linear issue ID. At the first start, Foreman prefers a valid local record
+  when present and otherwise uses tracker triage. The run keeps that source
+  across restarts. New runs save planning documents locally. Runs created with
+  tracker-backed planning keep their existing planning comments.
+  Auto mode checks triage after a successful tracker refresh. Manual and auto
+  starts reread readiness before preparing an implementation worktree. An
+  issue lock protects concurrent starts across repository choices.
+  Dashboard start and routing requests carry the source-qualified issue key.
+  Routing reads the issue and recent comments from that tracker.
   A Linear task uses Linear's suggested branch name when available. Without a
   suggestion, Foreman uses the display identifier and title. GitHub tasks
   use their numeric issue name by default.
@@ -875,8 +889,8 @@ the same commit. The commit message records why it changed.
   still needs a second task or a maintainer citation.
 - **Time and cost are context, not a score.** The evaluator prompt says so, and says
   CI is not evidence. A long or expensive task is not a failure by itself.
-- **Repository knowledge informs triage.** The separate triage skill researches
-  relevant knowledge before publishing decisions. Planning, implementation,
+- **Repository knowledge informs triage.** The triage interview can research relevant knowledge
+  before saving confirmed decisions. Planning, implementation,
   correction, and review prompts omit repository knowledge.
 - **Knowledge moves between machines as one Markdown file.** `foreman knowledge
   export owner/repo` writes the rendered active guidance, then a fenced YAML payload

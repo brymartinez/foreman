@@ -4,9 +4,8 @@
 # A rule's profiles are tried in order; a profile whose agent has no quota left
 # or is not set up is skipped. No fitting rule, or an unsure selector, uses `default`.
 #
-# A profile sets `agent` and may set `plan_model`, `model`, and, for Codex,
-# `plan_reasoning_effort` and `reasoning_effort`. An omitted field uses the
-# matching claude.* or codex.* setting in config.yaml.
+# Profiles are legacy provider routing choices. Task models come from `models`
+# in config.yaml and are fixed by stage.
 
 selector:
   agent: claude
@@ -15,14 +14,8 @@ selector:
 profiles:
   claude:
     agent: claude
-    plan_model: sonnet
-    model: opus
   codex:
     agent: codex
-    plan_model: gpt-6-luna
-    plan_reasoning_effort: xhigh
-    model: gpt-6-sol
-    reasoning_effort: medium
 
 rules:
   - when: Broad or ambiguous work, design or architecture changes, or refactors across several packages.

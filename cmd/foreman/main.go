@@ -23,7 +23,6 @@ import (
 	"github.com/brymartinez/foreman/internal/logs"
 	"github.com/brymartinez/foreman/internal/notifications"
 	"github.com/brymartinez/foreman/internal/quota"
-	"github.com/brymartinez/foreman/internal/routing"
 	"github.com/brymartinez/foreman/internal/runner"
 	"github.com/brymartinez/foreman/internal/stages"
 	"github.com/brymartinez/foreman/internal/store"
@@ -101,30 +100,24 @@ func run(argv []string) int {
 	claude := agent.Claude{Bin: cfg.Claude.Command, Model: cfg.Claude.Model, PlanModel: cfg.Claude.PlanModel, ReviewModel: cfg.Claude.ReviewModel, Exec: agent.RunCommand}
 	codex := agent.Codex{Bin: cfg.Codex.Command, Model: cfg.Codex.Model, PlanModel: cfg.Codex.PlanModel, ReviewModel: cfg.Codex.ReviewModel,
 		ReasoningEffort: cfg.Codex.ReasoningEffort, PlanReasoningEffort: cfg.Codex.PlanReasoningEffort, ReviewReasoningEffort: cfg.Codex.ReviewReasoningEffort, Exec: agent.RunCommand}
-	// A routing.yaml that fails to load stops only the dashboard starts that route.
-	routes, routesErr := routing.Load(routing.Path(cfg.Path))
 	linearClient := linear.New(os.Getenv("LINEAR_API_KEY"))
 	if endpoint := os.Getenv("FOREMAN_LINEAR_ENDPOINT"); endpoint != "" {
 		linearClient.Endpoint = endpoint
 	}
 	a := app.App{
-		ReplyToPRFeedback: false,
-		FullSuiteGate:     true,
-		Store:             store.Markdown{Dir: cfg.TasksDir},
-		GitHub:            github.New(),
-		Linear:            linearClient,
-		LinearTeam:        cfg.LinearTeam,
-		Repositories:      github.New(),
-		Worktrees:         worktree.Git{},
-		Accounts:          github.New(),
-		RemoteAuth:        worktree.Git{},
-		Agents:            map[task.Agent]app.AgentAdapter{task.Claude: claude, task.Codex: codex},
-		Routing:           routes,
-		RoutingErr:        routesErr,
-		RoutingDefaults: routing.Defaults{
-			task.Claude: {Model: cfg.Claude.Model, PlanModel: cfg.Claude.PlanModel},
-			task.Codex:  {Model: cfg.Codex.Model, PlanModel: cfg.Codex.PlanModel, ReasoningEffort: cfg.Codex.ReasoningEffort, PlanReasoningEffort: cfg.Codex.PlanReasoningEffort},
-		},
+		ReplyToPRFeedback:    false,
+		FullSuiteGate:        true,
+		Store:                store.Markdown{Dir: cfg.TasksDir},
+		Triage:               store.Triage{Dir: cfg.TriageDir},
+		GitHub:               github.New(),
+		Linear:               linearClient,
+		LinearTeam:           cfg.LinearTeam,
+		Repositories:         github.New(),
+		Worktrees:            worktree.Git{},
+		Accounts:             github.New(),
+		RemoteAuth:           worktree.Git{},
+		Agents:               map[task.Agent]app.AgentAdapter{task.Claude: claude, task.Codex: codex},
+		Models:               cfg.Models,
 		Knowledge:            knowledge.Store{Dir: cfg.KnowledgeDir},
 		Evaluator:            agent.Evaluators{Claude: claude, Codex: codex},
 		Learning:             cfg.Learning.Enabled,
@@ -137,6 +130,7 @@ func run(argv []string) int {
 		ReviewRounds:         cfg.ReviewRounds,
 		FixRounds:            cfg.FixRounds,
 		ReviewBeforePR:       cfg.ReviewBeforePR,
+		SkipSelfReview:       cfg.SkipSelfReview,
 		ImplementerBudgetUSD: cfg.Budgets.ImplementerUSD,
 		ReviewerBudgetUSD:    cfg.Budgets.ReviewerUSD,
 		TaskTokenLimit:       cfg.Budgets.TaskTokens,
@@ -165,8 +159,8 @@ func run(argv []string) int {
 			In: os.Stdin, Out: os.Stdout, Source: a,
 			IssueSource: source,
 			GitHubEvery: time.Duration(cfg.Refresh) * time.Second, LocalEvery: localRefresh,
-			Auto:     autoMode(cfg.Auto, cmd.Auto),
-			Route:    routes != nil || routesErr != nil,
+			Auto:     autoMode(cfg, cmd.Auto),
+			Route:    false,
 			Version:  currentVersion(),
 			TaskFile: store.Markdown{Dir: cfg.TasksDir}.Path,
 		}); err != nil {
@@ -254,8 +248,8 @@ func linearSelected(cfg config.Config, source task.Source) bool {
 // leaves auto mode off, and the dashboard shows why. A launch flag replaces the
 // saved choice for this session without writing it, so its read error is moot;
 // toggling with a still saves.
-func autoMode(cfg config.Auto, override cli.AutoMode) tui.Auto {
-	auto := tui.Auto{Enabled: false, Agent: cfg.Agent, Max: cfg.MaxConcurrent}
+func autoMode(cfg config.Config, override cli.AutoMode) tui.Auto {
+	auto := tui.Auto{Enabled: false, Agent: cfg.Models.Implementation.Agent, Max: cfg.Auto.MaxConcurrent}
 	path, err := config.StatePath()
 	if err != nil {
 		auto.LoadErr = err

@@ -14,11 +14,12 @@ import (
 const ReplyMarker = "<!-- foreman:reply -->"
 
 type TaskBrief struct {
-	Key        task.Key
-	Identifier string
-	Title      string
-	URL        string
-	IssueBody  string
+	LocalDocuments bool
+	Key            task.Key
+	Identifier     string
+	Title          string
+	URL            string
+	IssueBody      string
 	// ConfirmedScope contains the ordered triage decisions and source URLs.
 	ConfirmedScope string
 	Context        string // contents of the --context Markdown file, if any
@@ -121,10 +122,18 @@ func ImplementationPrompt(b TaskBrief) string {
 		testFirstSection(&s)
 	}
 	if b.Planning {
-		planningSection(&s, b.PlanInstructions)
+		if b.LocalDocuments {
+			localPlanningSection(&s, b.PlanInstructions)
+		} else {
+			planningSection(&s, b.PlanInstructions)
+		}
 	} else if b.PlanText != "" {
-		s.WriteString("## Checked work\n\nThe requirements and work plan below are your complete task. Do not read the issue, triage, or other planning comments for requirements.\n\n")
-		s.WriteString(RequirementsValidationInstruction + "\n" + b.PlanText + "\n\n")
+		if b.LocalDocuments {
+			s.WriteString("## Checked work\n\nFollow the Requirements and Implementation plan below as written. Verify each acceptance criterion. If the plan must change, return plan_revision with the affected step and why it cannot be followed. Keep the working documents and review findings local. Use the PR description for a concise change summary and verification.\n\n" + b.PlanText + "\n\n")
+		} else {
+			s.WriteString("## Checked work\n\nThe requirements and work plan below are your complete task. Do not read the issue, triage, or other planning comments for requirements.\n\n")
+			s.WriteString(RequirementsValidationInstruction + "\n" + b.PlanText + "\n\n")
+		}
 	}
 	if b.NextObjective != "" {
 		fmt.Fprintf(&s, "## Continue from checkpoint\n\nThe branch is clean at commit %s. Inspect the committed code as needed. Your next objective is: %s\n\nDo not reconstruct or request the earlier session transcript.\n\n", b.CheckpointHead, b.NextObjective)
@@ -261,9 +270,9 @@ func openingSection(b TaskBrief) string {
 Do not push the branch or open a pull request. Another agent reviews your local branch first, and foreman asks you to push and open the pull request once that review is clean.
 
 - When the change is review-ready: commit everything (the worktree must be clean) and run the validation.
-- Write the pull request you propose in prTitle and prBody. State the requirements the change meets. %s
-- Defer requested screenshots until the PR-opening turn, which posts them in a PR comment. Do not put screenshot placeholders in prBody or leave untracked images before review_ready.
-`, prIssueRule(b))
+- Write the pull request you propose in prTitle and prBody. Summarize the change and verification. %s
+- %s Requested screenshots are posted in a comment after the PR is opened. Do not put screenshot placeholders in prBody or leave untracked images before review_ready.
+`, prIssueRule(b), screenshotRequestRule)
 	}
 	return fmt.Sprintf(`## Opening the pull request
 
@@ -312,6 +321,20 @@ Do not change, commit, or push anything in this turn. If writing the documents n
 `)
 	if text := strings.TrimSpace(instructions); text != "" {
 		s.WriteString("The developer's instructions for the documents:\n\n" + text + "\n\n")
+	}
+	planningTestRule(s)
+}
+
+func localPlanningSection(s *strings.Builder, instructions string) {
+	s.WriteString(`## Plan first
+
+Inspect the checkout and return two short Markdown documents in the planned outcome. Use prd for Requirements and plan for the Implementation plan. Foreman saves both locally. You are the planner. Assign requirement IDs and list the behavior and checks. Write ordered implementation steps that name what to change and where. Refer to requirements by ID. Include exact identifiers, values, or checks where they affect the result. Omit background and code excerpts.
+
+Check both documents against confirmed triage. Resolve technical choices before handoff. If a choice requires the maintainer, return blocked with the question. Work read-only. Leave tracker documents and repository files untouched.
+
+`)
+	if text := strings.TrimSpace(instructions); text != "" {
+		s.WriteString("Apply the following stage instructions within the local planning workflow. Use Implementation plan as the plan's name.\n\n" + text + "\n\n")
 	}
 	planningTestRule(s)
 }
@@ -461,9 +484,11 @@ func LocalMergeMessage(branch, base string, files []string) string {
 	return s.String()
 }
 
+const screenshotRequestRule = "Set screenshotsRequested to true if the issue or repository asks for screenshots for this change, and false when they are unnecessary."
+
 // localFinishRule ends every turn of a task reviewed before its PR: the change stays
 // local and comes back with the description the reviewer reads.
-const localFinishRule = "Commit the change locally. Do not push the branch or open a pull request. Return the proposed pull request in prTitle and prBody, updated so it describes the change as it now is.\n\n"
+const localFinishRule = "Commit the change locally. Do not push the branch or open a pull request. Return the proposed pull request in prTitle and prBody, updated so it describes the change as it now is. " + screenshotRequestRule + "\n\n"
 
 // mergeRules tells the implementer how to bring the base into an open PR. A rebase or
 // force-push would rewrite a branch the developer and reviewers already see, and an

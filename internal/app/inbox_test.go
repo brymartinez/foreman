@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -182,6 +183,7 @@ func (f *fakeStore) List(context.Context) ([]*task.Record, error) {
 }
 
 type fakeGitHub struct {
+	onCreate         func(branch, base, title, body string)
 	items            []InboxItem
 	truncated        []string
 	fetched          []task.Key
@@ -204,6 +206,18 @@ type fakeGitHub struct {
 	commentErr       error // GetIssueComment fails with it
 	branchPRErr      error
 	mu               sync.Mutex
+}
+
+func (f *fakeGitHub) CreatePullRequest(_ context.Context, _ task.Repo, branch, base, title, bodyFile string) error {
+	if f.onCreate == nil {
+		return errors.New("unexpected PR creation")
+	}
+	body, err := os.ReadFile(bodyFile)
+	if err != nil {
+		return err
+	}
+	f.onCreate(branch, base, title, strings.TrimSpace(string(body)))
+	return nil
 }
 
 func (f *fakeGitHub) BranchHead(_ context.Context, _ task.Repo, branch string) (string, error) {

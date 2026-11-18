@@ -60,7 +60,7 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, token string, l
 	if rec, err = a.logRoute(ctx, rec, log); err != nil {
 		return err
 	}
-	if _, err := a.readScope(ctx, rec.Key); err != nil {
+	if _, err := a.readRunScope(ctx, rec); err != nil {
 		_, saveErr := a.update(final, rec.Key, existing(func(cur *task.Record) { failTask(cur, err.Error(), a.Now()) }))
 		return saveErr
 	}
@@ -68,7 +68,7 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, token string, l
 	if rec.Delegation.ConflictPending {
 		err = a.checkQuota(ctx, rec.Delegation.Implementer.Agent, log)
 		if err != nil {
-			_, saveErr := a.update(final, key, existing(func(cur *task.Record) { failTask(cur, err.Error(), a.Now()) }))
+			_, saveErr := a.update(final, key, existing(func(cur *task.Record) { deferConflictRepair(cur, err, a.Now()) }))
 			return saveErr
 		}
 		// The gate found the handed-over PR conflicting with its base. A repair
@@ -241,19 +241,25 @@ func (r *taskRun) loop(next step) error {
 }
 
 // scopeBoundary re-reads triage before every stage. A changed scope invalidates
-// prior plan and code reviews; a removed label or unreadable source stops the run.
+// prior plan and code reviews. A missing or unreadable scope stops the run.
 func (r *taskRun) scopeBoundary(next step) (step, bool, error) {
 	// Adversarial review and metadata-only handover have their own prerequisites.
-	needsImplementer := next != stepHandover && next != stepPickUpReview && !(next == stepReview && r.rec.NextReview() == task.CompetingReview)
+	needsImplementer := next != stepHandover && next != stepPickUpReview && next != stepOpenPR &&
+		!(next == stepReview && r.rec.NextReview() == task.CompetingReview)
 	if needsImplementer {
-		if quotaErr := r.a.checkQuota(r.ctx, r.rec.Delegation.Implementer.Agent, r.log); quotaErr != nil {
+		models := r.a.modelPolicy(r.rec.Delegation)
+		agent := models.Implementation.Agent
+		if r.a.needsPlan(r.rec) || r.forcePlan && !r.rec.PlanPosted() {
+			agent = models.Planning.Agent
+		}
+		if quotaErr := r.a.checkQuota(r.ctx, agent, r.log); quotaErr != nil {
 			saved, err := r.a.update(r.final, r.rec.Key, existing(func(cur *task.Record) { failTask(cur, quotaErr.Error(), r.a.Now()) }))
 			r.rec = saved
 			return stepDone, true, err
 		}
 	}
 
-	scope, err := r.a.readScope(r.ctx, r.rec.Key)
+	scope, err := r.a.readRunScope(r.ctx, r.rec)
 	if err != nil {
 		rec, saveErr := r.a.update(r.final, r.rec.Key, existing(func(cur *task.Record) { failTask(cur, err.Error(), r.a.Now()) }))
 		r.rec = rec
@@ -276,7 +282,7 @@ func (r *taskRun) scopeBoundary(next step) (step, bool, error) {
 		}
 		r.rec = rec
 	}
-	if r.rec.PlanPosted() && r.rec.Delegation.PlanDigest != "" {
+	if r.rec.Delegation.PlanDigest != "" && (r.rec.Delegation.LocalDocuments || r.rec.PlanPosted()) {
 		plan, err := r.a.readIssuePlan(r.ctx, r.rec)
 		if err != nil {
 			rec, saveErr := r.a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
@@ -298,7 +304,7 @@ func (r *taskRun) scopeBoundary(next step) (step, bool, error) {
 				return stepDone, true, err
 			}
 			r.rec = rec
-		} else if !plan.complete() || planDigest(plan.texts()) != r.rec.Delegation.PlanDigest {
+		} else if !plan.complete() || plan.staleLocal(r.rec) || plan.digest(r.rec) != r.rec.Delegation.PlanDigest {
 			r.findings = nil
 			rec, err := r.a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
 				cur.Delegation.PlanScopeDigest = ""
@@ -325,7 +331,7 @@ func (r *taskRun) planNeeded() bool {
 // goes straight on to an implementation turn; a PR goes to review.
 func (r *taskRun) implement() (step, error) {
 	a := r.a
-	if r.findings == nil && r.rec.Delegation.Action != nil {
+	if r.findings == nil && r.rec.Delegation.Action != nil && !r.planNeeded() {
 		round := r.rec.Delegation.Action.ReviewRound
 		for i := range r.rec.Reviews {
 			if r.rec.Reviews[i].Round == round {
@@ -336,7 +342,7 @@ func (r *taskRun) implement() (step, error) {
 	}
 	if r.findings == nil && r.rec.Delegation.Action == nil && !r.planNeeded() && !r.rec.Delegation.PlanImplementationPending {
 		head, _ := r.rec.CurrentChange()
-		if latest := r.rec.LatestReview(); latest != nil && !latest.Accepted() && !latest.Skipped &&
+		if latest := r.rec.LatestReview(); latest != nil && (!r.rec.Delegation.LocalDocuments || r.rec.ScopeCovered(latest)) && !latest.Accepted() && !latest.Skipped &&
 			!latest.AllFindingsRejected() && latest.Head != "" && latest.Head == head {
 			r.findings = latest
 		}
@@ -361,6 +367,9 @@ func (r *taskRun) implement() (step, error) {
 		return stepDone, err
 	}
 	res := a.runTurn(r.ctx, r.rec, req, a.verifiedPR(r.log), r.log)
+	if res.err == nil && res.turn.Outcome.Status == agent.PlanRevision && (!r.rec.Delegation.LocalDocuments || stage != task.Implementing) {
+		res.err = errors.New("plan_revision requires a local implementation turn")
+	}
 	if stage == task.Planning && res.err == nil && res.turn.Outcome.Status != agent.Planned && res.turn.Outcome.Status != agent.Blocked && res.turn.Outcome.Status != agent.FailedRun {
 		res.err = fmt.Errorf("planning turn returned %s instead of planned, blocked, or failed", res.turn.Outcome.Status)
 	}
@@ -370,7 +379,7 @@ func (r *taskRun) implement() (step, error) {
 			cur.Delegation.PlanImplementationPending = false
 			if r.findings != nil && stage == task.Implementing {
 				head, _ := cur.CurrentChange()
-				kind := task.SelfReviewAction
+				kind := cur.Delegation.InitialReviewAction()
 				if r.findings.Kind == task.CompetingReview || cur.SelfReviewPassed() {
 					kind = task.AdversarialAction
 				}
@@ -382,6 +391,15 @@ func (r *taskRun) implement() (step, error) {
 					cur.State = cur.ReviewStage()
 				}
 			}
+		}
+		if res.err == nil && res.turn.Outcome.Status == agent.PlanRevision {
+			d := cur.Delegation
+			d.PlanRevision = res.turn.Outcome.Summary
+			d.PlanImplementationPending = true
+			d.PlanDigest, d.PlanScopeDigest = "", ""
+			d.Action = nil
+			d.Planner.ID = ""
+			cur.State = task.Planning
 		}
 		if res.err == nil && res.turn.Outcome.Status == agent.Planned {
 			cur.Delegation.PlanDraft = &task.PlanDraft{Scope: r.scope.digest, Fingerprint: r.plan.fingerprint, Documents: mergePlanTexts(r.plan.texts(), res.turn.Outcome.Documents), Sources: r.plan.texts()}
@@ -397,6 +415,10 @@ func (r *taskRun) implement() (step, error) {
 		return stepDone, err
 	}
 	r.rec = rec
+	if res.err == nil && res.turn.Outcome.Status == agent.PlanRevision {
+		r.findings = nil
+		return stepImplement, nil
+	}
 	if res.err == nil && res.turn.Outcome.Status == agent.Planned {
 		_, next, err := r.restorePlanDraft()
 		return next, err
@@ -454,7 +476,7 @@ func (r *taskRun) pickUpReview() (step, error) {
 	rec, err := a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
 		d := cur.Delegation
 		if pr.HeadSHA != d.PRHead || (pr.BaseRefName != "" && "origin/"+pr.BaseRefName != d.BaseRef) {
-			d.Action = &task.Action{Kind: task.SelfReviewAction, Head: pr.HeadSHA}
+			d.Action = &task.Action{Kind: d.InitialReviewAction(), Head: pr.HeadSHA}
 		}
 		applyPRHead(cur, pr)
 	}))
@@ -466,15 +488,12 @@ func (r *taskRun) pickUpReview() (step, error) {
 	return stepReview, nil
 }
 
-// review reviews the current change: the implementer's self-review until a clean one
-// covers the head and description, then the competing review. Findings from either go
-// back to the implementer; a clean self-review goes on to the competing review; a
-// clean competing review hands over; anything else ends the run.
+// review checks the current change. A task starts with its configured review.
+// Findings go back to the implementer. A clean competing review advances the task.
 func (r *taskRun) review() (step, error) {
 	a := r.a
 	// Every change, including the first and one after a fix, is reviewed as a PR that
-	// merges cleanly into its latest base. The check runs once per change, before its
-	// self-review.
+	// merges cleanly into its latest base. Check before the first review of the change.
 	rec := r.rec
 	if !r.selfPassed {
 		var ready bool
@@ -505,7 +524,7 @@ func (r *taskRun) review() (step, error) {
 			reviewErr = baseErr
 		} else if base != pending.BaseHead || pending.BaseRef != rec.Delegation.BaseRef {
 			rec, err = a.update(r.final, rec.Key, existing(func(cur *task.Record) {
-				cur.Delegation.Action = &task.Action{Kind: task.SelfReviewAction}
+				cur.Delegation.Action = &task.Action{Kind: cur.Delegation.InitialReviewAction()}
 			}))
 			if err != nil {
 				return stepDone, err
@@ -516,7 +535,13 @@ func (r *taskRun) review() (step, error) {
 	kind := rec.NextReview()
 	reviewer := rec.Delegation.Implementer.Agent
 	if kind == task.CompetingReview {
-		reviewer = reviewer.Reviewer()
+		reviewer = a.modelPolicy(rec.Delegation).AdversarialReview.Agent
+		if reviewer == "" {
+			reviewer = rec.Delegation.Reviewer
+		}
+		if reviewer == "" {
+			reviewer = rec.Delegation.Implementer.Agent.Reviewer()
+		}
 	}
 	if reviewErr == nil {
 		_, _, reviewErr = a.reviewRequirements(r.ctx, rec)
@@ -661,6 +686,9 @@ func (a App) reviewRounds() int {
 // needsPlan is true until every planning document is on the issue. A task that
 // already has a PR is handled by taskRun.forcePlan at the start of its next run.
 func (a App) needsPlan(rec *task.Record) bool {
+	if d := rec.Delegation; d.LocalDocuments {
+		return !rec.PlanPosted() || d.PlanDigest == "" || d.PlanScopeDigest != d.ScopeDigest
+	}
 	return (!rec.PlanPosted() && rec.Delegation.PR == 0) ||
 		(rec.PlanPosted() && rec.Delegation.ScopeDigest != "" && rec.Delegation.PlanScopeDigest != rec.Delegation.ScopeDigest)
 }
@@ -669,11 +697,16 @@ func (a App) needsPlan(rec *task.Record) bool {
 func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, log io.Writer) (agent.Turn, error) {
 	d := rec.Delegation
 	findings, feedback, merge := req.findings, req.feedback, req.merge
-	adapter, ok := a.Agents[d.Implementer.Agent]
-	if !ok {
-		return agent.Turn{}, fmt.Errorf("agent %s is not configured", d.Implementer.Agent)
-	}
+	models := a.modelPolicy(d)
 	planning := a.needsPlan(rec) || req.forcePlan
+	target := models.Implementation
+	if planning {
+		target = models.Planning
+	}
+	adapter, ok := a.Agents[target.Agent]
+	if !ok {
+		return agent.Turn{}, fmt.Errorf("agent %s is not configured", target.Agent)
+	}
 	action := task.Action{Kind: task.ImplementAction}
 	action.Head, _ = rec.CurrentChange()
 	if action.Head == "" {
@@ -692,7 +725,8 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 		action.Kind = task.FeedbackAction
 		step = agent.StepFeedback
 	}
-	in := agent.StartInput{Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD, Stage: stage, Step: step, Profile: d.Profile}
+	in := agent.StartInput{Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ImplementerBudgetUSD,
+		Stage: stage, Step: step, Model: target.Model, ReasoningEffort: target.ReasoningEffort, Profile: d.Profile}
 	if req.finalCheck != nil {
 		action.Kind = task.FinalCheckAction
 		in.Purpose = "final_check"
@@ -738,7 +772,11 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 		resume += agent.SelfReviewLimitInstruction
 	}
 	if resume != "" && !planning {
-		resume += agent.RequirementsValidationInstruction
+		if d.LocalDocuments {
+			resume += "\nKeep working documents local. Follow the checked Implementation plan and verify its requirements. If it must change, return plan_revision with the affected step and reason.\n"
+		} else {
+			resume += agent.RequirementsValidationInstruction
+		}
 		resume = fullSuiteResume(rec, req, resume)
 	}
 	if resume != "" && !planning && d.Implementer.ID != "" {
@@ -757,7 +795,7 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 		return agent.Turn{}, err
 	}
 	// The turn that pushed before a merge already fixed the latest findings.
-	if latest := rec.LatestReview(); merge == nil && latest != nil && !latest.Accepted() {
+	if latest := rec.LatestReview(); merge == nil && latest != nil && !latest.Accepted() && (!d.LocalDocuments || rec.ScopeCovered(latest)) {
 		brief.OpenFindings = latest.Findings
 	}
 	brief.Correction = !planning && merge == nil && !d.ConflictPending && len(feedback) == 0 && req.finalCheck == nil && len(brief.OpenFindings) > 0
@@ -803,9 +841,16 @@ func (a App) implement(ctx context.Context, rec *task.Record, req turnRequest, l
 	}
 	in.Prompt = agent.ImplementationPrompt(brief)
 	if planning {
+		if d.LocalDocuments && d.PlanRevision != "" {
+			in.Prompt += "\n## Implementation plan revision requested\n\n" + d.PlanRevision + "\n"
+		}
 		for _, doc := range task.PlanDocs {
 			if text := req.planSources[doc]; text != "" {
-				in.Prompt += "\n## Existing " + doc.Title() + "\n\n" + text + "\n"
+				title := doc.Title()
+				if d.LocalDocuments {
+					title = localPlanTitle(doc)
+				}
+				in.Prompt += "\n## Existing " + title + "\n\n" + text + "\n"
 			}
 		}
 		if resume != "" {
@@ -920,7 +965,7 @@ func reviewTarget(rec *task.Record) string {
 }
 
 func (a App) reviewRequirements(ctx context.Context, rec *task.Record) (confirmedScope, string, error) {
-	scope, err := a.readScope(ctx, rec.Key)
+	scope, err := a.readRunScope(ctx, rec)
 	if err != nil {
 		return confirmedScope{}, "", err
 	}
@@ -928,16 +973,23 @@ func (a App) reviewRequirements(ctx context.Context, rec *task.Record) (confirme
 		return confirmedScope{}, "", errors.New("confirmed triage changed before review; restart to recheck planning and implementation")
 	}
 	if !rec.PlanPosted() {
+		if rec.Delegation.LocalDocuments {
+			return confirmedScope{}, "", errors.New("checked local plan is missing")
+		}
 		return scope, "", nil
 	}
 	plan, err := a.readIssuePlan(ctx, rec)
 	if err != nil {
 		return confirmedScope{}, "", fmt.Errorf("reading planning documents for review: %w", err)
 	}
-	if !plan.complete() || planDigest(plan.texts()) != rec.Delegation.PlanDigest || rec.Delegation.PlanScopeDigest != scope.digest {
+	if !plan.complete() || plan.staleLocal(rec) || plan.digest(rec) != rec.Delegation.PlanDigest || rec.Delegation.PlanScopeDigest != scope.digest {
 		return confirmedScope{}, "", errors.New("planning documents changed or have not been checked against current triage; restart to reconcile them")
 	}
-	return scope, "## Requirements\n\n" + plan.found[task.PRD].text + "\n\n## Work plan\n\n" + plan.found[task.ImplementationPlan].text, nil
+	title := task.ImplementationPlan.Title()
+	if rec.Delegation.LocalDocuments {
+		title = localPlanTitle(task.ImplementationPlan)
+	}
+	return scope, "## Requirements\n\n" + plan.found[task.PRD].text + "\n\n## " + title + "\n\n" + plan.found[task.ImplementationPlan].text, nil
 }
 
 func addUsage(total *task.Usage, turn task.Usage) {
@@ -1005,19 +1057,20 @@ func (a App) brief(ctx context.Context, rec *task.Record, log io.Writer) (agent.
 		return agent.TaskBrief{}, err
 	}
 	b := agent.TaskBrief{
-		Key:        rec.Key,
-		Identifier: issue.Identifier,
-		Title:      issue.Title,
-		URL:        issue.URL,
-		Branch:     d.Branch,
-		BaseBranch: strings.TrimPrefix(d.BaseRef, "origin/"),
-		Worktree:   d.Worktree,
-		Decisions:  rec.Undelivered(),
+		LocalDocuments: d.LocalDocuments,
+		Key:            rec.Key,
+		Identifier:     issue.Identifier,
+		Title:          issue.Title,
+		URL:            issue.URL,
+		Branch:         d.Branch,
+		BaseBranch:     strings.TrimPrefix(d.BaseRef, "origin/"),
+		Worktree:       d.Worktree,
+		Decisions:      rec.Undelivered(),
 	}
 	if !a.needsPlan(rec) {
 		return b, nil
 	}
-	scope, err := a.readScope(ctx, rec.Key)
+	scope, err := a.readRunScope(ctx, rec)
 	if err != nil {
 		return agent.TaskBrief{}, err
 	}
@@ -1150,6 +1203,7 @@ func applyTurnResult(rec *task.Record, res turnResult, now time.Time) {
 	}
 	o, d := res.turn.Outcome, rec.Delegation
 	d.LocalHead, d.ProposedTitle, d.ProposedBody = res.localHead, o.PRTitle, o.PRBody
+	d.ScreenshotsRequested = o.ScreenshotsRequested
 	d.CheckpointNext = ""
 	rec.Validation = o.Validation
 }

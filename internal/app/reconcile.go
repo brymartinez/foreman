@@ -34,6 +34,20 @@ func (p issuePlan) complete() bool {
 	return true
 }
 
+// staleLocal reports whether a local plan was checked against an older issue.
+func (p issuePlan) staleLocal(rec *task.Record) bool {
+	d := rec.Delegation
+	return d.LocalDocuments && (d.LocalPlan == nil || p.fingerprint != d.LocalPlan.Fingerprint)
+}
+
+func (p issuePlan) digest(rec *task.Record) string {
+	digest := planDigest(p.texts())
+	if rec.Delegation.LocalDocuments {
+		return task.Digest(p.fingerprint + "\n" + digest)
+	}
+	return digest
+}
+
 // texts are the found documents for the planning prompt.
 func (p issuePlan) texts() map[task.PlanDoc]string {
 	if len(p.found) == 0 {
@@ -58,11 +72,22 @@ func (a App) readIssuePlan(ctx context.Context, rec *task.Record) (issuePlan, er
 	if err != nil {
 		return issuePlan{}, err
 	}
+	p := issuePlan{fingerprint: task.DescriptionFingerprint(issue.Body), found: map[task.PlanDoc]foundPlan{}}
+	if rec.Delegation.LocalDocuments {
+		if saved := rec.Delegation.LocalPlan; saved != nil {
+			for _, doc := range task.PlanDocs {
+				if text := saved.Documents[doc]; strings.TrimSpace(text) != "" {
+					p.found[doc] = foundPlan{text: text, fingerprint: saved.Fingerprint}
+				}
+			}
+		}
+		return p, nil
+	}
 	comments, err := a.issueComments(ctx, rec.Key)
 	if err != nil {
 		return issuePlan{}, err
 	}
-	p := issuePlan{fingerprint: task.DescriptionFingerprint(issue.Body), found: map[task.PlanDoc]foundPlan{}}
+
 	recorded := map[task.PlanDoc]bool{}
 	for _, c := range comments {
 		doc, fp, ok := task.ParsePlanMarker(c.Body)
@@ -171,6 +196,9 @@ func (r *taskRun) reconcilePlan() (bool, error) {
 		return false, err
 	}
 	r.plan = p
+	if r.rec.Delegation.LocalDocuments {
+		return true, nil
+	}
 	if !p.complete() || r.rec.Delegation.PlanScopeDigest != r.scope.digest || r.rec.Delegation.PlanDigest != planDigest(p.texts()) {
 		return true, nil
 	}

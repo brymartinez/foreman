@@ -345,6 +345,21 @@ func canonical(p string) string {
 	return filepath.Clean(p)
 }
 
+func (g Git) PushReviewed(ctx context.Context, dir, branch, head string) error {
+	current, err := g.ReviewHead(ctx, dir, branch, head)
+	if err != nil {
+		return err
+	}
+	if current != head {
+		return fmt.Errorf("worktree HEAD is %s, expected reviewed commit %s", current, head)
+	}
+	if _, err := git(ctx, dir, "push", "--", "origin", current+":refs/heads/"+branch); err != nil {
+		return err
+	}
+	_, err = git(ctx, dir, "branch", "--set-upstream-to=origin/"+branch, "--", branch)
+	return err
+}
+
 func git(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)

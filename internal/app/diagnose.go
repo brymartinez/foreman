@@ -51,7 +51,7 @@ func (a App) diagnoseLimit(ctx context.Context, rec *task.Record, title, body st
 	out, err := a.Diagnoser.Diagnose(callCtx, in, sources)
 	if a.metered {
 		err = errors.Join(err, callCtx.Err())
-		err = errors.Join(err, a.saveCall(ctx, rec.Key, in.Agent, "diagnosis", started, out.Usage, err))
+		err = errors.Join(err, a.saveCall(ctx, rec.Key, in.Agent, "diagnosis", started, out.Usage, "", err))
 	}
 	if err != nil {
 		return unavailable(err), out.Usage

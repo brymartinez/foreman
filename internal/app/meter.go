@@ -61,7 +61,7 @@ func (a App) callContext(ctx context.Context, key task.Key, step string) (contex
 	return child, cancel, nil
 }
 
-func (a App) saveCall(ctx context.Context, key task.Key, name task.Agent, step string, start time.Time, usage task.Usage, callErr error) error {
+func (a App) saveCall(ctx context.Context, key task.Key, name task.Agent, step string, start time.Time, usage task.Usage, sessionID string, callErr error) error {
 	call := task.ModelCall{Agent: name, Step: step, Model: usage.Model, StartedAt: start, FinishedAt: a.Now(), Usage: usage}
 	if call.Model == "" {
 		call.Model = "CLI default (unreported)"
@@ -70,8 +70,19 @@ func (a App) saveCall(ctx context.Context, key task.Key, name task.Agent, step s
 		call.Error = callErr.Error()
 	}
 	_, err := a.update(context.WithoutCancel(ctx), key, existing(func(cur *task.Record) {
+		if name == task.Claude && sessionID != "" && usage.ClaudeCostUSD > 0 {
+			call.ClaudeSessionID = sessionID
+			call.ClaudeSessionCostUSD = usage.ClaudeCostUSD
+			var previous float64
+			for _, prior := range cur.Calls {
+				if prior.ClaudeSessionID == sessionID {
+					previous = max(previous, prior.ClaudeSessionCostUSD)
+				}
+			}
+			call.Usage.ClaudeCostUSD = max(0, usage.ClaudeCostUSD-previous)
+		}
 		cur.Calls = append(cur.Calls, call)
-		addUsage(&cur.Usage, usage)
+		addUsage(&cur.Usage, call.Usage)
 	}))
 	return err
 }
@@ -90,7 +101,7 @@ func (m meteredAgent) turn(ctx context.Context, in agent.StartInput, run func(co
 	if child.Err() != nil {
 		err = fmt.Errorf("agent call stopped (%v): %w", err, child.Err())
 	}
-	saveErr := m.app.saveCall(ctx, m.key, m.Name(), cmp.Or(in.Purpose, in.Step), start, out.Usage, err)
+	saveErr := m.app.saveCall(ctx, m.key, m.Name(), cmp.Or(in.Purpose, in.Step), start, out.Usage, out.Session.ID, err)
 	return out, errors.Join(err, saveErr)
 }
 
@@ -116,6 +127,6 @@ func (m meteredAgent) Review(ctx context.Context, in agent.StartInput) (agent.Re
 	if child.Err() != nil {
 		err = fmt.Errorf("agent call stopped (%v): %w", err, child.Err())
 	}
-	saveErr := m.app.saveCall(ctx, m.key, m.Name(), cmp.Or(in.Purpose, in.Step), start, out.Usage, err)
+	saveErr := m.app.saveCall(ctx, m.key, m.Name(), cmp.Or(in.Purpose, in.Step), start, out.Usage, "", err)
 	return out, errors.Join(err, saveErr)
 }

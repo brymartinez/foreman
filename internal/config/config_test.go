@@ -390,6 +390,26 @@ func TestReviewBeforePRDefaultsToOffAndLoadsFromConfig(t *testing.T) {
 	}
 }
 
+func TestSkipSelfReviewConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("FOREMAN_CONFIG", path)
+	for _, tc := range []struct {
+		contents string
+		skip     bool
+	}{
+		{"{}\n", false},
+		{"skip_self_review: true\n", true},
+	} {
+		if err := os.WriteFile(path, []byte(tc.contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load()
+		if err != nil || cfg.SkipSelfReview != tc.skip {
+			t.Fatalf("skip_self_review = %t, want %t (err %v)", cfg.SkipSelfReview, tc.skip, err)
+		}
+	}
+}
+
 func TestDefaultSourceIsGitHubWhenUnsetAndLoadsEachValidValue(t *testing.T) {
 	cfg, err := autoConfig(t, "")
 	if err != nil || cfg.DefaultSource != task.GitHub {

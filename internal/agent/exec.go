@@ -17,6 +17,10 @@ type StartInput struct {
 	Worktree string
 	Prompt   string
 	Stage    task.Stage
+	// Model and ReasoningEffort are the task's resolved stage target. They take
+	// precedence over provider defaults and routing profile fields.
+	Model           string
+	ReasoningEffort string
 	// Step names the work for the turn's agent:model:step log line; "" logs no line.
 	Step string
 	// Purpose gives the call a more specific name in task usage, without changing CLI log steps.
@@ -24,8 +28,7 @@ type StartInput struct {
 	// Log receives the agent's stderr and progress events; the runner points it at the task log.
 	Log          io.Writer
 	MaxBudgetUSD float64
-	// Profile, when set, replaces the adapter's models and effort for planning and
-	// implementation turns. Reviews ignore it.
+	// Profile supports task records created before stage model policies were saved.
 	Profile *task.Profile
 }
 

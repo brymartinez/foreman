@@ -8,7 +8,7 @@ foreman  →  pick issue #825 in the inbox, choose Claude
         ↓
   Claude plans and implements in its own worktree, pushes, and opens the PR
         ↓
-  Claude self-reviews, Codex adversarially reviews, Claude fixes, repeat until clean
+  planning, implementation, self-review, and adversarial review use configured model targets
         ↓
   foreman reads the PR's CI checks on GitHub
         ↓
@@ -43,7 +43,6 @@ if [ ! -e ~/.config/foreman/config.yaml ]; then
   install -m 600 foreman_*_darwin_arm64/config.yaml ~/.config/foreman/config.yaml
 fi
 cp -n foreman_*_darwin_arm64/stages/*.md ~/.config/foreman/stages/
-cp -n foreman_*_darwin_arm64/routing.yaml ~/.config/foreman/   # optional: turns on routing
 ```
 
 The binaries are not notarized. If you downloaded the archive in a browser, macOS may
@@ -58,7 +57,8 @@ make setup
 `make setup` builds foreman, installs it to `~/.local/bin`, copies the shipping
 `defaults/config.yaml` into `~/.config/foreman/config.yaml`, copies the default stage
 instructions from `defaults/stages/` into `~/.config/foreman/stages/`, and copies the
-starter `defaults/routing.yaml` to `~/.config/foreman/routing.yaml`. It never
+starter `defaults/routing.yaml` to `~/.config/foreman/routing.yaml` for older
+installations. New tasks use the stage models in `config.yaml`. It never
 overwrites a config, stage, or routing file you already have. When a stage file differs
 from the current default, it prints `differs <path>` and the `cp` command that replaces
 it. `make install` and `make config` run the
@@ -108,7 +108,7 @@ Precedence for the dashboard's source and mentions is the launch flag, then
 `default_source` or `mentions` in `config.yaml`, then the built-in default
 (`github`, and mention-only items shown). Auto mode has no config key: the launch
 flag wins, then the choice saved by pressing `a`, and with no saved choice auto mode
-is off. Every other setting lives in `config.yaml` or `routing.yaml` and has no
+is off. Every other setting lives in `config.yaml` and has no
 launch flag.
 
 `-c` opens the config even if it cannot load. A missing or empty config is filled
@@ -159,7 +159,7 @@ task's state. The selected row is drawn in reverse video with no color inside it
 |---|---|
 | `tab`, `←` `→`, `h` `l` | switch between inbox and delegated work |
 | `↑` `↓`, `k` `j` | move the focused list cursor |
-| `enter` on an issue | delegate it: pick `1` for Claude, `2` for Codex, or `3` to route it, type an optional context file, then review and edit the proposed branch. A `FAILED` issue starts again on its stored branch |
+| `enter` on an issue | delegate it with the configured stage models, type an optional context file, then review and edit the proposed branch. A `FAILED` issue starts again on its stored branch |
 | `↑` `↓`, `pgup` `pgdn` in the branch prompt | scroll the proposal rationale; the branch field stays visible |
 | `←` `→`, `home` `end`, `backspace` `delete` in the branch prompt | move the branch cursor or remove a character; typing inserts at the cursor |
 | `enter` on a task | open its log below, or the waiting question on a `NEEDS_DECISION` task |
@@ -204,10 +204,9 @@ closes the prompt; answers already recorded are kept, and Enter asks the next on
 task whose log is open switches to its question on its own when it needs a decision.
 
 Auto mode is off until you turn it on with `a` or `-a`. While it is on, it starts open issues
-assigned to you that foreman has never delegated, from the selected source, oldest first, with `auto.agent` and
-no context file. It looks after the first refresh, after each successful refresh, and
-when a run ends. Only issues with the exact `triaged` label
-start automatically; manual starts also require the exact `triaged` label. Mentions, FAILED
+assigned to you that foreman has never delegated, from the selected source, oldest first, with the
+configured implementation provider and no context file. It looks after the first refresh, after each successful refresh, and
+when a run ends. Auto mode only starts triaged issues. Mentions, FAILED
 tasks, and previously REVIEWED tasks never start on their own. At most `auto.max_concurrent`
 runs are active at once, and
 runs you start by hand count toward that limit. Issues in one repository start one
@@ -215,9 +214,9 @@ at a time, because they share its checkout. You can still start an issue by hand
 when the limit is full. The header shows `auto on 1/3` (active runs and the limit) or
 `auto off`.
 
-With [routing](#routing) on, auto mode routes each issue and starts it with the chosen
-profile without asking. When no suitable profile can run, the issue's row says
-`waiting:` and why, and auto mode tries it again after the next GitHub refresh.
+Auto mode uses the configured implementation provider. Foreman stores all three stage
+targets on the task before planning begins. Quota can pause a role, but cannot switch
+it to another provider or model.
 
 Press `a` to turn auto mode off or on. Turning it off leaves running agents alone. The
 choice is saved in `~/.local/share/foreman/state.json` and read at the next launch,
@@ -288,10 +287,10 @@ confirmed triage decisions before delegation.
    could not. It uses the repository's documented setup and sample data when taking
    screenshots; Foreman does not create sample data. It leaves the PR description as
    written for review.
-4. Each task has four roles: planner, implementer, self-reviewer, and adversarial
-   reviewer. Both reviewers start a fresh read-only session for each pass. Each role
-   first reads the full branch diff, then reads the verified fix range on follow-ups.
-   Both can inspect surrounding code and tests.
+4. Each task has a planner, an implementer, and an adversarial reviewer. Self-review
+   runs by default. Each reviewer starts a fresh read-only session for each pass.
+   Reviewers read the full branch diff on the first pass and the verified fix
+   range on follow-ups. They can inspect surrounding code and tests.
    Task requirements, plans, decisions, PR text, validation results, and earlier
    findings stay out of both code review prompts.
    Findings return to the implementer, then directly to the reviewer that raised
@@ -328,24 +327,29 @@ confirmed triage decisions before delegation.
 
 ## Planning
 
-Before any code, the planner writes two short documents: Requirements (`prd`)
-and Work plan (`plan`). `plan.md` sets what each one covers and asks for B1 English:
-common words and short sentences. Foreman reads
-`## Triage decisions` and later `## Triage correction` comments in order; if there
-are none, the issue description is the confirmed scope. It gives that scope and its
-source links to the planner, which checks its documents against the scope before
-returning them. Foreman posts each as an issue comment. Requirements says what must
-work and how to check it.
-Work plan gives ordered tasks that refer to requirement IDs without copying the rules.
-Foreman checks the two documents together against triage. The implementer receives
-both and validates the requirements against the implementation. The separate
-text-only plan check covers changes to scope or planning documents. If the plan
-changes after implementation starts, the implementer applies the updated plan
-before the next code review.
+Run the standalone `foreman-triage` skill in Claude Code or Codex for an
+issue marked **Awaiting triage**. Once the skill confirms the decisions and
+applies the `triaged` label in GitHub or Linear, refresh Foreman and start the
+issue. Foreman reads the confirmed triage comments, or the issue description
+if there are no triage comments.
 
-The `s` view links the two comments. A task that plans again, for example after a
-failed run, edits the same comments instead of adding new ones. A task that already
-has an open PR but no complete plan runs planning before reviewing that PR.
+Foreman also accepts existing confirmed Markdown records under `triage_dir`
+(default `~/.local/share/foreman/triage`). GitHub records use
+`github/<owner>/<repo>/<issue-number>.md`. Linear records use
+`linear/<issue-id>.md`. When a valid local record exists at the first start,
+the task uses it as its triage source. To revise it, edit the decisions and
+keep the issue marker and heading.
+
+Before changing code, the planner checks the confirmed decisions and writes
+**Requirements** and a short **Implementation plan**. The plan gives the agent
+ordered changes and references the requirements by ID. Foreman saves both
+documents and review findings in the local task record under `tasks_dir`.
+Use `s` on the task to see its task file. Changes to confirmed scope or the
+issue description trigger a plan recheck. An implementer that needs to change
+the plan returns the affected step to the planner.
+
+Existing runs retain their triage and planning sources. New runs still use the issue as input and open a
+PR with a change summary and verification.
 
 ## Stage instructions
 
@@ -376,12 +380,14 @@ Foreman never reads or changes those files.
   specific rules.
 - The repository's `AGENTS.md` and PR template take precedence over the global
   `pr.md` defaults when they give different title or body rules.
-- The checked Requirements and Work plan are the implementer's task specification. Answers
+- The checked Requirements and Implementation plan are the implementer's task specification. Answers
   to later blocking questions take precedence over stage instructions.
 - Tasks read `.foreman/` from their worktree, so only the version committed on the base
   branch counts.
 - A GitHub issue PR body includes `Closes #N`; a Linear issue PR links its issue URL.
-  A review always ends in foreman's JSON format. Profile selection is deterministic: Foreman uses an explicitly selected profile or the configured default; it does not ask an agent to choose or route a profile in prose. Quota checks can pause work but cannot skip a review. Automatic learning and diagnostic calls do not run in a task.
+  A review always ends in foreman's JSON format. Stage targets come from `models` in
+  `config.yaml`; no agent chooses a provider or model. Quota checks can pause work but
+  cannot skip a review. Automatic learning and diagnostic calls do not run in a task.
   Otherwise the text is passed through as written.
 
 ## Cleaning up worktrees
@@ -430,8 +436,10 @@ your answer. If the session is unavailable, the replacement gets the checked pla
 answered decisions, and outstanding findings. The answer also appears in the PR description.
 
 Foreman checks provider quota before each role call. Exhaustion pauses the role and
-preserves its session and work. Quota never skips a review. Each new revision gets a
-self-review before adversarial review. Both reviewers inspect the verified fix range
+preserves its session and work. Quota never skips a review. Set `skip_self_review: true`
+in `config.yaml` to send new tasks directly to adversarial review for their first
+review. Adversarial review remains required. A task keeps the setting it started
+with, including on restart. Both reviewers inspect the verified fix range
 on follow-ups. Findings go back to the
 implementer, then directly to the reviewer that raised them. The task pauses at its
 fix limit until you choose another round; unresolved adversarial findings cannot be
@@ -439,11 +447,12 @@ accepted.
 
 With `review_before_pr: true`, a new task is reviewed before its PR opens, so
 automated reviews that run on new PRs see the finished change. The implementer
-commits locally and proposes a PR title and description. Both reviewers read the
-local diff and fixes stay local. After a clean review, the implementer pushes the
-reviewed commit and opens the PR with the proposed title and description. Foreman
-checks that the PR matches. Requested screenshots go in a PR comment after it opens. If the fix limit is reached
-first, you choose another round or stopping the task without a PR. A task keeps the
+commits locally and proposes a PR title and description. Reviewers read the
+local diff and fixes stay local. After a clean review, Foreman pushes the reviewed
+commit and opens the PR with the reviewed title and description. If the change
+needs screenshots, the implementer opens the PR and posts them in a comment.
+Foreman checks that the PR matches the review. If the fix limit is reached first,
+you choose whether to run another round or stop without a PR. A task keeps the
 setting it started with, including when you restart it.
 
 ## When you close a PR
@@ -469,11 +478,11 @@ every refresh tries again.
 
 | State | Meaning | Your move |
 |---|---|---|
-| `PLANNING` | The implementer writes Requirements and Work plan, and foreman posts them | Wait, or `c` on the task to stop it |
+| `PLANNING` | The planner writes Requirements and the Implementation plan | Wait, or `c` on the task to stop it |
 | `IMPLEMENTING` | The implementer changes the branch: code, review fixes, answers, or a merge | Wait, or `c` on the task to stop it |
 | `SELF_REVIEW` | The implementer reviews its own change in a fresh session | Wait, or `c` on the task to stop it |
 | `ADVERSARIAL_REVIEW` | The competing agent reviews the change | Wait, or `c` on the task to stop it |
-| `OPENING_PR` | With `review_before_pr`, the implementer pushes the reviewed commit and opens its PR | Wait, or `c` on the task to stop it |
+| `OPENING_PR` | Foreman publishes the reviewed commit and verifies its PR | Wait, or `c` on the task to stop it |
 | `WAITING_FOR_CI` | The PR passed the adversarial review; foreman waits for CI | Wait |
 | `NEEDS_DECISION` | The agent asked a question | Enter on the task to answer |
 | `READY_FOR_HUMAN` | Review clean, CI finished (✓ or ✗ shown) | Review and merge the PR |
@@ -528,7 +537,7 @@ so only from a newer task. Learnings are short and generic: foreman drops any wi
 issue or PR numbers, issue keys such as `ABC-12`, commit hashes, URLs, emails, absolute paths, or secret-shaped
 text. Paths inside the repository are kept.
 
-The separate triage skill can use repository knowledge while researching an issue.
+The triage interview can use repository knowledge while researching an issue.
 Planning, implementation, correction, and review prompts omit repository knowledge.
 
 Set `learning.enabled: false` to stop new evaluations. Triage can still use what is already learned. To forget a repository's knowledge, delete its directory. To remove
@@ -581,15 +590,15 @@ optional; unset keys keep the built-in defaults below, even when no shipping con
 has been installed. A key foreman does not know, such as a misspelling, stops it
 with an error that names the key and its line.
 
-The built-in defaults are not the same file as the shipped `defaults/config.yaml`,
-which `make setup` installs when you have no config. The shipped file chooses some
-different values on purpose: `mentions: false`, `opus` and `sonnet` Claude models,
-Codex plan and reasoning settings, and $25 and $10 budgets. It leaves the webhook
-URL, repository filters, and Linear team setting empty.
+The shipped `defaults/config.yaml` is installed by `make setup` only when you have
+no config. Its `models` block fixes the provider and model for planning,
+implementation, and adversarial review. Self-review uses the implementation target.
+Each task saves that resolved policy, so config edits affect new tasks only.
 
 Built-in defaults:
 
 ```yaml
+triage_dir: ~/.local/share/foreman/triage
 tasks_dir: ~/.local/share/foreman/tasks
 worktrees_dir: ~/.local/share/foreman/worktrees
 repositories_dir: ~/.local/share/foreman/repositories # source checkouts for delegated work
@@ -598,11 +607,11 @@ knowledge_dir: ~/.local/share/foreman/knowledge # what foreman learns, per repos
 review_rounds: 1                     # complete diff passes per review call
 fix_rounds: 3                        # fixes asked by either review before foreman asks you
 review_before_pr: false              # open the PR before review; set true to review locally first
+skip_self_review: false              # set true to start new tasks with adversarial review
 mentions: true                       # show items found only because they mention you
 default_source: github               # dashboard issue source: github, linear, or all
 refresh: 60                          # seconds between dashboard issue-source refreshes
 auto:                                # on/off is not here; press a or launch with -a
-  agent: claude                      # claude or codex
   max_concurrent: 3                  # active runs, manual ones included
 budgets:
   task_tokens: 2000000               # reported input + output across task calls
@@ -616,16 +625,27 @@ learning:
 notifications:
   enabled: true                      # decision, failure, and readiness alerts
   webhook_url: ""                    # Discord webhook URL; a secret, keep this file chmod 600
+models:
+  planning:
+    agent: claude
+    model: claude-opus-5-5
+  implementation:
+    agent: claude
+    model: claude-sonnet-5            # use claude-haiku-4-5-20251001 to change implementation and self-review together
+  adversarial_review:
+    agent: codex
+    model: gpt-6.1-sol
+    reasoning_effort: medium
 claude:
   command: claude
-  model: claude-opus-5               # implementation and PR; "" uses the CLI default
-  plan_model: ""                     # "" uses model
-  review_model: ""                   # "" uses model
+  model: claude-sonnet-5             # standalone knowledge commands
+  plan_model: claude-opus-5-5
+  review_model: claude-sonnet-5
 codex:
   command: codex
-  model: gpt-6-sol                   # implementation and PR; "" uses the CLI default
-  plan_model: ""                     # "" uses model
-  review_model: ""                   # "" uses model
+  model: gpt-6.1-sol                 # standalone knowledge commands
+  plan_model: ""
+  review_model: ""
   reasoning_effort: ""               # implementation; "" uses the CLI default
   plan_reasoning_effort: ""          # "" uses reasoning_effort
   review_reasoning_effort: ""        # "" uses reasoning_effort
@@ -639,7 +659,7 @@ cleanup:
 
 `FOREMAN_TASKS_DIR` overrides `tasks_dir` after Foreman reads the file. Directory
 values beginning with `~/` expand to your home directory. The `stages/` directory
-and `routing.yaml` sit beside the selected config file; neither has a separate
+The `stages/` directory sits beside the selected config file; it has no separate
 config key. Auto mode's on/off choice lives in
 `~/.local/share/foreman/state.json`, outside `config.yaml`.
 
@@ -683,12 +703,11 @@ Set `default_source: linear` or `all`, or pass `-s linear` or `-s all` for one
 launch. Linear discovery needs `LINEAR_API_KEY` with access to that team.
 `foreman -s github` does not need the key.
 
-When you select a new Linear issue, Foreman reads its description and triage
-comments for explicit GitHub repository links. It proposes a repository when those
+When you select a new Linear issue, Foreman reads its description and confirmed triage for explicit GitHub repository links. It proposes a repository when those
 links identify one allowed destination. Confirm or edit the `owner/repo` before
 choosing an agent. Missing or conflicting links require you to enter a repository.
 A triage document hosted elsewhere is not fetched automatically; enter the
-repository when the issue and its triage comments do not identify it.
+repository when the issue and its triage do not identify it.
 
 Repository filters apply after selection and do not hide unresolved Linear issues.
 Auto mode infers the destination using the same links and leaves ambiguous issues
@@ -700,22 +719,23 @@ Branches and pull requests stay on GitHub. A Linear task's PR title includes its
 Linear identifier, and its body links to the Linear issue instead of using a GitHub
 `Closes #N` line. New Linear tasks use the branch naming rules described under [What a start does](#what-a-start-does).
 
-Planning, implementation, and review can use separate models. PR creation is part of
-implementation. The agent chosen for the task plans and implements; the competing
-agent reviews. Run `foreman -c` to set the values. For example:
+Task models are selected by stage. PR creation, fixes, merges, and final checks use
+the implementation target. Self-review uses that same target. Adversarial review uses
+its own target. `agent` selects the CLI provider for each target; model strings pass
+through to that CLI. Run `foreman -c` to edit the values. For example:
 
 ```yaml
-claude:
-  model: opus
-  plan_model: sonnet
-  review_model: opus
-codex:
-  model: gpt-6-sol
-  plan_model: gpt-6-luna
-  review_model: gpt-6-sol
-  reasoning_effort: medium
-  plan_reasoning_effort: xhigh
-  review_reasoning_effort: medium
+models:
+  planning:
+    agent: claude
+    model: claude-opus-5-5
+  implementation:
+    agent: claude
+    model: claude-sonnet-5
+  adversarial_review:
+    agent: codex
+    model: gpt-6.1-sol
+    reasoning_effort: medium
 ```
 
 `refresh` must be at least 5 seconds; foreman refuses to start with a smaller value.
@@ -732,10 +752,10 @@ in a dashboard that includes their source. A failed refresh of either selected
 source keeps results from the successful source visible with a warning and pauses all
 automatic starts until both sources refresh successfully.
 
-## Agent profile
+## Model policy
 
-Foreman uses the explicitly selected provider for a manual start, or the configured
-default for auto-starts and tasks without an explicit choice. Profile selection is
-deterministic; no model reads an issue to choose a profile. Quota checks may pause a
-role but cannot change its profile or waive review. The profile stays with the task
-across retries.
+The configured stage targets choose the providers and models for new tasks. Foreman
+uses the implementation target for code changes and self-review, the planning target
+for planning, and the adversarial-review target for the independent review. Quota
+checks can pause a role but cannot switch its provider or waive review. The resolved
+targets stay with the task across retries and config edits.

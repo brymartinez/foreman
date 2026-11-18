@@ -34,6 +34,18 @@ type Decision struct {
 
 // Route resolves the configured default profile without a model call.
 func (a App) Route(ctx context.Context, _ RouteRequest) (Decision, error) {
+	if a.Models.Implementation.Agent != "" {
+		p := task.Profile{
+			Name: "configured", Agent: a.Models.Implementation.Agent,
+			Model: a.Models.Implementation.Model, PlanModel: a.Models.Planning.Model,
+			ReasoningEffort:     a.Models.Implementation.ReasoningEffort,
+			PlanReasoningEffort: a.Models.Planning.ReasoningEffort,
+		}
+		if err := a.checkQuota(ctx, p.Agent, nil); err != nil {
+			return Decision{Wait: err.Error(), Reason: "configured implementation provider unavailable"}, nil
+		}
+		return Decision{Profile: &p, Reason: "configured stage models"}, nil
+	}
 	if a.RoutingErr != nil {
 		return Decision{}, a.RoutingErr
 	}

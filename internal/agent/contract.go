@@ -26,9 +26,10 @@ const (
 	PROpened   Status = "pr_opened"
 	// ReviewReady is a committed, validated change that is not pushed, with the PR
 	// the implementer proposes for it. Only a task reviewed before its PR returns it.
-	ReviewReady Status = "review_ready"
-	Blocked     Status = "blocked"
-	FailedRun   Status = "failed"
+	ReviewReady  Status = "review_ready"
+	Blocked      Status = "blocked"
+	FailedRun    Status = "failed"
+	PlanRevision Status = "plan_revision"
 )
 
 type Check = task.Check
@@ -49,6 +50,8 @@ type Outcome struct {
 	// PRTitle and PRBody are the pull request a review_ready turn proposes.
 	PRTitle string
 	PRBody  string
+	// ScreenshotsRequested selects the agent-assisted publication path.
+	ScreenshotsRequested *bool
 	// FullSuite is the full-suite report of a pr_opened or review_ready turn, or nil.
 	FullSuite *FullSuite
 }
@@ -85,18 +88,19 @@ type wireDocuments struct {
 }
 
 type wireOutcome struct {
-	ReviewAssessment *task.ReviewAssessment `json:"reviewAssessment"`
-	Status           Status                 `json:"status"`
-	Summary          string                 `json:"summary"`
-	NextObjective    *string                `json:"nextObjective"`
-	PRNumber         *int                   `json:"prNumber"`
-	PRURL            *string                `json:"prUrl"`
-	Validation       []Check                `json:"validation"`
-	Questions        []task.Question        `json:"questions"`
-	Documents        *wireDocuments         `json:"documents"`
-	PRTitle          *string                `json:"prTitle"`
-	PRBody           *string                `json:"prBody"`
-	FullSuite        *wireFullSuite         `json:"fullSuite"`
+	ReviewAssessment     *task.ReviewAssessment `json:"reviewAssessment"`
+	Status               Status                 `json:"status"`
+	Summary              string                 `json:"summary"`
+	NextObjective        *string                `json:"nextObjective"`
+	PRNumber             *int                   `json:"prNumber"`
+	PRURL                *string                `json:"prUrl"`
+	Validation           []Check                `json:"validation"`
+	Questions            []task.Question        `json:"questions"`
+	Documents            *wireDocuments         `json:"documents"`
+	PRTitle              *string                `json:"prTitle"`
+	PRBody               *string                `json:"prBody"`
+	ScreenshotsRequested *bool                  `json:"screenshotsRequested"`
+	FullSuite            *wireFullSuite         `json:"fullSuite"`
 }
 
 type wireFullSuite struct {
@@ -178,6 +182,7 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 			}
 		}
 		out.PRTitle, out.PRBody = strings.TrimSpace(*w.PRTitle), strings.TrimSpace(*w.PRBody)
+		out.ScreenshotsRequested = w.ScreenshotsRequested
 		out.Validation = w.Validation
 		if out.FullSuite, err = parseFullSuite(w.FullSuite); err != nil {
 			return Outcome{}, err
@@ -213,7 +218,7 @@ func ParseOutcome(raw []byte) (Outcome, error) {
 			}
 		}
 		out.Questions = w.Questions
-	case FailedRun:
+	case FailedRun, PlanRevision:
 	default:
 		return Outcome{}, fmt.Errorf("unknown outcome status %q", w.Status)
 	}

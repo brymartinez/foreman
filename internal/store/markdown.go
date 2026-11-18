@@ -168,6 +168,7 @@ type frontmatter struct {
 	State                     task.State             `yaml:"state"`
 	ImplementationAgent       task.Agent             `yaml:"implementation_agent,omitempty"`
 	Profile                   *task.Profile          `yaml:"profile,omitempty"`
+	Models                    *task.ModelPolicy      `yaml:"models,omitempty"`
 	RouteReason               string                 `yaml:"route_reason,omitempty"`
 	RouteLogged               bool                   `yaml:"route_logged,omitempty"`
 	StartedAt                 *time.Time             `yaml:"started_at,omitempty"`
@@ -194,10 +195,16 @@ type frontmatter struct {
 	Checkpoints               int                    `yaml:"checkpoints,omitempty"`
 	ConflictAttempts          []task.ConflictAttempt `yaml:"conflict_attempts,omitempty"`
 	ConflictPending           bool                   `yaml:"conflict_pending,omitempty"`
+	TrackerTriage             bool                   `yaml:"tracker_triage,omitempty"`
+	LocalDocuments            bool                   `yaml:"local_documents,omitempty"`
+	LocalPlan                 *task.LocalPlan        `yaml:"local_plan,omitempty"`
+	PlanRevision              string                 `yaml:"plan_revision,omitempty"`
 	ReviewBeforePR            bool                   `yaml:"review_before_pr,omitempty"`
+	SkipSelfReview            bool                   `yaml:"skip_self_review,omitempty"`
 	LocalHead                 string                 `yaml:"local_head,omitempty"`
 	ProposedTitle             string                 `yaml:"proposed_title,omitempty"`
 	ProposedBody              string                 `yaml:"proposed_body,omitempty"`
+	ScreenshotsRequested      *bool                  `yaml:"screenshots_requested,omitempty"`
 	ClaimVerification         bool                   `yaml:"claim_verification,omitempty"`
 	FullSuiteGate             bool                   `yaml:"full_suite_gate,omitempty"`
 	FinalChecks               int                    `yaml:"final_checks,omitempty"`
@@ -395,6 +402,7 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 		rec.Delegation = &task.Delegation{
 			Implementer:               task.Session{Agent: impl, ID: fm.SessionID},
 			Profile:                   fm.Profile,
+			Models:                    fm.Models,
 			RouteReason:               fm.RouteReason,
 			RouteLogged:               fm.RouteLogged,
 			Reviewer:                  impl.Reviewer(),
@@ -418,10 +426,16 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 			Checkpoints:               fm.Checkpoints,
 			ConflictAttempts:          fm.ConflictAttempts,
 			ConflictPending:           fm.ConflictPending,
+			TrackerTriage:             fm.TrackerTriage,
+			LocalDocuments:            fm.LocalDocuments,
+			LocalPlan:                 fm.LocalPlan,
+			PlanRevision:              fm.PlanRevision,
 			ReviewBeforePR:            fm.ReviewBeforePR,
+			SkipSelfReview:            fm.SkipSelfReview,
 			LocalHead:                 fm.LocalHead,
 			ProposedTitle:             fm.ProposedTitle,
 			ProposedBody:              fm.ProposedBody,
+			ScreenshotsRequested:      fm.ScreenshotsRequested,
 			ClaimVerification:         fm.ClaimVerification,
 			FullSuiteGate:             fm.FullSuiteGate,
 			FinalChecks:               fm.FinalChecks,
@@ -445,6 +459,17 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 		}
 		if fm.Profile != nil && fm.Profile.Agent != impl {
 			return nil, fmt.Errorf("profile %q is for %q, but implementation_agent is %q", fm.Profile.Name, fm.Profile.Agent, impl)
+		}
+		if fm.Models != nil {
+			if fm.Models.Implementation.Agent != impl {
+				return nil, fmt.Errorf("models.implementation.agent is %q, but implementation_agent is %q", fm.Models.Implementation.Agent, impl)
+			}
+			if rec.Delegation.Planner.Agent != "" && fm.Models.Planning.Agent != rec.Delegation.Planner.Agent {
+				return nil, fmt.Errorf("models.planning.agent is %q, but planner session uses %q", fm.Models.Planning.Agent, rec.Delegation.Planner.Agent)
+			}
+			if fm.ReviewAgent != "" && fm.Models.AdversarialReview.Agent != fm.ReviewAgent {
+				return nil, fmt.Errorf("models.adversarial_review.agent is %q, but review_agent is %q", fm.Models.AdversarialReview.Agent, fm.ReviewAgent)
+			}
 		}
 		if fm.ReviewAgent != "" && fm.ReviewAgent != impl.Reviewer() && fm.ReviewAgent != impl {
 			return nil, fmt.Errorf("review_agent must be %q or %q, got %q", impl.Reviewer(), impl, fm.ReviewAgent)
@@ -549,6 +574,7 @@ func fromRecord(rec *task.Record) frontmatter {
 	if d := rec.Delegation; d != nil {
 		fm.ImplementationAgent = d.Implementer.Agent
 		fm.Profile, fm.RouteReason, fm.RouteLogged = d.Profile, d.RouteReason, d.RouteLogged
+		fm.Models = d.Models
 		if !d.StartedAt.IsZero() {
 			t := d.StartedAt
 			fm.StartedAt = &t
@@ -568,6 +594,10 @@ func fromRecord(rec *task.Record) frontmatter {
 		fm.CheckpointHead, fm.CheckpointNext, fm.Checkpoints = d.CheckpointHead, d.CheckpointNext, d.Checkpoints
 		fm.ConflictAttempts, fm.ConflictPending = d.ConflictAttempts, d.ConflictPending
 		fm.ReviewBeforePR, fm.LocalHead, fm.ProposedTitle, fm.ProposedBody = d.ReviewBeforePR, d.LocalHead, d.ProposedTitle, d.ProposedBody
+		fm.TrackerTriage = d.TrackerTriage
+		fm.LocalDocuments, fm.LocalPlan, fm.PlanRevision = d.LocalDocuments, d.LocalPlan, d.PlanRevision
+		fm.SkipSelfReview = d.SkipSelfReview
+		fm.ScreenshotsRequested = d.ScreenshotsRequested
 		fm.ClaimVerification, fm.Claims, fm.PRDDigest = d.ClaimVerification, d.Claims, d.PRDDigest
 		fm.FullSuiteGate, fm.FinalChecks = d.FullSuiteGate, d.FinalChecks
 		fm.ScopeDigest, fm.PlanScopeDigest, fm.PlanDigest = d.ScopeDigest, d.PlanScopeDigest, d.PlanDigest

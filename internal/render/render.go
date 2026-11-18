@@ -193,6 +193,9 @@ func Show(w io.Writer, r *task.Record) {
 	} else {
 		row("Agent", "not delegated")
 	}
+	if r.Delegation != nil && r.Delegation.LocalDocuments && r.PlanPosted() {
+		row("Plan", "Requirements and Implementation plan saved in the local task file")
+	}
 	for i, c := range r.Plan {
 		label := ""
 		if i == 0 {

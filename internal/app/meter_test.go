@@ -82,3 +82,25 @@ func TestPlannerGetsCorrectionPrecedence(t *testing.T) {
 		}
 	}
 }
+
+func TestMeterCountsClaudeSessionCostIncrements(t *testing.T) {
+	f := newFixture()
+	key := started(t, f, startReq(t))
+	ctx := context.Background()
+	adapter := f.app.meterAgents(key).Agents[task.Claude]
+	session := task.Session{Agent: task.Claude, ID: "implementer"}
+	f.claude.turns = []agent.Turn{
+		{Session: session, Usage: task.Usage{ClaudeCostUSD: 9, ClaudeInputTokens: 200}},
+		{Session: session, Usage: task.Usage{ClaudeCostUSD: 10, ClaudeInputTokens: 100}},
+	}
+	for range 2 {
+		if _, err := adapter.Resume(ctx, session, agent.StartInput{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec := f.store.recs[key]
+	if rec.Usage.ClaudeCostUSD != 10 || rec.Calls[1].Usage.ClaudeCostUSD != 1 || rec.Usage.ClaudeInputTokens != 300 {
+		t.Fatalf("cost=%g second call=%g input=%d, want 10, 1, 300",
+			rec.Usage.ClaudeCostUSD, rec.Calls[1].Usage.ClaudeCostUSD, rec.Usage.ClaudeInputTokens)
+	}
+}

@@ -30,10 +30,9 @@ func (m *Model) SetAuto(a Auto) {
 	}
 }
 
-// awaitingTriage is an assigned, open issue that can be started manually but
-// cannot yet be started by auto mode.
+// awaitingTriage reports whether the issue still needs an interview.
 func awaitingTriage(e app.InboxEntry) bool {
-	return autoCandidate(e) && !slices.Contains(e.Item.Labels, "triaged")
+	return (autoCandidate(e) || e.LocalTriage && e.Item.Kind == task.Issue && e.Item.State == "open") && !triaged(e)
 }
 
 // autoCandidate is an open issue assigned to the developer that foreman has
@@ -45,7 +44,14 @@ func autoCandidate(e app.InboxEntry) bool {
 }
 
 func eligible(e app.InboxEntry) bool {
-	return autoCandidate(e) && slices.Contains(e.Item.Labels, "triaged")
+	return autoCandidate(e) && triaged(e)
+}
+
+func triaged(e app.InboxEntry) bool {
+	if e.LocalTriage {
+		return e.Triaged
+	}
+	return slices.Contains(e.Item.Labels, "triaged")
 }
 
 // active counts the slots in use: runs in a stage plus starts still in
@@ -82,7 +88,7 @@ func (m *Model) AutoStarts() []app.StartRequest {
 	var picks []app.InboxItem
 	for _, e := range m.Inbox {
 		k := e.Item.Key
-		if k.Source == task.Linear && m.Mode != Browsing && m.pending.Key.Source == task.Linear && m.pending.Key.ExternalID == k.ExternalID {
+		if m.Mode != Browsing && sameInboxIssue(requestKey(m.pending), k) {
 			continue
 		}
 		if eligible(e) && !containsIssue(m.tried, k) && !containsIssue(m.starting, k) && !containsIssue(tracked, k) {
@@ -195,10 +201,14 @@ func containsIssue(keys map[task.Key]bool, key task.Key) bool {
 	}
 	if key.Source == task.Linear {
 		for known, present := range keys {
-			if present && known.Source == task.Linear && known.ExternalID == key.ExternalID {
+			if present && sameInboxIssue(known, key) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+func sameInboxIssue(a, b task.Key) bool {
+	return a == b || a.Source == task.Linear && b.Source == task.Linear && a.ExternalID == b.ExternalID
 }

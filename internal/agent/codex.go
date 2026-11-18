@@ -108,6 +108,12 @@ func (c Codex) Review(ctx context.Context, in StartInput) (ReviewOutcome, error)
 	if c.ReviewReasoningEffort != "" {
 		c.ReasoningEffort = c.ReviewReasoningEffort
 	}
+	if in.Model != "" {
+		c.Model = in.Model
+	}
+	if in.ReasoningEffort != "" {
+		c.ReasoningEffort = in.ReasoningEffort
+	}
 	logTurn(in.Log, task.Codex, c.Model, in.Step)
 	_, raw, usage, err := c.exec(ctx, in, ReviewSchema, func(schema, last string) []string {
 		return []string{"exec", "--json", "-C", in.Worktree,
@@ -135,6 +141,12 @@ func (c Codex) run(ctx context.Context, in StartInput, baseArgs func(schema, las
 		if c.PlanReasoningEffort != "" {
 			c.ReasoningEffort = c.PlanReasoningEffort
 		}
+	}
+	if in.Model != "" {
+		c.Model = in.Model
+	}
+	if in.ReasoningEffort != "" {
+		c.ReasoningEffort = in.ReasoningEffort
 	}
 	logTurn(in.Log, task.Codex, c.Model, in.Step)
 	session, raw, usage, err := c.exec(ctx, in, OutcomeSchema, baseArgs, resumeID, onSession)

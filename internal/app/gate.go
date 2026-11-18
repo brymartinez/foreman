@@ -266,13 +266,16 @@ func closePR(rec *task.Record, now time.Time) string {
 }
 
 func (a App) recheckHandoffPlan(ctx context.Context, rec *task.Record, pr PullRequest) (*task.Record, string, error) {
-	scope, readErr := a.readScope(ctx, rec.Key)
+	scope, readErr := a.readRunScope(ctx, rec)
 	changed := scope.digest != rec.Delegation.ScopeDigest
+	if readErr == nil && rec.Delegation.LocalDocuments && !rec.PlanPosted() {
+		changed = true
+	}
 	if readErr == nil && rec.PlanPosted() && !changed {
 		var plan issuePlan
 		plan, readErr = a.readIssuePlan(ctx, rec)
-		samePlan := planDigest(plan.texts()) == rec.Delegation.PlanDigest || (rec.Delegation.PlanDigest != "" && legacyPlanDigest(plan) == rec.Delegation.PlanDigest)
-		changed = !plan.complete() || !samePlan || rec.Delegation.PlanScopeDigest != scope.digest
+		samePlan := plan.digest(rec) == rec.Delegation.PlanDigest || (rec.Delegation.PlanDigest != "" && legacyPlanDigest(plan) == rec.Delegation.PlanDigest)
+		changed = !plan.complete() || plan.staleLocal(rec) || !samePlan || rec.Delegation.PlanScopeDigest != scope.digest
 	}
 	if readErr == nil && !changed {
 		return nil, "", nil
@@ -292,6 +295,9 @@ func (a App) recheckHandoffPlan(ctx context.Context, rec *task.Record, pr PullRe
 		d := cur.Delegation
 		d.ScopeDigest = scope.digest
 		d.PlanScopeDigest, d.PlanDigest, d.Implementer.ID = "", "", ""
+		if d.LocalDocuments {
+			d.Action = nil
+		}
 		if pr.HeadSHA != "" {
 			d.PRHead = pr.HeadSHA
 		}

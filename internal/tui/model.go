@@ -161,7 +161,9 @@ type Model struct {
 	// the agent choice offers routing for an issue never delegated.
 	RouteOn bool
 
-	pending      app.StartRequest  // the delegation being collected
+	pending      app.StartRequest // the delegation being collected
+	pendingLocal bool
+	pendingReset bool
 	pendingNew   bool              // the pending issue was never delegated
 	routing      bool              // the pending delegation asks for a route
 	routeSeq     int               // the route request the footer waits for
@@ -598,13 +600,16 @@ func (m *Model) enter() Action {
 			m.pending.Key = e.Item.Key
 		}
 		m.pendingNew = !e.Delegated
-		if e.Item.Key.Source == task.Linear && e.Item.Key.Repo == "" {
-			m.Mode, m.Input = ResolvingRepository, ""
-			m.proposalSeq++
-			return Action{Kind: ActionRepository, Start: m.pending, ProposalSeq: m.proposalSeq}
+		m.pendingLocal, m.pendingReset = e.LocalTriage, e.Reset
+		if e.TriageError != "" {
+			m.Message = "! " + e.TriageError
+			return Action{}
 		}
-		m.Mode, m.Input = ChoosingAgent, ""
-		return Action{}
+		if e.LocalTriage && !e.Triaged {
+			m.Message = "Awaiting triage. Run foreman-triage separately, then refresh."
+			return Action{}
+		}
+		return m.continueStart()
 	}
 	rec := m.Selected()
 	switch {
@@ -618,6 +623,17 @@ func (m *Model) enter() Action {
 		m.LogOffset = 0
 		m.Message = ""
 	}
+	return Action{}
+}
+
+// continueStart resolves the repository before choosing an implementation agent.
+func (m *Model) continueStart() Action {
+	if m.pending.Key.Source == task.Linear && m.pending.Key.Repo == "" {
+		m.Mode, m.Input = ResolvingRepository, ""
+		m.proposalSeq++
+		return Action{Kind: ActionRepository, Start: m.pending, ProposalSeq: m.proposalSeq}
+	}
+	m.Mode, m.Input = ChoosingAgent, ""
 	return Action{}
 }
 
@@ -756,9 +772,7 @@ func (m *Model) chooseAgent(k Key) Action {
 	case k.Kind == KeyEscape:
 		m.Mode = Browsing
 	case k.Kind == KeyRune && k.Rune == '1':
-		m.pending.Agent, m.routing, m.Mode, m.Input = task.Claude, false, TypingContext, ""
-	case k.Kind == KeyRune && k.Rune == '2':
-		m.pending.Agent, m.routing, m.Mode, m.Input = task.Codex, false, TypingContext, ""
+		m.pending.Agent, m.routing, m.Mode, m.Input = m.AutoAgent, false, TypingContext, ""
 	case k.Kind == KeyRune && k.Rune == '3' && m.offersRoute():
 		m.pending.Agent, m.routing, m.Mode, m.Input = "", true, TypingContext, ""
 	}
@@ -896,6 +910,7 @@ func (m *Model) scrollBranch(by int) {
 
 func (m *Model) startPending(req app.StartRequest) Action {
 	k := requestKey(req)
+	req.NewOnly = req.NewOnly || m.pendingNew && m.pendingLocal && !m.pendingReset
 	m.tried, m.starting = mark(m.tried, k), mark(m.starting, k)
 	return Action{Kind: ActionStart, Start: req}
 }

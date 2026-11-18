@@ -23,6 +23,11 @@ type TaskStore interface {
 	Update(ctx context.Context, key task.Key, fn func(cur *task.Record) (*task.Record, error)) (*task.Record, error)
 }
 
+type TriageStore interface {
+	Read(key task.Key) (string, error)
+	LockStart(key task.Key) (func(), error)
+}
+
 type InboxItem struct {
 	Key        task.Key
 	Identifier string // source display ID, e.g. ACME-42
@@ -112,14 +117,14 @@ type GitHubClient interface {
 	GetPullRequest(ctx context.Context, key task.Key) (PullRequest, error)
 	// OpenPullRequestForBranch returns the open PR whose head is branch, or nil if none.
 	OpenPullRequestForBranch(ctx context.Context, repo task.Repo, branch string) (*PullRequest, error)
+	CreatePullRequest(ctx context.Context, repo task.Repo, branch, base, title, bodyFile string) error
 	// PullRequestsForBranch returns every PR in repo, in any state, whose head is
 	// branch in repo itself.
 	PullRequestsForBranch(ctx context.Context, repo task.Repo, branch string) ([]PullRequest, error)
 	// CIStatus summarizes the checks on the PR's current head. CheckedAt is left zero.
 	CIStatus(ctx context.Context, pr task.Key) (task.CIStatus, error)
 	// PostIssueComment adds a comment to the issue, or edits comment id when id > 0.
-	// Editing a comment that no longer exists returns ErrGone. It is foreman's only
-	// write to GitHub.
+	// Editing a comment that no longer exists returns ErrGone.
 	PostIssueComment(ctx context.Context, issue task.Key, id int64, body string) (IssueComment, error)
 	// GetIssueComment reads one comment. A missing comment returns ErrGone.
 	GetIssueComment(ctx context.Context, repo task.Repo, id int64) (IssueComment, error)
@@ -236,6 +241,8 @@ type WorktreeManager interface {
 	// ReviewHead applies the same checks while allowing HEAD to equal prior.
 	// Existing committed work may already be ready for review after a retry.
 	ReviewHead(ctx context.Context, dir, branch, prior string) (string, error)
+	// PushReviewed checks the clean worktree and pushes the exact reviewed SHA without force.
+	PushReviewed(ctx context.Context, dir, branch, head string) error
 	// ChangedPaths lists the paths that differ between from and to, both sides of a
 	// rename included. It fails when from is not a commit SHA, or is neither to nor
 	// an ancestor of it.

@@ -49,7 +49,7 @@ func readStage(t *testing.T, name string) string {
 func TestDefaultPlanStageKeepsTwoPlainEnglishDocuments(t *testing.T) {
 	plan := readStage(t, "plan.md")
 	for _, want := range []string{
-		"## Requirements", "## Work plan", "B1 English",
+		"## Requirements", "## Implementation plan", "B1 English",
 		"No line numbers", "commit messages", "Do not copy the rules",
 	} {
 		if !strings.Contains(plan, want) {
@@ -63,9 +63,9 @@ func TestDefaultPlanStageKeepsTwoPlainEnglishDocuments(t *testing.T) {
 	}
 }
 
-func TestDefaultPRStageHasProblemFixRiskAndNoHowToTest(t *testing.T) {
+func TestDefaultPRStageHasProblemFixRiskAndBriefVerification(t *testing.T) {
 	pr := readStage(t, "pr.md")
-	for _, want := range []string{"`## Problem`", "`## Fix`", "`## Risk`", "`## Review notes`", "`Closes #N`", "Leave out test commands, test results, reviewer test steps"} {
+	for _, want := range []string{"`## Problem`", "`## Fix`", "`## Risk`", "`## Review notes`", "`Closes #N`", "Summarize verification briefly"} {
 		if !strings.Contains(pr, want) {
 			t.Errorf("pr.md lacks %q", want)
 		}

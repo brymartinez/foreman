@@ -299,7 +299,11 @@ func inboxPane(m Model) pane {
 			issueSource = task.GitHub
 		}
 		detail := strings.Join(e.Changes, ", ")
-		if awaitingTriage(e) {
+		if e.TriageError != "" {
+			detail = render.JoinFacts("triage record error", detail)
+		} else if e.LocalTriage && e.Triaged {
+			detail = render.JoinFacts("triaged", detail)
+		} else if awaitingTriage(e) {
 			detail = render.JoinFacts("awaiting triage", detail)
 		}
 		if w, ok := m.waiting[k]; ok {
@@ -709,9 +713,9 @@ func footer(m Model) string {
 		return "GitHub repository (owner/repo; enter to confirm): " + m.Input + "█  esc cancel"
 	case ChoosingAgent:
 		if m.offersRoute() {
-			return fmt.Sprintf("Delegate %s#%d with:  [1] Claude   [2] Codex   [3] Route   esc cancel", m.pending.Repo, m.pending.Issue)
+			return fmt.Sprintf("Delegate %s#%d with configured stage models   [1] start   [3] route   esc cancel", m.pending.Repo, m.pending.Issue)
 		}
-		return fmt.Sprintf("Delegate %s#%d with:  [1] Claude   [2] Codex   esc cancel", m.pending.Repo, m.pending.Issue)
+		return fmt.Sprintf("Delegate %s#%d with configured stage models   [1] start   esc cancel", m.pending.Repo, m.pending.Issue)
 	case Routing:
 		return fmt.Sprintf("Choosing a profile for %s#%d…   esc back", m.pending.Repo, m.pending.Issue)
 	case ConfirmingRoute:

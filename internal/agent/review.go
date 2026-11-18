@@ -12,10 +12,48 @@ import (
 )
 
 // ReviewSchema constrains the reviewer's final message, like OutcomeSchema does for
-// the implementer. Strict mode again: nullable fields instead of optional ones.
+// the implementer. Codex strict mode requires every property, so nullable fields are
+// used instead of optional ones. Claude's schema below makes the empty findings and
+// limitations arrays optional; ParseReview already treats omitted arrays as empty.
 //
 //go:embed review.schema.json
 var ReviewSchema []byte
+
+func claudeReviewSchema() ([]byte, error) {
+	var schema map[string]json.RawMessage
+	if err := json.Unmarshal(ReviewSchema, &schema); err != nil {
+		return nil, fmt.Errorf("decode review schema: %w", err)
+	}
+	rawRequired, ok := schema["required"]
+	if !ok {
+		return nil, errors.New("review schema has no required fields")
+	}
+	var required []string
+	if err := json.Unmarshal(rawRequired, &required); err != nil {
+		return nil, fmt.Errorf("decode review schema required fields: %w", err)
+	}
+	seen := map[string]bool{}
+	required = slices.DeleteFunc(required, func(field string) bool {
+		if field == "findings" || field == "limitations" {
+			seen[field] = true
+			return true
+		}
+		return false
+	})
+	if !seen["findings"] || !seen["limitations"] {
+		return nil, errors.New("review schema must require findings and limitations before Claude normalization")
+	}
+	rawRequired, err := json.Marshal(required)
+	if err != nil {
+		return nil, fmt.Errorf("encode Claude review schema required fields: %w", err)
+	}
+	schema["required"] = rawRequired
+	result, err := json.Marshal(schema)
+	if err != nil {
+		return nil, fmt.Errorf("encode Claude review schema: %w", err)
+	}
+	return result, nil
+}
 
 type ReviewOutcome struct {
 	Skipped bool // Controller-only: adversarial provider has confirmed exhausted quota.

@@ -41,6 +41,9 @@ func (r *taskRun) restorePlanDraft() (bool, step, error) {
 	if draft == nil {
 		return false, stepImplement, nil
 	}
+	if r.rec.Delegation.LocalDocuments {
+		return r.saveLocalPlan(draft)
+	}
 	current, err := r.a.readIssuePlan(r.ctx, r.rec)
 	if err != nil {
 		rec, saveErr := r.a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {

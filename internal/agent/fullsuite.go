@@ -81,6 +81,7 @@ func FinalCheckMessage(c FinalCheck) string {
 	s.WriteString("3. If the repository has no identifiable full suite, report it as unavailable with what could not be verified.\n\n")
 	if c.Local {
 		s.WriteString("Do not push or open a pull request. End with \"review_ready\", the same prTitle and prBody unless a fix changed what the change does, the validation, and \"fullSuite\". ")
+		s.WriteString(screenshotRequestRule + " ")
 	} else {
 		fmt.Fprintf(&s, "Push any fix to PR #%d. End with \"pr_opened\" for PR #%d, the validation, and \"fullSuite\". ", c.PR, c.PR)
 	}

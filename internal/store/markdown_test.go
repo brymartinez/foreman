@@ -87,6 +87,16 @@ func delegated() *task.Record {
 func TestRoundTrip(t *testing.T) {
 	s := Markdown{Dir: t.TempDir()}
 	want := delegated()
+	want.Delegation.SkipSelfReview = true
+	want.Delegation.LocalDocuments = true
+	want.Delegation.LocalPlan = &task.LocalPlan{
+		Fingerprint: "issue-description",
+		Documents: map[task.PlanDoc]string{
+			task.PRD:                "R1. Preserve existing retries.",
+			task.ImplementationPlan: "1. Update retry.go for R1.",
+		},
+	}
+	want.Delegation.PlanRevision = "Update step 1 for the current code."
 	if err := s.Save(ctx, want); err != nil {
 		t.Fatal(err)
 	}

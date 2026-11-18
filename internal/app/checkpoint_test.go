@@ -79,7 +79,9 @@ func TestFailedCheckpointValidationResumesSameSessionForRepair(t *testing.T) {
 	f.wt.checkpointHeads = []string{"commit1"}
 	failed := checkpointTurn("first-session", "Continue work")
 	failed.Outcome.Validation = append(failed.Outcome.Validation, task.Check{Command: "pnpm lint", Passed: false})
-	f.claude.turns = []agent.Turn{failed, checkpointTurn("first-session", "Continue work"), prTurn("second-session")}
+	repaired := checkpointTurn("first-session", "Continue work")
+	repaired.Usage.ClaudeCostUSD += failed.Usage.ClaudeCostUSD
+	f.claude.turns = []agent.Turn{failed, repaired, prTurn("second-session")}
 	f.claude.turnErrs = []error{&agent.CheckpointValidationError{Failed: []string{"pnpm lint"}}, nil, nil}
 	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
 		t.Fatal(err)

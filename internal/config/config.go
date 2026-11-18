@@ -19,14 +19,16 @@ import (
 )
 
 type Config struct {
+	TriageDir       string `yaml:"triage_dir"`
 	TasksDir        string `yaml:"tasks_dir"`
 	WorktreesDir    string `yaml:"worktrees_dir"`
 	RepositoriesDir string `yaml:"repositories_dir"`
 	LogDir          string `yaml:"log_dir"`
 	// KnowledgeDir holds what foreman learns, one directory per repository.
-	KnowledgeDir string `yaml:"knowledge_dir"`
-	ReviewRounds int    `yaml:"review_rounds"` // reviewer passes per review; 0 means 1
-	FixRounds    int    `yaml:"fix_rounds"`    // fix and re-review cycles before asking; 0 means 3
+	KnowledgeDir   string `yaml:"knowledge_dir"`
+	ReviewRounds   int    `yaml:"review_rounds"` // reviewer passes per review; 0 means 1
+	FixRounds      int    `yaml:"fix_rounds"`    // fix and re-review cycles before asking; 0 means 3
+	SkipSelfReview bool   `yaml:"skip_self_review"`
 	// ReviewBeforePR has the agent review finish on the local branch before the PR
 	// opens. A task keeps the value it started with.
 	ReviewBeforePR bool `yaml:"review_before_pr"`
@@ -36,14 +38,15 @@ type Config struct {
 	// github, linear, or all.
 	DefaultSource task.Source `yaml:"default_source"`
 	// Refresh is how often the dashboard reads GitHub, in seconds.
-	Refresh       int           `yaml:"refresh"`
-	Budgets       Budgets       `yaml:"budgets"`
-	Learning      Learning      `yaml:"learning"`
-	Notifications Notifications `yaml:"notifications"`
-	Claude        Claude        `yaml:"claude"`
-	Codex         Codex         `yaml:"codex"`
-	Cleanup       Cleanup       `yaml:"cleanup"`
-	Auto          Auto          `yaml:"auto"`
+	Refresh       int              `yaml:"refresh"`
+	Budgets       Budgets          `yaml:"budgets"`
+	Learning      Learning         `yaml:"learning"`
+	Notifications Notifications    `yaml:"notifications"`
+	Models        task.ModelPolicy `yaml:"models"`
+	Claude        Claude           `yaml:"claude"`
+	Codex         Codex            `yaml:"codex"`
+	Cleanup       Cleanup          `yaml:"cleanup"`
+	Auto          Auto             `yaml:"auto"`
 	// IncludedRepos, when nonempty, limits the inbox to these repositories and
 	// overrides ExcludedRepos.
 	IncludedRepos []task.Repo `yaml:"include_repositories"`
@@ -107,16 +110,16 @@ type Auto struct {
 
 type Claude struct {
 	Command     string `yaml:"command"`
-	Model       string `yaml:"model"`        // implementation, including PR creation
-	PlanModel   string `yaml:"plan_model"`   // "" plans with Model
-	ReviewModel string `yaml:"review_model"` // "" reviews with Model
+	Model       string `yaml:"model"`        // standalone knowledge commands and legacy task records
+	PlanModel   string `yaml:"plan_model"`   // standalone evaluation; "" uses Model
+	ReviewModel string `yaml:"review_model"` // legacy task reviews; new tasks use models.*
 }
 
 type Codex struct {
 	Command               string `yaml:"command"`
-	Model                 string `yaml:"model"`        // implementation, including PR creation
-	PlanModel             string `yaml:"plan_model"`   // "" plans with Model
-	ReviewModel           string `yaml:"review_model"` // "" reviews with Model
+	Model                 string `yaml:"model"`        // standalone knowledge commands and legacy task records
+	PlanModel             string `yaml:"plan_model"`   // standalone evaluation; "" uses Model
+	ReviewModel           string `yaml:"review_model"` // legacy task reviews; new tasks use models.*
 	ReasoningEffort       string `yaml:"reasoning_effort"`
 	PlanReasoningEffort   string `yaml:"plan_reasoning_effort"`   // "" uses ReasoningEffort
 	ReviewReasoningEffort string `yaml:"review_reasoning_effort"` // "" uses ReasoningEffort
@@ -131,6 +134,7 @@ func Load() (Config, error) {
 	}
 	data := filepath.Join(home, ".local", "share", "foreman")
 	cfg := Config{
+		TriageDir:       filepath.Join(data, "triage"),
 		TasksDir:        filepath.Join(data, "tasks"),
 		WorktreesDir:    filepath.Join(data, "worktrees"),
 		RepositoriesDir: filepath.Join(data, "repositories"),
@@ -141,13 +145,18 @@ func Load() (Config, error) {
 		Mentions:        true,
 		DefaultSource:   task.GitHub,
 		Refresh:         DefaultRefresh,
-		Claude:          Claude{Command: "claude", Model: "claude-opus-5"},
+		Claude:          Claude{Command: "claude", Model: "claude-opus-5-5"},
 		Codex:           Codex{Command: "codex", Model: "gpt-6-sol"},
 		Cleanup:         Cleanup{OnDone: true, DeleteMergedBranch: true},
 		Budgets:         Budgets{ImplementerUSD: 3, ReviewerUSD: 1, TaskTokens: 2000000, PlanningTokens: 400000, CallTimeoutSeconds: 1800},
 		Learning:        Learning{Enabled: true, BudgetUSD: 0.5},
 		Notifications:   Notifications{Enabled: true},
 		Auto:            Auto{Agent: task.Claude, MaxConcurrent: 3},
+		Models: task.ModelPolicy{
+			Planning:          task.ModelTarget{Agent: task.Claude, Model: "claude-opus-5-5"},
+			Implementation:    task.ModelTarget{Agent: task.Claude, Model: "claude-sonnet-5"},
+			AdversarialReview: task.ModelTarget{Agent: task.Codex, Model: "gpt-6.1-sol", ReasoningEffort: "medium"},
+		},
 	}
 	path, err := FilePath()
 	if err != nil {
@@ -189,7 +198,7 @@ func Load() (Config, error) {
 	if env := os.Getenv("FOREMAN_TASKS_DIR"); env != "" {
 		cfg.TasksDir = env
 	}
-	for _, p := range []*string{&cfg.TasksDir, &cfg.WorktreesDir, &cfg.RepositoriesDir, &cfg.LogDir, &cfg.KnowledgeDir} {
+	for _, p := range []*string{&cfg.TriageDir, &cfg.TasksDir, &cfg.WorktreesDir, &cfg.RepositoriesDir, &cfg.LogDir, &cfg.KnowledgeDir} {
 		*p = expandHome(*p, home)
 	}
 	if cfg.Refresh < MinRefresh {
@@ -213,6 +222,15 @@ func Load() (Config, error) {
 	if cfg.Auto.MaxConcurrent < 1 {
 		return Config{}, fmt.Errorf("%s: auto.max_concurrent is %d; the minimum is 1", path, cfg.Auto.MaxConcurrent)
 	}
+	if err := validateModelTarget("models.planning", cfg.Models.Planning); err != nil {
+		return Config{}, fmt.Errorf("%s: %w", path, err)
+	}
+	if err := validateModelTarget("models.implementation", cfg.Models.Implementation); err != nil {
+		return Config{}, fmt.Errorf("%s: %w", path, err)
+	}
+	if err := validateModelTarget("models.adversarial_review", cfg.Models.AdversarialReview); err != nil {
+		return Config{}, fmt.Errorf("%s: %w", path, err)
+	}
 	if err := parseRepoList("include_repositories", cfg.IncludedRepos); err != nil {
 		return Config{}, err
 	}
@@ -227,6 +245,19 @@ func Load() (Config, error) {
 		cfg.LinearTeam = canonical
 	}
 	return cfg, nil
+}
+
+func validateModelTarget(key string, target task.ModelTarget) error {
+	if _, err := task.ParseAgent(string(target.Agent)); err != nil {
+		return fmt.Errorf("%s.agent: %w", key, err)
+	}
+	if strings.TrimSpace(target.Model) == "" {
+		return fmt.Errorf("%s.model: empty", key)
+	}
+	if target.Agent != task.Codex && target.ReasoningEffort != "" {
+		return fmt.Errorf("%s.reasoning_effort applies only to codex", key)
+	}
+	return nil
 }
 
 // emptyDocument reports whether n is what yaml reads for a document with no

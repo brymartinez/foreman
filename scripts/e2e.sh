@@ -107,6 +107,7 @@ setup() {
 	export sandbox FOREMAN_CWD="$sandbox/checkout"
 
 	cat >"$sandbox/config.yaml" <<EOF
+triage_dir: $sandbox/triage
 tasks_dir: $sandbox/tasks
 worktrees_dir: $sandbox/worktrees
 repositories_dir: $sandbox/repositories
@@ -532,8 +533,15 @@ notifications_config() {
 	chmod 600 "$sandbox/config.yaml"
 }
 
+confirm_triage() {
+	local id=$1 path="$sandbox/triage/$1.md"
+	mkdir -p "$(dirname "$path")"
+	printf '<!-- foreman:confirmed-triage %s -->\n# Triage decisions\n\nProceed with the issue as described.\n' "$id" >"$path"
+}
+
 issue() { # issue <number> <title> [labels-json]
 	echo "$2" >"$state/title-$1"
+	confirm_triage "github/acme/widgets/$1"
 	local labels=${3:-'[{"name":"triaged"}]'}
 	printf '%s\n' "$labels" >"$state/labels-$1.json"
 	printf '{"number":%s,"title":"%s","body":"do it","labels":%s,"url":"https://github.com/acme/widgets/issues/%s","state":"OPEN","updatedAt":"2026-09-25T10:00:00Z"}\n' \
@@ -567,9 +575,9 @@ scenario_runner() {
 	check "no line is stamped twice" bash -c "! grep -qE '^[^ ]+ [0-9]{4}-[0-9]{2}-[0-9]{2}T' '$log'"
 	check "planning carries the plan stage file" contains "$state/prompt.txt" "Write two short documents before changing code."
 	check "the first turn plans" contains "$state/prompt.txt" "You are the planner"
-	check "the two documents are posted on the issue" test "$(grep -c 'api --method POST repos/acme/widgets/issues/42/comments' "$state/gh.log")" = 2
-	check "the Requirements comment has its heading" contains "$state/comment-3001.md" "## Requirements"
-	check "a fresh session implements the posted plan text" contains "$state/plan-posted-prompt.txt" "### Task 1: retries"
+	check "the documents stay off the issue" bash -c "! grep -qF 'api --method POST repos/acme/widgets/issues/42/comments' '$state/gh.log'"
+	check "the checked documents are stored locally" contains "$sandbox/tasks/acme-widgets-42.md" "local_plan:"
+	check "a fresh session implements the local plan" contains "$state/plan-posted-prompt.txt" "### Task 1: retries"
 	check "planning uses its Claude model" contains "$state/models.log" "claude model=sonnet"
 	check "implementation uses its Claude model" contains "$state/models.log" "claude model=opus"
 	check "review uses its Codex model" contains "$state/models.log" "codex model=gpt-6-sol"
@@ -586,7 +594,7 @@ scenario_runner() {
 	check "adversarial review omits task context" no_review_context "$state/adversarial-review-prompt.txt"
 	check "the task records self-review usage" contains "$sandbox/tasks/acme-widgets-42.md" "step: self_review"
 	task 42 sd >"$sandbox/show.txt"
-	check "the show pane lists the plan" contains "$sandbox/show.txt" "Requirements https://github.com/acme/widgets/issues/42#issuecomment-3001"
+	check "the show pane lists the plan" contains "$sandbox/show.txt" "Requirements and Implementation plan saved in the local task file"
 	rm "$sandbox/stages/pr.md"
 	check "a missing stage file stops foreman" bash -c "! dash -- 2>'$sandbox/err.txt'"
 	check "and names the file" contains "$sandbox/err.txt" "stages/pr.md"
@@ -747,7 +755,7 @@ scenario_planning_advice() {
 }
 
 scenario_plan_reuse() {
-	echo "plan_reuse: the planner rechecks existing documents when the digest is absent"
+	echo "plan_reuse: a new run uses local scope and plans even when tracker documents exist"
 	setup plan_reuse
 	local comments='' entry i=0 doc title
 	for doc in prd:Requirements "plan:Work plan"; do
@@ -759,11 +767,11 @@ scenario_plan_reuse() {
 	printf '[[{"id":1999,"html_url":"https://github.com/acme/widgets/issues/42#issuecomment-1999","body":"Thanks, looking.","updated_at":"2026-09-20T09:00:00Z","user":{"login":"brymartinez"}},%s]]\n' "$comments" >"$state/conv-repos-acme-widgets-issues-42-comments.json"
 	check "the dashboard delegates #42" start 42
 	check "the runner reaches a clean review" wait_status "review ✓"
-	check "the planner inspects existing documents when their digest is absent" contains "$state/prompt.txt" "Posted earlier."
+	check "the planner uses confirmed local triage" contains "$state/prompt.txt" "Proceed with the issue as described."
 	check "the planner role runs once" test "$(grep -c '^claude planner$' "$state/agents.log")" = 1
 	check "nothing is posted on the issue" bash -c "! grep -qF 'api --method POST repos/acme/widgets/issues/42/comments' '$state/gh.log'"
-	check "the planner receives existing plan text" contains "$state/prompt.txt" "Posted earlier."
-	check "the task records the adopted comments" grep -q 'comment_id: 2002' "$sandbox/tasks/acme-widgets-42.md"
+	check "the planner does not adopt the old comments" bash -c "! grep -qF 'Posted earlier.' '$state/prompt.txt'"
+	check "the task stores the new checked plan" contains "$sandbox/tasks/acme-widgets-42.md" "local_plan:"
 }
 
 scenario_notify() {
@@ -925,6 +933,7 @@ scenario_linear() {
 linear_team: https://linear.app/acme/team/LIN
 EOF
 	issue 43 "GitHub work" '[{"name":"triaged"}]'
+	confirm_triage "linear/11111111-1111-4111-8111-111111111111"
 	echo "[$(hit acme/widgets 43 'GitHub work'),$(hit acme/linear 44 'Mapped GitHub work')]" >"$state/search-issues-assignee.json"
 	dash --no-auto -s all -- refreshed print >"$sandbox/mixed.txt" 2>/dev/null
 	check "the mixed inbox shows the GitHub section" contains "$sandbox/mixed.txt" "GITHUB"
@@ -949,7 +958,8 @@ EOF
 	fi
 	check "the Linear task keeps its issue ID" grep -q '11111111-1111-4111-8111-111111111111' "$sandbox/tasks/acme-linear-linear-11111111-1111-4111-8111-111111111111.md"
 	check "the Linear task uses the name supplied by Linear" grep -q '^branch: bryan/lin-7-add-search' "$sandbox/tasks/acme-linear-linear-11111111-1111-4111-8111-111111111111.md"
-	check "the runner posts planning comments to Linear" eventually 10 test -f "$state/linear-comment-2"
+	check "the runner saves the Linear plan locally" eventually 10 grep -q '^local_plan:' "$sandbox/tasks/acme-linear-linear-11111111-1111-4111-8111-111111111111.md"
+	check "the runner leaves Linear comments alone" test ! -e "$state/linear-comment-2"
 	check "the Linear task reaches a clean GitHub PR review" eventually 15 grep -q 'verdict: clean' "$sandbox/tasks/acme-linear-linear-11111111-1111-4111-8111-111111111111.md"
 	check "the Linear PR stays in its GitHub repository and links its issue" bash -c "grep -qF 'github.com/acme/linear/pull/947' '$state/pr-947.json' && grep -qF 'LIN-7/add-search' '$state/pr-947.json' && ! grep -qF 'Closes #' '$state/pr-947.json'"
 	check "the Linear PR prompt names its issue link rule" contains "$state/plan-posted-prompt.txt" "Put LIN-7 in the pull request title"

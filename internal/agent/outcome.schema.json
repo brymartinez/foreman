@@ -12,6 +12,7 @@
     "documents",
     "prTitle",
     "prBody",
+    "screenshotsRequested",
     "fullSuite",
     "reviewAssessment"
   ],
@@ -24,6 +25,7 @@
         "pr_opened",
         "review_ready",
         "blocked",
+        "plan_revision",
         "failed"
       ]
     },
@@ -152,6 +154,10 @@
         "string",
         "null"
       ]
+    },
+    "screenshotsRequested": {
+      "type": ["boolean", "null"],
+      "description": "For review_ready, whether the change needs screenshots under the issue or repository instructions. Null for other outcomes or if unknown."
     },
     "fullSuite": {
       "type": [

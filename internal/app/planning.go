@@ -46,7 +46,7 @@ func (a App) postPlan(ctx, final context.Context, rec *task.Record, docs map[tas
 			applyStop(ctx, cur, "planning", log, a.Now())
 		}))
 	}
-	scope, scopeErr := a.readScope(ctx, rec.Key)
+	scope, scopeErr := a.readRunScope(ctx, rec)
 	if scopeErr == nil && scope.digest != rec.Delegation.ScopeDigest {
 		scopeErr = errors.New("confirmed triage changed during planning; restart to revise the documents")
 	}
@@ -62,7 +62,7 @@ func (a App) postPlan(ctx, final context.Context, rec *task.Record, docs map[tas
 			texts[doc] = text
 		}
 	}
-	currentScope, err := a.readScope(ctx, rec.Key)
+	currentScope, err := a.readRunScope(ctx, rec)
 	if err != nil || currentScope.digest != scope.digest {
 		if err == nil {
 			err = errors.New("confirmed triage changed during planning; restart to revise the documents")
@@ -154,4 +154,51 @@ func planCommentBody(doc task.PlanDoc, fingerprint, text string) string {
 		text = string(r[:maxCommentChars-len([]rune(head))-len([]rune(cut))]) + cut
 	}
 	return head + text
+}
+
+// saveLocalPlan checks that the sources still match the draft before accepting it.
+func (r *taskRun) saveLocalPlan(draft *task.PlanDraft) (bool, step, error) {
+	a := r.a
+	scope, err := a.readRunScope(r.ctx, r.rec)
+	if err == nil && scope.digest != draft.Scope {
+		err = errors.New("confirmed triage changed during planning")
+	}
+	if err == nil {
+		current, readErr := a.readIssuePlan(r.ctx, r.rec)
+		err = readErr
+		if err == nil && current.fingerprint != draft.Fingerprint {
+			err = errors.New("issue description changed during planning")
+		}
+	}
+	for _, doc := range task.PlanDocs {
+		if err == nil && strings.TrimSpace(draft.Documents[doc]) == "" {
+			err = fmt.Errorf("the planning turn wrote no %s", localPlanTitle(doc))
+		}
+	}
+	rec, saveErr := a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
+		d := cur.Delegation
+		d.PlanDraft = nil
+		if err != nil {
+			failTask(cur, err.Error(), a.Now())
+			return
+		}
+		d.LocalPlan = &task.LocalPlan{Fingerprint: draft.Fingerprint, Documents: draft.Documents}
+		d.PlanScopeDigest = scope.digest
+		d.PlanRevision = ""
+		d.PlanDigest = task.Digest(draft.Fingerprint + "\n" + planDigest(draft.Documents))
+		d.PlanImplementationPending = d.PlanImplementationPending || d.PR != 0 || d.LocalHead != "" || d.Implementer.ID != ""
+	}))
+	r.rec = rec
+	if err != nil || saveErr != nil {
+		return true, stepDone, saveErr
+	}
+	fmt.Fprintln(r.log, "foreman: saved checked planning documents in the local task record")
+	return true, stepImplement, nil
+}
+
+func localPlanTitle(doc task.PlanDoc) string {
+	if doc == task.ImplementationPlan {
+		return "Implementation plan"
+	}
+	return doc.Title()
 }

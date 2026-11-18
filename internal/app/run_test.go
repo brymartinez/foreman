@@ -56,6 +56,31 @@ func TestReviewLoopCleanFirstRound(t *testing.T) {
 	}
 }
 
+func TestSkipSelfReviewKeepsAdversarialReviewOnRestart(t *testing.T) {
+	f := newFixture()
+	f.app.SkipSelfReview = true
+	key := started(t, f, startReq(t))
+	f.claude.turn = prTurn("sid-1")
+	f.codex.reviewErr = errors.New("review interrupted")
+	if got := run(t, f, key); got.State != task.Failed || len(f.claude.reviewed) != 0 || len(f.codex.reviewed) != 1 {
+		t.Fatalf("state %s, self reviews %d, adversarial reviews %d", got.State, len(f.claude.reviewed), len(f.codex.reviewed))
+	}
+
+	f.app.SkipSelfReview = false
+	f.codex.reviewErr = nil
+	pr := f.gh.prs[912]
+	pr.BaseRefName = "release"
+	f.gh.prs[912] = pr
+	key = started(t, f, startReq(t))
+	got := run(t, f, key)
+	if got.State != task.WaitingForCI || !got.Delegation.SkipSelfReview || len(f.claude.reviewed) != 0 || len(f.codex.reviewed) != 2 {
+		t.Fatalf("state %s, skip %t, self reviews %d, adversarial reviews %d", got.State, got.Delegation.SkipSelfReview, len(f.claude.reviewed), len(f.codex.reviewed))
+	}
+	if review := got.LatestCompeting(); review == nil || !review.Clean || review.BaseRef != "origin/release" {
+		t.Fatalf("adversarial review = %+v", review)
+	}
+}
+
 func TestReviewLoopFixesFindingsThenReReviews(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))

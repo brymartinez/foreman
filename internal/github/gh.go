@@ -519,6 +519,11 @@ func (c Client) OpenPullRequestForBranch(ctx context.Context, repo task.Repo, br
 	return nil, nil
 }
 
+func (c Client) CreatePullRequest(ctx context.Context, repo task.Repo, branch, base, title, bodyFile string) error {
+	_, err := c.Run(ctx, "", "pr", "create", "--repo", string(repo), "--head", branch, "--base", base, "--title="+title, "--body-file", bodyFile)
+	return err
+}
+
 // branchPRLimit caps the PRs read for one branch name. A full page may hide more, and
 // forks count toward it, so a list that reaches it is an error rather than a guess.
 const branchPRLimit = 100

@@ -260,6 +260,19 @@ func TestReviewBeforePRReviewsTheLocalCommitThenOpensThePR(t *testing.T) {
 	}
 }
 
+func TestReviewBeforePRCanSkipSelfReview(t *testing.T) {
+	f := newFixture()
+	f.app.SkipSelfReview = true
+	key := localTask(t, f)
+	f.wt.checkpointHeads = []string{"commit1"}
+	f.claude.turns = []agent.Turn{reviewReadyTurn("sid-1", proposedBody), prTurn("sid-1")}
+	opensPR(t, f, "commit1", proposedTitle, proposedBody, 1)
+	got := run(t, f, key)
+	if got.State != task.WaitingForCI || openTurns(f) != 1 || len(f.claude.reviewed) != 0 || len(f.codex.reviewed) != 1 {
+		t.Fatalf("state %s, PR turns %d, self reviews %d, adversarial reviews %d", got.State, openTurns(f), len(f.claude.reviewed), len(f.codex.reviewed))
+	}
+}
+
 func TestReviewBeforePRFixesFindingsLocallyAndOpensWithTheUpdatedDescription(t *testing.T) {
 	f := newFixture()
 	key := localTask(t, f)
@@ -632,5 +645,32 @@ func TestReviewBeforePRReviewsAChangedTitleBeforeOpening(t *testing.T) {
 	}
 	if got := f.store.recs[key]; got.Delegation.PR != 912 {
 		t.Fatalf("state %s pr %d", got.State, got.Delegation.PR)
+	}
+}
+
+func TestReviewBeforePRPublishesWithoutAnAgentWhenScreenshotsAreUnneeded(t *testing.T) {
+	f := newFixture()
+	key := localTask(t, f)
+	rec := f.store.recs[key]
+	d := rec.Delegation
+	d.LocalHead, d.ProposedTitle, d.ProposedBody = "commit1", proposedTitle, proposedBody
+	d.ScreenshotsRequested = new(bool)
+	rec.Reviews = []task.Review{{Round: 1, Reviewer: task.Codex, Head: d.LocalHead,
+		Proposal: task.ProposalDigest(d.ProposedTitle, d.ProposedBody), Clean: true, At: now,
+		Scope: d.ScopeDigest, Plan: d.PlanDigest}}
+	f.app.Quota = fakeQuota{q: map[task.Agent]Quota{task.Claude: {Status: QuotaExhausted}}}
+	f.gh.onCreate = func(branch, base, title, body string) {
+		pr := fixturePR()
+		pr.HeadRefName, pr.BaseRefName, pr.HeadSHA = branch, base, f.wt.pushedHead
+		pr.Title, pr.Body = title, body
+		f.gh.prs[912] = pr
+	}
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got := f.store.recs[key]
+	if got.State != task.WaitingForCI || got.Delegation.PR != 912 || got.Delegation.PRHead != "commit1" ||
+		f.claude.starts != 0 || len(f.claude.resumed) != 0 {
+		t.Fatalf("state=%s outcome=%+v Claude starts=%d resumes=%d", got.State, got.LastOutcome, f.claude.starts, len(f.claude.resumed))
 	}
 }

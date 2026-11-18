@@ -40,6 +40,13 @@ var ErrDelegated = errors.New("already delegated")
 // Start prepares the worktree and task file, then launches the detached runner.
 // Rerunning it for a FAILED task, or one whose runner died, resumes from durable state.
 func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) {
+	if a.Triage != nil && req.Key.Source == task.Linear {
+		unlock, err := a.Triage.LockStart(req.Key)
+		if err != nil {
+			return nil, err
+		}
+		defer unlock()
+	}
 	if req.Key.Source == task.Linear {
 		recs, err := a.Store.List(ctx)
 		if err != nil {
@@ -63,9 +70,38 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		return nil, fmt.Errorf("issue belongs to %s, not %s", key.Repo, info.Repo)
 	}
 	req.Repo, req.Key = info.Repo, key
+	if a.Triage != nil && key.Source != task.Linear {
+		unlock, err := a.Triage.LockStart(key)
+		if err != nil {
+			return nil, err
+		}
+		defer unlock()
+	}
 	existing, err := a.Store.Get(ctx, key)
 	if err != nil {
 		return nil, err
+	}
+	models := a.Models
+	if existing != nil && existing.Delegation != nil {
+		if existing.Delegation.Models != nil {
+			models = *existing.Delegation.Models
+			req.Agent = models.Implementation.Agent
+			req.Profile, req.RouteReason = existing.Delegation.Profile, existing.Delegation.RouteReason
+		} else {
+			models = a.migrateModelPolicy(existing.Delegation)
+			if existing.Delegation.Implementer.Agent != "" {
+				req.Agent = existing.Delegation.Implementer.Agent
+			}
+		}
+	}
+	if models.Implementation.Agent == "" {
+		models = legacyModelPolicy(req.Agent, req.Profile)
+	}
+	if req.Agent == "" {
+		req.Agent = models.Implementation.Agent
+	}
+	if req.Agent != models.Implementation.Agent {
+		return nil, fmt.Errorf("implementation is configured for %s, not %s", models.Implementation.Agent, req.Agent)
 	}
 	if err := a.startable(existing); err != nil {
 		return nil, err
@@ -74,9 +110,6 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		return nil, err
 	}
 	if p := req.Profile; p != nil {
-		if req.Agent == "" {
-			req.Agent = p.Agent
-		}
 		if req.Agent != p.Agent {
 			return nil, fmt.Errorf("profile %s runs %s, not %s", p.Name, p.Agent, req.Agent)
 		}
@@ -103,7 +136,26 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 	if issue.State != "open" {
 		return nil, fmt.Errorf("%s is %s", issueLabel(key, issue.Identifier), issue.State)
 	}
-	if !slices.Contains(issue.Labels, "triaged") {
+	localDocuments, trackerTriage := a.Triage != nil, true
+	if existing != nil && existing.Delegation != nil {
+		d := existing.Delegation
+		localDocuments, trackerTriage = d.LocalDocuments, !d.LocalDocuments || d.TrackerTriage
+		if !trackerTriage {
+			if _, err := a.localTriage(key); err != nil {
+				return nil, err
+			}
+		}
+	} else if localDocuments {
+		_, err := a.localTriage(key)
+		if err != nil && !errors.Is(err, ErrAwaitingTriage) {
+			return nil, err
+		}
+		trackerTriage = errors.Is(err, ErrAwaitingTriage)
+	}
+	if trackerTriage && !slices.Contains(issue.Labels, "triaged") {
+		if localDocuments {
+			return nil, ErrAwaitingTriage
+		}
 		return nil, fmt.Errorf("%s no longer has the triaged label", issueLabel(key, issue.Identifier))
 	}
 
@@ -201,31 +253,40 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		}
 		prev := cur.Delegation
 		cur.Delegation = &task.Delegation{
-			Implementer:    task.Session{Agent: req.Agent},
+			Planner:        task.Session{Agent: models.Planning.Agent},
+			Implementer:    task.Session{Agent: models.Implementation.Agent},
 			StartedAt:      now,
-			Reviewer:       req.Agent.Reviewer(),
+			Reviewer:       models.AdversarialReview.Agent,
 			Branch:         wt.Branch,
 			BaseRef:        base,
 			RepoDir:        wt.RepoDir,
 			Worktree:       wt.Path,
 			ContextFile:    req.ContextFile,
 			Profile:        req.Profile,
+			Models:         &models,
 			RouteReason:    req.RouteReason,
 			CheckpointHead: head,
+			LocalDocuments: localDocuments,
+			TrackerTriage:  localDocuments && trackerTriage,
 			ReviewBeforePR: a.ReviewBeforePR,
+			SkipSelfReview: a.SkipSelfReview,
 		}
 		// A restart is the same task, so it keeps the review settings it started with,
 		// and unreviewed local commits are never pushed by a PR-workflow turn. A reset
 		// discarded the run, so it starts with the current settings.
 		if prev != nil {
-			cur.Delegation.Planner = prev.Planner
+			if prev.Planner.Agent != "" {
+				cur.Delegation.Planner = prev.Planner
+			}
 			cur.Delegation.Action = prev.Action
 			cur.Delegation.Implementer.ID = prev.Implementer.ID
-			if !cur.PlanPosted() && prev.Planner.ID == "" && prev.Action == nil && prev.PR == 0 && prev.LocalHead == "" {
+			if !prev.LocalDocuments && !cur.PlanPosted() && prev.Planner.ID == "" && prev.Action == nil && prev.PR == 0 && prev.LocalHead == "" {
 				cur.Delegation.Planner = prev.Implementer
 				cur.Delegation.Implementer.ID = ""
 			}
+			cur.Delegation.LocalPlan, cur.Delegation.PlanRevision = prev.LocalPlan, prev.PlanRevision
 			cur.Delegation.ReviewBeforePR = prev.ReviewBeforePR
+			cur.Delegation.SkipSelfReview = prev.SkipSelfReview
 			cur.Delegation.ClaimVerification = prev.ClaimVerification
 			cur.Delegation.Claims, cur.Delegation.PRDDigest = prev.Claims, prev.PRDDigest
 			cur.Delegation.FullSuiteGate = prev.FullSuiteGate
@@ -274,6 +335,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			recoveringChange := prev.Action != nil && prev.Action.Role() == task.ImplementerRole
 			if prev.LocalHead == head || recoveringChange {
 				cur.Delegation.LocalHead, cur.Delegation.ProposedTitle, cur.Delegation.ProposedBody = prev.LocalHead, prev.ProposedTitle, prev.ProposedBody
+				cur.Delegation.ScreenshotsRequested = prev.ScreenshotsRequested
 			} else if prev.LocalHead != "" {
 				cur.Delegation.Action = nil
 			}
@@ -281,6 +343,11 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		// A retry with the same agent keeps its route. Choosing another agent drops it.
 		if req.Profile == nil && sameAgent && prev.Profile != nil {
 			cur.Delegation.Profile, cur.Delegation.RouteReason, cur.Delegation.RouteLogged = prev.Profile, prev.RouteReason, prev.RouteLogged
+		}
+		if prev != nil && prev.Models != nil && prev.Implementer.Agent == req.Agent {
+			cur.Delegation.Models = prev.Models
+			cur.Delegation.Planner.Agent = prev.Models.Planning.Agent
+			cur.Delegation.Reviewer = prev.Models.AdversarialReview.Agent
 		}
 		if was != task.PRClosed && prev != nil && prev.Branch == wt.Branch {
 			cur.Delegation.PR, cur.Delegation.PRURL, cur.Delegation.PRHead = prev.PR, prev.PRURL, prev.PRHead

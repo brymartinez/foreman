@@ -16,6 +16,7 @@ import (
 )
 
 type fakeWorktrees struct {
+	pushedHead      string
 	reviewBase      string
 	reviewBaseErr   error
 	baseRefs        []string
@@ -85,6 +86,11 @@ func (f *fakeWorktrees) Head(_ context.Context, _ string) (string, error) {
 		return "basehead", nil
 	}
 	return f.head, nil
+}
+
+func (f *fakeWorktrees) PushReviewed(_ context.Context, _, _, head string) error {
+	f.pushedHead = head
+	return nil
 }
 
 func (f *fakeWorktrees) Checkpoint(_ context.Context, _, _, prior string) (string, error) {
@@ -415,7 +421,7 @@ func newFixture() fixture {
 func (f fixture) run(ctx context.Context, key task.Key, pid int, log io.Writer) error {
 	token := ""
 	if rec := f.store.recs[key]; rec != nil && rec.Delegation != nil {
-		if !rec.PlanPosted() && rec.Delegation.PR == 0 && rec.Delegation.PlanDraft == nil && len(rec.Plan) == 0 && len(f.gh.issueComments) == 0 {
+		if !rec.Delegation.LocalDocuments && !rec.PlanPosted() && rec.Delegation.PR == 0 && rec.Delegation.PlanDraft == nil && len(rec.Plan) == 0 && len(f.gh.issueComments) == 0 {
 			provider := f.claude
 			if rec.Delegation.Implementer.Agent == task.Codex {
 				provider = f.codex

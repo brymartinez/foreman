@@ -57,6 +57,19 @@ func (r *taskRun) openPR() (step, error) {
 	}
 	defer os.Remove(bodyFile)
 	fmt.Fprintf(r.log, "foreman: the review of %s is clean; opening the PR\n", short(d.LocalHead))
+	if d.ScreenshotsRequested != nil && !*d.ScreenshotsRequested && len(r.rec.Undelivered()) == 0 {
+		pr, publishErr := r.publishReviewedPR(bodyFile)
+		r.rec, err = a.update(r.final, r.rec.Key, existing(func(cur *task.Record) {
+			if publishErr != nil {
+				failTask(cur, publishErr.Error(), a.Now())
+				return
+			}
+			adoptOpenedPR(cur, pr, a.Now())
+			cur.LastOutcome.Summary = fmt.Sprintf("opened PR #%d for the reviewed commit", pr.Key.Number)
+			cur.Delegation.Action = nil
+		}))
+		return stepDone, err
+	}
 	res := a.runTurn(r.ctx, r.rec, turnRequest{openBodyFile: bodyFile}, a.openedPR(r.log), r.log)
 	r.rec, err = a.finishTurn(r.ctx, r.final, r.rec.Key, "opening the pull request", res, func(cur *task.Record) {
 		applyTurnResult(cur, res, a.Now())
@@ -66,6 +79,21 @@ func (r *taskRun) openPR() (step, error) {
 		}
 	}, r.log)
 	return stepDone, err
+}
+
+func (r *taskRun) publishReviewedPR(bodyFile string) (*PullRequest, error) {
+	a, d := r.a, r.rec.Delegation
+	if err := a.checkAccount(r.ctx, r.rec); err != nil {
+		return nil, err
+	}
+	if err := a.Worktrees.PushReviewed(r.ctx, d.Worktree, d.Branch, d.LocalHead); err != nil {
+		return nil, fmt.Errorf("push the reviewed commit: %w", err)
+	}
+	base := strings.TrimPrefix(d.BaseRef, "origin/")
+	if err := a.GitHub.CreatePullRequest(r.ctx, r.rec.Repo, d.Branch, base, d.ProposedTitle, bodyFile); err != nil {
+		return nil, fmt.Errorf("open the reviewed pull request: %w", err)
+	}
+	return a.openedPR(r.log)(r.ctx, r.rec, agent.Outcome{})
 }
 
 // openTurn resumes the implementer to publish its reviewed commit.
@@ -140,6 +168,7 @@ func adoptOpenedPR(rec *task.Record, pr *PullRequest, now time.Time) {
 	rec.State = task.WaitingForCI
 	rec.CI = nil
 	rec.Delegation.PR, rec.Delegation.PRURL, rec.Delegation.PRHead = pr.Key.Number, pr.URL, pr.HeadSHA
+	rec.Delegation.PRDigest = task.ProposalDigest(pr.Title, pr.Body)
 	rec.Delegation.CheckpointNext = ""
 	rec.LastOutcome = &task.Outcome{Status: string(agent.PROpened), Summary: fmt.Sprintf("adopted PR #%d for the reviewed commit", pr.Key.Number), At: now}
 	coverOpenedPR(rec)
@@ -153,6 +182,7 @@ func coverOpenedPR(rec *task.Record) {
 		latest.PR = d.PR
 	}
 	d.LocalHead, d.ProposedTitle, d.ProposedBody = "", "", ""
+	d.ScreenshotsRequested = nil
 	d.FinalChecks = 0
 }
 

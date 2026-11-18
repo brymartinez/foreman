@@ -10,4 +10,4 @@ Follow the repository's PR template and rules. Use these defaults where it has n
   3. `## Risk`: what could break and where. If risk is low, explain why in one sentence.
   4. `## Review notes`: only decisions, plan deviations, or limits a reviewer needs to know, one line each. Add later developer answers here with `gh pr edit --body` when relevant.
   5. For GitHub issues, `Closes #N`. For Linear issues, follow the repository's link rule.
-- Omit test commands, results, reviewer test steps, planning-comment links, and agent attribution. Use short, plain sentences; cut filler, unsupported claims, em dashes, and "This PR...".
+- Summarize verification briefly. Keep detailed test output, triage, planning documents, and review findings in Foreman. Follow the repository template for any verification details it requires.

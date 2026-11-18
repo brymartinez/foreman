@@ -45,6 +45,11 @@ func (a App) codeReview(ctx context.Context, rec *task.Record, kind task.ReviewK
 	if !self {
 		action.Kind = task.AdversarialAction
 	}
+	models := a.modelPolicy(d)
+	model := models.AdversarialReview
+	if self {
+		model = models.Implementation
+	}
 	if d.Action != nil && d.Action.Kind == action.Kind &&
 		d.Action.Head == head && d.Action.BaseHead == base && d.Action.BaseRef == d.BaseRef &&
 		d.Action.FromHead != "" && d.Action.FromHead != head {
@@ -58,6 +63,7 @@ func (a App) codeReview(ctx context.Context, rec *task.Record, kind task.ReviewK
 	}
 	in := agent.StartInput{
 		Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ReviewerBudgetUSD,
+		Model: model.Model, ReasoningEffort: model.ReasoningEffort,
 		Prompt: agent.ReviewPrompt(agent.ReviewBrief{
 			BaseHead: base, FromHead: action.FromHead, Head: head, Self: self, Passes: a.reviewRounds(),
 			StageInstructions: instructions.Content(), FullSuiteRevision: fullRevision,

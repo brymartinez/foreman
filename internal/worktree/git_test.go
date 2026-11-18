@@ -665,3 +665,40 @@ func TestReviewBasePinsTheFetchedBase(t *testing.T) {
 		t.Fatal("missing base accepted")
 	}
 }
+
+func TestPushReviewedPushesOnlyTheCleanReviewedHead(t *testing.T) {
+	clone, _ := repoWithOrigin(t)
+	branch := "agent/reviewed"
+	run(t, clone, "switch", "-c", branch)
+	head := run(t, clone, "rev-parse", "HEAD")
+	g := Git{}
+	ctx := context.Background()
+
+	if err := os.WriteFile(filepath.Join(clone, "untracked"), []byte("work"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.PushReviewed(ctx, clone, branch, head); err == nil {
+		t.Fatal("pushed a dirty worktree")
+	}
+	run(t, clone, "add", "untracked")
+	run(t, clone, "commit", "-m", "changes after review")
+	if err := g.PushReviewed(ctx, clone, branch, head); err == nil {
+		t.Fatal("pushed a branch that advanced after review")
+	}
+	if got, err := g.RemoteBranchHead(ctx, clone, branch); got != "" || err != nil {
+		t.Fatalf("remote head = %q, %v before publication", got, err)
+	}
+
+	head = run(t, clone, "rev-parse", "HEAD")
+	for range 2 {
+		if err := g.PushReviewed(ctx, clone, branch, head); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, err := g.RemoteBranchHead(ctx, clone, branch); got != head || err != nil {
+		t.Fatalf("remote head = %q, %v, want %s", got, err, head)
+	}
+	if got := run(t, clone, "rev-parse", "--abbrev-ref", "@{upstream}"); got != "origin/"+branch {
+		t.Fatalf("upstream = %q", got)
+	}
+}

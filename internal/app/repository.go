@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -26,14 +27,25 @@ func (a App) ProposeRepository(ctx context.Context, key task.Key) (RepositoryPro
 	if err != nil {
 		return RepositoryProposal{}, err
 	}
-	comments, err := a.issueComments(ctx, key)
-	if err != nil {
-		return RepositoryProposal{}, fmt.Errorf("read triage for repository selection: %w", err)
-	}
 	text := issue.Body
-	for _, comment := range comments {
-		if strings.HasPrefix(comment.Body, "## Triage decisions") || strings.HasPrefix(comment.Body, "## Triage correction") {
-			text += "\n" + comment.Body
+	var local string
+	if a.Triage != nil {
+		local, err = a.localTriage(key)
+		if err != nil && !errors.Is(err, ErrAwaitingTriage) {
+			return RepositoryProposal{}, err
+		}
+	}
+	if local != "" {
+		text += "\n" + local
+	} else {
+		comments, err := a.issueComments(ctx, key)
+		if err != nil {
+			return RepositoryProposal{}, fmt.Errorf("read triage for repository selection: %w", err)
+		}
+		for _, comment := range comments {
+			if strings.HasPrefix(comment.Body, "## Triage decisions") || strings.HasPrefix(comment.Body, "## Triage correction") {
+				text += "\n" + comment.Body
+			}
 		}
 	}
 	repos := map[string]task.Repo{}

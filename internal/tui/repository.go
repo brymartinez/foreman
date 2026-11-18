@@ -37,7 +37,8 @@ func (m *Model) typeRepository(k Key) Action {
 			return Action{}
 		}
 		m.pending.Repo, m.pending.Key.Repo = repo, repo
-		m.Mode, m.Input, m.Message = ChoosingAgent, "", ""
+		m.Message = ""
+		return m.continueStart()
 	}
 	return Action{}
 }

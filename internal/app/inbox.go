@@ -13,8 +13,11 @@ import (
 )
 
 type InboxEntry struct {
-	Item    InboxItem
-	Changes []string
+	LocalTriage bool
+	Triaged     bool
+	TriageError string
+	Item        InboxItem
+	Changes     []string
 	// Delegated says foreman has a run for this item, and State is that run's state.
 	// Together they are what keeps work already in hand out of INBOX.
 	Delegated bool
@@ -45,6 +48,7 @@ type InboxReport struct {
 }
 
 type App struct {
+	Triage TriageStore
 	Store  TaskStore
 	GitHub GitHubClient
 	// ReplyToPRFeedback is disabled in the CLI. It remains available to exercise
@@ -53,6 +57,7 @@ type App struct {
 	FullSuiteGate     bool // enabled in the CLI; every task copies it when it starts
 	Linear            IssueTracker
 	LinearTeam        string
+	Models            task.ModelPolicy
 	Repositories      RepositoryManager
 	Worktrees         WorktreeManager
 	Agents            map[task.Agent]AgentAdapter
@@ -65,6 +70,7 @@ type App struct {
 	// ReviewBeforePR is copied into each task's delegation when it starts. Runs read
 	// the task's copy, so a config change never alters a started task.
 	ReviewBeforePR       bool
+	SkipSelfReview       bool // copied into each new task's delegation
 	ImplementerBudgetUSD float64
 	ReviewerBudgetUSD    float64
 	TaskTokenLimit       int64
@@ -241,6 +247,11 @@ func (a App) inboxView(ctx context.Context, allRepos bool, source task.Source) (
 	}
 	if a.HideMentionOnly {
 		hideMentionOnly(&report, stored)
+	}
+	if a.Triage != nil {
+		a.markLocalTriage(report.Current)
+		a.markLocalTriage(report.New)
+		a.markLocalTriage(report.Changed)
 	}
 	return report, nil
 }

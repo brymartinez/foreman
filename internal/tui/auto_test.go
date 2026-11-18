@@ -356,3 +356,18 @@ func TestAutoCountsHiddenSourcesRunsAgainstTheLimit(t *testing.T) {
 		t.Errorf("header = %q; want no visible task and the hidden run plus the start counted", got)
 	}
 }
+
+func TestManualStartDirectsUntriagedIssueToStandaloneSkill(t *testing.T) {
+	waiting := own(1, 0)
+	waiting.LocalTriage = true
+	waiting.Item.Labels = nil
+	ready := own(2, 1)
+	ready.LocalTriage, ready.Triaged = true, true
+	m := autoModel(3, waiting, ready)
+	if got := startedKeys(m.AutoStarts()); !slices.Equal(got, []task.Key{ready.Item.Key}) {
+		t.Fatalf("auto started %v", got)
+	}
+	if action := m.Key(Key{Kind: KeyEnter}); action.Kind != ActionNone || m.Mode != Browsing || !strings.Contains(m.Message, "Run foreman-triage separately") {
+		t.Fatalf("manual start = %+v, message %q", action, m.Message)
+	}
+}
