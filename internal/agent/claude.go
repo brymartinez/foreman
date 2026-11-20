@@ -128,6 +128,9 @@ func (c Claude) exec(ctx context.Context, in StartInput, args []string) (json.Ra
 	if c.Model != "" {
 		args = append(args, "--model", c.Model)
 	}
+	if in.ReasoningEffort != "" {
+		args = append(args, "--effort", in.ReasoningEffort)
+	}
 	pr, pw := io.Pipe()
 	var result []byte
 	var tools map[string]int

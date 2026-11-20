@@ -482,8 +482,8 @@ the same commit. The commit message records why it changed.
   diagnostic calls do not run in the task lifecycle. Standalone knowledge commands
   remain separate operations.
 - **Stage model policy is explicit:** `models.planning`, `models.implementation`,
-  and `models.adversarial_review` each store an agent, model, and optional Codex
-  reasoning effort. Self-review shares the implementation target. Fixes, merges,
+  and `models.adversarial_review` each store an agent, model, and reasoning effort. All three
+  default to medium for Claude and Codex. Self-review shares the implementation target. Fixes, merges,
   final checks, and PR creation use that same target. Each task snapshots the resolved
   policy before its first call, and each turn logs an `agent:model:step` line.
 

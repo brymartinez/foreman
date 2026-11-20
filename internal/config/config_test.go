@@ -74,6 +74,31 @@ func TestAgentSettingsOverlayDefaults(t *testing.T) {
 	}
 }
 
+func TestTaskEffortDefaultsAndOverrides(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("FOREMAN_CONFIG", path)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []task.ModelTarget{cfg.Models.Planning, cfg.Models.Implementation, cfg.Models.AdversarialReview} {
+		if target.ReasoningEffort != "medium" {
+			t.Errorf("default effort for %s/%s = %q", target.Agent, target.Model, target.ReasoningEffort)
+		}
+	}
+	raw := "models:\n  planning:\n    reasoning_effort: high\n  adversarial_review:\n    agent: claude\n    model: claude-opus-5-5\n    reasoning_effort: low\n"
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Models.Planning.ReasoningEffort != "high" || cfg.Models.Implementation.ReasoningEffort != "medium" || cfg.Models.AdversarialReview.ReasoningEffort != "low" {
+		t.Errorf("unexpected stage effort: %+v", cfg.Models)
+	}
+}
+
 func TestStageModelsAndEffortLoadFromConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	t.Setenv("FOREMAN_CONFIG", path)

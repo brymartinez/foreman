@@ -60,7 +60,7 @@ func TestClaudeStart(t *testing.T) {
 	}
 }
 
-func TestClaudeStageModelsOnStartResumeAndReview(t *testing.T) {
+func TestClaudeStageModelsAndEffortOnStartResumeAndReview(t *testing.T) {
 	var commands []Command
 	exec := func(_ context.Context, cmd Command) error {
 		commands = append(commands, cmd)
@@ -72,8 +72,8 @@ func TestClaudeStageModelsOnStartResumeAndReview(t *testing.T) {
 		return nil
 	}
 	c := Claude{Bin: "claude", Model: "opus", PlanModel: "sonnet", ReviewModel: "opus", Exec: exec, NewSessionID: func() string { return "sid-1" }}
-	plan := StartInput{Worktree: "/wt", Stage: task.StagePlan}
-	implement := StartInput{Worktree: "/wt", Stage: task.StageImplement}
+	plan := StartInput{Worktree: "/wt", Stage: task.StagePlan, ReasoningEffort: "high"}
+	implement := StartInput{Worktree: "/wt", Stage: task.StageImplement, ReasoningEffort: "medium"}
 	if _, err := c.Start(context.Background(), plan, func(task.Session) {}); err != nil {
 		t.Fatal(err)
 	}
@@ -86,12 +86,17 @@ func TestClaudeStageModelsOnStartResumeAndReview(t *testing.T) {
 	if _, err := c.Resume(context.Background(), task.Session{Agent: task.Claude, ID: "sid-2"}, implement); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Review(context.Background(), StartInput{Worktree: "/wt"}); err != nil {
+	if _, err := c.Review(context.Background(), StartInput{Worktree: "/wt", ReasoningEffort: "low"}); err != nil {
 		t.Fatal(err)
 	}
 	for i, want := range []string{"sonnet", "sonnet", "opus", "opus", "opus"} {
 		if got := argValue(commands[i].Args, "--model"); got != want {
 			t.Errorf("command %d model = %q, want %q", i, got, want)
+		}
+	}
+	for i, want := range []string{"high", "high", "medium", "medium", "low"} {
+		if got := argValue(commands[i].Args, "--effort"); got != want {
+			t.Errorf("command %d effort = %q, want %q", i, got, want)
 		}
 	}
 }

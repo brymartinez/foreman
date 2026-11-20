@@ -629,9 +629,11 @@ models:
   planning:
     agent: claude
     model: claude-opus-5-5
+    reasoning_effort: medium
   implementation:
     agent: claude
     model: claude-sonnet-5            # use claude-haiku-4-5-20251001 to change implementation and self-review together
+    reasoning_effort: medium
   adversarial_review:
     agent: codex
     model: gpt-6.1-sol
@@ -729,9 +731,11 @@ models:
   planning:
     agent: claude
     model: claude-opus-5-5
+    reasoning_effort: medium
   implementation:
     agent: claude
     model: claude-sonnet-5
+    reasoning_effort: medium
   adversarial_review:
     agent: codex
     model: gpt-6.1-sol
@@ -756,6 +760,7 @@ automatic starts until both sources refresh successfully.
 
 The configured stage targets choose the providers and models for new tasks. Foreman
 uses the implementation target for code changes and self-review, the planning target
-for planning, and the adversarial-review target for the independent review. Quota
+for planning, and the adversarial-review target for the independent review. Each
+stage defaults to `reasoning_effort: medium` for Claude and Codex. Quota
 checks can pause a role but cannot switch its provider or waive review. The resolved
 targets stay with the task across retries and config edits.

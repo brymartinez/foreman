@@ -153,8 +153,8 @@ func Load() (Config, error) {
 		Notifications:   Notifications{Enabled: true},
 		Auto:            Auto{Agent: task.Claude, MaxConcurrent: 3},
 		Models: task.ModelPolicy{
-			Planning:          task.ModelTarget{Agent: task.Claude, Model: "claude-opus-5-5"},
-			Implementation:    task.ModelTarget{Agent: task.Claude, Model: "claude-sonnet-5"},
+			Planning:          task.ModelTarget{Agent: task.Claude, Model: "claude-opus-5-5", ReasoningEffort: "medium"},
+			Implementation:    task.ModelTarget{Agent: task.Claude, Model: "claude-sonnet-5", ReasoningEffort: "medium"},
 			AdversarialReview: task.ModelTarget{Agent: task.Codex, Model: "gpt-6.1-sol", ReasoningEffort: "medium"},
 		},
 	}
@@ -253,9 +253,6 @@ func validateModelTarget(key string, target task.ModelTarget) error {
 	}
 	if strings.TrimSpace(target.Model) == "" {
 		return fmt.Errorf("%s.model: empty", key)
-	}
-	if target.Agent != task.Codex && target.ReasoningEffort != "" {
-		return fmt.Errorf("%s.reasoning_effort applies only to codex", key)
 	}
 	return nil
 }

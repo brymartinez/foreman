@@ -24,9 +24,11 @@ models:
   planning:
     agent: claude
     model: claude-opus-5-5
+    reasoning_effort: medium
   implementation:
     agent: claude
     model: claude-sonnet-5
+    reasoning_effort: medium
   adversarial_review:
     agent: codex
     model: gpt-6.1-sol
