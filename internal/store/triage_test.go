@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/brymartinez/foreman/internal/task"
@@ -11,7 +12,7 @@ import (
 
 func TestTriageRecordIsConfirmedAndBoundToIssue(t *testing.T) {
 	s := Triage{Dir: t.TempDir()}
-	key := task.Key{Source: task.Linear, ExternalID: "11111111-1111-4111-8111-111111111111"}
+	key := task.Key{Source: task.Local, ExternalID: "L-0000002A"}
 	if text, err := s.Read(key); text != "" || err != nil {
 		t.Fatalf("missing triage = %q, %v", text, err)
 	}
@@ -25,7 +26,7 @@ func TestTriageRecordIsConfirmedAndBoundToIssue(t *testing.T) {
 	if err := s.Save(key, "Replacement"); !errors.Is(err, os.ErrExist) {
 		t.Fatalf("second save = %v", err)
 	}
-	path := filepath.Join(s.Dir, "linear", key.ExternalID+".md")
+	path := filepath.Join(s.Dir, "local", strings.ToLower(key.ExternalID)+".md")
 	if err := os.WriteFile(path, []byte("Unconfirmed draft"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -34,9 +35,9 @@ func TestTriageRecordIsConfirmedAndBoundToIssue(t *testing.T) {
 	}
 }
 
-func TestTriageStartLockUsesLinearIssueIdentity(t *testing.T) {
+func TestTriageStartLockUsesLocalIssueIdentity(t *testing.T) {
 	s := Triage{Dir: t.TempDir()}
-	key := task.Key{Source: task.Linear, ExternalID: "11111111-1111-4111-8111-111111111111", Repo: "acme/web"}
+	key := task.Key{Source: task.Local, ExternalID: "L-0000002A", Repo: "acme/web"}
 	unlock, err := s.LockStart(key)
 	if err != nil {
 		t.Fatal(err)

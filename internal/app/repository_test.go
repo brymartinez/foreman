@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/brymartinez/foreman/internal/store"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -19,9 +20,15 @@ func TestRepositoryProposalUsesIssueAndTriageEvidence(t *testing.T) {
 		{"multiple repositories", "https://github.com/acme/web", "## Triage decisions\nhttps://github.com/acme/api", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			tracker := &lifecycleTracker{issue: Issue{Body: tc.body}, comments: []TrackerComment{{Body: tc.triage}}}
-			a := App{Linear: tracker}
-			p, err := a.ProposeRepository(context.Background(), task.Key{Source: task.Linear, ExternalID: "uuid"})
+			key := task.Key{Source: task.Local, ExternalID: localID}
+			triage := store.Triage{Dir: t.TempDir()}
+			if tc.triage != "" {
+				if err := triage.Save(key, tc.triage); err != nil {
+					t.Fatal(err)
+				}
+			}
+			a := App{LocalIssues: &fakeLocal{issue: Issue{Body: tc.body}}, Triage: triage}
+			p, err := a.ProposeRepository(context.Background(), key)
 			if err != nil || p.Repo != tc.want {
 				t.Fatalf("proposal = %+v, error = %v", p, err)
 			}
@@ -33,12 +40,12 @@ func TestRepositoryProposalUsesIssueAndTriageEvidence(t *testing.T) {
 }
 
 func TestTeamDiscoveryDoesNotRequireOrPersistRepository(t *testing.T) {
-	key := task.Key{Source: task.Linear, ExternalID: "uuid-42"}
-	tracker := &inboxTracker{items: []InboxItem{{Key: key, Identifier: "ENG-42", Kind: task.Issue, State: "open", Reasons: []task.InboxReason{task.Assigned}}}}
+	key := task.Key{Source: task.Local, ExternalID: "L-0000002A"}
+	tracker := &fakeLocal{items: []InboxItem{{Key: key, Identifier: "ENG-42", Kind: task.Issue, State: "open", Reasons: []task.InboxReason{task.Assigned}}}}
 	store := &fakeStore{recs: map[task.Key]*task.Record{}}
-	a := App{Store: store, GitHub: &fakeGitHub{}, Linear: tracker, LinearTeam: "https://linear.app/acme/team/ENG", IncludedRepositories: []task.Repo{"acme/web"}, Runners: &fakeRunners{}, Now: func() time.Time { return now }}
+	a := App{Store: store, GitHub: &fakeGitHub{}, LocalIssues: tracker, IncludedRepositories: []task.Repo{"acme/web"}, Runners: &fakeRunners{}, Now: func() time.Time { return now }}
 	for i := 0; i < 2; i++ {
-		report, err := a.InboxSources(context.Background(), task.Linear)
+		report, err := a.InboxSources(context.Background(), task.Local)
 		if err != nil || len(report.Current) != 1 || report.Current[0].Item.Key != key {
 			t.Fatalf("report=%+v, error=%v", report, err)
 		}
@@ -49,19 +56,19 @@ func TestTeamDiscoveryDoesNotRequireOrPersistRepository(t *testing.T) {
 }
 
 func TestUnresolvedIssueIgnoresOldDiscoveryMapping(t *testing.T) {
-	key := task.Key{Repo: "acme/old", Source: task.Linear, ExternalID: "uuid-42"}
+	key := task.Key{Repo: "acme/old", Source: task.Local, ExternalID: "L-0000002A"}
 	store := &fakeStore{recs: map[task.Key]*task.Record{key: {Key: key, Kind: task.Issue, State: task.Discovered}}}
-	tracker := &inboxTracker{items: []InboxItem{{Key: task.Key{Source: task.Linear, ExternalID: key.ExternalID}, Identifier: "ENG-42", Kind: task.Issue, State: "open"}}}
-	a := App{Store: store, GitHub: &fakeGitHub{}, Linear: tracker, LinearTeam: "https://linear.app/acme/team/ENG", Runners: &fakeRunners{}, Now: func() time.Time { return now }}
-	report, err := a.InboxSources(context.Background(), task.Linear)
+	tracker := &fakeLocal{items: []InboxItem{{Key: task.Key{Source: task.Local, ExternalID: key.ExternalID}, Identifier: "ENG-42", Kind: task.Issue, State: "open"}}}
+	a := App{Store: store, GitHub: &fakeGitHub{}, LocalIssues: tracker, Runners: &fakeRunners{}, Now: func() time.Time { return now }}
+	report, err := a.InboxSources(context.Background(), task.Local)
 	if err != nil || len(report.Current) != 1 || report.Current[0].Item.Key.Repo != "" {
 		t.Fatalf("report=%+v error=%v", report, err)
 	}
 }
 
-func TestLinearStartRefusesDifferentRepositoryForExistingDelegation(t *testing.T) {
+func TestLocalStartRefusesDifferentRepositoryForExistingDelegation(t *testing.T) {
 	f := newFixture()
-	key := task.Key{Repo: "acme/old", Source: task.Linear, ExternalID: "uuid-42"}
+	key := task.Key{Repo: "acme/old", Source: task.Local, ExternalID: "L-0000002A"}
 	f.store.recs[key] = &task.Record{Key: key, Delegation: &task.Delegation{}, State: task.Failed}
 	other := key
 	other.Repo = "acme/new"

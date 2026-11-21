@@ -107,7 +107,7 @@ class Dashboard:
         for _ in range(40):
             self.settle()
             if re.search(r"(^|[\s│])> " + re.escape(text), self.screen(), re.M) or re.search(
-                r"(^|[\s│])> (?:GITHUB|LINEAR)[^\n]*\n\s*" + re.escape(text), self.screen(), re.M
+                r"(^|[\s│])> (?:GITHUB|LOCAL)[^\n]*\n\s*" + re.escape(text), self.screen(), re.M
             ):
                 return
             self.press(b"j")

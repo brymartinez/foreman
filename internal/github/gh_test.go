@@ -20,16 +20,16 @@ func fixtures(t *testing.T) Runner {
 	return func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		cmd := strings.Join(args, " ")
 		for flag, file := range map[string]string{
-			"--assignee=@me":                            "assigned",
-			"issues --mentions=@me":                     "mentioned",
-			"prs --mentions=@me":                        "mentioned_prs",
-			"--review-requested=@me":                    "review_requested",
-			"repos/testorg/example/issues/912": "merged_pr",
-			"issue view 825":                            "issue",
-			"repo view":                                 "repo",
-			"pr view 912":                               "pr",
-			"--head agent/825-provider-retries":         "pr_list",
-			"--head agent/1-none":                       "empty_list",
+			"--assignee=@me":                    "assigned",
+			"issues --mentions=@me":             "mentioned",
+			"prs --mentions=@me":                "mentioned_prs",
+			"--review-requested=@me":            "review_requested",
+			"repos/testorg/example/issues/912":  "merged_pr",
+			"issue view 825":                    "issue",
+			"repo view":                         "repo",
+			"pr view 912":                       "pr",
+			"--head agent/825-provider-retries": "pr_list",
+			"--head agent/1-none":               "empty_list",
 		} {
 			if strings.Contains(cmd, flag) {
 				if strings.HasPrefix(cmd, "search") && !strings.Contains(cmd, "--state=open") {

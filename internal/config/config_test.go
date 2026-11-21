@@ -169,37 +169,32 @@ func TestLoadValidatesRepositoryLists(t *testing.T) {
 	}
 }
 
-func TestLinearTeamNormalizesURL(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	t.Setenv("FOREMAN_CONFIG", path)
-	for _, suffix := range []string{"", "/overview", "/issues"} {
-		if err := os.WriteFile(path, []byte("linear_team: https://linear.app/acme/team/ENG"+suffix+"\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		cfg, err := Load()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if cfg.LinearTeam != "https://linear.app/acme/team/ENG" {
-			t.Fatalf("team = %q", cfg.LinearTeam)
-		}
-	}
-}
-
-func TestLinearTeamRejectsMappingsAndProjectURLs(t *testing.T) {
+func TestRetiredLinearSettingsGetAnUpgradeMessage(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	t.Setenv("FOREMAN_CONFIG", path)
 	for _, body := range []string{
-		"linear_teams: {}\n", "linear_projects: {}\n",
-		"linear_team: https://linear.app/acme/project/site-123\n",
-		"linear_team: https://linear.app/acme/issue/ENG-123\n",
+		"linear_team: https://linear.app/acme/team/ENG\n", "linear_team: \"\"\n",
+		"linear_teams: {}\n", "linear_projects: {}\n", "default_source: linear\n",
 	} {
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Load(); err == nil {
-			t.Fatalf("accepted %q", body)
+		_, err := Load()
+		if err == nil || !strings.Contains(err.Error(), "Linear support was removed") || !strings.Contains(err.Error(), "foreman issue add") {
+			t.Fatalf("%q gave err = %v, want the upgrade message", body, err)
 		}
+	}
+}
+
+func TestLocalIsAnIssueSource(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("FOREMAN_CONFIG", path)
+	if err := os.WriteFile(path, []byte("default_source: local\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil || cfg.DefaultSource != task.Local {
+		t.Fatalf("default_source local = %q, %v", cfg.DefaultSource, err)
 	}
 }
 
@@ -443,7 +438,7 @@ func TestDefaultSourceIsGitHubWhenUnsetAndLoadsEachValidValue(t *testing.T) {
 	if cfg, err := autoConfig(t, "default_source:\n"); err != nil || cfg.DefaultSource != task.GitHub {
 		t.Fatalf("empty default_source = %q, %v; want github", cfg.DefaultSource, err)
 	}
-	for _, want := range []task.Source{task.GitHub, task.Linear, SourceAll} {
+	for _, want := range []task.Source{task.GitHub, task.Local, SourceAll} {
 		cfg, err := autoConfig(t, "default_source: "+string(want)+"\n")
 		if err != nil || cfg.DefaultSource != want {
 			t.Errorf("default_source: %s loaded as %q, %v", want, cfg.DefaultSource, err)
@@ -542,7 +537,6 @@ auto:
   max_concurrent: 2
 include_repositories: [acme/web]
 exclude_repositories: [acme/api]
-linear_team: https://linear.app/acme/team/WEB
 `
 	cfg, err := autoConfig(t, body)
 	if err != nil || cfg.DefaultSource != SourceAll || cfg.Auto.MaxConcurrent != 2 || cfg.Codex.ReviewReasoningEffort != "low" {
@@ -593,13 +587,19 @@ func TestRunnerBudgetDefaultsOverridesAndValidation(t *testing.T) {
 	}
 }
 
-func TestLinearTeamLoadsWithoutRepositoryMapping(t *testing.T) {
+func TestEmptyDatabaseSettingKeepsTheDefaultFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	t.Setenv("FOREMAN_CONFIG", path)
-	if err := os.WriteFile(path, []byte("linear_team: https://linear.app/acme/team/ENG/overview\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Load(); err != nil {
-		t.Fatal(err)
+	for _, raw := range []string{"database: \"\"\n", "database:\n", "database: \"  \"\n"} {
+		if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Database == "" || filepath.Base(cfg.Database) != "foreman.db" || !filepath.IsAbs(cfg.Database) {
+			t.Errorf("%q: database = %q, want the default <data>/foreman.db", raw, cfg.Database)
+		}
 	}
 }

@@ -17,6 +17,13 @@ type confirmedScope struct {
 }
 
 func (a App) readScope(ctx context.Context, key task.Key) (confirmedScope, error) {
+	if key.Source == task.Local {
+		text, err := a.localTriage(key)
+		if err != nil {
+			return confirmedScope{}, err
+		}
+		return confirmedScope{text: text, digest: task.Digest(text)}, nil
+	}
 	issue, err := a.issue(ctx, key)
 	if err != nil {
 		return confirmedScope{}, fmt.Errorf("reading issue for confirmed scope: %w", err)

@@ -18,18 +18,28 @@ go build -o "$work/foreman" "$root/cmd/foreman"
 
 pass() { printf '  ok   %s\n' "$1"; }
 fail() { printf '  FAIL %s\n' "$1"; failures=$((failures + 1)); }
+# Tasks live in the SQLite database. sync_tasks refreshes tasks/ with the one-way
+# Markdown export, so the checks below can read a task as text. A sandbox with no
+# database yet has nothing to export.
+sync_tasks() {
+	[ -n "${sandbox:-}" ] && [ -e "$sandbox/foreman.db" ] && [ -d "$sandbox/tasks" ] || return 0
+	(cd "${FOREMAN_CWD:-$sandbox}" && "$work/foreman" export markdown "$sandbox/tasks" >/dev/null 2>&1) || true
+}
 check() { # check <description> <command...>
 	local what=$1
 	shift
+	sync_tasks
 	if "$@" >/dev/null 2>&1; then pass "$what"; else fail "$what"; fi
 }
 contains() { grep -qF -- "$2" "$1"; }
 eventually() { # eventually <seconds> <command...>
 	local end=$((SECONDS + $1))
 	shift
+	sync_tasks
 	until "$@"; do
 		[ $SECONDS -lt $end ] || return 1
 		sleep 0.1
+		sync_tasks
 	done
 }
 
@@ -42,11 +52,14 @@ dash() {
 	local flags=()
 	while [ $# -gt 0 ] && [ "$1" != -- ]; do flags+=("$1"); shift; done
 	[ ${#flags[@]} -gt 0 ] || flags=(--no-auto)
-	(cd "${FOREMAN_CWD:-$sandbox}" && HOME="$sandbox/home" python3 "$root/scripts/tui-drive.py" "$work/foreman" "${flags[@]}" "$@")
+	local rc=0
+	(cd "${FOREMAN_CWD:-$sandbox}" && HOME="$sandbox/home" python3 "$root/scripts/tui-drive.py" "$work/foreman" "${flags[@]}" "$@") || rc=$?
+	sync_tasks
+	return $rc
 }
 
 # check runs commands through bash -c too, so they can use dash.
-export -f dash
+export -f dash sync_tasks
 export root work
 
 # screen runs one GitHub refresh in the dashboard and prints what it shows.
@@ -79,7 +92,7 @@ start() {
 	dash -- refreshed "pick=acme/widgets#$1" 'keys=\r1\r' confirm-branch "wait=Started acme/widgets#$1"
 }
 
-runner_pid() { sed -n 's/^runner_pid: *//p' "$sandbox/tasks/acme-widgets-$1.md"; }
+runner_pid() { sync_tasks; sed -n 's/^runner_pid: *//p' "$sandbox/tasks/acme-widgets-$1.md"; }
 pid_gone() { ! kill -0 "$1" 2>/dev/null; }
 agent_gone() { ! kill -0 -- "-$(cat "$state/$1-agent.pid")" 2>/dev/null; }
 processes_gone() { pid_gone "$1" && agent_gone "$2"; }
@@ -107,6 +120,7 @@ setup() {
 	export sandbox FOREMAN_CWD="$sandbox/checkout"
 
 	cat >"$sandbox/config.yaml" <<EOF
+database: $sandbox/foreman.db
 triage_dir: $sandbox/triage
 tasks_dir: $sandbox/tasks
 worktrees_dir: $sandbox/worktrees
@@ -126,6 +140,19 @@ codex:
   reasoning_effort: medium
   plan_reasoning_effort: xhigh
   review_reasoning_effort: medium
+models:
+  planning:
+    agent: claude
+    model: sonnet
+    reasoning_effort: medium
+  implementation:
+    agent: claude
+    model: opus
+    reasoning_effort: medium
+  adversarial_review:
+    agent: codex
+    model: gpt-6-sol
+    reasoning_effort: medium
 notifications:
   enabled: false
 EOF
@@ -266,6 +293,15 @@ if [[ -f "$E2E_STATE/correction-committed" && "$2" != *"Push it and open the pul
 	echo '{"type":"result","session_id":"s1","subtype":"success","structured_output":{"status":"review_ready","summary":"The old finding is already fixed in this commit","reviewAssessment":{"round":1,"rejected":[{"finding":1,"reason":"Already fixed in the committed correction; no further edit is needed."}]},"nextObjective":null,"prNumber":null,"prUrl":null,'"$(full)"',"questions":[],"documents":null,"prTitle":"feat: add retries","prBody":"Retry 5xx and 429.\n\nCloses #42"}}'
 	exit 0
 fi
+# The learner's evaluation turn answers with the JSON the scenario prepared for the task's
+# title, or with no proposals.
+if [[ "$*" == *"You evaluate one finished task"* ]]; then
+	echo "claude evaluate" >>"$E2E_STATE/evaluations.log"
+	title=$(printf '%s\n' "$*" | sed -n 's/^Title: //p' | head -n 1)
+	if [ -f "$E2E_STATE/evaluation-$title.json" ]; then out=$(cat "$E2E_STATE/evaluation-$title.json"); else out='{"assessment":"went fine","signals":[],"proposals":[],"revisions":[]}'; fi
+	printf '{"type":"result","session_id":"e1","subtype":"success","total_cost_usd":0.01,"structured_output":%s}\n' "$out"
+	exit 0
+fi
 # Planner and implementer prompts are dispatched to retained task sessions.
 planning=
 if [[ "$2" == *"You are the planner"* || "$2" == *"## Plan first"* ]]; then
@@ -273,6 +309,11 @@ if [[ "$2" == *"You are the planner"* || "$2" == *"## Plan first"* ]]; then
 	if [[ " $* " == *" --resume "* ]]; then echo "planner resume" >>"$E2E_STATE/role-sessions.log"; else echo "planner start" >>"$E2E_STATE/role-sessions.log"; fi
 	printf '%s' "$2" >"$E2E_STATE/prompt.txt"
 	planning=1
+elif [[ "$2" == "The previous turn for this action was interrupted"* && "$2" == *"You are the implementation agent"* && "$2" != *"You are correcting the latest review"* ]]; then
+	# A restarted implementation turn does the same work as the first one. The shipped
+	# implement stage text mentions review findings, so it must not look like a fix.
+	echo "claude implement" >>"$E2E_STATE/agents.log"
+	printf '%s' "$*" >"$E2E_STATE/plan-posted-prompt.txt"
 elif [[ " $* " == *" --resume "* || "$2" == *"You are correcting the latest review"* || "$2" == *"## Final full check"* || "$2" == *"Push it and open the pull request now"* ]]; then
 	if [[ "$2" == *"foreman posted your documents"* ]]; then
 		echo "claude implement" >>"$E2E_STATE/agents.log"
@@ -533,10 +574,33 @@ notifications_config() {
 	chmod 600 "$sandbox/config.yaml"
 }
 
+# confirm_triage <triage id> stores a confirmed triage record in the database, the way
+# `foreman` would after a skill session. GitHub issues have no CLI for it, because the
+# standalone skill publishes to the issue itself; e2e writes the row directly. Opening
+# the database first through `foreman issue list` creates and migrates it.
 confirm_triage() {
-	local id=$1 path="$sandbox/triage/$1.md"
-	mkdir -p "$(dirname "$path")"
-	printf '<!-- foreman:confirmed-triage %s -->\n# Triage decisions\n\nProceed with the issue as described.\n' "$id" >"$path"
+	foreman issue list >/dev/null 2>&1 || true
+	sqlite3 -cmd ".timeout 5000" "$sandbox/foreman.db" \
+		"INSERT OR REPLACE INTO triage (id, decisions, confirmed_at) VALUES ('$1', 'Proceed with the issue as described.', '2026-09-25T10:00:00Z')"
+}
+
+# Tasks live in the database, so a scenario that needs a task in a state the stubs cannot
+# reach edits the row the way an earlier version edited the file.
+#   set_state <task id> <STATE> rewrites the stored state and the document's state line.
+#   seed_task <task id> <file> stores a Markdown task document as a new row.
+set_state() {
+	local cur
+	cur=$(sqlite3 "$sandbox/foreman.db" "SELECT state FROM tasks WHERE id = '$1'")
+	sqlite3 -cmd ".timeout 5000" "$sandbox/foreman.db" \
+		"UPDATE tasks SET state = '$2', document = replace(document, char(10) || 'state: $cur' || char(10), char(10) || 'state: $2' || char(10)) WHERE id = '$1'"
+}
+seed_task() { # seed_task <owner/repo#number> <file>
+	local id=$1 repo number
+	repo=${id%#*}
+	number=${id#*#}
+	foreman issue list >/dev/null 2>&1 || true
+	sqlite3 -cmd ".timeout 5000" "$sandbox/foreman.db" \
+		"INSERT INTO tasks (id, source, repo, number, external_id, state, title, document, updated_at) VALUES ('$id', 'github', '$repo', $number, '', 'FAILED', 'Add retries', CAST(readfile('$2') AS TEXT), '2026-10-01T10:00:00Z')"
 }
 
 issue() { # issue <number> <title> [labels-json]
@@ -573,7 +637,7 @@ scenario_runner() {
 	check "log lines are timestamped" grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$log"
 	check "agent stderr reached the log" contains "$log" "claude stderr progress"
 	check "no line is stamped twice" bash -c "! grep -qE '^[^ ]+ [0-9]{4}-[0-9]{2}-[0-9]{2}T' '$log'"
-	check "planning carries the plan stage file" contains "$state/prompt.txt" "Write two short documents before changing code."
+	check "planning carries the plan stage file" contains "$state/prompt.txt" "You are the planning agent."
 	check "the first turn plans" contains "$state/prompt.txt" "You are the planner"
 	check "the documents stay off the issue" bash -c "! grep -qF 'api --method POST repos/acme/widgets/issues/42/comments' '$state/gh.log'"
 	check "the checked documents are stored locally" contains "$sandbox/tasks/acme-widgets-42.md" "local_plan:"
@@ -843,7 +907,7 @@ scenario_logs() {
 	check "R marks the pane raw" contains "$sandbox/raw.txt" "LOG · raw · acme/widgets#42"
 	check "raw keeps Codex JSON" contains "$sandbox/raw.txt" '"type":"turn.completed"'
 	task 42 sd >"$sandbox/show.txt"
-	check "the show pane reports usage" contains "$sandbox/show.txt" 'Claude $0.37 (4 turns) · Codex 120 tokens (1 turn)'
+	check "the show pane reports usage" contains "$sandbox/show.txt" 'Claude $0.32 (3 turns) · Codex 120 tokens (1 turn)'
 
 	# Far more than one bounded read of the log, so g must load older chunks.
 	local log first
@@ -921,61 +985,30 @@ scenario_inbox() {
 	check "and the fixed config opens the dashboard" dash -- refreshed
 }
 
-scenario_linear() {
-	echo "linear: mixed issue sources, filters, delegation, and failed refresh"
-	setup linear
-	python3 "$root/scripts/linear-stub.py" "$state" &
-	listeners="$listeners $!"
-	eventually 5 test -s "$state/linear-port"
-	export LINEAR_API_KEY=e2e-personal-key
-	export FOREMAN_LINEAR_ENDPOINT="http://127.0.0.1:$(cat "$state/linear-port")/graphql"
-	cat >>"$sandbox/config.yaml" <<'EOF'
-linear_team: https://linear.app/acme/team/LIN
-EOF
-	issue 43 "GitHub work" '[{"name":"triaged"}]'
-	confirm_triage "linear/11111111-1111-4111-8111-111111111111"
-	echo "[$(hit acme/widgets 43 'GitHub work'),$(hit acme/linear 44 'Mapped GitHub work')]" >"$state/search-issues-assignee.json"
-	dash --no-auto -s all -- refreshed print >"$sandbox/mixed.txt" 2>/dev/null
-	check "the mixed inbox shows the GitHub section" contains "$sandbox/mixed.txt" "GITHUB"
-	check "the mixed inbox shows the Linear section" contains "$sandbox/mixed.txt" "LINEAR"
-	check "the mixed inbox shows both issues" bash -c "grep -qF 'acme/widgets#43' '$sandbox/mixed.txt' && grep -qF 'LIN-7' '$sandbox/mixed.txt'"
-	check "the team does not hide GitHub issues" bash -c "grep -qF 'acme/linear#44' '$sandbox/mixed.txt'"
-	dash --no-auto -s github -- refreshed print >"$sandbox/github.txt" 2>/dev/null
-	check "the GitHub filter hides Linear issues" bash -c "grep -qF 'acme/widgets#43' '$sandbox/github.txt' && ! grep -qF 'LIN-7' '$sandbox/github.txt'"
-	dash --no-auto -s linear -- refreshed print >"$sandbox/linear.txt" 2>/dev/null
-	check "the Linear filter hides GitHub inbox issues" bash -c "grep -qF 'LIN-7' '$sandbox/linear.txt' && ! grep -qF 'GITHUB' '$sandbox/linear.txt'"
-	touch "$state/linear-fail"
-	dash --auto -s all -- refreshed print >"$sandbox/failed.txt" 2>/dev/null
-	check "a failed Linear refresh keeps GitHub results with a warning" bash -c "grep -qF 'acme/widgets#43' '$sandbox/failed.txt' && grep -qF 'warning' '$sandbox/failed.txt'"
-	check "a failed mixed refresh blocks all auto starts" grep -q '^state: DISCOVERED' "$sandbox/tasks/acme-widgets-43.md"
-	rm -f "$state/linear-fail"
-	check "a GitHub issue can be delegated" dash --no-auto -s github -- refreshed "pick=acme/widgets#43" 'keys=\r1\r' confirm-branch "wait=Started acme/widgets#43"
-	check "the GitHub task keeps its issue number" grep -q '^number: 43' "$sandbox/tasks/acme-widgets-43.md"
-	if dash --no-auto -s linear -- refreshed "pick=LIN-7" 'keys=\r' "wait=GitHub repository" 'keys=acme/linear\r1\r' confirm-branch "wait=Started acme/linear · LIN-7" >"$sandbox/linear-start.txt" 2>&1; then
-		pass "a Linear issue can be delegated"
+scenario_local() {
+	echo "local: intake, delegation, restart, and portable export with no tracker credentials"
+	setup local
+	printf 'Proceed with search as described. Implement in https://github.com/acme/widgets.\n' >"$sandbox/local-triage.md"
+	local id
+	id=$(printf 'Add search to the widgets page.' | foreman issue add --title "Add search" --url https://linear.app/acme/issue/LIN-7/add-search \
+		--description-file - --triage-file "$sandbox/local-triage.md" --tag frontend)
+	check "intake prints a stable local ID" bash -c "[[ '$id' =~ ^L-[0-9A-F]{8}\$ ]]"
+	check "the issue lists as triaged" bash -c "'$work/foreman' issue list | grep -qF '$id'$'\ttriaged'"
+	check "the local issue appears in the inbox" dash --no-auto -s local -- refreshed "pick=$id"
+	if dash --no-auto -s local -- refreshed "pick=$id" 'keys=\r' "wait=GitHub repository" 'keys=\r1\r' confirm-branch "wait=Started acme/widgets" >"$sandbox/local-start.txt" 2>&1; then
+		pass "a local issue can be delegated"
 	else
-		fail "a Linear issue can be delegated"
+		fail "a local issue can be delegated"
 	fi
-	check "the Linear task keeps its issue ID" grep -q '11111111-1111-4111-8111-111111111111' "$sandbox/tasks/acme-linear-linear-11111111-1111-4111-8111-111111111111.md"
-	check "the Linear task uses the name supplied by Linear" grep -q '^branch: bryan/lin-7-add-search' "$sandbox/tasks/acme-linear-linear-11111111-1111-4111-8111-111111111111.md"
-	check "the runner saves the Linear plan locally" eventually 10 grep -q '^local_plan:' "$sandbox/tasks/acme-linear-linear-11111111-1111-4111-8111-111111111111.md"
-	check "the runner leaves Linear comments alone" test ! -e "$state/linear-comment-2"
-	check "the Linear task reaches a clean GitHub PR review" eventually 15 grep -q 'verdict: clean' "$sandbox/tasks/acme-linear-linear-11111111-1111-4111-8111-111111111111.md"
-	check "the Linear PR stays in its GitHub repository and links its issue" bash -c "grep -qF 'github.com/acme/linear/pull/947' '$state/pr-947.json' && grep -qF 'LIN-7/add-search' '$state/pr-947.json' && ! grep -qF 'Closes #' '$state/pr-947.json'"
-	check "the Linear PR prompt names its issue link rule" contains "$state/plan-posted-prompt.txt" "Put LIN-7 in the pull request title"
-	dash --no-auto -s github -- refreshed print >"$sandbox/github-delegated.txt" 2>/dev/null
-	check "the GitHub-only view hides delegated Linear work" bash -c "! grep -qF 'LIN-7' '$sandbox/github-delegated.txt'"
-	dash --no-auto -s linear -- refreshed print >"$sandbox/linear-delegated.txt" 2>/dev/null
-	check "the Linear-only view shows delegated Linear work" contains "$sandbox/linear-delegated.txt" "LIN-7"
-	dash --no-auto -- refreshed print >"$sandbox/default-delegated.txt" 2>/dev/null
-	check "the built-in default source hides delegated Linear work" bash -c "! grep -qF 'LIN-7' '$sandbox/default-delegated.txt'"
-	echo "default_source: all" >>"$sandbox/config.yaml"
-	dash --no-auto -- refreshed print >"$sandbox/both-delegated.txt" 2>/dev/null
-	check "default_source all shows delegated Linear work" contains "$sandbox/both-delegated.txt" "LIN-7"
-	unset LINEAR_API_KEY
-	check "-s github overrides default_source and needs no Linear key" dash --no-auto -s github -- refreshed
-	check "mixed use without a Linear key gives a setup error" bash -c "! dash -- 2>'$sandbox/missing-key.txt' && grep -qF LINEAR_API_KEY '$sandbox/missing-key.txt'"
-	unset FOREMAN_LINEAR_ENDPOINT
+	check "the task reaches a clean GitHub PR review" eventually 20 grep -q 'verdict: clean' "$sandbox/tasks/acme-widgets-local-$id.md"
+	check "the source link never reaches GitHub" bash -c "! grep -qF 'linear.app' '$state/gh.log'"
+	check "the prompt puts the local ID in the PR title and keeps the source link out" bash -c "grep -qF 'Put $id in the pull request title. Do not put the issue' '$state/plan-posted-prompt.txt'"
+	check "no Linear or Jira call was made" bash -c "! grep -qiE 'linear|jira' '$state/gh.log'"
+	check "the task survives a restart of the dashboard" dash --no-auto -s local -- refreshed "wait=$id"
+	foreman issue export -o "$sandbox/work.yaml" >/dev/null
+	check "the export holds the issue and its triage" bash -c "grep -qF '$id' '$sandbox/work.yaml' && grep -qF 'Proceed with search' '$sandbox/work.yaml'"
+	check "the export holds no machine paths" bash -c "! grep -qF '$sandbox' '$sandbox/work.yaml'"
+	check "importing the export again changes nothing" bash -c "'$work/foreman' issue import '$sandbox/work.yaml' | grep -qF '0 new records; 1 already present'"
 }
 
 scenario_inbox_lifecycle() {
@@ -1089,9 +1122,9 @@ scenario_respond() {
 	check "the task still waits" wait_status "NEEDS_DECISION" 1
 	check "the second answer relaunches the run" dash -- refreshed keys=l pick=acme/widgets#42 'keys=\r\r' "wait=Resumed acme/widgets#42 with the answers"
 	check "the run reaches a clean review" wait_status "review ✓"
-	check "the agent resumed once, with both answers" test "$(turns 'claude resume')" = 1
-	check "resume carries the first answer" contains "$state/resume-prompt.txt" "Decision: B. 4xx and 5xx"
-	check "resume carries the second answer" contains "$state/resume-prompt.txt" "Decision: A. 3 tries"
+	check "the planner resumed once, with both answers" test "$(grep -c 'planner resume' "$state/role-sessions.log")" = 1
+	check "resume carries the first answer" contains "$state/prompt.txt" "Decision: B. 4xx and 5xx"
+	check "resume carries the second answer" contains "$state/prompt.txt" "Decision: A. 3 tries"
 }
 
 scenario_cancel() {
@@ -1124,12 +1157,12 @@ scenario_reset() {
 	branch=$(sed -n 's/^branch: *//p' "$file")
 	log=$(ls "$sandbox"/logs/acme-widgets-42.log)
 	check "the first runner finishes before reset" eventually 5 grep -qF "finished" "$log"
-	perl -pi -e 's/^state: .*/state: FAILED/' "$file"
+	set_state "acme/widgets#42" FAILED
 	echo wip >"$wt/notes.txt"
 	echo '[[{"id":71,"html_url":"https://github.com/acme/widgets/pull/942#issuecomment-71","body":"Only retry idempotent calls.","updated_at":"2026-10-01T10:00:00Z","user":{"login":"brymartinez"}}]]' \
 		>"$state/conv-repos-acme-widgets-issues-942-comments.json"
 	local writes
-	writes=$(grep -c 'api --method' "$state/gh.log")
+	writes=$(grep -c 'api --method' "$state/gh.log" || true)
 
 	mv "$state/pr-942.json" "$state/pr-942.hold"
 	check "with GitHub failing, x then y keeps the run" dash -- refreshed keys=l pick=acme/widgets#42 keys=xy "wait=nothing was deleted"
@@ -1210,7 +1243,7 @@ scenario_routing() {
 	rm "$sandbox/routing.yaml"
 
 	# A dashboard start routed #42 to a profile that plans with opus, and the run failed.
-	cat >"$sandbox/tasks/acme-widgets-42.md" <<EOF2
+	cat >"$sandbox/seed-42.md" <<EOF2
 ---
 repo: acme/widgets
 number: 42
@@ -1227,6 +1260,7 @@ profile:
 route_reason: broad or ambiguous design work
 ---
 EOF2
+	seed_task "acme/widgets#42" "$sandbox/seed-42.md"
 	check "a retry with the same agent starts" start 42
 	check "the run reaches a clean review" wait_status "review ✓"
 	local log
@@ -1322,11 +1356,11 @@ scenario_history() {
 	check "esc returns to the dashboard" dash -- refreshed keys=p "wait=#907" 'keys=\x1b' "wait=DELEGATED WORK"
 }
 
-# evaluated <repo dir> <n> [seconds] waits for task #n's evaluation, refreshing so a
+# evaluated <owner/repo> <n> [seconds] waits for task #n's evaluation, refreshing so a
 # learner that lost the repository lock is started again.
 evaluated() {
-	local end=$((SECONDS + ${3:-15}))
-	until [ -f "$sandbox/knowledge/$1/evaluations/$2.yaml" ]; do
+	local end=$((SECONDS + ${3:-15})) repo=$1
+	until foreman knowledge export "$repo" 2>/dev/null | grep -qE "^ *(- )?task: ['\"]?$2['\"]?$"; do
 		[ $SECONDS -lt $end ] || return 1
 		screen >/dev/null
 		sleep 0.1
@@ -1352,7 +1386,7 @@ scenario_learning() {
 	start 42 >/dev/null
 	check "the first task reaches a clean review" reviewed 42 20
 	check "and is evaluated" evaluated acme/widgets 42
-	check "one task's learning stays a candidate" eventually 5 grep -q 'status: candidate' "$k/learnings.yaml"
+	check "one task's learning stays a candidate" eventually 5 kgrep acme/widgets 'status: candidate'
 	check "a candidate stays out of knowledge.md" bash -c "! grep -qF 'go vet' '$k/knowledge.md'"
 
 	start 43 >/dev/null
@@ -1364,6 +1398,7 @@ scenario_learning() {
 	# A task in another repository: same origin, but foreman keys it as acme/linear.
 	echo "[$(hit acme/linear 45 'Other repo work')]" >"$state/search-issues-assignee.json"
 	issue 45 "Other repo work"
+	confirm_triage "github/acme/linear/45"
 	dash -- refreshed "pick=acme/linear#45" 'keys=\r1\r' confirm-branch "wait=Started acme/linear#45" >/dev/null 2>&1 || true
 	check "the other repository's task reaches a clean review" eventually 20 grep -q 'verdict: clean' "$sandbox/tasks/acme-linear-45.md"
 	check "its prompt carries no knowledge from acme/widgets" bash -c "! grep -qF 'go vet' '$state/prompt.txt'"
@@ -1378,8 +1413,8 @@ scenario_learning() {
 	check "its planning prompt omits the learning" bash -c "! grep -qF 'Run go vet before each commit.' '$state/prompt.txt'"
 	check "without a repository knowledge section" bash -c "! grep -qF '## Repository knowledge' '$state/prompt.txt'"
 	check "and is evaluated" evaluated acme/widgets 44
-	check "the developer's comment is citable maintainer evidence" eventually 10 grep -q -- '- C1' "$k/evaluations/44.yaml"
-	check "a maintainer contradiction retires the learning" eventually 5 grep -q 'status: retired' "$k/learnings.yaml"
+	check "the developer's comment is citable maintainer evidence" eventually 10 kgrep acme/widgets '- C1'
+	check "a maintainer contradiction retires the learning" eventually 5 kgrep acme/widgets 'status: retired'
 	check "the retired learning leaves knowledge.md" bash -c "! grep -qF 'go vet' '$k/knowledge.md'"
 	check "the learner evaluated every finished task" bash -c "[ \"\$(grep -c '^claude evaluate' '$state/evaluations.log')\" -ge 4 ]"
 }
@@ -1415,14 +1450,23 @@ assessment: fine
 EOF
 }
 
+# kgrep <repo> <text> looks for text in the repository's knowledge export.
+kgrep() { foreman knowledge export "$1" 2>/dev/null | grep -q -- "$2"; }
+
 # store_digest <store dir> hashes every file but the lock, to show nothing changed.
-store_digest() { (cd "$1" && find . -type f ! -name learning.lock | LC_ALL=C sort | xargs shasum); }
+# Knowledge lives in the database, so it is hashed through the export, less the time.
+store_digest() { foreman knowledge export acme/widgets 2>/dev/null | grep -v '^exported_at:' | shasum; }
+# has_task <machine, or a for the default> <repo> <task> reports a stored evaluation.
+has_task() {
+	local m=$1 repo=$2 task=$3
+	if [ "$m" = a ]; then foreman knowledge export "$repo" 2>/dev/null; else on "$m" knowledge export "$repo" 2>/dev/null; fi | grep -qE "^ *(- )?task: ['\"]?$task['\"]?\$"
+}
 
 # merges counts the merge agent's turns.
 merges() { if [ -f "$state/merges.log" ]; then wc -l <"$state/merges.log" | tr -d ' '; else echo 0; fi; }
 
 # machine <name> writes config-<name>.yaml with its own knowledge_dir.
-machine() { sed "s|knowledge_dir: .*|knowledge_dir: $sandbox/knowledge-$1|" "$sandbox/config.yaml" >"$sandbox/config-$1.yaml"; }
+machine() { sed -e "s|knowledge_dir: .*|knowledge_dir: $sandbox/knowledge-$1|" -e "s|database: .*|database: $sandbox/foreman-$1.db|" "$sandbox/config.yaml" >"$sandbox/config-$1.yaml"; }
 on() { local m=$1; shift; FOREMAN_CONFIG="$sandbox/config-$m.yaml" foreman "$@"; }
 
 scenario_knowledge_transfer() {
@@ -1433,6 +1477,9 @@ scenario_knowledge_transfer() {
 	machine c
 	seed "$a" 1 2026-09-01T12:00:00Z observed "Wrap errors with the operation name."
 	seed "$b" 7 2026-09-05T12:00:00Z observed "Errors carry the operation name."
+	# The seeds are the Markdown knowledge store of an earlier version. Removing the empty
+	# database lets the first command of each machine import them, as an upgrade would.
+	rm -f "$sandbox"/foreman.db "$sandbox"/foreman.db-wal "$sandbox"/foreman.db-shm
 
 	check "export writes the file" foreman knowledge export acme/widgets -o "$sandbox/a.md"
 	check "the export names its repository" contains "$sandbox/a.md" "Repository: acme/widgets"
@@ -1442,15 +1489,15 @@ scenario_knowledge_transfer() {
 	on c knowledge ingest "$sandbox/a.md" >"$out" 2>&1 || true
 	check "an empty store restores the export" contains "$out" "Restored acme/widgets"
 	check "without a merge turn" test "$(merges)" = 0
-	check "the restore keeps the evaluation" test -f "$c/acme/widgets/evaluations/1.yaml"
+	check "the restore keeps the evaluation" has_task c acme/widgets 1
 	check "and regenerates knowledge.md" test -f "$c/acme/widgets/knowledge.md"
 
 	if on c knowledge ingest "$sandbox/a.md" --repo acme/gadgets >"$out" 2>&1; then fail "another repository is rejected"; else pass "another repository is rejected"; fi
-	check "and stores nothing there" test ! -e "$c/acme/gadgets/learnings.yaml"
+	check "and stores nothing there" bash -c "! FOREMAN_CONFIG='$sandbox/config-c.yaml' '$work/foreman' knowledge export acme/gadgets"
 	on c knowledge ingest "$sandbox/a.md" --repo acme/gadgets --rebind >"$out" 2>&1 || true
-	check "rebinding stores it under the destination" test -f "$c/acme/gadgets/evaluations/1.yaml"
+	check "rebinding stores it under the destination" has_task c acme/gadgets 1
 
-	before=$(store_digest "$a")
+	before=$(store_digest)
 	printf '# notes\n' >"$sandbox/bad.md"
 	if foreman knowledge ingest "$sandbox/bad.md" >"$out" 2>&1; then fail "an invalid file is rejected"; else pass "an invalid file is rejected"; fi
 	touch "$state/merge-fail"
@@ -1460,24 +1507,24 @@ scenario_knowledge_transfer() {
 	echo '{"groups":[{"members":["local:L1"],"kind":"convention","text":"Wrap errors.","conflict":null}]}' >"$state/merge.json"
 	if foreman knowledge ingest "$sandbox/b.md" >"$out" 2>&1; then fail "a merge that leaves out a learning is rejected"; else pass "a merge that leaves out a learning is rejected"; fi
 	check "after one more merge turn" test "$(merges)" = 2
-	check "and none of the failures changed the store" test "$(store_digest "$a")" = "$before"
+	check "and none of the failures changed the store" test "$(store_digest)" = "$before"
 
 	echo '{"groups":[{"members":["local:L1","import:L1"],"kind":"convention","text":"Wrap returned errors with the operation name.","conflict":null}]}' >"$state/merge.json"
 	on b knowledge ingest "$sandbox/a.md" --dry-run >"$out" 2>&1 || true
 	check "a dry run shows the merged knowledge.md" contains "$out" "- Wrap returned errors with the operation name."
-	check "and saves nothing" bash -c "! grep -qF 'Wrap returned' '$b/acme/widgets/learnings.yaml'"
+	check "and saves nothing" bash -c "! FOREMAN_CONFIG='$sandbox/config-b.yaml' '$work/foreman' knowledge export acme/widgets | grep -qF 'Wrap returned'"
 
 	turns=$(merges)
 	foreman knowledge ingest "$sandbox/b.md" >"$out" 2>&1 || true
 	check "both sides' knowledge merges in one turn" test "$(merges)" = $((turns + 1))
 	check "into one active learning" contains "$a/acme/widgets/knowledge.md" "Wrap returned errors with the operation name."
-	check "with both tasks' evaluations" test -f "$a/acme/widgets/evaluations/7.yaml"
+	check "with both tasks' evaluations" has_task a acme/widgets 7
 
-	before=$(store_digest "$a")
+	before=$(store_digest)
 	foreman knowledge ingest "$sandbox/b.md" >"$out" 2>&1 || true
 	check "a repeat ingest changes nothing" contains "$out" "nothing changed"
 	check "without a merge turn" test "$(merges)" = $((turns + 1))
-	check "and leaves the store byte for byte" test "$(store_digest "$a")" = "$before"
+	check "and leaves the store byte for byte" test "$(store_digest)" = "$before"
 
 	machine d
 	machine e
@@ -1533,7 +1580,7 @@ scenario_account() {
 	unset E2E_CLONE_URL
 }
 
-scenarios=${*:-runner review_before_pr retry_committed_correction self_assessment complete_diff_review quota_pause full_check final_check_stop plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui history linear account knowledge_transfer}
+scenarios=${*:-runner review_before_pr retry_committed_correction self_assessment complete_diff_review quota_pause full_check final_check_stop plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui history local account knowledge_transfer}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"

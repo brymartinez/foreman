@@ -28,7 +28,7 @@ func (a App) postPlan(ctx, final context.Context, rec *task.Record, docs map[tas
 			// The comment may have been deleted or unmarked while the turn ran, and
 			// the turn left no text to post in its place.
 			id := found.comment.ExternalCommentID
-			if rec.IssueSource() != task.Linear {
+			if rec.IssueSource() != task.Local {
 				id = strconv.FormatInt(found.comment.CommentID, 10)
 			}
 			kept, err := a.stillPlanComment(ctx, rec.Key, doc, id)
@@ -84,7 +84,7 @@ func (a App) postPlan(ctx, final context.Context, rec *task.Record, docs map[tas
 		// lost its marker belongs to someone else now, so the document is posted anew.
 		var id string
 		if isFound {
-			if rec.IssueSource() == task.Linear {
+			if rec.IssueSource() == task.Local {
 				id = found.comment.ExternalCommentID
 			} else if found.comment.CommentID > 0 {
 				id = strconv.FormatInt(found.comment.CommentID, 10)

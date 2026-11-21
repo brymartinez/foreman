@@ -114,10 +114,10 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
-func TestLinearTaskKeepsSourceAndStableIssueIdentity(t *testing.T) {
+func TestLocalTaskKeepsSourceAndStableIssueIdentity(t *testing.T) {
 	s := Markdown{Dir: t.TempDir()}
-	key := task.Key{Repo: "acme/web", Source: task.Linear, ExternalID: "123e4567-e89b-12d3-a456-426614174000"}
-	rec := &task.Record{Key: key, Identifier: "WEB-42", Kind: task.Issue, Title: "Fix sign in", URL: "https://linear.app/acme/issue/WEB-42", State: task.Discovered}
+	key := task.Key{Repo: "acme/web", Source: task.Local, ExternalID: "L-0000002A"}
+	rec := &task.Record{Key: key, Identifier: "L-0000002A", Kind: task.Issue, Title: "Fix sign in", URL: "https://linear.app/acme/issue/WEB-42", State: task.Discovered}
 	if err := s.Save(ctx, rec); err != nil {
 		t.Fatal(err)
 	}
@@ -128,15 +128,15 @@ func TestLinearTaskKeepsSourceAndStableIssueIdentity(t *testing.T) {
 	if !reflect.DeepEqual(got, rec) {
 		t.Fatalf("round trip = %+v, want %+v", got, rec)
 	}
-	if _, err := os.Stat(filepath.Join(s.Dir, "acme-web-linear-123e4567-e89b-12d3-a456-426614174000.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(s.Dir, "acme-web-local-L-0000002A.md")); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestLinearPlanCommentKeepsStringID(t *testing.T) {
+func TestLocalPlanCommentKeepsStringID(t *testing.T) {
 	s := Markdown{Dir: t.TempDir()}
-	key := task.Key{Repo: "acme/web", Source: task.Linear, ExternalID: "123e4567-e89b-12d3-a456-426614174000"}
-	rec := &task.Record{Key: key, Identifier: "WEB-42", Kind: task.Issue, Title: "Fix sign in", URL: "https://linear.app/acme/issue/WEB-42", State: task.Discovered}
+	key := task.Key{Repo: "acme/web", Source: task.Local, ExternalID: "L-0000002A"}
+	rec := &task.Record{Key: key, Identifier: "L-0000002A", Kind: task.Issue, Title: "Fix sign in", URL: "https://linear.app/acme/issue/WEB-42", State: task.Discovered}
 	rec.SetPlanComment(task.PlanComment{Doc: task.Analysis, ExternalCommentID: "abc-123", URL: "https://linear.app/acme/issue/WEB-42#comment-abc-123"})
 	if err := s.Save(ctx, rec); err != nil {
 		t.Fatal(err)

@@ -40,21 +40,21 @@ var ErrDelegated = errors.New("already delegated")
 // Start prepares the worktree and task file, then launches the detached runner.
 // Rerunning it for a FAILED task, or one whose runner died, resumes from durable state.
 func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) {
-	if a.Triage != nil && req.Key.Source == task.Linear {
+	if a.Triage != nil && req.Key.Source == task.Local {
 		unlock, err := a.Triage.LockStart(req.Key)
 		if err != nil {
 			return nil, err
 		}
 		defer unlock()
 	}
-	if req.Key.Source == task.Linear {
+	if req.Key.Source == task.Local {
 		recs, err := a.Store.List(ctx)
 		if err != nil {
 			return nil, err
 		}
 		for _, rec := range recs {
-			if rec.Key.Source == task.Linear && rec.Key.ExternalID == req.Key.ExternalID && rec.Key.Repo != req.Repo && (rec.Delegation != nil || rec.Reset != nil) {
-				return nil, fmt.Errorf("Linear issue already belongs to a task in %s; resume that task", rec.Key.Repo)
+			if rec.Key.Source == task.Local && rec.Key.ExternalID == req.Key.ExternalID && rec.Key.Repo != req.Repo && (rec.Delegation != nil || rec.Reset != nil) {
+				return nil, fmt.Errorf("local issue already belongs to a task in %s; resume that task", rec.Key.Repo)
 			}
 		}
 	}
@@ -70,7 +70,7 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		return nil, fmt.Errorf("issue belongs to %s, not %s", key.Repo, info.Repo)
 	}
 	req.Repo, req.Key = info.Repo, key
-	if a.Triage != nil && key.Source != task.Linear {
+	if a.Triage != nil && key.Source != task.Local {
 		unlock, err := a.Triage.LockStart(key)
 		if err != nil {
 			return nil, err
@@ -151,6 +151,10 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 			return nil, err
 		}
 		trackerTriage = errors.Is(err, ErrAwaitingTriage)
+	}
+	if trackerTriage && key.Source == task.Local {
+		// Only confirmed local triage counts for a local issue; no label can stand in.
+		return nil, ErrAwaitingTriage
 	}
 	if trackerTriage && !slices.Contains(issue.Labels, "triaged") {
 		if localDocuments {
@@ -315,6 +319,15 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 		}
 		if prev == nil {
 			cur.Delegation.FullSuiteGate = a.FullSuiteGate
+			// Documents a portable import restored are the saved plan. A start whose
+			// issue has changed since finds the fingerprint stale and plans again.
+			if imp := cur.Imported; localDocuments && imp != nil && imp.Fingerprint != "" && len(imp.Documents) == len(task.PlanDocs) {
+				docs := map[task.PlanDoc]string{}
+				for doc, text := range imp.Documents {
+					docs[doc] = text
+				}
+				cur.Delegation.LocalPlan = &task.LocalPlan{Fingerprint: imp.Fingerprint, Documents: docs}
+			}
 		}
 		// The same branch has the same PR, so a restart can pick up at its review.
 		// A provider handoff keeps the same committed work and PR. A

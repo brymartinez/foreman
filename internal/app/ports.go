@@ -183,13 +183,16 @@ type TrackerComment struct {
 	Body string
 }
 
-// IssueTracker owns issue operations. Repository and PR operations stay on GitHubClient.
-type IssueTracker interface {
-	AssignedIssues(ctx context.Context, teamURL string) ([]InboxItem, error)
+// LocalIssues is Foreman's own issue store, the second source of work beside GitHub.
+// A local issue has a stable ID (its key's ExternalID) that does not depend on the
+// repository later chosen for it. Foreman never writes to the tracker a local
+// issue's source URL points at.
+type LocalIssues interface {
+	// OpenIssues lists the issues still open, with confirmed triage or without.
+	OpenIssues(ctx context.Context) ([]InboxItem, error)
 	GetIssue(ctx context.Context, key task.Key) (Issue, error)
-	IssueComments(ctx context.Context, key task.Key) ([]TrackerComment, error)
-	GetIssueComment(ctx context.Context, id string) (TrackerComment, error)
-	PostIssueComment(ctx context.Context, key task.Key, id, body string) (TrackerComment, error)
+	// Complete closes the issue once its work is done.
+	Complete(ctx context.Context, key task.Key) error
 }
 
 // RepositoryManager provides a local source checkout for repository-independent

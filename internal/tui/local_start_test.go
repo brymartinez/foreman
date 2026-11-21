@@ -9,19 +9,19 @@ import (
 	"github.com/brymartinez/foreman/internal/task"
 )
 
-func TestManualLinearDelegationKeepsSourceIdentity(t *testing.T) {
-	k := task.Key{Repo: "a/b", Source: task.Linear, ExternalID: "uuid-42"}
+func TestManualLocalDelegationKeepsSourceIdentity(t *testing.T) {
+	k := task.Key{Repo: "a/b", Source: task.Local, ExternalID: "L-0000002A"}
 	m := model()
-	m.SetInbox([]app.InboxEntry{{Item: app.InboxItem{Key: k, Identifier: "WEB-42", Kind: task.Issue, State: "open"}}})
+	m.SetInbox([]app.InboxEntry{{Item: app.InboxItem{Key: k, Identifier: "L-0000002A", Kind: task.Issue, State: "open"}}})
 	got := confirmBranch(t, &m, press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter}))
 	if got.Kind != ActionStart || got.Start.Key != k {
 		t.Fatalf("manual start = %+v", got)
 	}
 }
 
-func TestManualLinearStartReleasesItsSlotForTheNextAutoIssue(t *testing.T) {
-	first := task.Key{Repo: "a/b", Source: task.Linear, ExternalID: "uuid-1"}
-	second := task.Key{Repo: "a/b", Source: task.Linear, ExternalID: "uuid-2"}
+func TestManualLocalStartReleasesItsSlotForTheNextAutoIssue(t *testing.T) {
+	first := task.Key{Repo: "a/b", Source: task.Local, ExternalID: "uuid-1"}
+	second := task.Key{Repo: "a/b", Source: task.Local, ExternalID: "uuid-2"}
 	m := model()
 	m.SetTasks(nil)
 	m.SetAuto(Auto{Enabled: true, Agent: task.Codex, Max: 1})
@@ -40,8 +40,8 @@ func TestManualLinearStartReleasesItsSlotForTheNextAutoIssue(t *testing.T) {
 	}
 }
 
-func TestLinearAutoRetryPassesItsPriorSelectionToRouting(t *testing.T) {
-	k := task.Key{Repo: "a/b", Source: task.Linear, ExternalID: "uuid-2"}
+func TestLocalAutoRetryPassesItsPriorSelectionToRouting(t *testing.T) {
+	k := task.Key{Repo: "a/b", Source: task.Local, ExternalID: "uuid-2"}
 	m := model()
 	m.SetTasks(nil)
 	m.SetAuto(Auto{Enabled: true, Max: 1})
@@ -61,8 +61,8 @@ func TestLinearAutoRetryPassesItsPriorSelectionToRouting(t *testing.T) {
 	}
 }
 
-func TestAutoLinearDelegationKeepsSourceIdentity(t *testing.T) {
-	k := task.Key{Repo: "a/b", Source: task.Linear, ExternalID: "uuid-42"}
+func TestAutoLocalDelegationKeepsSourceIdentity(t *testing.T) {
+	k := task.Key{Repo: "a/b", Source: task.Local, ExternalID: "L-0000002A"}
 	m := Model{}
 	m.SetAuto(Auto{Enabled: true, Agent: task.Codex, Max: 1})
 	m.SetInbox([]app.InboxEntry{{Item: app.InboxItem{Key: k, Kind: task.Issue, State: "open", Reasons: []task.InboxReason{task.Assigned}, Labels: []string{"triaged"}}}})

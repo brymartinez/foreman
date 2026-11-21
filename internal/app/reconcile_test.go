@@ -34,23 +34,6 @@ func githubPlanComments(f fixture, fingerprint string, docs ...task.PlanDoc) []I
 	return out
 }
 
-func linearPlanComments(fingerprint string, docs ...task.PlanDoc) []TrackerComment {
-	var out []TrackerComment
-	for _, doc := range docs {
-		id := "lin-" + string(doc)
-		out = append(out, TrackerComment{ID: id, URL: "https://linear.app/comment/" + id, Body: planBody(doc, fingerprint)})
-	}
-	return out
-}
-
-func linearTask(t *testing.T, f *fixture) (task.Key, *lifecycleTracker) {
-	key := task.Key{Repo: f.gh.repo.Repo, Source: task.Linear, ExternalID: "uuid-42"}
-	tracker := &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Title: "Fix cache", Body: "Use bounded retries.", URL: "https://linear.app/acme/issue/WEB-42", State: "open", Labels: []string{"triaged"}}}
-	f.app.Linear = tracker
-	started(t, *f, StartRequest{Repo: key.Repo, Key: key, Agent: task.Claude})
-	return key, tracker
-}
-
 // keepingTurn plans by keeping the documents in keep and writing the others.
 func keepingTurn(keep ...task.PlanDoc) agent.Turn {
 	turn := plannedTurn("sid-1")
@@ -121,19 +104,12 @@ func TestLegacyFourDocumentDigestMigratesOnlyWhenCommentsAreUnchanged(t *testing
 	}
 }
 
-func TestAdoptingAnUnchangedCheckedPlanReusesAgreementForBothTrackers(t *testing.T) {
-	for _, source := range []task.Source{task.GitHub, task.Linear} {
+func TestAdoptingAnUnchangedCheckedPlanReusesAgreement(t *testing.T) {
+	for _, source := range []task.Source{task.GitHub} {
 		t.Run(string(source), func(t *testing.T) {
 			f := newFixture()
-			var key task.Key
-			if source == task.Linear {
-				var tracker *lifecycleTracker
-				key, tracker = linearTask(t, &f)
-				tracker.comments = linearPlanComments(task.DescriptionFingerprint(tracker.issue.Body), task.PlanDocs...)
-			} else {
-				key = started(t, f, startReq(t))
-				f.gh.issueComments = githubPlanComments(f, task.DescriptionFingerprint(f.gh.issue.Body), task.PlanDocs...)
-			}
+			key := started(t, f, startReq(t))
+			f.gh.issueComments = githubPlanComments(f, task.DescriptionFingerprint(f.gh.issue.Body), task.PlanDocs...)
 			scope, err := f.app.readScope(context.Background(), key)
 			if err != nil {
 				t.Fatal(err)
@@ -181,20 +157,6 @@ func TestAPartialPlanOnTheGitHubIssueGoesToPlanningAndOnlyMissingDocumentsArePos
 	}
 }
 
-func TestAPartialPlanOnTheLinearIssueKeepsValidCommentsAndPostsOnlyMissingOnes(t *testing.T) {
-	f := newFixture()
-	key, tracker := linearTask(t, &f)
-	tracker.comments = linearPlanComments(task.DescriptionFingerprint(tracker.issue.Body), task.PRD)
-	f.claude.turns = []agent.Turn{keepingTurn(task.PRD), prTurn("sid-2")}
-	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	got := f.store.recs[key]
-	if !got.PlanPosted() || !slices.Equal(tracker.postIDs, []string{""}) || got.PlanComment(task.PRD).ExternalCommentID != "lin-prd" {
-		t.Fatalf("plan %+v post IDs %v", got.Plan, tracker.postIDs)
-	}
-}
-
 func TestAPlanningTurnThatLeavesAMissingDocumentEmptyFailsWithoutPosting(t *testing.T) {
 	f := newFixture()
 	key := started(t, f, startReq(t))
@@ -221,18 +183,6 @@ func TestAnUnreadableIssueFailsTheTaskBeforePlanning(t *testing.T) {
 		got := f.store.recs[key]
 		if got.State != task.Failed || got.LastOutcome.Summary != "reading triage comments: HTTP 502" || f.claude.starts != 0 || len(f.gh.comments) != 0 {
 			t.Fatalf("state %s outcome %+v starts %d comments %d", got.State, got.LastOutcome, f.claude.starts, len(f.gh.comments))
-		}
-	})
-	t.Run("Linear", func(t *testing.T) {
-		f := newFixture()
-		key, tracker := linearTask(t, &f)
-		tracker.commentsErr = readErr
-		if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
-			t.Fatal(err)
-		}
-		got := f.store.recs[key]
-		if got.State != task.Failed || !strings.HasSuffix(got.LastOutcome.Summary, "HTTP 502") || f.claude.starts != 0 || len(tracker.postIDs) != 0 {
-			t.Fatalf("state %s outcome %+v starts %d post IDs %v", got.State, got.LastOutcome, f.claude.starts, tracker.postIDs)
 		}
 	})
 }
@@ -298,19 +248,6 @@ func TestAPlanCommentUnmarkedDuringThePlanningTurnIsNotEdited(t *testing.T) {
 			t.Fatalf("plan %+v edits %d comment 501 %q", got.Plan, f.gh.edits, f.gh.comments[501].Body)
 		}
 	})
-	t.Run("Linear", func(t *testing.T) {
-		f := newFixture()
-		key, tracker := linearTask(t, &f)
-		tracker.comments = linearPlanComments("", task.PRD)
-		f.claude.during = func() { tracker.comments[0].Body = "## Requirements\n\nThe marker was removed." }
-		f.claude.turns = []agent.Turn{keepingTurn(), plannedTurn("sid-1"), prTurn("sid-2")}
-		if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
-			t.Fatal(err)
-		}
-		if got := f.store.recs[key]; !got.PlanPosted() || slices.Contains(tracker.postIDs, "lin-prd") || got.PlanComment(task.PRD).ExternalCommentID == "lin-prd" {
-			t.Fatalf("plan %+v post IDs %v", got.Plan, tracker.postIDs)
-		}
-	})
 }
 
 func TestAKeptDocumentRemovedDuringThePlanningTurnFailsWithoutPosting(t *testing.T) {
@@ -330,20 +267,6 @@ func TestAKeptDocumentRemovedDuringThePlanningTurnFailsWithoutPosting(t *testing
 		got := f.store.recs[key]
 		if got.State != task.Failed || got.LastOutcome.Summary != "source document changed" || len(f.gh.comments) != 1 || len(got.Plan) != 0 || f.claude.starts != 1 {
 			t.Fatalf("state %s outcome %+v comments %d plan %+v starts %d", got.State, got.LastOutcome, len(f.gh.comments), got.Plan, f.claude.starts)
-		}
-	})
-	t.Run("Linear deleted", func(t *testing.T) {
-		f := newFixture()
-		key, tracker := linearTask(t, &f)
-		tracker.comments = linearPlanComments("", task.PRD)
-		f.claude.during = func() { tracker.missing = map[string]bool{"lin-prd": true} }
-		f.claude.turns = []agent.Turn{keepingTurn(task.PRD), {Outcome: agent.Outcome{Status: agent.FailedRun, Summary: "source document changed"}}}
-		if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
-			t.Fatal(err)
-		}
-		got := f.store.recs[key]
-		if got.State != task.Failed || !strings.Contains(got.LastOutcome.Summary, "source document changed") || len(tracker.postIDs) != 0 || len(got.Plan) != 0 {
-			t.Fatalf("state %s outcome %+v post IDs %v plan %+v", got.State, got.LastOutcome, tracker.postIDs, got.Plan)
 		}
 	})
 }

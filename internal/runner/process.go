@@ -36,8 +36,8 @@ type Processes struct {
 }
 
 func (p Processes) logPath(key task.Key) string {
-	if key.Source == task.Linear {
-		return filepath.Join(p.LogDir, fmt.Sprintf("%s-linear-%s.log", strings.ReplaceAll(string(key.Repo), "/", "-"), key.ExternalID))
+	if key.Source == task.Local {
+		return filepath.Join(p.LogDir, fmt.Sprintf("%s-local-%s.log", strings.ReplaceAll(string(key.Repo), "/", "-"), key.ExternalID))
 	}
 	return filepath.Join(p.LogDir, fmt.Sprintf("%s-%d.log", strings.ReplaceAll(string(key.Repo), "/", "-"), key.Number))
 }
@@ -119,8 +119,8 @@ func (p Processes) SpawnLearn(key task.Key) error {
 }
 
 func keyArg(key task.Key) string {
-	if key.Source == task.Linear {
-		return fmt.Sprintf("%s#linear:%s", key.Repo, key.ExternalID)
+	if key.Source == task.Local {
+		return fmt.Sprintf("%s#local:%s", key.Repo, key.ExternalID)
 	}
 	return fmt.Sprintf("%s#%d", key.Repo, key.Number)
 }

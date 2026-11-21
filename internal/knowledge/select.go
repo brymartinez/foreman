@@ -16,6 +16,11 @@ func (s Store) Select(repo, query string, limit, maxChars int) ([]Learning, erro
 	if err != nil {
 		return nil, err
 	}
+	return selectActive(ls, query, limit, maxChars), nil
+}
+
+// selectActive is Select over learnings already read.
+func selectActive(ls []Learning, query string, limit, maxChars int) []Learning {
 	want := words(query)
 	type ranked struct {
 		l       Learning
@@ -62,7 +67,7 @@ func (s Store) Select(repo, query string, limit, maxChars int) ([]Learning, erro
 		total += n
 		out = append(out, r.l)
 	}
-	return out, nil
+	return out
 }
 
 var stopWords = map[string]bool{

@@ -111,7 +111,7 @@ func (a App) readIssuePlan(ctx context.Context, rec *task.Record) (issuePlan, er
 // planCommentFor is the record entry for a comment on the task's issue source.
 func planCommentFor(source task.Source, doc task.PlanDoc, c TrackerComment) task.PlanComment {
 	comment := task.PlanComment{Doc: doc, URL: c.URL}
-	if source == task.Linear {
+	if source == task.Local {
 		comment.ExternalCommentID = c.ID
 	} else {
 		comment.CommentID, _ = strconv.ParseInt(c.ID, 10, 64)

@@ -783,21 +783,21 @@ func TestInboxTitleShowsView(t *testing.T) {
 	if got := screen(m); !strings.Contains(got, "INBOX · configured repos") {
 		t.Errorf("a %d-column frame does not name the configured view:\n%s", minWidth, got)
 	}
-	m.IssueSource = task.Linear
-	if got := screen(m); !strings.Contains(got, "INBOX · LINEAR") {
-		t.Errorf("a %d-column frame does not name the Linear view:\n%s", minWidth, got)
+	m.IssueSource = task.Local
+	if got := screen(m); !strings.Contains(got, "INBOX · LOCAL") {
+		t.Errorf("a %d-column frame does not name the local view:\n%s", minWidth, got)
 	}
 }
 
 func TestMixedInboxGroupsGitHubAndLinearIssuesBySource(t *testing.T) {
 	m := Model{Width: 100, Height: 30}
 	linear := entry("acme/web", 0, "Linear work")
-	linear.Item.Key.Source = task.Linear
-	linear.Item.Key.ExternalID = "uuid-42"
-	linear.Item.Identifier = "WEB-42"
+	linear.Item.Key.Source = task.Local
+	linear.Item.Key.ExternalID = "L-0000002A"
+	linear.Item.Identifier = "L-0000002A"
 	m.SetInbox([]app.InboxEntry{linear, entry("acme/api", 1, "GitHub work")})
 	rows := inboxPane(m).rows
-	if len(rows) != 2 || rows[0].lines[0] != "GITHUB" || rows[1].lines[0] != "LINEAR" || !strings.Contains(rows[1].lines[1], "WEB-42") {
+	if len(rows) != 2 || rows[0].lines[0] != "GITHUB" || rows[1].lines[0] != "LOCAL" || !strings.Contains(rows[1].lines[1], "L-0000002A") {
 		t.Fatalf("source rows = %+v", rows)
 	}
 }

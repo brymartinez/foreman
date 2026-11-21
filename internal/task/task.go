@@ -103,7 +103,9 @@ type Source string
 
 const (
 	GitHub Source = "github"
-	Linear Source = "linear"
+	// Local is an issue kept in Foreman's own database. Its ExternalID is the stable
+	// local issue ID, which does not depend on the repository chosen for the work.
+	Local Source = "local"
 )
 
 type Kind string
@@ -622,13 +624,15 @@ type Record struct {
 	// Reset is set when the developer discarded a failed run. The record then has no
 	// delegation, and auto mode leaves the issue for a manual start.
 	Reset *ResetMark
+	// Imported is set when a portable import restored this task's earlier work.
+	Imported *ImportedWork
 	// Body is the Markdown below the frontmatter, round-tripped untouched so human edits survive.
 	Body string
 }
 
 func (r *Record) IssueSource() Source {
-	if r.Source == Linear {
-		return Linear
+	if r.Source == Local {
+		return Local
 	}
 	return GitHub
 }

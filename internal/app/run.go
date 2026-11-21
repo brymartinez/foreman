@@ -116,6 +116,7 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, token string, l
 	if err := r.loop(firstStep(rec, len(feedback))); err != nil {
 		return err
 	}
+	a.learnAfterRun(r.rec, log)
 	return nil
 }
 
@@ -1028,6 +1029,10 @@ func (a App) update(ctx context.Context, key task.Key, fn func(cur *task.Record)
 	})
 	if err == nil && rec != nil && rec.State != before {
 		a.notify(key, rec)
+		// Finished work closes its local issue, which keeps it out of the inbox.
+		if rec.State == task.Done && key.Source == task.Local && a.LocalIssues != nil {
+			_ = a.LocalIssues.Complete(ctx, key)
+		}
 	}
 	return rec, err
 }

@@ -16,7 +16,7 @@ type BranchProposal struct {
 // ProposeBranch uses tracker and task metadata without creating a worktree or task.
 // A stored branch always wins, including on a failed task's next start.
 func (a App) ProposeBranch(ctx context.Context, req StartRequest) (BranchProposal, error) {
-	if req.Key.Source == task.Linear && !a.repoVisible(req.Repo, false) {
+	if req.Key.Source == task.Local && !a.repoVisible(req.Repo, false) {
 		return BranchProposal{}, fmt.Errorf("repository %s is outside the configured repository filters", req.Repo)
 	}
 	info, err := a.sourceRepo(ctx, &req)
@@ -58,18 +58,12 @@ func (a App) ProposeBranch(ctx context.Context, req StartRequest) (BranchProposa
 }
 
 func proposeBranch(branchType task.BranchType, key task.Key, issue Issue) BranchProposal {
-	if key.Source == task.Linear && issue.BranchName != "" {
-		if !task.ValidBranchName(issue.BranchName) {
-			return BranchProposal{Name: issue.BranchName, Reason: "the tracker supplied an invalid branch name", Uncertain: true}
-		}
-		return BranchProposal{Name: issue.BranchName, Reason: "Linear branch suggestion"}
-	}
 	if branchType == "" {
 		branchType = task.BranchTypeFor(issue.Title, issue.Labels)
 	}
 	work := task.WorkName(key.Number, issue.Title)
-	if key.Source == task.Linear {
-		work = "linear-" + task.Slug(issue.Identifier) + "-" + task.Slug(issue.Title)
+	if key.Source == task.Local {
+		work = "local-" + task.Slug(issue.Identifier) + "-" + task.Slug(issue.Title)
 	}
 	name := task.BranchName(branchType, work)
 	if !task.ValidBranchName(name) {

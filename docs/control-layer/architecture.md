@@ -1,44 +1,44 @@
 # Architecture
 
 ```
-cmd/foreman           wiring: build adapters, open the dashboard or run a task
-internal/cli          argv -> Command (launch flags, knowledge export and ingest, __run);
-                      no I/O beyond parsing
-internal/config       config.yaml: directories, budgets, learning, default source, and
-                      their validation, rejecting unknown keys
+cmd/foreman           wiring: open the database, build adapters, open the dashboard, run a
+                      task, or run an `issue`, `export`, or `knowledge` command
+internal/cli          argv -> Command (launch flags, issue, export, and knowledge commands,
+                      __run and __learn); no I/O beyond parsing
+internal/config       config.yaml: database and directories, budgets, learning, default
+                      source, and their validation, rejecting unknown and retired keys
 internal/routing      legacy profile parsing for older task records/configs
 internal/render       terminal formatting of app results
 internal/tui          the dashboard: pure Model and Frame, one terminal loop
 internal/app          orchestration + ports.go (the interfaces below)
   ├── github          GitHubClient, RepositoryManager, and AccountProvider over `gh`
-  ├── linear          IssueTracker over Linear GraphQL using a personal API key
-  ├── store           TaskStore over Markdown + YAML frontmatter
+  ├── localissues     LocalIssues: Foreman's own issue store, in the database
+  ├── store           TaskStore and TriageStore over SQLite; the Markdown reader that
+                      upgrades earlier versions
+  ├── db              the SQLite file and its versioned schema
+  ├── portable        versioned export and import of local work
   ├── worktree        WorktreeManager over `git worktree`; RemoteAuth over `ssh -T`
   ├── agent           outcome contract, role prompts, claude.go / codex.go adapters,
-  │                   knowledge merger
-  ├── knowledge       KnowledgeStore: per-repository learnings, evaluations, knowledge.md,
-  │                   and their export, merge, and atomic replace
+  │                   evaluator, knowledge merger
+  ├── knowledge       KnowledgeStore: per-repository learnings and evaluations in the
+  │                   database, a rendered knowledge.md, and their export and merge
   ├── quota           QuotaChecker over the optional `quota-axi`
-  ├── runner          spawns and checks the detached `foreman __run` process
+  ├── runner          spawns and checks the detached `foreman __run` process, and
+  │                   spawns the detached `foreman __learn` process
   └── stages          resolves ~/.config/foreman/stages/<stage>.md + <repo>/.foreman/<stage>.md
 internal/task         the durable model: Record, State, Delegation, Decision, Attempt
 ```
 
 `app` depends only on the interfaces in `internal/app/ports.go`. Presentation stays in
 `cmd/foreman`, and process handling stays in `runner` and the adapters.
-`IssueTracker` carries source display identifiers and string comment IDs. Linear
-queries resolve the singular `linear_team` URL to a team ID within the authenticated
-workspace, then page through its open issues assigned to the authenticated user,
-across every project and including issues without a project. The team has no
-repository mapping. Config accepts a team URL with an optional `/overview` or
-`/issues` suffix and rejects the retired `linear_projects` and `linear_teams` keys.
-Issue state types `completed` and `canceled`
-map to closed; Linear's `Entity not found` errors map to `ErrGone` for tracked
-issues and planning comments. Repository and PR operations remain on `GitHubClient`.
-The detached runner receives `owner/repo#linear:<issue ID>` for Linear tasks and
-`owner/repo#<number>` for GitHub tasks. Linear runner logs use the stable issue ID,
-so tasks in one repository cannot share a `#0` log. The end-to-end fixture points
-`FOREMAN_LINEAR_ENDPOINT` at a local GraphQL stand-in.
+Work comes from two sources. GitHub owns its issues; Foreman reads them through
+`GitHubClient`. A **local issue** lives in Foreman's own database behind the
+`LocalIssues` port, so work from Linear, Jira, or a chat message is managed entirely in
+Foreman. Foreman has no tracker credentials and never reads or writes a source tracker:
+the source URL of a local issue is context for people and agents only. The detached
+runner receives `owner/repo#local:<ID>` for local tasks and `owner/repo#<number>` for
+GitHub tasks. Local runner logs use the stable issue ID, so tasks in one repository
+cannot share a `#0` log. Repository and PR operations always use `GitHubClient`.
 
 ## Execution model
 
@@ -89,11 +89,29 @@ runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR)
   missing or uncertain session / unavailable provider -> preserve progress and pause;
     resume when available or wait for explicit role replacement
   quota and fix limits pause work; they never skip review or accept unresolved findings
-  task lifecycle starts no learning or diagnostic model calls
+  when the loop ends on a clean adversarial review and the evidence changed since
+    the stored evaluation: spawn detached `foreman __learn owner/repo#825`, then exit
+    (learning is a side job, not a task role; it never changes the task)
 
   with review_before_pr captured on the task and no PR yet, the same four-role
   review sequence covers the local diff before Foreman publishes it
 
+
+foreman __learn       -> one evaluation of one task; output goes to <log_dir>/learning.log
+  ├─ knowledge: take the repository's lock without waiting; held -> exit 0, a later
+  │             refresh retries
+  ├─ build the evidence packet from the task record (decisions, review findings,
+  │  phase times, cost or tokens, tool-call counts, PR outcome) and every human
+  │  comment on the PR from gh; no logs, transcripts, CI, or tool arguments. The
+  │  prompt adds the repository's current learnings, which revisions cite by id, and
+  │  its 12 newest other evaluations, so recurrence is visible
+  ├─ evaluator turn: the task's implementer agent, no tools, a scratch directory,
+  │  learning.budget_usd for Claude; a turn that called a tool is discarded;
+  │  agent.ParseEvaluation reads its output
+  └─ knowledge.Apply: in one database transaction, store the evaluation and fold its
+     proposals and revisions into the repository's learnings; then rewrite knowledge.md.
+     A failed turn writes nothing, and never changes the task, its alerts, or the
+     runner's exit code
 
 app.Resume            -> disabled for legacy REVIEWED tasks; the next refresh
                          returns them to READY_FOR_HUMAN
@@ -118,7 +136,7 @@ app.Reset             -> FAILED with no live runner only
                          branch -D; delete the log
                          store: clear the list, or keep what failed for the next
                          start and mark the removal finished
-foreman [-a|--auto|--no-auto] [-s github|linear|all] [--mentions|--no-mentions]
+foreman [-a|--auto|--no-auto] [-s github|local|all] [--mentions|--no-mentions]
                       -> the dashboard, until q or ctrl+c. A launch flag overrides
                          its setting for this launch and saves nothing. The source is
                          -s, else default_source, else github; auto mode starts off
@@ -145,6 +163,14 @@ foreman [-a|--auto|--no-auto] [-s github|linear|all] [--mentions|--no-mentions]
                          R -> switch the open log between cleaned and raw lines
                          u, pgup, ctrl-u past the oldest loaded line -> read an
                            older chunk of the log file; g -> read back to its start
+                         f on an open inbox issue marked Awaiting triage -> hand the
+                           terminal to an interactive `foreman-triage` session for that
+                           GitHub or local issue (Claude or Codex, per models.planning);
+                           F -> the same skill for a new local issue. The dashboard
+                           leaves raw mode and the alternate screen, takes the session's
+                           stdin back from its key reader, ignores SIGINT meant for the
+                           session, and on exit restores the terminal and refreshes the
+                           inbox. c stays cancel
                          ? -> the keys and the version; any key closes it
                          c on a running task     -> confirm, app.Cancel
                          x on a FAILED task      -> confirm, app.Reset
@@ -192,6 +218,13 @@ app.InboxView         -> runner pid dead in a stage -> FAILED
                            check keeps the worktree for the next refresh
                          Reconcile, per item: issue closed, no runner -> DONE, including
                            FAILED and PR_CLOSED; a DONE task stays DONE if it reopens
+                         learning on, per learnable task (a clean competing review, or
+                         stalled at the self-review limit on a missed practice) no runner
+                         drives (in no stage), at most one per repository:
+                           evidence fingerprint differs from the stored evaluation, the
+                           repository is not locked, no failed attempt on the same
+                           evidence in the last hour -> spawn `foreman __learn`
+                           (a merged or closed task never evaluated is skipped)
 
 foreman -c            -> open the config in $VISUAL, $EDITOR, or vi, before the config
                          loads, so an invalid file can be fixed; check it after
@@ -217,12 +250,14 @@ the same commit. The commit message records why it changed.
   refresh. Rejected: a daemon, a watcher, or a runner that waits for CI.
 - **The dashboard is the only interface for tasks.** Bare `foreman` opens it;
   `-c` edits the config. The other verbs are
-  `knowledge export` and `knowledge ingest`, which move a repository's knowledge and
-  need no stage files, and the hidden `__run`. Task subcommands were
+  `knowledge export` and `knowledge ingest`, which move a repository's knowledge, the
+  `issue` commands (`add`, `triage`, `list`, `show`, `export`, `import`), and
+  `export markdown`; none needs stage files or an agent. The hidden verbs are `__run`
+  and `__learn`. Task subcommands were
   dropped because they duplicated the dashboard, and a piped `foreman` still prints
   usage.
 - **Launch flags override; files configure.** A dashboard launch flag overrides one
-  setting for one launch and writes nothing: `-s github|linear|all` over
+  setting for one launch and writes nothing: `-s github|local|all` over
   `default_source`, `--mentions`/`--no-mentions` over `mentions`, and
   `-a`/`--auto`/`--no-auto` over the choice the `a` key saves in `state.json`. Without a
   flag, the config key applies, then the built-in default (`github`, mentions shown).
@@ -308,42 +343,90 @@ the same commit. The commit message records why it changed.
   `gh pr create`). That lets a crashed runner be restarted from the
   task file.
 
-### Linear repository selection
+### Local issues
 
-- **Discovery does not allocate a repository.** New team issues use their Linear
-  UUID as the inbox identity and stay in memory. Reconciliation reuses an existing
-  delegation's repository by UUID. Legacy undelegated Linear snapshots are ignored
-  during refresh, and no empty-repository task is saved.
-- **Resolve before preparing work.** Selecting a new issue reads its description
-  and marked triage comments for explicit GitHub repository links. A single allowed
-  destination prefills a repository prompt. The developer confirms or edits it
-  before agent routing or branch proposal. Missing or conflicting evidence requires
-  an explicit repository. External triage documents are not fetched automatically.
-  Repository filters are checked before a branch proposal prepares a checkout.
-- **Auto mode uses the same resolver.** It starts only with one allowed repository
-  in the issue or triage links. Otherwise the issue waits for a manual choice.
-  Existing assignment, triaged-label, quota, and branch rules still apply.
-- **Delegations keep their repository.** A start rejects an issue UUID already
-  delegated to another repository. Task keys, filenames, branches, and runner
-  arguments stay unchanged for existing delegations.
+- **One stable ID.** A local issue is `L-` and eight hex digits, assigned once and
+  independent of the repository later chosen for it. `foreman issue add` is the one
+  intake command: the TUI's `F`, the standalone `foreman-triage` skill, and a person
+  at a shell all save through it. With `--triage-file` the scope is confirmed and the
+  issue is ready; without it the issue awaits triage and `foreman issue triage ID`
+  confirms it later. The issue and its triage save in one transaction.
+- **Only confirmed local triage counts.** A local issue never takes the GitHub
+  `triaged` label or tracker comments as scope: a user tag spelled `triaged` is
+  filtered out of its labels. A start without a triage record returns
+  `ErrAwaitingTriage` before any worktree is prepared. The skill reads a non-GitHub
+  link with the access its agent session has, asks for pasted content when it
+  cannot, confirms scope with the developer, and then calls `issue add`.
+- **Discovery does not allocate a repository.** Open local issues enter the inbox
+  with the stable ID as their identity and an empty repository. Reconciliation reuses
+  an existing delegation's repository by ID. A repository hint saved with the issue
+  becomes a GitHub link in its body, which repository selection already reads.
+- **Resolve before preparing work.** Selecting an issue reads its description and
+  confirmed triage for explicit GitHub repository links. A single allowed destination
+  prefills a repository prompt. The developer confirms or edits it before agent
+  routing or branch proposal. Missing or conflicting evidence requires an explicit
+  repository. Repository filters are checked before a branch proposal prepares a
+  checkout.
+- **Auto mode uses the same resolver.** It starts only a triaged local issue with one
+  allowed repository in the issue or triage links. Otherwise the issue waits for a
+  manual choice. Existing quota and branch rules still apply.
+- **Delegations keep their repository.** A start rejects a local ID already delegated
+  to another repository. Task keys, branches, and runner arguments stay unchanged for
+  existing delegations. A task that reaches DONE closes its local issue.
+- **GitHub carries code, not context.** A local task's PR is opened on GitHub with the
+  local ID in its title. The prompt tells the agent to keep the source link, private
+  notes, and any `Closes #N` line out of the PR. Source links and notes stay local
+  unless the developer exports them.
 
 ### Task files
 
-- **One Markdown file per source-qualified issue**, named `<owner>-<repo>-<number>.md`
-  for GitHub or `<owner>-<repo>-linear-<issue UUID>.md` for Linear. Legacy files
-  without `issue_source` still identify GitHub issues. Linear files also store the
-  display identifier separately from the stable UUID. Planning comments store
-  Linear's string ID in `external_comment_id`; legacy GitHub comments retain
-  their numeric `comment_id`. The tasks directory can be an Obsidian vault.
-  Frontmatter holds machine state. Saves
-  replace only the keys foreman owns (snake_case) through a `yaml.Node`, so user keys
-  and comments keep their place. The body is the user's: foreman's only edit is
-  appending a line to `## Decisions` when an answer is recorded.
-- **Writes are locked.** The runner and the dashboard can write one file at once.
-  `TaskStore.Update` takes a flock on `<tasks_dir>/.foreman.lock`, re-reads, applies,
-  and saves atomically. The inbox refresh merges in only fields that come from GitHub.
+- **SQLite is the source of truth for tasks, triage, local issues, and learnings.**
+  `database` in `config.yaml` (default `<data>/foreman.db`) is one file with a
+  versioned schema (`internal/db`, table `schema_migrations`). Opening it applies any
+  newer migration, each in its own transaction, and refuses a file written by a newer
+  Foreman. The file runs in WAL mode with a 15-second busy timeout, and every
+  transaction takes the write lock when it begins, so the dashboard and every runner,
+  separate processes, never overwrite one another. GitHub still owns its issues; the
+  database holds Foreman's state for them.
+- **A task is one row per source-qualified issue.** The row key is
+  `owner/repo#<number>` for GitHub and `owner/repo#local:<ID>` for local issues. The
+  `document` column is the task's Markdown, frontmatter and notes body, so user
+  frontmatter keys, their comments, and the user's notes survive every save: saves
+  replace only the keys foreman owns (snake_case) through a `yaml.Node`, and the body
+  is the user's. Foreman's only body edit is appending a line to `## Decisions` when
+  an answer is recorded. Columns beside it (state, title, repository) are only what
+  queries filter on.
+- **`TaskStore.Update` is one write transaction.** It reads the row, applies `fn`, and
+  writes the result, or rolls back. The inbox refresh merges in only fields that come
+  from GitHub. Runner claims (`launch`) ride on the same transaction, so a claim taken
+  in one process is seen by every other.
+- **Markdown is an export, not a store.** `foreman export markdown DIR` copies every
+  task's document to `DIR/<owner>-<repo>-<number>.md` (`-local-<ID>.md` for local
+  issues) for an Obsidian vault. It is one way: edits to the copies stay in the vault
+  and are never read back. A rendered `knowledge.md` per repository is likewise
+  written under `knowledge_dir` after each change, for tools such as the triage skill
+  that read guidance without Foreman.
+- **The upgrade moves Markdown records once, and retires Linear.** The first start
+  after the upgrade (`store.MigrateLegacy`) copies every task file in `tasks_dir`,
+  every GitHub triage record in `triage_dir`, and every repository's learnings and
+  evaluation attempts under `knowledge_dir` into the database, in one transaction.
+  A task file is stored byte for byte, so user keys and notes are untouched. The
+  transaction reads every copied row back and compares it to its source before it
+  commits; the commit is the cutover. It refuses while any task file names a live
+  runner, because an old runner could recreate a record or write the retired store.
+  It takes the Markdown store's lock while it runs. After the commit it moves the
+  copied task files into `tasks_dir/.pre-sqlite/`, which a vault ignores, and deletes
+  every Linear task file and Linear triage record, active and completed, without
+  importing them. Branches, worktrees, PRs, runner logs, and the Linear tickets are
+  left alone. Deletion is a separate recorded step, so a crash between the commit and
+  the cleanup is finished by the next run, and a rerun after either step changes
+  nothing. A file that fails to decode aborts the import before anything is deleted.
+- **Retired Linear settings fail loudly.** `linear_team`, `linear_teams`,
+  `linear_projects`, and `default_source: linear` or `-s linear` are errors that say
+  Linear support was removed and how to keep Linear work as local issues.
 - **Every write goes through `App.update`**, which sends the alert when the state
-  enters NEEDS_DECISION, FAILED, READY_FOR_HUMAN, or REVIEWED. Call sites never notify
+  enters NEEDS_DECISION, FAILED, READY_FOR_HUMAN, or REVIEWED, and closes the local
+  issue when a local task reaches DONE. Call sites never notify
   on their own. A test fails on any other `Store.Update` or `Store.Save` in `app`.
 - **The state is the stage.** A delegated task in progress is in one of PLANNING,
   IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, OPENING_PR, or WAITING_FOR_CI. Each
@@ -422,10 +505,8 @@ the same commit. The commit message records why it changed.
   their planning comments.
 - **Names are chosen once, before worktree creation.** GitHub tasks default to
   `<type>/<issue>-<slug>`. The type comes from the title prefix, the labels, or
-  `feat`, and the slug is capped at five words and 40 characters. Linear tasks
-  use the tracker suggestion when present. Without one, the default is
-  `<type>/linear-<identifier>-<title-slug>`. An invalid tracker suggestion
-  requires a manual choice. The manual prompt allows editing before confirming,
+  `feat`, and the slug is capped at five words and 40 characters. Local tasks
+  default to `<type>/local-<id>-<title-slug>`. The manual prompt allows editing before confirming,
   and auto mode waits for a choice if the proposal is invalid or reserved by a
   prior PR. Foreman validates the chosen name before creating the worktree.
   A new branch starts from the fetched remote base. Its worktree is
@@ -478,9 +559,10 @@ the same commit. The commit message records why it changed.
   with the code, or cannot be followed, it reports `blocked` instead of revising the plan,
   adding scope, changing expected behavior, or skipping work. A changed confirmed scope
   returns to the planner and implementer before review.
-- **No task-triggered model calls sit outside the four roles.** Automatic learning and
-  diagnostic calls do not run in the task lifecycle. Standalone knowledge commands
-  remain separate operations.
+- **Only learning sits outside the four roles.** Automatic diagnostic calls do not run
+  in the task lifecycle. Learning is a detached side job that starts after a clean
+  review or on changed evidence; it reads the task and never changes it. Standalone
+  knowledge commands remain separate operations.
 - **Stage model policy is explicit:** `models.planning`, `models.implementation`,
   and `models.adversarial_review` each store an agent, model, and reasoning effort. All three
   default to medium for Claude and Codex. Self-review shares the implementation target. Fixes, merges,
@@ -712,45 +794,41 @@ the same commit. The commit message records why it changed.
   Work an agent holds stays in DELEGATED WORK, so an issue is never delegated
   twice. `mentions: false` hides mention-only items but never a delegated task that
   needs the developer.
-- **Every new run requires confirmed triage.** The standalone skill records
-  decisions on the issue and applies its `triaged` label. Foreman also reads
-  existing local triage records keyed by GitHub repository and issue number
-  or Linear issue ID. At the first start, Foreman prefers a valid local record
-  when present and otherwise uses tracker triage. The run keeps that source
-  across restarts. New runs save planning documents locally. Runs created with
-  tracker-backed planning keep their existing planning comments.
-  Auto mode checks triage after a successful tracker refresh. Manual and auto
+- **Every new run requires confirmed triage.** For a GitHub issue the standalone
+  skill records decisions on the issue and applies its `triaged` label; Foreman
+  also reads a confirmed triage record in the database keyed by repository and
+  issue number. At the first start, Foreman prefers a valid record when present and
+  otherwise uses tracker triage. The run keeps that source across restarts. A local
+  issue has only the database record, saved by `foreman issue add --triage-file` or
+  `foreman issue triage`. New runs save planning documents locally.
+  Auto mode checks triage after a successful refresh. Manual and auto
   starts reread readiness before preparing an implementation worktree. An
-  issue lock protects concurrent starts across repository choices.
+  issue lock (a pid-stamped row, taken over once its process is gone) protects
+  concurrent starts across repository choices.
   Dashboard start and routing requests carry the source-qualified issue key.
-  Routing reads the issue and recent comments from that tracker.
-  A Linear task uses Linear's suggested branch name when available. Without a
-  suggestion, Foreman uses the display identifier and title. GitHub tasks
-  use their numeric issue name by default.
+  Local tasks use the display identifier and title for the default branch name;
+  GitHub tasks use their numeric issue name.
 - **Runner issue source.** A runner reads the issue through the source stored on
-  the task. Planning documents are posted through that source and retain its
-  comment IDs for later edits. A Linear task still opens its PR on GitHub; the
-  implementation prompt requires its Linear identifier in the PR title and its
-  issue URL in the body, with no GitHub closing keyword. GitHub tasks retain
-  their closing keyword.
+  the task. A local task still opens its PR on GitHub; the implementation prompt
+  requires its local ID in the PR title and keeps the source link, notes, and any
+  GitHub closing keyword out of it. GitHub tasks retain their closing keyword.
 - **Repository and source filters.** A nonempty `include_repositories` shows only those
   repositories and overrides `exclude_repositories`; otherwise the exclude list hides
-  its repositories. GitHub discovery remains independent of the Linear team. New
-  Linear issues have no repository until delegation, so repository filters do not
-  hide them. The resolved source (`-s`, else `default_source`) limits
-  inbox discovery to `github` or `linear`; `all` becomes the empty source, which
-  selects both. A missing Linear key blocks startup only when the source is `linear`
-  or `all` and `linear_team` is configured. A failed source leaves successful results and a warning, while
+  its repositories. New local issues have no repository until delegation, so
+  repository filters do not hide them. The resolved source (`-s`, else
+  `default_source`) limits inbox discovery to `github` or `local`; `all` becomes the
+  empty source, which selects both. Local discovery reads the database and needs no
+  credentials or network. A failed source leaves successful results and a warning, while
   auto mode waits for all selected sources to refresh successfully. The inbox groups
-  selectable issues under GITHUB and LINEAR. `App.InboxSources` drops filtered items before
+  selectable issues under GITHUB and LOCAL. `App.InboxSources` drops filtered items before
   `Reconcile`, so the configured view writes no records for them and reports no waiting
   task from them. Tracked lookups skip items outside the repository filter. Within the
   repository view, delegated tasks refresh through their stored source even when the inbox
   selects another source, and the selected source still controls which issues appear in
   INBOX. DELEGATED WORK lists the stored tasks from the selected source, and a record
   with no source counts as GitHub. Refresh and runners still cover every task, and runs
-  from a hidden source count toward auto.max_concurrent. Linear completed and canceled
-  issues map to closed; a stopped task becomes DONE on refresh. A merged GitHub PR also completes a task.
+  from a hidden source count toward auto.max_concurrent. A closed local issue
+  maps to closed; a stopped task becomes DONE on refresh. A merged GitHub PR also completes a task.
 - **Lookup failures warn and retry** next refresh without blocking other items. A 404
   or 410 on an undelegated item is reported once and then no longer checked.
 - **Delegation doesn't need a checkout:** foreman keeps a clone under
@@ -825,15 +903,15 @@ the same commit. The commit message records why it changed.
 
 - **Learning is explicit and separate from delegated tasks.** The `knowledge` commands
   export and ingest repository knowledge; the task runner does not evaluate finished tasks.
-  The store is `<knowledge_dir>/<owner>/<repo>/` (default `<data>/knowledge`):
-  `learnings.yaml` is the source of truth (id, kind, text, status, evidence entries,
-  and history), `evaluations/<task>.yaml` holds each task's evaluation and evidence
-  fingerprint, `attempts/<task>.yaml` the last attempt, `learning.lock` the
-  repository lock, and `knowledge.md` the active learnings rendered for people.
-  `Apply` writes the evaluation last, so a failed write leaves the task due for a
-  retry. Paths
-  come from a validated `owner/repo`, so one repository cannot reach another's
-  directory. Writes use a temp file and rename.
+  The store is the database: `learnings` holds each repository's learnings document
+  (id, kind, text, status, evidence entries, and history), and `evaluations` and
+  `attempts` hold one row per task. `knowledge.md`, the active learnings rendered for
+  people and for tools such as the triage skill, is written under
+  `<knowledge_dir>/<owner>/<repo>/` after each change and never read back. `Apply`
+  saves the learnings and the evaluation in one transaction. Repository names come
+  from a validated `owner/repo`, so one repository cannot reach another's rows. An
+  evaluation lock is a row stamped with its holder's pid, taken over once that
+  process is gone.
 - **The agent judges; Go keeps the books.** One evaluator turn reads the evidence and
   the repository's current learnings and returns proposals and revisions. Go decides
   what is stored, so the rules below are tested and a model cannot argue past them.
@@ -956,20 +1034,13 @@ the same commit. The commit message records why it changed.
   same decision. Its `ingest:` reason marks it as a decision, so it never counts as
   a correction itself.
 - **Ingest saves all or nothing.** `App.IngestKnowledge` takes the repository lock
-  without waiting, hashes `learnings.yaml` and `evaluations/`, merges, and hashes
+  without waiting, hashes the stored learnings and evaluations, merges, and hashes
   again before it saves; a change means another writer ran, and it fails with
-  `ErrKnowledgeChanged`. `Store.Replace` stages `learnings.yaml`, `evaluations/`,
-  and a regenerated `knowledge.md` in `.ingest/`, then writes `ingest.journal`
-  listing the staged evaluations. Writing the journal commits the save. It then
-  renames each staged file over the live one, removes evaluations the journal does
-  not list, moves `learnings.yaml` last, and deletes the journal. Each step can run
-  again, and `Store.Lock` finishes a committed save before anything else holds the
-  lock, so a crash after the commit completes on the next learner, refresh, export,
-  or ingest; a crash before it drops the stage. `Snapshot` refuses while a journal
-  is pending, and `App.ExportKnowledge` takes the lock, so an export never mixes
-  the old state and the new. No live file is ever missing, and a
-  reader without the lock sees whole old or new files. A failed agent turn, invalid
-  output, a conflict, the lock held, or `--dry-run` writes nothing.
+  `ErrKnowledgeChanged`. `SQLStore.Replace` writes the learnings and every evaluation
+  in one transaction and then renders `knowledge.md`, so a crash never leaves a
+  half-applied ingest and a reader sees the whole old state or the whole new one.
+  `App.ExportKnowledge` takes the lock, so an export never mixes the two. A failed
+  agent turn, invalid output, a conflict, the lock held, or `--dry-run` writes nothing.
 - **Learning is a side job.** `learning.enabled: false` stops new evaluations, even
   from a learner spawned before the change, because `App.Learn` checks it too;
   triage can still read knowledge already stored.
@@ -977,6 +1048,38 @@ the same commit. The commit message records why it changed.
   0.50) caps one Claude evaluation. Codex reports no cost, so its evaluations have no
   cap, like its other turns. Evaluation errors go to `learning.log` and never
   change a task, an alert, or an exit code.
+
+### Portable work
+
+- **One versioned file moves local work between databases.** `foreman issue export
+  [ID] [-o FILE]` writes one local issue, or all local work, as YAML with
+  `format: foreman-work/1`. Each issue carries its stable ID, title, description,
+  source URL, status, repository hint, private notes, tags, timestamps, and confirmed
+  triage. Its work, once a run has started, carries the repository, requirements, the
+  checked implementation plan with its description fingerprint, answered decisions,
+  review findings, the last checkpoint, and branch, commit, and PR references. Those
+  references describe prior work and reconnect to it only where the resources exist.
+  The file never carries credentials, provider session IDs, raw logs, runner state, the
+  account, or machine paths: `workOf` builds it from named fields, so a new field is
+  excluded until someone adds it.
+- **Learnings are opt in and full exports only.** `--learnings` adds each repository's
+  curated learnings with identity, status, evidence, and revision history, including
+  superseded and retired entries, so an import keeps which guidance is active. Pending
+  proposals (candidate learnings) and raw evaluations stay out, and `Parse` rejects a
+  file that carries them.
+- **An import is previewed, then atomic.** `Parse` validates the whole file first: the
+  format, unknown fields, one document, ID, URL, branch, commit, and review shapes,
+  and learnings as an ingest would. `--dry-run` lists what would be created, what is
+  unchanged, and each conflict. A record that exists with different content is a
+  conflict, and the default policy changes nothing at all. `--on-conflict skip` keeps
+  this database's version and `replace` takes the file's, refusing to replace work
+  whose agent is still running. All writes share one transaction. Importing the same
+  file again finds every record unchanged and writes nothing.
+- **An import restores records and starts nothing.** It creates no delegation, session,
+  worktree, or runner and calls no tracker. A run in progress comes back idle: its PR
+  and branch become a reset mark, so the next manual start reads that PR and continues it
+  when it is still open on that branch, and the saved plan seeds the new run and is
+  replaced when the issue changed since. A finished run comes back DONE.
 
 ### Notifications
 
@@ -988,8 +1091,12 @@ the same commit. The commit message records why it changed.
 ### Tooling
 
 - **Go, standard library first.** The dependencies are `go.yaml.in/yaml/v3` (task
-  files keep comments and key order) and `golang.org/x/term` (raw mode and terminal
-  size). Add another only with the user's approval, and list it here.
+  documents keep comments and key order), `golang.org/x/term` (raw mode and terminal
+  size), `golang.org/x/sys/unix` (polling stdin, so a triage session can take the
+  terminal without a dashboard read stealing its keys), and `modernc.org/sqlite` (the
+  database). The SQLite driver is pure Go, so the static, cgo-free release builds
+  below keep working; `mattn/go-sqlite3` was rejected because it needs cgo. Add
+  another only with the user's approval, and list it here.
 - **Releases** are `scripts/release.sh` run by a tag workflow: static binaries for
   darwin and linux on arm64 and amd64, no Windows (the runner needs `setsid`), not
   signed. Local builds report `0.1.0-dev (<revision>)`, with `-dirty`

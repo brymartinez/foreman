@@ -1,6 +1,6 @@
 # foreman
 
-A local CLI that hands GitHub or Linear issues to Claude Code or Codex. It gives the
+A local CLI that hands GitHub issues, and local issues saved in Foreman, to Claude Code or Codex. It gives the
 PR back to you once it is ready for your review.
 
 ```
@@ -73,10 +73,15 @@ foreman                         # dashboard for default_source (GitHub unless se
 foreman -a                      # auto mode on for this launch
 foreman --no-auto               # auto mode off for this launch
 foreman -s github               # show GitHub issues and delegated tasks
-foreman --source linear         # show Linear issues and delegated tasks
-foreman -s all                  # show both trackers
+foreman --source local          # show local issues and delegated tasks
+foreman -s all                  # show GitHub and local issues
 foreman --mentions              # show mention-only items for this launch
 foreman -c                      # edit config in $VISUAL, $EDITOR, or vi
+foreman issue add --title "Fix cache" --url <link> --triage-file triage.md   # save a local issue
+foreman issue list | show L-0000002A | triage L-0000002A --file triage.md
+foreman issue export [L-0000002A] [--learnings] -o work.yaml
+foreman issue import work.yaml [--dry-run] [--on-conflict fail|skip|replace]
+foreman export markdown ~/vault/foreman       # one-way copy of tasks for Obsidian
 foreman knowledge export owner/repo -o knowledge.md
 foreman knowledge ingest knowledge.md --dry-run
 foreman --help
@@ -87,7 +92,7 @@ Dashboard launch flags override a setting for one launch and save nothing:
 
 | Launch override | Effect |
 |---|---|
-| `-s`, `--source github\|linear\|all` | Select the issue tracker for INBOX, DELEGATED WORK, and auto mode's starts. `all` selects both. Overrides `default_source`. |
+| `-s`, `--source github\|local\|all` | Select the issue source for INBOX, DELEGATED WORK, and auto mode's starts. `all` selects both. Overrides `default_source`. |
 | `-a`, `--auto` | Turn auto mode on. Overrides the choice saved with `a`. |
 | `--no-auto` | Turn auto mode off. Overrides the choice saved with `a`. |
 | `--mentions` | Show items found only because they mention you. Overrides `mentions`. |
@@ -225,9 +230,9 @@ start that fails is shown on the message line and is not retried until you reope
 dashboard. An issue that lacks detail goes through the usual decision flow.
 
 For GitHub repositories, the inbox searches for open issues assigned to you, open
-issues and PRs that mention you, and PRs that request your review. For the configured
-Linear team, it lists open issues assigned to the user named by `LINEAR_API_KEY`. INBOX groups
-delegatable issues under GITHUB and LINEAR, with
+issues and PRs that mention you, and PRs that request your review. It also lists your
+open local issues, which need no credentials or network. INBOX groups
+delegatable issues under GITHUB and LOCAL, with
 what changed since the last refresh beneath each one. Each search returns up to 1000
 results.
 
@@ -275,9 +280,8 @@ confirmed triage decisions before delegation.
      takes the type from a title prefix (`fix: …`) or a label (`bug` → `fix`,
      `documentation` → `docs`). It uses `feat` if neither supplies a type.
      The slug is capped at five words and 40 characters.
-   - A Linear issue uses the suggested branch when provided. If Linear returns no
-     name, Foreman uses the type, identifier, and title, as in
-     `fix/linear-web-42-fix-cache`. An invalid suggestion requires a manual choice.
+   - A local issue uses the type, its ID, and the title, as in
+     `fix/local-l-0000002a-fix-cache`.
 2. It launches a detached runner that logs to `~/.local/share/foreman/logs/`. The
    runner keeps going after you quit the dashboard.
 3. The runner has the agent implement the issue, run validation, push, and open a PR
@@ -328,15 +332,16 @@ confirmed triage decisions before delegation.
 ## Planning
 
 Run the standalone `foreman-triage` skill in Claude Code or Codex for an
-issue marked **Awaiting triage**. Once the skill confirms the decisions and
-applies the `triaged` label in GitHub or Linear, refresh Foreman and start the
-issue. Foreman reads the confirmed triage comments, or the issue description
+issue marked **Awaiting triage**, or press `f` on it in the dashboard to open that
+session in place; the dashboard returns and refreshes when the session exits.
+Once the skill confirms the decisions and applies the `triaged` label in GitHub,
+refresh Foreman and start the issue. Foreman reads the confirmed triage comments, or the issue description
 if there are no triage comments.
 
 Foreman also accepts existing confirmed Markdown records under `triage_dir`
 (default `~/.local/share/foreman/triage`). GitHub records use
-`github/<owner>/<repo>/<issue-number>.md`. Linear records use
-`linear/<issue-id>.md`. When a valid local record exists at the first start,
+`github/<owner>/<repo>/<issue-number>.md`; they are moved into the database on
+upgrade, and `foreman issue triage` saves local ones. When a valid local record exists at the first start,
 the task uses it as its triage source. To revise it, edit the decisions and
 keep the issue marker and heading.
 
@@ -384,7 +389,7 @@ Foreman never reads or changes those files.
   to later blocking questions take precedence over stage instructions.
 - Tasks read `.foreman/` from their worktree, so only the version committed on the base
   branch counts.
-- A GitHub issue PR body includes `Closes #N`; a Linear issue PR links its issue URL.
+- A GitHub issue PR body includes `Closes #N`; a local issue PR carries its ID in the title and never its source link or notes.
   A review always ends in foreman's JSON format. Stage targets come from `models` in
   `config.yaml`; no agent chooses a provider or model. Quota checks can pause work but
   cannot skip a review. Automatic learning and diagnostic calls do not run in a task.
@@ -609,7 +614,7 @@ fix_rounds: 3                        # fixes asked by either review before forem
 review_before_pr: false              # open the PR before review; set true to review locally first
 skip_self_review: false              # set true to start new tasks with adversarial review
 mentions: true                       # show items found only because they mention you
-default_source: github               # dashboard issue source: github, linear, or all
+default_source: github               # dashboard issue source: github, local, or all
 refresh: 60                          # seconds between dashboard issue-source refreshes
 auto:                                # on/off is not here; press a or launch with -a
   max_concurrent: 3                  # active runs, manual ones included
@@ -653,7 +658,7 @@ codex:
   review_reasoning_effort: ""        # "" uses reasoning_effort
 include_repositories: []             # exact owner/name; when set, the inbox shows only these
 exclude_repositories: []             # exact owner/name hidden from the inbox when include is empty
-linear_team: ""                      # Linear team URL; independent of GitHub repositories
+database: ""                        # SQLite file; "" uses <data>/foreman.db
 cleanup:
   on_done: true                   # each refresh removes DONE tasks' worktrees
   delete_merged_branch: true      # and the local branch, once the PR is merged
@@ -683,43 +688,45 @@ planning totals use the saved call history. Older missing usage is not backfille
 Dollar limits apply to Claude only. The task file stores each runner call with its
 stage, model, usage, times, and error; the task view shows calls and tokens by stage.
 
-To use Linear, set the team URL and a personal API key before starting Foreman:
+## Local issues
 
-```yaml
-linear_team: https://linear.app/acme/team/ENG/overview
-default_source: all
-```
+A local issue is work from anywhere else, such as Linear, Jira, or a chat message, kept
+in Foreman's own database. Foreman holds no tracker credentials and never reads or
+writes the source: the link is context for you and the agent. Each issue has a stable
+ID like `L-0000002A`.
 
-```bash
-export LINEAR_API_KEY=your-personal-linear-api-key
-foreman
-```
+- Press `F` in the dashboard (or run `foreman-triage` with a link) to interview and save
+  one. The skill reads the link with whatever access your agent session has, asks you to
+  paste the content otherwise, and saves with `foreman issue add`. Press `f` on an issue
+  marked **Awaiting triage** to triage it the same way. `c` still cancels.
+- Without confirmed triage a local issue cannot start. With it, delegate it like any
+  issue: Foreman proposes a repository from `owner/repo` links in the issue and triage,
+  or you enter one. Auto mode starts it only when triage is confirmed and one
+  repository is allowed.
+- The PR is opened on GitHub with the local ID in its title. The source link, private
+  notes, and any `Closes #N` stay out of it. A finished task closes the issue.
+- `foreman issue export [ID] -o work.yaml` writes a portable `foreman-work/1` file with
+  decisions, notes, tags, requirements, plans, review findings, checkpoints, and
+  branch, commit, and PR references. It leaves out credentials, raw logs, provider
+  session IDs, runner state, and machine paths. `--learnings` (all work only) adds
+  active, retired, and superseded learnings with history, not pending proposals.
+  `foreman issue import work.yaml` is atomic and repeatable, `--dry-run` previews
+  conflicts, and it never starts an agent or touches a tracker.
 
-Replace `linear_projects` or `linear_teams` with the singular `linear_team` string.
-The old mapping settings are no longer accepted. Team URLs can end in `/overview`
-or `/issues`, or stop at the team key.
+## Storage and upgrading
 
-Foreman discovers your assigned open issues across every project in the team,
-including issues without a project. GitHub issues remain available independently.
-Set `default_source: linear` or `all`, or pass `-s linear` or `-s all` for one
-launch. Linear discovery needs `LINEAR_API_KEY` with access to that team.
-`foreman -s github` does not need the key.
+Tasks, triage, local issues, and learnings live in one SQLite file, `database` in
+`config.yaml` (default `<data>/foreman.db`). The first start after upgrading moves your
+Markdown task files, triage records, and learnings into it; the originals stay in
+`tasks_dir/.pre-sqlite/`. It refuses while a runner is still alive, so stop running
+tasks first. **Linear support was removed:** saved Linear task records, active and
+completed, are deleted without migration. Branches, worktrees, PRs, and Linear tickets
+are untouched. Delete `linear_team`, `linear_teams`, and `linear_projects`, and use
+`github`, `local`, or `all` for `default_source`; Foreman stops with a message until you
+do. Save Linear work you still want as local issues.
 
-When you select a new Linear issue, Foreman reads its description and confirmed triage for explicit GitHub repository links. It proposes a repository when those
-links identify one allowed destination. Confirm or edit the `owner/repo` before
-choosing an agent. Missing or conflicting links require you to enter a repository.
-A triage document hosted elsewhere is not fetched automatically; enter the
-repository when the issue and its triage do not identify it.
-
-Repository filters apply after selection and do not hide unresolved Linear issues.
-Auto mode infers the destination using the same links and leaves ambiguous issues
-for manual selection. A delegated issue keeps its confirmed repository across
-refreshes and restarts.
-
-Foreman reads and comments on Linear issues but does not change their status.
-Branches and pull requests stay on GitHub. A Linear task's PR title includes its
-Linear identifier, and its body links to the Linear issue instead of using a GitHub
-`Closes #N` line. New Linear tasks use the branch naming rules described under [What a start does](#what-a-start-does).
+`foreman export markdown DIR` writes each task as Markdown for an Obsidian vault. It is
+one way; edits to the copies are not read back.
 
 Task models are selected by stage. PR creation, fixes, merges, and final checks use
 the implementation target. Self-review uses that same target. Adversarial review uses
@@ -750,7 +757,7 @@ the selected issue sources whenever you ask.
 `acme/widgets`. A nonempty include list limits the inbox to those repositories and the
 exclude list is then ignored. With an empty include list, the exclude list hides its
 repositories. The filter applies to fresh inbox results and tracked-task refreshes
-from GitHub and Linear alike. DELEGATED WORK lists only tasks from the source `-s`
+from GitHub and local issues alike. DELEGATED WORK lists only tasks from the source `-s`
 selects. Hidden tasks keep running, count toward `auto.max_concurrent`, and show again
 in a dashboard that includes their source. A failed refresh of either selected
 source keeps results from the successful source visible with a warning and pauses all

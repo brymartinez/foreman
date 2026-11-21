@@ -8,8 +8,8 @@ import (
 	"github.com/brymartinez/foreman/internal/task"
 )
 
-func TestLinearRepositoryIsConfirmedBeforeAgentSelection(t *testing.T) {
-	key := task.Key{Source: task.Linear, ExternalID: "uuid-42"}
+func TestLocalRepositoryIsConfirmedBeforeAgentSelection(t *testing.T) {
+	key := task.Key{Source: task.Local, ExternalID: "L-0000002A"}
 	m := Model{Width: 100, Height: 30}
 	m.SetInbox([]app.InboxEntry{{Item: app.InboxItem{Key: key, Identifier: "ENG-42", Kind: task.Issue, State: "open"}}})
 	action := m.Key(Key{Kind: KeyEnter})
@@ -46,7 +46,7 @@ func (s *repositorySource) ProposeRepository(context.Context, task.Key) (app.Rep
 }
 
 func TestAutoWaitsForRepositoryOrKeepsOriginalInboxIdentity(t *testing.T) {
-	key := task.Key{Source: task.Linear, ExternalID: "uuid-42"}
+	key := task.Key{Source: task.Local, ExternalID: "L-0000002A"}
 	req := app.StartRequest{Key: key, Agent: task.Claude, NewOnly: true}
 	s := &repositorySource{proposal: app.RepositoryProposal{Reason: "choose a repository"}}
 	result := autoStart(context.Background(), s, req, nil)
@@ -60,8 +60,8 @@ func TestAutoWaitsForRepositoryOrKeepsOriginalInboxIdentity(t *testing.T) {
 	}
 }
 
-func TestAutoDoesNotDuplicateLinearIssueDuringRepositorySelection(t *testing.T) {
-	key := task.Key{Source: task.Linear, ExternalID: "uuid-42"}
+func TestAutoDoesNotDuplicateLocalIssueDuringRepositorySelection(t *testing.T) {
+	key := task.Key{Source: task.Local, ExternalID: "L-0000002A"}
 	m := Model{AutoOn: true, AutoMax: 3, AutoAgent: task.Claude, githubFresh: true}
 	m.Inbox = []app.InboxEntry{{Item: app.InboxItem{Key: key, Kind: task.Issue, State: "open", Reasons: []task.InboxReason{task.Assigned}, Labels: []string{"triaged"}}}}
 	m.Mode = TypingRepository
