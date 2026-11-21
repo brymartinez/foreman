@@ -22,7 +22,7 @@ fail() { printf '  FAIL %s\n' "$1"; failures=$((failures + 1)); }
 # Markdown export, so the checks below can read a task as text. A sandbox with no
 # database yet has nothing to export.
 sync_tasks() {
-	[ -n "${sandbox:-}" ] && [ -e "$sandbox/foreman.db" ] || return 0
+	[ -n "${sandbox:-}" ] && [ -e "$sandbox/foreman.db" ] && [ -d "$sandbox/tasks" ] || return 0
 	(cd "${FOREMAN_CWD:-$sandbox}" && "$work/foreman" export markdown "$sandbox/tasks" >/dev/null 2>&1) || true
 }
 check() { # check <description> <command...>
@@ -52,11 +52,14 @@ dash() {
 	local flags=()
 	while [ $# -gt 0 ] && [ "$1" != -- ]; do flags+=("$1"); shift; done
 	[ ${#flags[@]} -gt 0 ] || flags=(--no-auto)
-	(cd "${FOREMAN_CWD:-$sandbox}" && HOME="$sandbox/home" python3 "$root/scripts/tui-drive.py" "$work/foreman" "${flags[@]}" "$@")
+	local rc=0
+	(cd "${FOREMAN_CWD:-$sandbox}" && HOME="$sandbox/home" python3 "$root/scripts/tui-drive.py" "$work/foreman" "${flags[@]}" "$@") || rc=$?
+	sync_tasks
+	return $rc
 }
 
 # check runs commands through bash -c too, so they can use dash.
-export -f dash
+export -f dash sync_tasks
 export root work
 
 # screen runs one GitHub refresh in the dashboard and prints what it shows.
@@ -137,6 +140,19 @@ codex:
   reasoning_effort: medium
   plan_reasoning_effort: xhigh
   review_reasoning_effort: medium
+models:
+  planning:
+    agent: claude
+    model: sonnet
+    reasoning_effort: medium
+  implementation:
+    agent: claude
+    model: opus
+    reasoning_effort: medium
+  adversarial_review:
+    agent: codex
+    model: gpt-6-sol
+    reasoning_effort: medium
 notifications:
   enabled: false
 EOF
@@ -277,6 +293,15 @@ if [[ -f "$E2E_STATE/correction-committed" && "$2" != *"Push it and open the pul
 	echo '{"type":"result","session_id":"s1","subtype":"success","structured_output":{"status":"review_ready","summary":"The old finding is already fixed in this commit","reviewAssessment":{"round":1,"rejected":[{"finding":1,"reason":"Already fixed in the committed correction; no further edit is needed."}]},"nextObjective":null,"prNumber":null,"prUrl":null,'"$(full)"',"questions":[],"documents":null,"prTitle":"feat: add retries","prBody":"Retry 5xx and 429.\n\nCloses #42"}}'
 	exit 0
 fi
+# The learner's evaluation turn answers with the JSON the scenario prepared for the task's
+# title, or with no proposals.
+if [[ "$*" == *"You evaluate one finished task"* ]]; then
+	echo "claude evaluate" >>"$E2E_STATE/evaluations.log"
+	title=$(printf '%s\n' "$*" | sed -n 's/^Title: //p' | head -n 1)
+	if [ -f "$E2E_STATE/evaluation-$title.json" ]; then out=$(cat "$E2E_STATE/evaluation-$title.json"); else out='{"assessment":"went fine","signals":[],"proposals":[],"revisions":[]}'; fi
+	printf '{"type":"result","session_id":"e1","subtype":"success","total_cost_usd":0.01,"structured_output":%s}\n' "$out"
+	exit 0
+fi
 # Planner and implementer prompts are dispatched to retained task sessions.
 planning=
 if [[ "$2" == *"You are the planner"* || "$2" == *"## Plan first"* ]]; then
@@ -284,6 +309,11 @@ if [[ "$2" == *"You are the planner"* || "$2" == *"## Plan first"* ]]; then
 	if [[ " $* " == *" --resume "* ]]; then echo "planner resume" >>"$E2E_STATE/role-sessions.log"; else echo "planner start" >>"$E2E_STATE/role-sessions.log"; fi
 	printf '%s' "$2" >"$E2E_STATE/prompt.txt"
 	planning=1
+elif [[ "$2" == "The previous turn for this action was interrupted"* && "$2" == *"You are the implementation agent"* && "$2" != *"You are correcting the latest review"* ]]; then
+	# A restarted implementation turn does the same work as the first one. The shipped
+	# implement stage text mentions review findings, so it must not look like a fix.
+	echo "claude implement" >>"$E2E_STATE/agents.log"
+	printf '%s' "$*" >"$E2E_STATE/plan-posted-prompt.txt"
 elif [[ " $* " == *" --resume "* || "$2" == *"You are correcting the latest review"* || "$2" == *"## Final full check"* || "$2" == *"Push it and open the pull request now"* ]]; then
 	if [[ "$2" == *"foreman posted your documents"* ]]; then
 		echo "claude implement" >>"$E2E_STATE/agents.log"
@@ -544,10 +574,34 @@ notifications_config() {
 	chmod 600 "$sandbox/config.yaml"
 }
 
-# GitHub issues in e2e are triaged by their "triaged" label and description, the way
-# the standalone skill leaves them. Confirmed triage now lives in the database, so
-# nothing is written to triage_dir; local issues are triaged with `foreman issue`.
-confirm_triage() { :; }
+# confirm_triage <triage id> stores a confirmed triage record in the database, the way
+# `foreman` would after a skill session. GitHub issues have no CLI for it, because the
+# standalone skill publishes to the issue itself; e2e writes the row directly. Opening
+# the database first through `foreman issue list` creates and migrates it.
+confirm_triage() {
+	foreman issue list >/dev/null 2>&1 || true
+	sqlite3 -cmd ".timeout 5000" "$sandbox/foreman.db" \
+		"INSERT OR REPLACE INTO triage (id, decisions, confirmed_at) VALUES ('$1', 'Proceed with the issue as described.', '2026-09-25T10:00:00Z')"
+}
+
+# Tasks live in the database, so a scenario that needs a task in a state the stubs cannot
+# reach edits the row the way an earlier version edited the file.
+#   set_state <task id> <STATE> rewrites the stored state and the document's state line.
+#   seed_task <task id> <file> stores a Markdown task document as a new row.
+set_state() {
+	local cur
+	cur=$(sqlite3 "$sandbox/foreman.db" "SELECT state FROM tasks WHERE id = '$1'")
+	sqlite3 -cmd ".timeout 5000" "$sandbox/foreman.db" \
+		"UPDATE tasks SET state = '$2', document = replace(document, char(10) || 'state: $cur' || char(10), char(10) || 'state: $2' || char(10)) WHERE id = '$1'"
+}
+seed_task() { # seed_task <owner/repo#number> <file>
+	local id=$1 repo number
+	repo=${id%#*}
+	number=${id#*#}
+	foreman issue list >/dev/null 2>&1 || true
+	sqlite3 -cmd ".timeout 5000" "$sandbox/foreman.db" \
+		"INSERT INTO tasks (id, source, repo, number, external_id, state, title, document, updated_at) VALUES ('$id', 'github', '$repo', $number, '', 'FAILED', 'Add retries', CAST(readfile('$2') AS TEXT), '2026-10-01T10:00:00Z')"
+}
 
 issue() { # issue <number> <title> [labels-json]
 	echo "$2" >"$state/title-$1"
@@ -583,7 +637,7 @@ scenario_runner() {
 	check "log lines are timestamped" grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$log"
 	check "agent stderr reached the log" contains "$log" "claude stderr progress"
 	check "no line is stamped twice" bash -c "! grep -qE '^[^ ]+ [0-9]{4}-[0-9]{2}-[0-9]{2}T' '$log'"
-	check "planning carries the plan stage file" contains "$state/prompt.txt" "Write two short documents before changing code."
+	check "planning carries the plan stage file" contains "$state/prompt.txt" "You are the planning agent."
 	check "the first turn plans" contains "$state/prompt.txt" "You are the planner"
 	check "the documents stay off the issue" bash -c "! grep -qF 'api --method POST repos/acme/widgets/issues/42/comments' '$state/gh.log'"
 	check "the checked documents are stored locally" contains "$sandbox/tasks/acme-widgets-42.md" "local_plan:"
@@ -853,7 +907,7 @@ scenario_logs() {
 	check "R marks the pane raw" contains "$sandbox/raw.txt" "LOG · raw · acme/widgets#42"
 	check "raw keeps Codex JSON" contains "$sandbox/raw.txt" '"type":"turn.completed"'
 	task 42 sd >"$sandbox/show.txt"
-	check "the show pane reports usage" contains "$sandbox/show.txt" 'Claude $0.37 (4 turns) · Codex 120 tokens (1 turn)'
+	check "the show pane reports usage" contains "$sandbox/show.txt" 'Claude $0.32 (3 turns) · Codex 120 tokens (1 turn)'
 
 	# Far more than one bounded read of the log, so g must load older chunks.
 	local log first
@@ -941,14 +995,14 @@ scenario_local() {
 	check "intake prints a stable local ID" bash -c "[[ '$id' =~ ^L-[0-9A-F]{8}\$ ]]"
 	check "the issue lists as triaged" bash -c "'$work/foreman' issue list | grep -qF '$id'$'\ttriaged'"
 	check "the local issue appears in the inbox" dash --no-auto -s local -- refreshed "pick=$id"
-	if dash --no-auto -s local -- refreshed "pick=$id" 'keys=\r' "wait=GitHub repository" 'keys=acme/widgets\r1\r' confirm-branch "wait=Started acme/widgets" >"$sandbox/local-start.txt" 2>&1; then
+	if dash --no-auto -s local -- refreshed "pick=$id" 'keys=\r' "wait=GitHub repository" 'keys=\r1\r' confirm-branch "wait=Started acme/widgets" >"$sandbox/local-start.txt" 2>&1; then
 		pass "a local issue can be delegated"
 	else
 		fail "a local issue can be delegated"
 	fi
 	check "the task reaches a clean GitHub PR review" eventually 20 grep -q 'verdict: clean' "$sandbox/tasks/acme-widgets-local-$id.md"
 	check "the source link never reaches GitHub" bash -c "! grep -qF 'linear.app' '$state/gh.log'"
-	check "the PR title carries the local ID" bash -c "grep -F 'pr create' '$state/gh.log' | grep -qF '$id'"
+	check "the prompt puts the local ID in the PR title and keeps the source link out" bash -c "grep -qF 'Put $id in the pull request title. Do not put the issue' '$state/plan-posted-prompt.txt'"
 	check "no Linear or Jira call was made" bash -c "! grep -qiE 'linear|jira' '$state/gh.log'"
 	check "the task survives a restart of the dashboard" dash --no-auto -s local -- refreshed "wait=$id"
 	foreman issue export -o "$sandbox/work.yaml" >/dev/null
@@ -1068,9 +1122,9 @@ scenario_respond() {
 	check "the task still waits" wait_status "NEEDS_DECISION" 1
 	check "the second answer relaunches the run" dash -- refreshed keys=l pick=acme/widgets#42 'keys=\r\r' "wait=Resumed acme/widgets#42 with the answers"
 	check "the run reaches a clean review" wait_status "review ✓"
-	check "the agent resumed once, with both answers" test "$(turns 'claude resume')" = 1
-	check "resume carries the first answer" contains "$state/resume-prompt.txt" "Decision: B. 4xx and 5xx"
-	check "resume carries the second answer" contains "$state/resume-prompt.txt" "Decision: A. 3 tries"
+	check "the planner resumed once, with both answers" test "$(grep -c 'planner resume' "$state/role-sessions.log")" = 1
+	check "resume carries the first answer" contains "$state/prompt.txt" "Decision: B. 4xx and 5xx"
+	check "resume carries the second answer" contains "$state/prompt.txt" "Decision: A. 3 tries"
 }
 
 scenario_cancel() {
@@ -1103,12 +1157,12 @@ scenario_reset() {
 	branch=$(sed -n 's/^branch: *//p' "$file")
 	log=$(ls "$sandbox"/logs/acme-widgets-42.log)
 	check "the first runner finishes before reset" eventually 5 grep -qF "finished" "$log"
-	perl -pi -e 's/^state: .*/state: FAILED/' "$file"
+	set_state "acme/widgets#42" FAILED
 	echo wip >"$wt/notes.txt"
 	echo '[[{"id":71,"html_url":"https://github.com/acme/widgets/pull/942#issuecomment-71","body":"Only retry idempotent calls.","updated_at":"2026-10-01T10:00:00Z","user":{"login":"brymartinez"}}]]' \
 		>"$state/conv-repos-acme-widgets-issues-942-comments.json"
 	local writes
-	writes=$(grep -c 'api --method' "$state/gh.log")
+	writes=$(grep -c 'api --method' "$state/gh.log" || true)
 
 	mv "$state/pr-942.json" "$state/pr-942.hold"
 	check "with GitHub failing, x then y keeps the run" dash -- refreshed keys=l pick=acme/widgets#42 keys=xy "wait=nothing was deleted"
@@ -1189,7 +1243,7 @@ scenario_routing() {
 	rm "$sandbox/routing.yaml"
 
 	# A dashboard start routed #42 to a profile that plans with opus, and the run failed.
-	cat >"$sandbox/tasks/acme-widgets-42.md" <<EOF2
+	cat >"$sandbox/seed-42.md" <<EOF2
 ---
 repo: acme/widgets
 number: 42
@@ -1206,6 +1260,7 @@ profile:
 route_reason: broad or ambiguous design work
 ---
 EOF2
+	seed_task "acme/widgets#42" "$sandbox/seed-42.md"
 	check "a retry with the same agent starts" start 42
 	check "the run reaches a clean review" wait_status "review ✓"
 	local log
@@ -1301,13 +1356,15 @@ scenario_history() {
 	check "esc returns to the dashboard" dash -- refreshed keys=p "wait=#907" 'keys=\x1b' "wait=DELEGATED WORK"
 }
 
-# evaluated <repo dir> <n> [seconds] waits for task #n's evaluation, refreshing so a
-# learner that lost the repository lock is started again.
+# evaluated <owner/repo> <n> [seconds] runs the learner on task #n and waits for its
+# evaluation. The task lifecycle starts no learner of its own, so the scenario runs the
+# hidden `__learn` verb that a learner process executes. A learner that loses the
+# repository lock is run again.
 evaluated() {
-	local end=$((SECONDS + ${3:-15}))
-	until foreman knowledge export "$1" 2>/dev/null | grep -qE "^ *(- )?task: ['\"]?$2['\"]?$"; do
+	local end=$((SECONDS + ${3:-15})) repo=$1
+	until foreman knowledge export "$repo" 2>/dev/null | grep -qE "^ *(- )?task: ['\"]?$2['\"]?$"; do
 		[ $SECONDS -lt $end ] || return 1
-		screen >/dev/null
+		foreman __learn "$repo#$2" >/dev/null 2>&1 || true
 		sleep 0.1
 	done
 }
@@ -1343,6 +1400,7 @@ scenario_learning() {
 	# A task in another repository: same origin, but foreman keys it as acme/linear.
 	echo "[$(hit acme/linear 45 'Other repo work')]" >"$state/search-issues-assignee.json"
 	issue 45 "Other repo work"
+	confirm_triage "github/acme/linear/45"
 	dash -- refreshed "pick=acme/linear#45" 'keys=\r1\r' confirm-branch "wait=Started acme/linear#45" >/dev/null 2>&1 || true
 	check "the other repository's task reaches a clean review" eventually 20 grep -q 'verdict: clean' "$sandbox/tasks/acme-linear-45.md"
 	check "its prompt carries no knowledge from acme/widgets" bash -c "! grep -qF 'go vet' '$state/prompt.txt'"
@@ -1421,6 +1479,9 @@ scenario_knowledge_transfer() {
 	machine c
 	seed "$a" 1 2026-09-01T12:00:00Z observed "Wrap errors with the operation name."
 	seed "$b" 7 2026-09-05T12:00:00Z observed "Errors carry the operation name."
+	# The seeds are the Markdown knowledge store of an earlier version. Removing the empty
+	# database lets the first command of each machine import them, as an upgrade would.
+	rm -f "$sandbox"/foreman.db "$sandbox"/foreman.db-wal "$sandbox"/foreman.db-shm
 
 	check "export writes the file" foreman knowledge export acme/widgets -o "$sandbox/a.md"
 	check "the export names its repository" contains "$sandbox/a.md" "Repository: acme/widgets"

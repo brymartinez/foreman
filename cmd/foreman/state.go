@@ -38,8 +38,12 @@ func openState(cfg config.Config, w io.Writer) (state, error) {
 		return state{}, fmt.Errorf("upgrade stored work into %s: %w", cfg.Database, err)
 	}
 	if rep.Tasks+rep.Triage+rep.Repositories+rep.LinearRemoved > 0 {
-		fmt.Fprintf(w, "foreman: moved %d tasks, %d triage records, and %d repositories' learnings into %s; deleted %d Linear records. Your original task files are in %s/.pre-sqlite.\n",
-			rep.Tasks, rep.Triage, rep.Repositories, cfg.Database, rep.LinearRemoved, cfg.TasksDir)
+		fmt.Fprintf(w, "foreman: moved %d tasks, %d triage records, and %d repositories' learnings into %s; deleted %d Linear records.",
+			rep.Tasks, rep.Triage, rep.Repositories, cfg.Database, rep.LinearRemoved)
+		if rep.Tasks > 0 {
+			fmt.Fprintf(w, " Your original task files are in %s/.pre-sqlite.", cfg.TasksDir)
+		}
+		fmt.Fprintln(w)
 	}
 	return state{
 		DB:        d,
