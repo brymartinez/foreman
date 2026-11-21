@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +18,9 @@ import (
 )
 
 type Config struct {
+	// Database is the SQLite file holding tasks, triage, local issues, and
+	// learnings.
+	Database        string `yaml:"database"`
 	TriageDir       string `yaml:"triage_dir"`
 	TasksDir        string `yaml:"tasks_dir"`
 	WorktreesDir    string `yaml:"worktrees_dir"`
@@ -35,7 +37,7 @@ type Config struct {
 	// Mentions shows items the searches found only because they mention you.
 	Mentions bool `yaml:"mentions"`
 	// DefaultSource is the issue tracker the dashboard shows when -s is not given:
-	// github, linear, or all.
+	// github, local, or all.
 	DefaultSource task.Source `yaml:"default_source"`
 	// Refresh is how often the dashboard reads GitHub, in seconds.
 	Refresh       int              `yaml:"refresh"`
@@ -51,7 +53,6 @@ type Config struct {
 	// overrides ExcludedRepos.
 	IncludedRepos []task.Repo `yaml:"include_repositories"`
 	ExcludedRepos []task.Repo `yaml:"exclude_repositories"`
-	LinearTeam    string      `yaml:"linear_team"`
 	// Path is the resolved config file used by config show/edit.
 	Path string `yaml:"-"`
 	// StagesDir holds the global stage instructions: stages/ next to the config file,
@@ -134,6 +135,7 @@ func Load() (Config, error) {
 	}
 	data := filepath.Join(home, ".local", "share", "foreman")
 	cfg := Config{
+		Database:        filepath.Join(data, "foreman.db"),
 		TriageDir:       filepath.Join(data, "triage"),
 		TasksDir:        filepath.Join(data, "tasks"),
 		WorktreesDir:    filepath.Join(data, "worktrees"),
@@ -170,8 +172,10 @@ func Load() (Config, error) {
 		dec := yaml.NewDecoder(bytes.NewReader(raw))
 		dec.KnownFields(true)
 		if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
-			if strings.Contains(err.Error(), "field linear_teams not found") || strings.Contains(err.Error(), "field linear_projects not found") {
-				return Config{}, fmt.Errorf("%s: %w; replace retired Linear mappings with linear_team: https://linear.app/<workspace>/team/<KEY>/overview; choose a repository when delegating", path, err)
+			for _, key := range []string{"linear_team", "linear_teams", "linear_projects"} {
+				if strings.Contains(err.Error(), "field "+key+" not found") {
+					return Config{}, fmt.Errorf("%s: %w; %s", path, err, linearRetired)
+				}
 			}
 			return Config{}, fmt.Errorf("%s: %w", path, err)
 		}
@@ -198,7 +202,10 @@ func Load() (Config, error) {
 	if env := os.Getenv("FOREMAN_TASKS_DIR"); env != "" {
 		cfg.TasksDir = env
 	}
-	for _, p := range []*string{&cfg.TriageDir, &cfg.TasksDir, &cfg.WorktreesDir, &cfg.RepositoriesDir, &cfg.LogDir, &cfg.KnowledgeDir} {
+	if strings.TrimSpace(cfg.Database) == "" { // database: with no value means the default
+		cfg.Database = filepath.Join(data, "foreman.db")
+	}
+	for _, p := range []*string{&cfg.Database, &cfg.TriageDir, &cfg.TasksDir, &cfg.WorktreesDir, &cfg.RepositoriesDir, &cfg.LogDir, &cfg.KnowledgeDir} {
 		*p = expandHome(*p, home)
 	}
 	if cfg.Refresh < MinRefresh {
@@ -237,13 +244,6 @@ func Load() (Config, error) {
 	if err := parseRepoList("exclude_repositories", cfg.ExcludedRepos); err != nil {
 		return Config{}, err
 	}
-	if cfg.LinearTeam != "" {
-		canonical, err := linearTeamURL(cfg.LinearTeam)
-		if err != nil {
-			return Config{}, fmt.Errorf("linear_team: %w", err)
-		}
-		cfg.LinearTeam = canonical
-	}
 	return cfg, nil
 }
 
@@ -264,25 +264,18 @@ func emptyDocument(n *yaml.Node) bool {
 	return n.Kind == yaml.ScalarNode && n.Tag == "!!null" && n.Value == "" && n.Style == 0 && n.Anchor == ""
 }
 
-// ValidSource accepts the dashboard's issue source choices: github, linear, or all.
+// linearRetired is the upgrade message for every retired Linear setting.
+const linearRetired = "Linear support was removed: delete the setting and keep Linear work as local issues instead (save one with `foreman issue add`, or press Shift+F in the dashboard); default_source is github, local, or all"
+
+// ValidSource accepts the dashboard's issue source choices: github, local, or all.
 func ValidSource(s task.Source) error {
 	switch s {
-	case task.GitHub, task.Linear, SourceAll:
+	case task.GitHub, task.Local, SourceAll:
 		return nil
+	case "linear":
+		return errors.New("issue source linear is retired; " + linearRetired)
 	}
-	return fmt.Errorf("unknown issue source %q (want github, linear, or all)", s)
-}
-
-func linearTeamURL(raw string) (string, error) {
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "https" || u.Host != "linear.app" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return "", fmt.Errorf("invalid Linear team URL %q", raw)
-	}
-	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
-	if len(parts) < 3 || len(parts) > 4 || parts[0] == "" || parts[1] != "team" || parts[2] == "" || strings.ContainsAny(parts[2], "%?# ") || (len(parts) == 4 && parts[3] != "overview" && parts[3] != "issues") {
-		return "", fmt.Errorf("invalid Linear team URL %q", raw)
-	}
-	return "https://linear.app/" + strings.Join(parts[:3], "/"), nil
+	return fmt.Errorf("unknown issue source %q (want github, local, or all)", s)
 }
 
 // parseRepoList validates each entry of the config list key and stores the parsed form in place.

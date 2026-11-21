@@ -28,8 +28,8 @@ type Markdown struct {
 }
 
 func (m Markdown) path(key task.Key) string {
-	if key.Source == task.Linear {
-		return filepath.Join(m.Dir, fmt.Sprintf("%s-linear-%s.md", strings.ReplaceAll(string(key.Repo), "/", "-"), key.ExternalID))
+	if key.Source == task.Local {
+		return filepath.Join(m.Dir, fmt.Sprintf("%s-local-%s.md", strings.ReplaceAll(string(key.Repo), "/", "-"), key.ExternalID))
 	}
 	return filepath.Join(m.Dir, fmt.Sprintf("%s-%d.md", strings.ReplaceAll(string(key.Repo), "/", "-"), key.Number))
 }
@@ -57,8 +57,8 @@ func (m Markdown) Get(_ context.Context, key task.Key) (*task.Record, error) {
 }
 
 func (m Markdown) Save(_ context.Context, rec *task.Record) error {
-	if rec.Source == task.Linear && (!linearIssueID.MatchString(rec.ExternalID) || rec.Identifier == "") {
-		return fmt.Errorf("linear issue needs a stable ID and identifier")
+	if rec.Source == task.Local && (!localIssueID.MatchString(rec.ExternalID) || rec.Identifier == "") {
+		return fmt.Errorf("local issue needs a stable ID and identifier")
 	}
 	if err := os.MkdirAll(m.Dir, 0o755); err != nil {
 		return err
@@ -148,7 +148,7 @@ func (m Markdown) List(_ context.Context) ([]*task.Record, error) {
 		if recs[i].Source != recs[j].Source {
 			return recs[i].Source < recs[j].Source
 		}
-		if recs[i].Source == task.Linear {
+		if recs[i].Source == task.Local {
 			return recs[i].ExternalID < recs[j].ExternalID
 		}
 		return recs[i].Number < recs[j].Number
@@ -232,6 +232,7 @@ type frontmatter struct {
 	CI                        *ciFM                  `yaml:"ci,omitempty"`
 	Attempts                  []task.Attempt         `yaml:"attempts,omitempty"`
 	Reset                     *resetFM               `yaml:"reset,omitempty"`
+	Imported                  *task.ImportedWork     `yaml:"imported_work,omitempty"`
 }
 
 type resetFM struct {
@@ -243,7 +244,7 @@ type resetFM struct {
 	Cleanup *task.ResetCleanup `yaml:"cleanup,omitempty"`
 }
 
-var linearIssueID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+var localIssueID = regexp.MustCompile(`^L-[0-9A-F]{8}$`)
 
 type feedbackFM struct {
 	Kind      task.CommentKind `yaml:"kind"`
@@ -367,9 +368,9 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 	if err != nil {
 		return nil, err
 	}
-	if fm.Source == task.Linear {
-		if !linearIssueID.MatchString(fm.ExternalID) || fm.Identifier == "" {
-			return nil, fmt.Errorf("linear issue needs a stable ID and identifier")
+	if fm.Source == task.Local {
+		if !localIssueID.MatchString(fm.ExternalID) || fm.Identifier == "" {
+			return nil, fmt.Errorf("local issue needs a stable ID and identifier")
 		}
 	} else if fm.Source != "" && fm.Source != task.GitHub {
 		return nil, fmt.Errorf("unknown issue source %q", fm.Source)
@@ -528,6 +529,7 @@ func (fm frontmatter) toRecord(body string) (*task.Record, error) {
 		}
 	}
 	rec.Attempts = fm.Attempts
+	rec.Imported = fm.Imported
 	if r := fm.Reset; r != nil {
 		rec.Reset = &task.ResetMark{At: r.At, PR: r.PR, PRURL: r.PRURL, Branch: r.Branch, PRState: r.PRState, Cleanup: r.Cleanup}
 	}
@@ -618,6 +620,7 @@ func fromRecord(rec *task.Record) frontmatter {
 	fm.Validation, fm.FullResult = rec.Validation, rec.FullResult
 	fm.Plan = rec.Plan
 	fm.Attempts = rec.Attempts
+	fm.Imported = rec.Imported
 	if r := rec.Reset; r != nil {
 		fm.Reset = &resetFM{At: r.At, PR: r.PR, PRURL: r.PRURL, Branch: r.Branch, PRState: r.PRState, Cleanup: r.Cleanup}
 	}

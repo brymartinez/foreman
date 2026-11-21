@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -19,13 +20,11 @@ import (
 	"github.com/brymartinez/foreman/internal/config"
 	"github.com/brymartinez/foreman/internal/github"
 	"github.com/brymartinez/foreman/internal/knowledge"
-	"github.com/brymartinez/foreman/internal/linear"
 	"github.com/brymartinez/foreman/internal/logs"
 	"github.com/brymartinez/foreman/internal/notifications"
 	"github.com/brymartinez/foreman/internal/quota"
 	"github.com/brymartinez/foreman/internal/runner"
 	"github.com/brymartinez/foreman/internal/stages"
-	"github.com/brymartinez/foreman/internal/store"
 	"github.com/brymartinez/foreman/internal/task"
 	"github.com/brymartinez/foreman/internal/tui"
 	"github.com/brymartinez/foreman/internal/worktree"
@@ -84,41 +83,53 @@ func run(argv []string) int {
 	if cmd.Name == cli.KnowledgeExport || cmd.Name == cli.KnowledgeIngest {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 		defer stop()
-		return runKnowledge(ctx, cfg, cmd, os.Stdout, os.Stderr)
+		st, err := openState(cfg, os.Stderr)
+		if err != nil {
+			return fail(err)
+		}
+		defer st.Close()
+		return runKnowledge(ctx, cfg, st, cmd, os.Stdout, os.Stderr)
+	}
+	if isIssueCommand(cmd.Name) {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+		defer stop()
+		st, err := openState(cfg, os.Stderr)
+		if err != nil {
+			return fail(err)
+		}
+		defer st.Close()
+		return runIssue(ctx, st, cmd, os.Stdin, os.Stdout, os.Stderr)
 	}
 	if err := (stages.Files{GlobalDir: cfg.StagesDir}).RequireGlobal(); err != nil {
 		return fail(err)
 	}
 	source := resolveSource(cfg, cmd)
-	if cmd.Name == cli.TUI {
-		if err := requireLinearKey(cfg, source, os.Getenv("LINEAR_API_KEY")); err != nil {
-			return fail(err)
-		}
+	st, err := openState(cfg, os.Stderr)
+	if err != nil {
+		return fail(err)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	defer st.Close()
+	// A triage session owns the terminal, so its Ctrl-C is the agent's, not ours.
+	var inSession atomic.Bool
+	ctx, stop := notifyContext(&inSession)
 	defer stop()
 	claude := agent.Claude{Bin: cfg.Claude.Command, Model: cfg.Claude.Model, PlanModel: cfg.Claude.PlanModel, ReviewModel: cfg.Claude.ReviewModel, Exec: agent.RunCommand}
 	codex := agent.Codex{Bin: cfg.Codex.Command, Model: cfg.Codex.Model, PlanModel: cfg.Codex.PlanModel, ReviewModel: cfg.Codex.ReviewModel,
 		ReasoningEffort: cfg.Codex.ReasoningEffort, PlanReasoningEffort: cfg.Codex.PlanReasoningEffort, ReviewReasoningEffort: cfg.Codex.ReviewReasoningEffort, Exec: agent.RunCommand}
-	linearClient := linear.New(os.Getenv("LINEAR_API_KEY"))
-	if endpoint := os.Getenv("FOREMAN_LINEAR_ENDPOINT"); endpoint != "" {
-		linearClient.Endpoint = endpoint
-	}
 	a := app.App{
 		ReplyToPRFeedback:    false,
 		FullSuiteGate:        true,
-		Store:                store.Markdown{Dir: cfg.TasksDir},
-		Triage:               store.Triage{Dir: cfg.TriageDir},
+		Store:                st.Tasks,
+		Triage:               st.Triage,
 		GitHub:               github.New(),
-		Linear:               linearClient,
-		LinearTeam:           cfg.LinearTeam,
+		LocalIssues:          st.Issues,
 		Repositories:         github.New(),
 		Worktrees:            worktree.Git{},
 		Accounts:             github.New(),
 		RemoteAuth:           worktree.Git{},
 		Agents:               map[task.Agent]app.AgentAdapter{task.Claude: claude, task.Codex: codex},
 		Models:               cfg.Models,
-		Knowledge:            knowledge.Store{Dir: cfg.KnowledgeDir},
+		Knowledge:            st.Knowledge,
 		Evaluator:            agent.Evaluators{Claude: claude, Codex: codex},
 		Learning:             cfg.Learning.Enabled,
 		LearningBudgetUSD:    cfg.Learning.BudgetUSD,
@@ -162,7 +173,8 @@ func run(argv []string) int {
 			Auto:     autoMode(cfg, cmd.Auto),
 			Route:    false,
 			Version:  currentVersion(),
-			TaskFile: store.Markdown{Dir: cfg.TasksDir}.Path,
+			TaskFile: func(task.Key) string { return "task record in " + cfg.Database },
+			Triage:   triageSession(cfg, &inSession),
 		}); err != nil {
 			return fail(err)
 		}
@@ -184,10 +196,10 @@ func run(argv []string) int {
 		defer log.Flush()
 		key := task.Key{Repo: cmd.Repo, Number: cmd.Issue, Source: cmd.Source, ExternalID: cmd.ExternalID}
 		name := fmt.Sprintf("%s#%d", key.Repo, key.Number)
-		if key.Source == task.Linear {
-			name = fmt.Sprintf("%s#linear:%s", key.Repo, key.ExternalID)
+		if key.Source == task.Local {
+			name = fmt.Sprintf("%s#local:%s", key.Repo, key.ExternalID)
 		}
-		a.Knowledge = knowledge.Store{Dir: cfg.KnowledgeDir, Log: log}
+		a.Knowledge = knowledge.SQLStore{DB: st.DB, Dir: cfg.KnowledgeDir, Log: log}
 		err := a.Learn(ctx, key, log)
 		switch {
 		case errors.Is(err, knowledge.ErrLocked):
@@ -223,25 +235,6 @@ func resolveMentions(cfg config.Config, cmd cli.Command) bool {
 		return false
 	}
 	return cfg.Mentions
-}
-
-// requireLinearKey checks credentials for the selected Linear team.
-func requireLinearKey(cfg config.Config, source task.Source, key string) error {
-	if key != "" || !linearSelected(cfg, source) {
-		return nil
-	}
-	shown := "linear"
-	if source == "" {
-		shown = "all"
-	}
-	return fmt.Errorf("issue source %s needs LINEAR_API_KEY for linear_team; set it, or use -s github or default_source: github for GitHub only", shown)
-}
-
-func linearSelected(cfg config.Config, source task.Source) bool {
-	if source == task.GitHub {
-		return false
-	}
-	return cfg.LinearTeam != ""
 }
 
 // autoMode reads the saved auto mode choice. A state file that cannot be read
@@ -306,6 +299,28 @@ func editConfig() int {
 		return fail(fmt.Errorf("%v; run foreman -c again to fix it", err))
 	}
 	return 0
+}
+
+// notifyContext cancels on SIGINT, SIGTERM, or SIGHUP, except that SIGINT is ignored
+// while a triage session holds the terminal.
+func notifyContext(inSession *atomic.Bool) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.Background())
+	sigs := make(chan os.Signal, 4)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case sig := <-sigs:
+				if sig == os.Interrupt && inSession.Load() {
+					continue
+				}
+				cancel()
+			}
+		}
+	}()
+	return ctx, func() { signal.Stop(sigs); cancel() }
 }
 
 func fail(err error) int {

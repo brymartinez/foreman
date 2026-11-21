@@ -615,14 +615,14 @@ func TestReadLocalShowsOnlyTheSelectedSourcesDelegatedWork(t *testing.T) {
 	gh.Source = task.GitHub
 	legacy := record(11, task.Implementing) // no source: a GitHub issue
 	lin := record(12, task.Implementing)
-	lin.Source = task.Linear
+	lin.Source = task.Local
 	s := stubSource{recs: []*task.Record{gh, legacy, lin}}
 	for _, tc := range []struct {
 		name   string
 		source task.Source
 		want   []int
 	}{
-		{"linear shows only Linear tasks", task.Linear, []int{12}},
+		{"linear shows only Linear tasks", task.Local, []int{12}},
 		{"github shows GitHub and source-less tasks", task.GitHub, []int{10, 11}},
 		{"no source shows every task", "", []int{10, 11, 12}},
 	} {
@@ -645,7 +645,7 @@ func TestReadLocalShowsOnlyTheSelectedSourcesDelegatedWork(t *testing.T) {
 
 func TestAHiddenTaskReturnsWhenTheSourceIncludesIt(t *testing.T) {
 	lin := record(12, task.Implementing)
-	lin.Source = task.Linear
+	lin.Source = task.Local
 	s := stubSource{recs: []*task.Record{record(10, task.Implementing), lin}}
 	m := Model{Width: 100, Height: 30, IssueSource: task.GitHub}
 	readLocal(context.Background(), s, &m)

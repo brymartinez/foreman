@@ -34,8 +34,8 @@ func TestTaskRowsCarryStateAndBadges(t *testing.T) {
 	}
 }
 
-func TestLinearDelegatedTaskShowsItsIdentifier(t *testing.T) {
-	rec := &task.Record{Key: task.Key{Repo: "acme/linear", Source: task.Linear, ExternalID: "uuid-7"}, Identifier: "LIN-7", State: task.Implementing, Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}}}
+func TestLocalDelegatedTaskShowsItsIdentifier(t *testing.T) {
+	rec := &task.Record{Key: task.Key{Repo: "acme/linear", Source: task.Local, ExternalID: "uuid-7"}, Identifier: "LIN-7", State: task.Implementing, Delegation: &task.Delegation{Implementer: task.Session{Agent: task.Claude}}}
 	if identity, _, _ := TaskHead(rec); identity != "acme/linear · LIN-7" {
 		t.Fatalf("task identity = %q", identity)
 	}

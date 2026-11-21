@@ -3,12 +3,15 @@ package cli
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/brymartinez/foreman/internal/config"
 	"github.com/brymartinez/foreman/internal/task"
 )
+
+var localIssueID = regexp.MustCompile(`^L-[0-9A-F]{8}$`)
 
 type Name string
 
@@ -58,16 +61,18 @@ type Command struct {
 	Auto       AutoMode
 	Mentions   MentionsMode
 	// Source is the task's tracker for __run and __learn. For the dashboard it is the
-	// -s override: github, linear, or config.SourceAll, and empty to use default_source.
+	// -s override: github, local, or config.SourceAll, and empty to use default_source.
 	Source task.Source
 	// File is the export's output path (empty for stdout) or the ingest's input.
 	File   string
 	Rebind bool
 	Agent  task.Agent
 	DryRun bool
+	// Local holds the local issue commands' inputs.
+	Local *IssueInput
 }
 
-const Usage = `foreman: delegate GitHub issues to Claude Code or Codex
+const Usage = `foreman: delegate GitHub issues and local issues to Claude Code or Codex
 
 Usage:
   foreman [launch overrides]  Open the dashboard: inbox, delegated work, and logs
@@ -76,11 +81,27 @@ Usage:
                               Write the repository's learned knowledge to FILE or stdout
   foreman knowledge ingest FILE [--repo owner/repo [--rebind]] [--agent claude|codex] [--dry-run]
                               Store an export, merging with this machine's knowledge
+  foreman issue add --title TITLE [--url URL] [--repo owner/repo] [--description-file FILE|-]
+                    [--triage-file FILE] [--notes-file FILE] [--tag TAG]...
+                              Save a local issue and print its stable ID. With --triage-file the
+                              scope is confirmed and the issue is ready to delegate
+  foreman issue triage ID --file FILE
+                              Confirm the triage decisions of a local issue awaiting triage
+  foreman issue list          List local issues
+  foreman issue show ID       Show a local issue and its confirmed triage
+  foreman issue export [ID] [--learnings] [-o FILE]
+                              Write one local issue, or all local work, to a portable file.
+                              --learnings adds curated repository learnings (all work only)
+  foreman issue import FILE [--dry-run] [--on-conflict fail|skip|replace]
+                              Restore work from an export, atomically. Conflicts are listed
+                              first; the default stops before changing anything. No agent
+                              starts and no tracker is touched
+  foreman export markdown DIR Write every task as Markdown for Obsidian (one way)
   foreman -h, --help          Show this help
   foreman --version           Show the version
 
 Dashboard launch overrides (this launch only; nothing is saved):
-  -s, --source github|linear|all
+  -s, --source github|local|all
                       Show only this tracker's issues in INBOX and its tasks in
                       DELEGATED WORK, and auto mode starts only from them; all
                       shows both. Overrides default_source.
@@ -110,7 +131,7 @@ Precedence:
   such as mentions: false, models, and budgets.
 
 Settings without launch flags:
-  config.yaml: refresh, repository filters and linear_team, directories,
+  config.yaml: refresh, repository filters, database and directories,
   agent commands and models, budgets, review policy, learning, notifications,
   cleanup, auto.agent, and auto.max_concurrent. Unknown keys are an error.
   routing.yaml: selector, profiles, and rules.
@@ -140,13 +161,13 @@ func Parse(argv []string) (Command, error) {
 	case string(Run), string(Learn):
 		verb := Name(name)
 		if len(rest) == 1 {
-			repoPart, id, found := strings.Cut(rest[0], "#linear:")
+			repoPart, id, found := strings.Cut(rest[0], "#local:")
 			if found {
 				repo, err := task.ParseRepo(repoPart)
-				if err != nil || id == "" || strings.ContainsAny(id, "/#:") {
-					return Command{}, usagef("%s needs owner/repo#linear:ID", name)
+				if err != nil || !localIssueID.MatchString(id) {
+					return Command{}, usagef("%s needs owner/repo#local:ID", name)
 				}
-				return Command{Name: verb, Repo: repo, Source: task.Linear, ExternalID: id}, nil
+				return Command{Name: verb, Repo: repo, Source: task.Local, ExternalID: id}, nil
 			}
 		}
 		repo, n, err := issueArg(name, rest)
@@ -156,6 +177,10 @@ func Parse(argv []string) (Command, error) {
 		return Command{Name: verb, Repo: repo, Issue: n}, err
 	case "knowledge":
 		return parseKnowledge(rest)
+	case "issue":
+		return parseIssue(rest)
+	case "export":
+		return parseExport(rest)
 	}
 	return parseFlags(argv)
 }
@@ -246,7 +271,7 @@ func parseFlags(argv []string) (Command, error) {
 		case "-s", "--source":
 			i++
 			if i >= len(argv) {
-				return Command{}, usagef("%s needs github, linear, or all", arg)
+				return Command{}, usagef("%s needs github, local, or all", arg)
 			}
 			chosen := task.Source(argv[i])
 			if err := config.ValidSource(chosen); err != nil {

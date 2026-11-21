@@ -10,8 +10,8 @@ import (
 	"github.com/brymartinez/foreman/internal/task"
 )
 
-func TestConfirmedScopeUsesOrderedTriageCommentsForBothSources(t *testing.T) {
-	for _, source := range []task.Source{task.GitHub, task.Linear} {
+func TestConfirmedScopeUsesOrderedTriageComments(t *testing.T) {
+	for _, source := range []task.Source{task.GitHub} {
 		t.Run(string(source), func(t *testing.T) {
 			f := newFixture()
 			key := task.Key{Repo: f.gh.repo.Repo, Number: 825, Source: source, ExternalID: "uuid-42"}
@@ -20,12 +20,8 @@ func TestConfirmedScopeUsesOrderedTriageCommentsForBothSources(t *testing.T) {
 				{ID: "2", URL: "https://example.test/discussion", Body: "Use the recipients table instead."},
 				{ID: "3", URL: "https://example.test/triage/3", Body: "## Triage correction\nInclude the date filter."},
 			}
-			if source == task.Linear {
-				f.app.Linear = &lifecycleTracker{issue: Issue{Key: key, Identifier: "WEB-42", Body: "Old description", URL: "https://linear.app/issue/WEB-42", Labels: []string{"triaged"}}, comments: comments}
-			} else {
-				for _, c := range comments {
-					f.gh.issueComments = append(f.gh.issueComments, IssueComment{URL: c.URL, Body: c.Body})
-				}
+			for _, c := range comments {
+				f.gh.issueComments = append(f.gh.issueComments, IssueComment{URL: c.URL, Body: c.Body})
 			}
 			scope, err := f.app.readScope(context.Background(), key)
 			if err != nil {

@@ -1,6 +1,6 @@
 ---
 name: foreman
-description: Run one triaged GitHub or Linear issue through Foreman's planning, implementation, independent code reviews, and pull request handoff. Use for a Foreman-style issue run or to continue one from a saved checkpoint.
+description: Run one triaged GitHub issue through Foreman's planning, implementation, independent code reviews, and pull request handoff. Use for a Foreman-style issue run or to continue one from a saved checkpoint.
 ---
 
 # Foreman

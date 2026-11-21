@@ -310,7 +310,7 @@ func inboxPane(m Model) pane {
 			detail = render.JoinFacts("waiting: "+w.reason, detail)
 		}
 		identity := fmt.Sprintf("%s#%d  %s", k.Repo, k.Number, e.Item.Title)
-		if issueSource == task.Linear {
+		if issueSource == task.Local {
 			identity = fmt.Sprintf("%s · %s  %s", k.Repo, e.Item.Identifier, e.Item.Title)
 			if k.Repo == "" {
 				identity = fmt.Sprintf("%s  %s", e.Item.Identifier, e.Item.Title)
@@ -574,6 +574,8 @@ var helpKeys = []helpKey{
 	{"u/d, pgup/pgdn", "scroll the log a page; past the top loads older lines", "u/d page"},
 	{"ctrl-u/ctrl-d", "scroll the log, or move the PR history, half a page", "ctrl-u/d half page"},
 	{"g/G, end", "go to the log's first line or follow its tail", "g/G log start/end"},
+	{"f", "triage the selected open issue that is awaiting triage, in an interactive session", "f triage"},
+	{"F", "take in a new local issue in an interactive triage session", "F new local"},
 	{"c", "cancel the selected task's run", "c cancel"},
 	{"x", "reset the selected FAILED task: delete its local run and offer the issue again", "x reset"},
 	{"p", "open the PR history of merged and closed PRs; esc returns", "p PR history"},
@@ -808,7 +810,7 @@ func answerHints(m Model) string {
 const (
 	hintsAnswerLong  = "type an option label or an answer · enter to record · up/down scroll · esc close"
 	hintsAnswerShort = "label or answer · enter · up/down · esc close"
-	hintsLong        = "j/k move · h/l pane · enter select · c cancel · a auto · r refresh · ? help · q quit"
+	hintsLong        = "j/k move · h/l pane · enter select · f triage · F new · c cancel · a auto · r refresh · ? help · q quit"
 	hintsShort       = "j/k move · h/l pane · enter · ? help · q quit"
 	hintsLogLong     = "j/k task · u/d log page · ctrl-u/d half page · g/G ends · s show/log · R raw · esc close · ? help"
 	hintsLogShort    = "j/k task · u/d log · g/G ends · s show/log · ? help"

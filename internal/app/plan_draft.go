@@ -58,7 +58,7 @@ func (r *taskRun) restorePlanDraft() (bool, step, error) {
 		source, wasPresent := draft.Sources[doc]
 		if exists && wasPresent && draft.Documents[doc] == source {
 			id := found.comment.ExternalCommentID
-			if r.rec.IssueSource() != task.Linear {
+			if r.rec.IssueSource() != task.Local {
 				id = fmt.Sprint(found.comment.CommentID)
 			}
 			still, err := r.a.stillPlanComment(r.ctx, r.rec.Key, doc, id)

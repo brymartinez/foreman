@@ -15,9 +15,9 @@ func TestSourceFlagIsAOneLaunchOverride(t *testing.T) {
 		"no flag leaves the source to config":    {nil, ""},
 		"an auto flag leaves the source alone":   {[]string{"-a"}, ""},
 		"-s github selects GitHub":               {[]string{"-s", "github"}, task.GitHub},
-		"-s linear selects Linear":               {[]string{"-s", "linear"}, task.Linear},
+		"-s local selects local issues":          {[]string{"-s", "local"}, task.Local},
 		"-s all selects both trackers":           {[]string{"-s", "all"}, "all"},
-		"--source works with other flags":        {[]string{"--source", "linear", "-a"}, task.Linear},
+		"--source works with other flags":        {[]string{"--source", "local", "-a"}, task.Local},
 		"a repeated identical source is allowed": {[]string{"-s", "all", "--source", "all"}, "all"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -34,10 +34,11 @@ func TestSourceFlagRejectsMissingUnknownAndConflictingValues(t *testing.T) {
 		args []string
 		want string
 	}{
-		"missing value":      {[]string{"-s"}, "github, linear, or all"},
-		"unknown value":      {[]string{"-s", "other"}, "github, linear, or all"},
+		"missing value":      {[]string{"-s"}, "github, local, or all"},
+		"unknown value":      {[]string{"-s", "other"}, "github, local, or all"},
 		"conflicting values": {[]string{"-s", "github", "-s", "all"}, "conflicting"},
-		"with the editor":    {[]string{"-c", "-s", "linear"}, "-c"},
+		"with the editor":    {[]string{"-c", "-s", "local"}, "-c"},
+		"retired linear":     {[]string{"-s", "linear"}, "Linear support was removed"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := Parse(tc.args); err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -145,11 +146,11 @@ func TestParseRunNeedsAQualifiedIssue(t *testing.T) {
 	}
 }
 
-func TestParseRunKeepsLinearIssueIdentity(t *testing.T) {
-	got, err := Parse([]string{"__run", "a/b#linear:11111111-1111-4111-8111-111111111111"})
-	want := Command{Name: Run, Repo: "a/b", Source: task.Linear, ExternalID: "11111111-1111-4111-8111-111111111111"}
+func TestParseRunKeepsLocalIssueIdentity(t *testing.T) {
+	got, err := Parse([]string{"__run", "a/b#local:L-0000002A"})
+	want := Command{Name: Run, Repo: "a/b", Source: task.Local, ExternalID: "L-0000002A"}
 	if err != nil || got != want {
-		t.Fatalf("Parse Linear runner key = %+v, %v; want %+v", got, err, want)
+		t.Fatalf("Parse local runner key = %+v, %v; want %+v", got, err, want)
 	}
 }
 
@@ -158,9 +159,9 @@ func TestParseLearnTakesTheSameTaskKeyAsRun(t *testing.T) {
 	if want := (Command{Name: Learn, Repo: "a/b", Issue: 3}); err != nil || got != want {
 		t.Fatalf("Parse(__learn a/b#3) = %+v, %v; want %+v", got, err, want)
 	}
-	got, err = Parse([]string{"__learn", "a/b#linear:ENG-1"})
-	if want := (Command{Name: Learn, Repo: "a/b", Source: task.Linear, ExternalID: "ENG-1"}); err != nil || got != want {
-		t.Fatalf("Parse Linear learn key = %+v, %v; want %+v", got, err, want)
+	got, err = Parse([]string{"__learn", "a/b#local:L-0000002A"})
+	if want := (Command{Name: Learn, Repo: "a/b", Source: task.Local, ExternalID: "L-0000002A"}); err != nil || got != want {
+		t.Fatalf("Parse local learn key = %+v, %v; want %+v", got, err, want)
 	}
 }
 
@@ -249,7 +250,7 @@ func TestUsageSeparatesLaunchOverridesFromOperationInputs(t *testing.T) {
 		t.Fatalf("usage lacks the override, input, and precedence sections in order:\n%s", Usage)
 	}
 	section := func(start, end int) string { return Usage[start:end] }
-	for _, flag := range []string{"-s, --source github|linear|all", "-a, --auto", "--no-auto", "--mentions", "--no-mentions"} {
+	for _, flag := range []string{"-s, --source github|local|all", "-a, --auto", "--no-auto", "--mentions", "--no-mentions"} {
 		if !strings.Contains(section(overrides, inputs), flag) {
 			t.Errorf("launch overrides lack %q:\n%s", flag, Usage)
 		}
@@ -278,5 +279,44 @@ func TestUsageExplainsPrecedenceAndWhereSettingsLive(t *testing.T) {
 	}
 	if strings.Contains(Usage, "in the inbox (default github)") {
 		t.Errorf("usage still says --source filters only the inbox:\n%s", Usage)
+	}
+}
+
+func TestParseIssueAddReadsTheIntakeFlags(t *testing.T) {
+	got, err := Parse([]string{"issue", "add", "--title", "Fix cache", "--url", "https://tracker.example/WEB-42", "--repo", "acme/web", "--description-file", "-", "--triage-file", "t.md", "--tag", "a", "--tag", "b"})
+	if err != nil || got.Name != IssueAdd {
+		t.Fatalf("Parse = %+v, %v", got, err)
+	}
+	in := *got.Local
+	if in.Title != "Fix cache" || in.SourceURL != "https://tracker.example/WEB-42" || in.Repo != "acme/web" || in.DescriptionFile != "-" || in.TriageFile != "t.md" || len(in.Tags) != 2 {
+		t.Fatalf("input = %+v", in)
+	}
+}
+
+func TestParseIssueCommandsRejectBadInput(t *testing.T) {
+	for _, argv := range [][]string{
+		{"issue"}, {"issue", "frob"}, {"issue", "add"}, {"issue", "add", "--title"},
+		{"issue", "show"}, {"issue", "show", "not-an-id"}, {"issue", "triage", "L-0000002A"},
+		{"issue", "export", "L-0000002A", "--learnings"}, {"issue", "import"}, {"issue", "import", "f", "--on-conflict", "maybe"},
+		{"export"}, {"export", "pdf", "x"},
+	} {
+		if _, err := Parse(argv); err == nil {
+			t.Errorf("Parse(%q) succeeded; want usage error", argv)
+		}
+	}
+}
+
+func TestParseIssueImportAndExport(t *testing.T) {
+	got, err := Parse([]string{"issue", "import", "work.yaml", "--dry-run", "--on-conflict", "skip"})
+	if err != nil || got.Name != IssueImport || got.Local.File != "work.yaml" || !got.Local.DryRun || got.Local.OnConflict != "skip" {
+		t.Fatalf("import = %+v, %v", got, err)
+	}
+	got, err = Parse([]string{"issue", "export", "--learnings", "-o", "out.yaml"})
+	if err != nil || got.Name != IssueExport || !got.Local.Learnings || got.Local.Output != "out.yaml" || got.Local.ID != "" {
+		t.Fatalf("export = %+v, %v", got, err)
+	}
+	got, err = Parse([]string{"export", "markdown", "vault"})
+	if err != nil || got.Name != ExportNotes || got.Local.Dir != "vault" {
+		t.Fatalf("export markdown = %+v, %v", got, err)
 	}
 }

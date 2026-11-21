@@ -130,7 +130,7 @@ func TestSpawnLearnRunsTheLearnerWithItsOutputInLearningLog(t *testing.T) {
 	if err := p.SpawnLearn(task.Key{Repo: "o/r", Number: 7}); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.SpawnLearn(task.Key{Repo: "o/r", Source: task.Linear, ExternalID: "ENG-3"}); err != nil {
+	if err := p.SpawnLearn(task.Key{Repo: "o/r", Source: task.Local, ExternalID: "L-0000002A"}); err != nil {
 		t.Fatal(err)
 	}
 	var out string
@@ -140,7 +140,7 @@ func TestSpawnLearnRunsTheLearnerWithItsOutputInLearningLog(t *testing.T) {
 			break
 		}
 	}
-	if !strings.Contains(out, "learner for o/r#7\n") || !strings.Contains(out, "learner for o/r#linear:ENG-3\n") {
+	if !strings.Contains(out, "learner for o/r#7\n") || !strings.Contains(out, "learner for o/r#local:L-0000002A\n") {
 		t.Fatalf("learning.log = %q", out)
 	}
 }

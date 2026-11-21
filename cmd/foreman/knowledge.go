@@ -18,12 +18,12 @@ import (
 
 // runKnowledge runs `foreman knowledge export` or `ingest`. Neither needs the stage
 // files, the dashboard, or a task.
-func runKnowledge(ctx context.Context, cfg config.Config, cmd cli.Command, stdout, stderr io.Writer) int {
+func runKnowledge(ctx context.Context, cfg config.Config, st state, cmd cli.Command, stdout, stderr io.Writer) int {
 	claude := agent.Claude{Bin: cfg.Claude.Command, Model: cfg.Claude.Model, PlanModel: cfg.Claude.PlanModel, Exec: agent.RunCommand}
 	codex := agent.Codex{Bin: cfg.Codex.Command, Model: cfg.Codex.Model, PlanModel: cfg.Codex.PlanModel,
 		ReasoningEffort: cfg.Codex.ReasoningEffort, PlanReasoningEffort: cfg.Codex.PlanReasoningEffort, Exec: agent.RunCommand}
 	a := app.App{
-		Knowledge:         knowledge.Store{Dir: cfg.KnowledgeDir},
+		Knowledge:         st.Knowledge,
 		Merger:            agent.Mergers{Claude: claude, Codex: codex},
 		LearningBudgetUSD: cfg.Learning.BudgetUSD,
 		Now:               func() time.Time { return time.Now().Truncate(time.Second) },

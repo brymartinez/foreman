@@ -62,7 +62,17 @@ const (
 	ActionLoadOlder
 	// ActionLoadHistory reads the PR history for the current repository view.
 	ActionLoadHistory
+	// ActionTriage hands the terminal to an interactive foreman-triage session.
+	ActionTriage
 )
+
+// TriageRequest asks for a triage session. A zero Key starts local intake for a new
+// local issue; otherwise the session triages that issue.
+type TriageRequest struct {
+	Key task.Key
+	// Title names the issue in the session's first message.
+	Title string
+}
 
 // Action is what a keystroke asks the driver to do. The model itself does no I/O.
 type Action struct {
@@ -81,6 +91,8 @@ type Action struct {
 	Route       app.RouteRequest
 	RouteSeq    int
 	ProposalSeq int
+	// Triage is the session to run for ActionTriage.
+	Triage TriageRequest
 }
 
 // Model is everything the dashboard draws and everything a keystroke changes.
@@ -304,10 +316,10 @@ func (m *Model) SetInbox(entries []app.InboxEntry) {
 		selected = cur.Item.Key
 	}
 	slices.SortStableFunc(entries, func(a, b app.InboxEntry) int {
-		if a.Item.Key.Source == task.Linear && b.Item.Key.Source != task.Linear {
+		if a.Item.Key.Source == task.Local && b.Item.Key.Source != task.Local {
 			return 1
 		}
-		if a.Item.Key.Source != task.Linear && b.Item.Key.Source == task.Linear {
+		if a.Item.Key.Source != task.Local && b.Item.Key.Source == task.Local {
 			return -1
 		}
 		return 0
@@ -458,6 +470,10 @@ func (m *Model) browse(k Key) Action {
 		return m.scrollLog(-m.logPage())
 	case m.LogOpen && k.Kind == KeyEnd:
 		m.scrollEnd()
+	case k.Kind == KeyRune && k.Rune == 'f':
+		return m.triageSelected()
+	case k.Kind == KeyRune && k.Rune == 'F':
+		return Action{Kind: ActionTriage}
 	case k.Kind == KeyRune && k.Rune == 'c':
 		return m.startCancel()
 	case k.Kind == KeyRune && k.Rune == 'x':
@@ -596,7 +612,7 @@ func (m *Model) enter() Action {
 			return Action{Kind: ActionResume, Resume: e.Item.Key}
 		}
 		m.pending = app.StartRequest{Repo: e.Item.Key.Repo, Issue: e.Item.Key.Number}
-		if e.Item.Key.Source == task.Linear {
+		if e.Item.Key.Source == task.Local {
 			m.pending.Key = e.Item.Key
 		}
 		m.pendingNew = !e.Delegated
@@ -606,7 +622,7 @@ func (m *Model) enter() Action {
 			return Action{}
 		}
 		if e.LocalTriage && !e.Triaged {
-			m.Message = "Awaiting triage. Run foreman-triage separately, then refresh."
+			m.Message = "Awaiting triage. Press f to triage it here, then refresh."
 			return Action{}
 		}
 		return m.continueStart()
@@ -626,9 +642,29 @@ func (m *Model) enter() Action {
 	return Action{}
 }
 
+// triageSelected starts an interactive triage session for the selected open issue
+// that is marked Awaiting triage. Anything else says why it cannot.
+func (m *Model) triageSelected() Action {
+	e := m.selectedEntry()
+	switch {
+	case m.Focus != InboxPane || e == nil:
+		m.Message = "Select an open issue in INBOX that is awaiting triage, then press f. Shift+F starts a new local issue."
+	case e.Item.Kind != task.Issue || e.Item.State != "open" || e.Delegated:
+		m.Message = "f triages an open issue that has not been delegated."
+	case e.TriageError != "":
+		m.Message = "! " + e.TriageError
+	case !e.LocalTriage || e.Triaged:
+		m.Message = "This issue is already triaged. Enter delegates it."
+	default:
+		m.Message = ""
+		return Action{Kind: ActionTriage, Triage: TriageRequest{Key: e.Item.Key, Title: e.Item.Title}}
+	}
+	return Action{}
+}
+
 // continueStart resolves the repository before choosing an implementation agent.
 func (m *Model) continueStart() Action {
-	if m.pending.Key.Source == task.Linear && m.pending.Key.Repo == "" {
+	if m.pending.Key.Source == task.Local && m.pending.Key.Repo == "" {
 		m.Mode, m.Input = ResolvingRepository, ""
 		m.proposalSeq++
 		return Action{Kind: ActionRepository, Start: m.pending, ProposalSeq: m.proposalSeq}

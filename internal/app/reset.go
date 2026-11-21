@@ -306,7 +306,7 @@ func markFor(pr PullRequest) task.ResetMark {
 }
 
 func taskRef(rec *task.Record) string {
-	if rec.Source == task.Linear {
+	if rec.Source == task.Local {
 		return rec.Identifier
 	}
 	return fmt.Sprintf("%s#%d", rec.Repo, rec.Number)

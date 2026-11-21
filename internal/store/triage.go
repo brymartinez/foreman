@@ -17,11 +17,11 @@ type Triage struct{ Dir string }
 
 func (s Triage) path(key task.Key) (string, string, error) {
 	switch key.Source {
-	case task.Linear:
-		if !linearIssueID.MatchString(key.ExternalID) {
-			return "", "", errors.New("invalid Linear issue ID")
+	case task.Local:
+		if !localIssueID.MatchString(key.ExternalID) {
+			return "", "", errors.New("invalid local issue ID")
 		}
-		id := "linear/" + strings.ToLower(key.ExternalID)
+		id := "local/" + strings.ToLower(key.ExternalID)
 		return filepath.Join(s.Dir, id+".md"), id, nil
 	case "", task.GitHub:
 		repo, err := task.ParseRepo(string(key.Repo))
@@ -90,7 +90,7 @@ func (s Triage) Save(key task.Key, decisions string) error {
 	return os.Link(f.Name(), path)
 }
 
-// LockStart serializes starts by issue even when two Linear starts pick
+// LockStart serializes starts by issue even when two local starts pick
 // different repositories and therefore different task files.
 func (s Triage) LockStart(key task.Key) (func(), error) {
 	path, _, err := s.path(key)

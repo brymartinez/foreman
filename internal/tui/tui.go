@@ -41,6 +41,9 @@ type Options struct {
 	Version string
 	// TaskFile is the path of a task's file, for the reset confirmation.
 	TaskFile func(task.Key) string
+	// Triage runs an interactive triage session on the terminal and returns when it
+	// ends. The dashboard has given the terminal up for the call and takes it back.
+	Triage func(ctx context.Context, req TriageRequest) error
 }
 
 // result is one finished background call. The event loop owns the model, so a
@@ -114,7 +117,8 @@ func Run(ctx context.Context, o Options) (err error) {
 	m.IssueSource = o.IssueSource
 
 	keys := make(chan Key, 64)
-	go readKeys(ctx, o.In, keys, escapeWait)
+	input := &pausable{f: o.In}
+	go readKeys(ctx, input, keys, escapeWait)
 	results := make(chan result, 8)
 	// pending counts Start, Cancel, and Respond calls in flight. Quitting waits for
 	// them: App.Start records the first stage before it spawns the runner, so exiting
@@ -221,6 +225,20 @@ func Run(ctx context.Context, o Options) (err error) {
 				key, raw := a.Respond, a.Answer
 				pending++
 				go func() { results <- respond(ctx, o.Source, key, raw) }()
+			case ActionTriage:
+				if o.Triage == nil {
+					m.Message = "! triage sessions are not available"
+					break
+				}
+				req := a.Triage
+				sessionErr, termErr := handoff(o, input, &state, func() error { return o.Triage(ctx, req) })
+				if termErr != nil {
+					return termErr
+				}
+				screen.resize()
+				m.Message = triageMessage(req, sessionErr)
+				// The session may have saved a local issue or confirmed triage.
+				refresh()
 			case ActionReadLog:
 				readLog(&m)
 			case ActionLoadOlder:
@@ -241,6 +259,17 @@ func Run(ctx context.Context, o Options) (err error) {
 		}
 		screen.paint(m)
 	}
+}
+
+// triageMessage says how a triage session ended.
+func triageMessage(req TriageRequest, err error) string {
+	if err != nil {
+		return "! triage session: " + err.Error()
+	}
+	if req.Key == (task.Key{}) {
+		return "Local intake ended. The inbox is refreshing."
+	}
+	return "Triage session ended. The inbox is refreshing."
 }
 
 // painter writes Run's frames. A paused log gets one frame with its indicator, then
@@ -367,7 +396,7 @@ func apply(m *Model, r result) {
 			if !r.report.SourcesFresh && len(r.report.Warnings) > 0 {
 				m.Message = "! " + r.report.Warnings[0].Error()
 			} else {
-				if strings.HasPrefix(m.Message, "! Linear refresh:") || strings.HasPrefix(m.Message, "! GitHub refresh:") {
+				if strings.HasPrefix(m.Message, "! local issues refresh:") || strings.HasPrefix(m.Message, "! GitHub refresh:") {
 					m.Message = ""
 				}
 				m.retryWaiting()
@@ -445,7 +474,7 @@ func propose(ctx context.Context, s Source, req app.StartRequest, seq int) resul
 // profile. When no suitable profile can run, nothing starts and the result says why.
 func autoStart(ctx context.Context, s Source, req app.StartRequest, prior *agent.Selection) result {
 	key := requestKey(req)
-	if req.Key.Source == task.Linear && req.Repo == "" {
+	if req.Key.Source == task.Local && req.Repo == "" {
 		p, err := s.ProposeRepository(ctx, req.Key)
 		if err != nil {
 			return result{err: fmt.Errorf("auto: repository selection: %w", err), key: key, auto: true, finished: true}
@@ -505,7 +534,7 @@ func startResult(ctx context.Context, s Source, req app.StartRequest) result {
 }
 
 func recordRef(rec *task.Record) string {
-	if rec.Source == task.Linear {
+	if rec.Source == task.Local {
 		return fmt.Sprintf("%s · %s", rec.Repo, rec.Identifier)
 	}
 	return fmt.Sprintf("%s#%d", rec.Repo, rec.Number)

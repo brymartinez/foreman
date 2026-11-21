@@ -125,7 +125,7 @@ func (m *Model) AutoStarts() []app.StartRequest {
 		// can see that another command delegated this issue since the refresh. With
 		// routing on, the agent is left empty for autoStart to route.
 		req := app.StartRequest{Repo: it.Key.Repo, Issue: it.Key.Number, Agent: m.AutoAgent, NewOnly: true}
-		if it.Key.Source == task.Linear {
+		if it.Key.Source == task.Local {
 			req.Key = it.Key
 		}
 		if m.RouteOn {
@@ -194,12 +194,12 @@ func mark(set map[task.Key]bool, key task.Key) map[task.Key]bool {
 	return set
 }
 
-// Linear discovery and delegation have the same UUID before and after a repository is chosen.
+// Local issue discovery and delegation have the same UUID before and after a repository is chosen.
 func containsIssue(keys map[task.Key]bool, key task.Key) bool {
 	if keys[key] {
 		return true
 	}
-	if key.Source == task.Linear {
+	if key.Source == task.Local {
 		for known, present := range keys {
 			if present && sameInboxIssue(known, key) {
 				return true
@@ -210,5 +210,5 @@ func containsIssue(keys map[task.Key]bool, key task.Key) bool {
 }
 
 func sameInboxIssue(a, b task.Key) bool {
-	return a == b || a.Source == task.Linear && b.Source == task.Linear && a.ExternalID == b.ExternalID
+	return a == b || a.Source == task.Local && b.Source == task.Local && a.ExternalID == b.ExternalID
 }

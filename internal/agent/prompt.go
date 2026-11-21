@@ -97,8 +97,8 @@ func ImplementationPrompt(b TaskBrief) string {
 		return correctionPrompt(b)
 	}
 	var s strings.Builder
-	if b.Key.Source == task.Linear {
-		fmt.Fprintf(&s, "You are the implementation agent for Linear issue %s in %s. You are working unattended; nobody will answer questions during this turn.\n\n", b.Identifier, b.Key.Repo)
+	if b.Key.Source == task.Local {
+		fmt.Fprintf(&s, "You are the implementation agent for local issue %s in %s. You are working unattended; nobody will answer questions during this turn.\n\n", b.Identifier, b.Key.Repo)
 	} else {
 		fmt.Fprintf(&s, "You are the implementation agent for GitHub issue %s#%d. You are working unattended; nobody will answer questions during this turn.\n\n", b.Key.Repo, b.Key.Number)
 	}
@@ -193,8 +193,8 @@ The next turn resumes this session with the commit, nextObjective, and checked p
 	} else if b.FullSuite && !b.Planning {
 		fullSuiteSection(&s, b.FocusedOnly)
 	}
-	if b.Key.Source == task.Linear && !b.Planning {
-		s.WriteString("GitHub hosts the pull request. Put " + b.Identifier + " in the pull request title and " + b.URL + " in the pull request body. Do not add a GitHub Closes #N line. These issue link rules override conflicting developer PR instructions below.\n\n")
+	if b.Key.Source == task.Local && !b.Planning {
+		s.WriteString("GitHub hosts the pull request. Put " + b.Identifier + " in the pull request title. Do not put the issue's source link, private notes, or a GitHub Closes #N line in the pull request. These issue rules override conflicting developer PR instructions below.\n\n")
 	}
 	opening, pr := openingSection(b), prSection(b.PRInstructions)
 	workspace := fmt.Sprintf("You are in a dedicated git worktree at %s on branch %s, created from origin/%s.\nOnly change files inside this worktree. Commit your work to %s. Do not switch branches.", b.Worktree, b.Branch, b.BaseBranch, b.Branch)
@@ -301,8 +301,8 @@ func finishedStatus(b TaskBrief) string {
 }
 
 func prIssueRule(b TaskBrief) string {
-	if b.Key.Source == task.Linear {
-		return "The pull request title must include " + b.Identifier + ", and its body must link " + b.URL + ". Do not add a GitHub Closes #N line."
+	if b.Key.Source == task.Local {
+		return "The pull request title must include " + b.Identifier + ". Do not put the issue's source link, private notes, or a GitHub Closes #N line in the pull request."
 	}
 	return fmt.Sprintf("The pull request body must include \"Closes #%d\"%s.", b.Key.Number, prBodyRule(b.PRInstructions))
 }

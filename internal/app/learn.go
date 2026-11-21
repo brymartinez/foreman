@@ -147,10 +147,10 @@ func stalledOnPractice(rec *task.Record) bool {
 	return rec.State == task.NeedsDecision && d.Answer == "" || rec.State == task.Failed && stopAnswer(d)
 }
 
-// learnTaskID names a task's evaluation file. A Linear task has no number.
+// learnTaskID names a task's evaluation file. A local task has no number.
 func learnTaskID(k task.Key) string {
-	if k.Source == task.Linear {
-		return "linear-" + k.ExternalID
+	if k.Source == task.Local {
+		return "local-" + k.ExternalID
 	}
 	return strconv.Itoa(k.Number)
 }

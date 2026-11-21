@@ -344,7 +344,7 @@ func TestAutoCountsHiddenSourcesRunsAgainstTheLimit(t *testing.T) {
 	m := autoModel(2, own(1, 0), own(2, 1))
 	m.IssueSource = task.GitHub
 	lin := record(10, task.Implementing)
-	lin.Source = task.Linear
+	lin.Source = task.Local
 	m.SetTasks([]*task.Record{lin})
 	if len(m.Tasks) != 0 {
 		t.Fatalf("the GitHub view lists %d Linear tasks", len(m.Tasks))
@@ -367,7 +367,7 @@ func TestManualStartDirectsUntriagedIssueToStandaloneSkill(t *testing.T) {
 	if got := startedKeys(m.AutoStarts()); !slices.Equal(got, []task.Key{ready.Item.Key}) {
 		t.Fatalf("auto started %v", got)
 	}
-	if action := m.Key(Key{Kind: KeyEnter}); action.Kind != ActionNone || m.Mode != Browsing || !strings.Contains(m.Message, "Run foreman-triage separately") {
+	if action := m.Key(Key{Kind: KeyEnter}); action.Kind != ActionNone || m.Mode != Browsing || !strings.Contains(m.Message, "Press f to triage") {
 		t.Fatalf("manual start = %+v, message %q", action, m.Message)
 	}
 }

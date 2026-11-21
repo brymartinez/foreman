@@ -55,8 +55,7 @@ type App struct {
 	// the older feedback flow in tests while stored tasks are migrated.
 	ReplyToPRFeedback bool
 	FullSuiteGate     bool // enabled in the CLI; every task copies it when it starts
-	Linear            IssueTracker
-	LinearTeam        string
+	LocalIssues       LocalIssues
 	Models            task.ModelPolicy
 	Repositories      RepositoryManager
 	Worktrees         WorktreeManager
@@ -141,7 +140,7 @@ func (a App) inboxView(ctx context.Context, allRepos bool, source task.Source) (
 		return InboxReport{}, err
 	}
 	recs = slices.DeleteFunc(recs, func(rec *task.Record) bool {
-		return rec.Key.Source == task.Linear && rec.Delegation == nil && rec.Reset == nil
+		return rec.Key.Source == task.Local && rec.Delegation == nil && rec.Reset == nil
 	})
 	dead := a.deadRunners(recs)
 	if err := a.clearExited(ctx, recs); err != nil {
@@ -165,9 +164,9 @@ func (a App) inboxView(ctx context.Context, allRepos bool, source task.Source) (
 	var pending []InboxItem
 	var bound []InboxItem
 	for _, item := range items {
-		if item.Key.Source == task.Linear && item.Key.Repo == "" {
+		if item.Key.Source == task.Local && item.Key.Repo == "" {
 			for _, rec := range recs {
-				if rec.Key.Source == task.Linear && rec.Key.ExternalID == item.Key.ExternalID && (rec.Delegation != nil || rec.Reset != nil) {
+				if rec.Key.Source == task.Local && rec.Key.ExternalID == item.Key.ExternalID && (rec.Delegation != nil || rec.Reset != nil) {
 					item.Key = rec.Key
 					break
 				}
@@ -287,14 +286,12 @@ func (a App) discoverSources(ctx context.Context, source task.Source, allRepos b
 			}
 		}
 	}
-	if source == "" || source == task.Linear {
-		if a.LinearTeam != "" {
-			if a.Linear == nil {
-				warnings = append(warnings, errors.New("Linear refresh: set LINEAR_API_KEY to use Linear issues"))
-			} else if found, err := a.Linear.AssignedIssues(ctx, a.LinearTeam); err != nil {
-				warnings = append(warnings, fmt.Errorf("Linear refresh: %w", err))
+	if source == "" || source == task.Local {
+		if a.LocalIssues != nil {
+			if found, err := a.LocalIssues.OpenIssues(ctx); err != nil {
+				warnings = append(warnings, fmt.Errorf("local issues refresh: %w", err))
 			} else {
-				available[task.Linear] = true
+				available[task.Local] = true
 				items = append(items, found...)
 			}
 		}
@@ -447,7 +444,7 @@ func (a App) fetchTrackedSources(ctx context.Context, recs []*task.Record, found
 		if r.Delegation == nil && (!available[issueSource] || (source != "" && source != issueSource)) {
 			continue
 		}
-		if r.Delegation != nil && issueSource == task.Linear && a.Linear == nil {
+		if r.Delegation != nil && issueSource == task.Local && a.LocalIssues == nil {
 			continue
 		}
 		if r.Delegation == nil && r.Reset == nil && r.GitHub != nil && len(r.GitHub.Reasons) == 0 {
@@ -467,9 +464,9 @@ func (a App) fetchTrackedSources(ctx context.Context, recs []*task.Record, found
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			if k.Source == task.Linear {
+			if k.Source == task.Local {
 				var issue Issue
-				issue, errs[i] = a.Linear.GetIssue(ctx, k)
+				issue, errs[i] = a.LocalIssues.GetIssue(ctx, k)
 				if errs[i] == nil {
 					out[i] = InboxItem{Key: k, Identifier: issue.Identifier, Kind: task.Issue, Title: issue.Title, URL: issue.URL, State: issue.State, UpdatedAt: issue.UpdatedAt, Labels: issue.Labels, Reasons: []task.InboxReason{task.Tracked}}
 				}
@@ -489,7 +486,7 @@ func (a App) fetchTrackedSources(ctx context.Context, recs []*task.Record, found
 		case errors.Is(err, ErrGone) && !delegated[keys[i]]:
 			gone = append(gone, keys[i])
 		default:
-			if keys[i].Source == task.Linear {
+			if keys[i].Source == task.Local {
 				warnings = append(warnings, fmt.Errorf("refresh %s: %w", keys[i].ExternalID, err))
 			} else {
 				warnings = append(warnings, fmt.Errorf("refresh %s#%d: %w", keys[i].Repo, keys[i].Number, err))

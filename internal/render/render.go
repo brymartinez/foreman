@@ -15,7 +15,7 @@ import (
 )
 
 func issueLabel(k task.Key, identifier string) string {
-	if k.Source == task.Linear {
+	if k.Source == task.Local {
 		return fmt.Sprintf("%s · %s", k.Repo, identifier)
 	}
 	return fmt.Sprintf("%s#%d", k.Repo, k.Number)

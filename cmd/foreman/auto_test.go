@@ -19,7 +19,7 @@ func TestAutoModeLaunchFlagOverridesTheSavedChoiceWithoutWritingIt(t *testing.T)
 	}
 	before, _ := os.ReadFile(path)
 
-	auto := autoMode(config.Auto{}, cli.AutoOn)
+	auto := autoMode(config.Config{}, cli.AutoOn)
 	if !auto.Enabled || auto.LoadErr != nil {
 		t.Fatalf("autoMode(--auto) = enabled %v, err %v; want on with no error", auto.Enabled, auto.LoadErr)
 	}
@@ -29,7 +29,7 @@ func TestAutoModeLaunchFlagOverridesTheSavedChoiceWithoutWritingIt(t *testing.T)
 	if err := config.SaveAutoEnabled(path, true); err != nil {
 		t.Fatal(err)
 	}
-	if auto := autoMode(config.Auto{}, cli.AutoOff); auto.Enabled {
+	if auto := autoMode(config.Config{}, cli.AutoOff); auto.Enabled {
 		t.Fatal("autoMode(--no-auto) is on; want off over a saved on")
 	}
 }
@@ -40,21 +40,21 @@ func TestAutoModeWithoutAFlagUsesTheSavedChoice(t *testing.T) {
 	if err := config.SaveAutoEnabled(path, false); err != nil {
 		t.Fatal(err)
 	}
-	if auto := autoMode(config.Auto{}, cli.AutoSaved); auto.Enabled {
+	if auto := autoMode(config.Config{}, cli.AutoSaved); auto.Enabled {
 		t.Fatal("autoMode with no flag is on; want the saved off")
 	}
 }
 
 func TestAutoModeDefaultsOffWithoutSavedChoice(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	if auto := autoMode(config.Auto{}, cli.AutoSaved); auto.Enabled || auto.LoadErr != nil {
+	if auto := autoMode(config.Config{}, cli.AutoSaved); auto.Enabled || auto.LoadErr != nil {
 		t.Fatalf("auto mode without saved choice = enabled %v, err %v; want off", auto.Enabled, auto.LoadErr)
 	}
 }
 
 func TestAutoModeToggleStillSavesAfterALaunchOverride(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	auto := autoMode(config.Auto{}, cli.AutoOn)
+	auto := autoMode(config.Config{}, cli.AutoOn)
 	if auto.Save == nil {
 		t.Fatal("Save is nil; the a key would not persist")
 	}
@@ -73,10 +73,10 @@ func TestAutoModeOverrideHidesAnUnreadableSavedChoice(t *testing.T) {
 	if err := os.MkdirAll(path, 0o755); err != nil { // a directory cannot be read as the file
 		t.Fatal(err)
 	}
-	if auto := autoMode(config.Auto{}, cli.AutoSaved); auto.LoadErr == nil {
+	if auto := autoMode(config.Config{}, cli.AutoSaved); auto.LoadErr == nil {
 		t.Fatal("no flag: LoadErr is nil; want the read error shown")
 	}
-	if auto := autoMode(config.Auto{}, cli.AutoOff); auto.LoadErr != nil || auto.Enabled {
+	if auto := autoMode(config.Config{}, cli.AutoOff); auto.LoadErr != nil || auto.Enabled {
 		t.Fatalf("--no-auto: enabled %v, err %v; want off with no error", auto.Enabled, auto.LoadErr)
 	}
 }

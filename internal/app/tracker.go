@@ -2,28 +2,30 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 
 	"github.com/brymartinez/foreman/internal/task"
 )
 
+var errLocalNoComments = errors.New("local issues have no tracker comments")
+
 func (a App) issue(ctx context.Context, key task.Key) (Issue, error) {
-	if key.Source == task.Linear {
-		if a.Linear == nil {
-			return Issue{}, fmt.Errorf("Linear issue source is not configured")
+	if key.Source == task.Local {
+		if a.LocalIssues == nil {
+			return Issue{}, fmt.Errorf("local issue store is not configured")
 		}
-		return a.Linear.GetIssue(ctx, key)
+		return a.LocalIssues.GetIssue(ctx, key)
 	}
 	return a.GitHub.GetIssue(ctx, key)
 }
 
+// issueComments reads an issue's comments. A local issue has none: its confirmed
+// triage lives in the triage store.
 func (a App) issueComments(ctx context.Context, key task.Key) ([]TrackerComment, error) {
-	if key.Source == task.Linear {
-		if a.Linear == nil {
-			return nil, fmt.Errorf("Linear issue source is not configured")
-		}
-		return a.Linear.IssueComments(ctx, key)
+	if key.Source == task.Local {
+		return nil, nil
 	}
 	comments, err := a.GitHub.IssueComments(ctx, key)
 	if err != nil {
@@ -39,11 +41,8 @@ func (a App) issueComments(ctx context.Context, key task.Key) ([]TrackerComment,
 // issueComment reads one comment on the task's issue source. A missing comment
 // returns ErrGone.
 func (a App) issueComment(ctx context.Context, key task.Key, id string) (TrackerComment, error) {
-	if key.Source == task.Linear {
-		if a.Linear == nil {
-			return TrackerComment{}, fmt.Errorf("Linear issue source is not configured")
-		}
-		return a.Linear.GetIssueComment(ctx, id)
+	if key.Source == task.Local {
+		return TrackerComment{}, errLocalNoComments
 	}
 	number, err := strconv.ParseInt(id, 10, 64)
 	if err != nil {
@@ -54,18 +53,15 @@ func (a App) issueComment(ctx context.Context, key task.Key, id string) (Tracker
 }
 
 func issueLabel(key task.Key, identifier string) string {
-	if key.Source == task.Linear {
+	if key.Source == task.Local {
 		return identifier
 	}
 	return fmt.Sprintf("#%d", key.Number)
 }
 
 func (a App) postIssueComment(ctx context.Context, key task.Key, id, body string) (TrackerComment, error) {
-	if key.Source == task.Linear {
-		if a.Linear == nil {
-			return TrackerComment{}, fmt.Errorf("Linear issue source is not configured")
-		}
-		return a.Linear.PostIssueComment(ctx, key, id, body)
+	if key.Source == task.Local {
+		return TrackerComment{}, errLocalNoComments
 	}
 	number := int64(0)
 	if id != "" {
