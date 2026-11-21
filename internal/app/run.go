@@ -116,6 +116,7 @@ func (a App) RunTask(ctx context.Context, key task.Key, pid int, token string, l
 	if err := r.loop(firstStep(rec, len(feedback))); err != nil {
 		return err
 	}
+	a.learnAfterRun(r.rec, log)
 	return nil
 }
 

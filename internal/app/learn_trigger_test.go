@@ -5,12 +5,26 @@ import (
 	"errors"
 	"io"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/brymartinez/foreman/internal/knowledge"
 	"github.com/brymartinez/foreman/internal/task"
 )
+
+func TestRunnerStartsOneLearnerAfterACleanReview(t *testing.T) {
+	f := newFixture()
+	f.app.Knowledge, f.app.Learning = knowledge.Store{Dir: t.TempDir()}, true
+	key := started(t, f, startReq(t))
+	f.claude.turn = prTurn("sid-1")
+	if err := f.run(context.Background(), key, 4242, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(f.runners.learned, []task.Key{key}) {
+		t.Fatalf("learners started = %v; want one for %v", f.runners.learned, key)
+	}
+}
 
 func TestRunnerStartsNoLearnerWhenLearningIsOff(t *testing.T) {
 	f := newFixture()
@@ -25,22 +39,6 @@ func TestRunnerStartsNoLearnerWhenLearningIsOff(t *testing.T) {
 	}
 }
 
-func TestTaskLifecycleKeepsLearningOutsideTheFourRoles(t *testing.T) {
-	f := newFixture()
-	f.app.Knowledge, f.app.Learning = knowledge.Store{Dir: t.TempDir()}, true
-	key := started(t, f, startReq(t))
-	f.claude.turn = prTurn("sid-1")
-	if got := run(t, f, key); got.State != task.WaitingForCI {
-		t.Fatalf("state %s, outcome %+v", got.State, got.LastOutcome)
-	}
-	if _, err := f.app.Inbox(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if len(f.runners.learned) != 0 {
-		t.Fatalf("the task lifecycle launched a learner: %v", f.runners.learned)
-	}
-}
-
 func TestRunnerStartsNoLearnerWhenTheReviewFails(t *testing.T) {
 	f := newFixture()
 	f.app.Knowledge, f.app.Learning = knowledge.Store{Dir: t.TempDir()}, true
@@ -50,6 +48,24 @@ func TestRunnerStartsNoLearnerWhenTheReviewFails(t *testing.T) {
 	_ = f.run(context.Background(), key, 4242, io.Discard)
 	if len(f.runners.learned) != 0 {
 		t.Fatalf("learners started = %v; want none", f.runners.learned)
+	}
+}
+
+func TestALearnerThatFailsToStartLeavesTheRunAndTaskAlone(t *testing.T) {
+	f := newFixture()
+	f.app.Knowledge, f.app.Learning = knowledge.Store{Dir: t.TempDir()}, true
+	f.runners.learnErr = errors.New("no executable")
+	key := started(t, f, startReq(t))
+	f.claude.turn = prTurn("sid-1")
+	var log strings.Builder
+	if err := f.run(context.Background(), key, 4242, &log); err != nil {
+		t.Fatalf("RunTask = %v; a learner error must not fail the run", err)
+	}
+	if got := f.store.recs[key]; got.State != task.WaitingForCI {
+		t.Fatalf("state = %s; want REVIEWING", got.State)
+	}
+	if !strings.Contains(log.String(), "learning not started: no executable") {
+		t.Errorf("log does not say the learner failed to start:\n%s", log.String())
 	}
 }
 
@@ -124,6 +140,17 @@ func TestRefreshStartsOneLearnerPerRepository(t *testing.T) {
 	f.app.startLearners([]*task.Record{first, &second, &other})
 	if !slices.Equal(f.runners.learned, []task.Key{learnKey, other.Key}) {
 		t.Fatalf("started %v; want one per repository", f.runners.learned)
+	}
+}
+
+func TestRefreshStartsDueLearners(t *testing.T) {
+	f, _, _ := learnFixture(t)
+	f.app.Learning = true
+	if _, err := f.app.Inbox(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(f.runners.learned, []task.Key{learnKey}) {
+		t.Fatalf("refresh started %v; want %v", f.runners.learned, learnKey)
 	}
 }
 

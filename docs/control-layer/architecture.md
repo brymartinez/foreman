@@ -4,7 +4,7 @@
 cmd/foreman           wiring: open the database, build adapters, open the dashboard, run a
                       task, or run an `issue`, `export`, or `knowledge` command
 internal/cli          argv -> Command (launch flags, issue, export, and knowledge commands,
-                      __run); no I/O beyond parsing
+                      __run and __learn); no I/O beyond parsing
 internal/config       config.yaml: database and directories, budgets, learning, default
                       source, and their validation, rejecting unknown and retired keys
 internal/routing      legacy profile parsing for older task records/configs
@@ -19,11 +19,12 @@ internal/app          orchestration + ports.go (the interfaces below)
   ├── portable        versioned export and import of local work
   ├── worktree        WorktreeManager over `git worktree`; RemoteAuth over `ssh -T`
   ├── agent           outcome contract, role prompts, claude.go / codex.go adapters,
-  │                   knowledge merger
+  │                   evaluator, knowledge merger
   ├── knowledge       KnowledgeStore: per-repository learnings and evaluations in the
   │                   database, a rendered knowledge.md, and their export and merge
   ├── quota           QuotaChecker over the optional `quota-axi`
-  ├── runner          spawns and checks the detached `foreman __run` process
+  ├── runner          spawns and checks the detached `foreman __run` process, and
+  │                   spawns the detached `foreman __learn` process
   └── stages          resolves ~/.config/foreman/stages/<stage>.md + <repo>/.foreman/<stage>.md
 internal/task         the durable model: Record, State, Delegation, Decision, Attempt
 ```
@@ -88,11 +89,29 @@ runs in: PLANNING, IMPLEMENTING, SELF_REVIEW, ADVERSARIAL_REVIEW, or OPENING_PR)
   missing or uncertain session / unavailable provider -> preserve progress and pause;
     resume when available or wait for explicit role replacement
   quota and fix limits pause work; they never skip review or accept unresolved findings
-  task lifecycle starts no learning or diagnostic model calls
+  when the loop ends on a clean adversarial review and the evidence changed since
+    the stored evaluation: spawn detached `foreman __learn owner/repo#825`, then exit
+    (learning is a side job, not a task role; it never changes the task)
 
   with review_before_pr captured on the task and no PR yet, the same four-role
   review sequence covers the local diff before Foreman publishes it
 
+
+foreman __learn       -> one evaluation of one task; output goes to <log_dir>/learning.log
+  ├─ knowledge: take the repository's lock without waiting; held -> exit 0, a later
+  │             refresh retries
+  ├─ build the evidence packet from the task record (decisions, review findings,
+  │  phase times, cost or tokens, tool-call counts, PR outcome) and every human
+  │  comment on the PR from gh; no logs, transcripts, CI, or tool arguments. The
+  │  prompt adds the repository's current learnings, which revisions cite by id, and
+  │  its 12 newest other evaluations, so recurrence is visible
+  ├─ evaluator turn: the task's implementer agent, no tools, a scratch directory,
+  │  learning.budget_usd for Claude; a turn that called a tool is discarded;
+  │  agent.ParseEvaluation reads its output
+  └─ knowledge.Apply: in one database transaction, store the evaluation and fold its
+     proposals and revisions into the repository's learnings; then rewrite knowledge.md.
+     A failed turn writes nothing, and never changes the task, its alerts, or the
+     runner's exit code
 
 app.Resume            -> disabled for legacy REVIEWED tasks; the next refresh
                          returns them to READY_FOR_HUMAN
@@ -199,6 +218,13 @@ app.InboxView         -> runner pid dead in a stage -> FAILED
                            check keeps the worktree for the next refresh
                          Reconcile, per item: issue closed, no runner -> DONE, including
                            FAILED and PR_CLOSED; a DONE task stays DONE if it reopens
+                         learning on, per learnable task (a clean competing review, or
+                         stalled at the self-review limit on a missed practice) no runner
+                         drives (in no stage), at most one per repository:
+                           evidence fingerprint differs from the stored evaluation, the
+                           repository is not locked, no failed attempt on the same
+                           evidence in the last hour -> spawn `foreman __learn`
+                           (a merged or closed task never evaluated is skipped)
 
 foreman -c            -> open the config in $VISUAL, $EDITOR, or vi, before the config
                          loads, so an invalid file can be fixed; check it after
@@ -533,9 +559,10 @@ the same commit. The commit message records why it changed.
   with the code, or cannot be followed, it reports `blocked` instead of revising the plan,
   adding scope, changing expected behavior, or skipping work. A changed confirmed scope
   returns to the planner and implementer before review.
-- **No task-triggered model calls sit outside the four roles.** Automatic learning and
-  diagnostic calls do not run in the task lifecycle. Standalone knowledge commands
-  remain separate operations.
+- **Only learning sits outside the four roles.** Automatic diagnostic calls do not run
+  in the task lifecycle. Learning is a detached side job that starts after a clean
+  review or on changed evidence; it reads the task and never changes it. Standalone
+  knowledge commands remain separate operations.
 - **Stage model policy is explicit:** `models.planning`, `models.implementation`,
   and `models.adversarial_review` each store an agent, model, and reasoning effort. All three
   default to medium for Claude and Codex. Self-review shares the implementation target. Fixes, merges,

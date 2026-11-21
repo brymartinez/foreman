@@ -1356,15 +1356,13 @@ scenario_history() {
 	check "esc returns to the dashboard" dash -- refreshed keys=p "wait=#907" 'keys=\x1b' "wait=DELEGATED WORK"
 }
 
-# evaluated <owner/repo> <n> [seconds] runs the learner on task #n and waits for its
-# evaluation. The task lifecycle starts no learner of its own, so the scenario runs the
-# hidden `__learn` verb that a learner process executes. A learner that loses the
-# repository lock is run again.
+# evaluated <owner/repo> <n> [seconds] waits for task #n's evaluation, refreshing so a
+# learner that lost the repository lock is started again.
 evaluated() {
 	local end=$((SECONDS + ${3:-15})) repo=$1
 	until foreman knowledge export "$repo" 2>/dev/null | grep -qE "^ *(- )?task: ['\"]?$2['\"]?$"; do
 		[ $SECONDS -lt $end ] || return 1
-		foreman __learn "$repo#$2" >/dev/null 2>&1 || true
+		screen >/dev/null
 		sleep 0.1
 	done
 }
