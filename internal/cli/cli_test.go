@@ -201,8 +201,8 @@ func TestParseKnowledgeIngest(t *testing.T) {
 		want Command
 	}{
 		"export's repository": {[]string{"knowledge", "ingest", "k.md"}, Command{Name: KnowledgeIngest, File: "k.md"}},
-		"every flag": {[]string{"knowledge", "ingest", "--repo", "c/d", "--rebind", "--agent", "codex", "--dry-run", "k.md"},
-			Command{Name: KnowledgeIngest, File: "k.md", Repo: "c/d", Rebind: true, Agent: task.Codex, DryRun: true}},
+		"every flag": {[]string{"knowledge", "ingest", "--repo", "c/d", "--rebind", "--dry-run", "k.md"},
+			Command{Name: KnowledgeIngest, File: "k.md", Repo: "c/d", Rebind: true, DryRun: true}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got, err := Parse(tc.argv); err != nil || got != tc.want {
@@ -223,7 +223,7 @@ func TestParseRejectsInvalidKnowledgeCommands(t *testing.T) {
 		{"knowledge", "export", "a/b", "--dry-run"},
 		{"knowledge", "ingest"},
 		{"knowledge", "ingest", "a.md", "b.md"},
-		{"knowledge", "ingest", "k.md", "--agent", "gpt"},
+		{"knowledge", "ingest", "k.md", "--agent", "codex"},
 		{"knowledge", "ingest", "k.md", "--repo", "bad"},
 		{"knowledge", "ingest", "k.md", "--rebind"},
 		{"knowledge", "ingest", "k.md", "-o", "x.md"},
@@ -235,7 +235,7 @@ func TestParseRejectsInvalidKnowledgeCommands(t *testing.T) {
 }
 
 func TestUsageListsTheKnowledgeCommands(t *testing.T) {
-	for _, want := range []string{"foreman knowledge export owner/repo [-o FILE]", "foreman knowledge ingest FILE", "--rebind", "--agent claude|codex", "--dry-run"} {
+	for _, want := range []string{"foreman knowledge export owner/repo [-o FILE]", "foreman knowledge ingest FILE", "--rebind", "--dry-run"} {
 		if !strings.Contains(Usage, want) {
 			t.Errorf("usage lacks %q:\n%s", want, Usage)
 		}
@@ -255,7 +255,7 @@ func TestUsageSeparatesLaunchOverridesFromOperationInputs(t *testing.T) {
 			t.Errorf("launch overrides lack %q:\n%s", flag, Usage)
 		}
 	}
-	for _, flag := range []string{"knowledge export", "-o, --output FILE", "knowledge ingest", "--repo owner/repo", "--rebind", "--agent claude|codex", "--dry-run"} {
+	for _, flag := range []string{"knowledge export", "-o, --output FILE", "knowledge ingest", "--repo owner/repo", "--rebind", "--dry-run"} {
 		if !strings.Contains(section(inputs, precedence), flag) {
 			t.Errorf("operation inputs lack %q:\n%s", flag, Usage)
 		}

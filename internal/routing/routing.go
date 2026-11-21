@@ -28,8 +28,7 @@ type Config struct {
 	Default  string             `yaml:"default"`
 }
 
-// Selector is the agent that reads the issue and picks a rule. Empty fields take
-// claude.plan_model (else claude.model), or the Codex equivalents.
+// Selector is the agent that reads the issue and picks a rule.
 type Selector struct {
 	Agent           task.Agent `yaml:"agent"`
 	Model           string     `yaml:"model"`

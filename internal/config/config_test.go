@@ -40,13 +40,13 @@ func TestLoadPrecedence(t *testing.T) {
 	}
 }
 
-func TestAgentSettingsOverlayDefaults(t *testing.T) {
+func TestSettingsOverlayDefaults(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("FOREMAN_CONFIG", "")
 	t.Setenv("FOREMAN_TASKS_DIR", "")
 	os.MkdirAll(filepath.Join(home, ".config/foreman"), 0o755)
-	os.WriteFile(filepath.Join(home, ".config/foreman/config.yaml"), []byte("worktrees_dir: ~/wt\nclaude:\n  model: haiku\ncodex:\n  command: /opt/codex\ncleanup:\n  delete_merged_branch: false\n"), 0o644)
+	os.WriteFile(filepath.Join(home, ".config/foreman/config.yaml"), []byte("worktrees_dir: ~/wt\ncleanup:\n  delete_merged_branch: false\n"), 0o644)
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
@@ -54,14 +54,8 @@ func TestAgentSettingsOverlayDefaults(t *testing.T) {
 	if cfg.WorktreesDir != filepath.Join(home, "wt") || cfg.RepositoriesDir != filepath.Join(home, ".local/share/foreman/repositories") || cfg.LogDir != filepath.Join(home, ".local/share/foreman/logs") {
 		t.Errorf("dirs: %+v", cfg)
 	}
-	if cfg.Claude.Model != "haiku" || cfg.Claude.Command != "claude" {
-		t.Errorf("claude: %+v", cfg.Claude)
-	}
 	if cfg.ReviewRounds != 1 || cfg.FixRounds != 3 {
 		t.Errorf("rounds must load as their defaults so a materialized file shows them: %d %d", cfg.ReviewRounds, cfg.FixRounds)
-	}
-	if cfg.Codex.Command != "/opt/codex" || cfg.Codex.Model != "gpt-6-sol" {
-		t.Errorf("codex: %+v", cfg.Codex)
 	}
 	if cfg.StagesDir != filepath.Join(home, ".config/foreman/stages") {
 		t.Errorf("stages dir = %s", cfg.StagesDir)
@@ -96,26 +90,6 @@ func TestTaskEffortDefaultsAndOverrides(t *testing.T) {
 	}
 	if cfg.Models.Planning.ReasoningEffort != "high" || cfg.Models.Implementation.ReasoningEffort != "medium" || cfg.Models.AdversarialReview.ReasoningEffort != "low" {
 		t.Errorf("unexpected stage effort: %+v", cfg.Models)
-	}
-}
-
-func TestStageModelsAndEffortLoadFromConfig(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	t.Setenv("FOREMAN_CONFIG", path)
-	t.Setenv("FOREMAN_TASKS_DIR", "")
-	raw := "claude:\n  model: opus\n  plan_model: sonnet\n  review_model: opus\ncodex:\n  model: gpt-6-sol\n  plan_model: gpt-6-luna\n  review_model: gpt-6-sol\n  reasoning_effort: medium\n  plan_reasoning_effort: xhigh\n  review_reasoning_effort: medium\n"
-	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Claude.Model != "opus" || cfg.Claude.PlanModel != "sonnet" || cfg.Claude.ReviewModel != "opus" {
-		t.Errorf("claude stage models = %+v", cfg.Claude)
-	}
-	if cfg.Codex.Model != "gpt-6-sol" || cfg.Codex.PlanModel != "gpt-6-luna" || cfg.Codex.ReviewModel != "gpt-6-sol" || cfg.Codex.ReasoningEffort != "medium" || cfg.Codex.PlanReasoningEffort != "xhigh" || cfg.Codex.ReviewReasoningEffort != "medium" {
-		t.Errorf("codex stage settings = %+v", cfg.Codex)
 	}
 }
 
@@ -201,12 +175,12 @@ func TestLocalIsAnIssueSource(t *testing.T) {
 func TestMaterializeWritesDefaultsOnlyForEmptyFiles(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	cfg := Config{TasksDir: "/tasks", Claude: Claude{Model: "opus", PlanModel: "sonnet"}, Codex: Codex{Model: "gpt-6-sol", PlanModel: "gpt-6-luna", ReasoningEffort: "medium", PlanReasoningEffort: "xhigh"}, Budgets: Budgets{ImplementerUSD: 3, ReviewerUSD: 1}, Notifications: Notifications{Enabled: true}}
+	cfg := Config{TasksDir: "/tasks", Models: task.ModelPolicy{Planning: task.ModelTarget{Agent: task.Claude, Model: "sonnet", ReasoningEffort: "high"}}, Budgets: Budgets{ImplementerUSD: 3, ReviewerUSD: 1}, Notifications: Notifications{Enabled: true}}
 	if err := Materialize(path, cfg); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(path)
-	if err != nil || len(raw) == 0 || !strings.Contains(string(raw), "implementer_usd: 3") || !strings.Contains(string(raw), "plan_model: sonnet") || !strings.Contains(string(raw), "plan_reasoning_effort: xhigh") {
+	if err != nil || len(raw) == 0 || !strings.Contains(string(raw), "implementer_usd: 3") || !strings.Contains(string(raw), "model: sonnet") || !strings.Contains(string(raw), "reasoning_effort: high") {
 		t.Fatalf("materialized config = %q, err = %v", raw, err)
 	}
 	if err := os.WriteFile(path, []byte("tasks_dir: /custom\n"), 0o600); err != nil {
@@ -456,7 +430,9 @@ func TestDefaultSourceRejectsAnUnknownValueNamingTheKey(t *testing.T) {
 func TestLoadRejectsUnknownKeysNamingTheKeyAndFile(t *testing.T) {
 	for name, tc := range map[string]struct{ body, key string }{
 		"top-level misspelling":    {"mentoins: false\n", "mentoins"},
-		"nested misspelling":       {"claude:\n  modle: haiku\n", "modle"},
+		"nested misspelling":       {"models:\n  planning:\n    modle: haiku\n", "modle"},
+		"retired claude settings":  {"claude:\n  command: claude\n", "claude"},
+		"retired codex settings":   {"codex:\n  command: codex\n", "codex"},
 		"retired ignore list":      {"ignore_repositories: [acme/widgets]\n", "ignore_repositories"},
 		"auto mode on/off setting": {"auto:\n  enabled: true\n", "enabled"},
 	} {
@@ -516,19 +492,6 @@ learning:
 notifications:
   enabled: false
   webhook_url: ""
-claude:
-  command: claude
-  model: opus
-  plan_model: sonnet
-  review_model: opus
-codex:
-  command: codex
-  model: m
-  plan_model: p
-  review_model: r
-  reasoning_effort: medium
-  plan_reasoning_effort: high
-  review_reasoning_effort: low
 cleanup:
   on_done: false
   delete_merged_branch: false
@@ -539,7 +502,7 @@ include_repositories: [acme/web]
 exclude_repositories: [acme/api]
 `
 	cfg, err := autoConfig(t, body)
-	if err != nil || cfg.DefaultSource != SourceAll || cfg.Auto.MaxConcurrent != 2 || cfg.Codex.ReviewReasoningEffort != "low" {
+	if err != nil || cfg.DefaultSource != SourceAll || cfg.Auto.MaxConcurrent != 2 {
 		t.Fatalf("documented config = %+v, %v", cfg, err)
 	}
 }

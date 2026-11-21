@@ -150,7 +150,7 @@ func toollessTurn(ctx context.Context, claude Claude, codex Codex, in EvaluateIn
 		return nil, task.Usage{}, err
 	}
 	defer os.RemoveAll(dir)
-	start := StartInput{Worktree: dir, Prompt: in.Prompt, Log: in.Log}
+	start := StartInput{Worktree: dir, Prompt: in.Prompt, ReasoningEffort: in.ReasoningEffort, Log: in.Log}
 	var raw []byte
 	var usage task.Usage
 	switch in.Agent {

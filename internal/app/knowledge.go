@@ -45,8 +45,6 @@ type IngestInput struct {
 	Data   []byte
 	Repo   string
 	Rebind bool
-	// Agent runs the merge turn when both sides have learnings.
-	Agent  task.Agent
 	DryRun bool
 	Log    io.Writer
 }
@@ -128,13 +126,14 @@ func (a App) IngestKnowledge(ctx context.Context, in IngestInput) (IngestResult,
 			if a.Merger == nil {
 				return res, errors.New("no merge agent is configured")
 			}
-			if err := a.checkQuota(ctx, in.Agent, in.Log); err != nil {
+			target := a.Models.Planning
+			if err := a.checkQuota(ctx, target.Agent, in.Log); err != nil {
 				return res, err
 			}
-			out, err := a.Merger.Merge(ctx, agent.EvaluateInput{Agent: in.Agent, Prompt: agent.MergePrompt(dest, m.Items), MaxBudgetUSD: a.LearningBudgetUSD, Log: in.Log}, m.Refs())
+			out, err := a.Merger.Merge(ctx, agent.EvaluateInput{Agent: target.Agent, Model: target.Model, ReasoningEffort: target.ReasoningEffort, Prompt: agent.MergePrompt(dest, m.Items), MaxBudgetUSD: a.LearningBudgetUSD, Log: in.Log}, m.Refs())
 			res.Usage = out.Usage
 			if err != nil {
-				return res, fmt.Errorf("merge with %s: %w", in.Agent, err)
+				return res, fmt.Errorf("merge with %s: %w", target.Agent, err)
 			}
 			groups = out.Groups
 		}

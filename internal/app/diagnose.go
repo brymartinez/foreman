@@ -33,7 +33,8 @@ func (a App) diagnoseLimit(ctx context.Context, rec *task.Record, title, body st
 	if err != nil {
 		return unavailable(err), task.Usage{}
 	}
-	in := agent.EvaluateInput{Agent: rec.Delegation.Implementer.Agent, Prompt: agent.DiagnosisPrompt(findings, sources), MaxBudgetUSD: a.ReviewerBudgetUSD, Log: log}
+	target := a.modelPolicy(rec.Delegation).Implementation
+	in := agent.EvaluateInput{Agent: target.Agent, Model: target.Model, ReasoningEffort: target.ReasoningEffort, Prompt: agent.DiagnosisPrompt(findings, sources), MaxBudgetUSD: a.ReviewerBudgetUSD, Log: log}
 	fmt.Fprintf(log, "foreman: %s diagnosing the self-review at the fix limit\n", in.Agent)
 	callCtx := ctx
 	if a.metered {

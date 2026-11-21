@@ -21,7 +21,7 @@ var k0 = time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 
 type stubMerger struct {
 	calls  int
-	agent  task.Agent
+	input  agent.EvaluateInput
 	refs   []string
 	groups func(refs []string) []knowledge.Group
 	err    error
@@ -30,7 +30,7 @@ type stubMerger struct {
 
 func (s *stubMerger) Merge(_ context.Context, in agent.EvaluateInput, refs []string) (agent.MergeResult, error) {
 	s.calls++
-	s.agent, s.refs = in.Agent, refs
+	s.input, s.refs = in, refs
 	if s.during != nil {
 		s.during()
 	}
@@ -68,7 +68,7 @@ func machine(t *testing.T, evs ...knowledge.Evaluation) knowledge.Store {
 }
 
 func knowledgeApp(s knowledge.Store, m Merger) App {
-	return App{Knowledge: s, Merger: m, Now: func() time.Time { return k0.Add(100 * 24 * time.Hour) }}
+	return App{Knowledge: s, Merger: m, Models: task.ModelPolicy{Planning: task.ModelTarget{Agent: task.Claude}}, Now: func() time.Time { return k0.Add(100 * 24 * time.Hour) }}
 }
 
 func exportOf(t *testing.T, s knowledge.Store) []byte {
@@ -111,7 +111,7 @@ func TestIngestIntoARepositoryWithoutKnowledgeRestoresWithoutTheAgent(t *testing
 	src := machine(t, kEval("1", 0, "Wrap errors with the operation name.", knowledge.Maintainer), kEval("2", 2, "Run the linter first.", knowledge.Observed))
 	dst := machine(t)
 	m := &stubMerger{}
-	res, err := knowledgeApp(dst, m).IngestKnowledge(context.Background(), IngestInput{Data: exportOf(t, src), Agent: task.Claude})
+	res, err := knowledgeApp(dst, m).IngestKnowledge(context.Background(), IngestInput{Data: exportOf(t, src)})
 	if err != nil || res.Mode != IngestRestored || !res.Saved || m.calls != 0 {
 		t.Fatalf("res = %+v, err = %v, agent calls = %d", res, err, m.calls)
 	}
@@ -132,9 +132,10 @@ func TestIngestMergesWithOneAgentCallAndARepeatChangesNothing(t *testing.T) {
 	data := exportOf(t, src)
 	m := &stubMerger{groups: oneGroup("Wrap returned errors with the operation name.")}
 	a := knowledgeApp(dst, m)
-	res, err := a.IngestKnowledge(context.Background(), IngestInput{Data: data, Agent: task.Codex})
-	if err != nil || res.Mode != IngestMerged || !res.Saved || m.calls != 1 || m.agent != task.Codex {
-		t.Fatalf("res = %+v, err = %v, calls = %d, agent = %s", res, err, m.calls, m.agent)
+	a.Models.Planning = task.ModelTarget{Agent: task.Codex, Model: "planning-model", ReasoningEffort: "high"}
+	res, err := a.IngestKnowledge(context.Background(), IngestInput{Data: data})
+	if err != nil || res.Mode != IngestMerged || !res.Saved || m.calls != 1 || m.input.Agent != task.Codex || m.input.Model != "planning-model" || m.input.ReasoningEffort != "high" {
+		t.Fatalf("res = %+v, err = %v, calls = %d, target = %s/%s (%s)", res, err, m.calls, m.input.Agent, m.input.Model, m.input.ReasoningEffort)
 	}
 	ls, _ := dst.Learnings(kRepo)
 	if len(ls) != 1 || ls[0].Status != knowledge.Active || ls[0].Tasks() != 2 || ls[0].Text != "Wrap returned errors with the operation name." {
@@ -146,7 +147,7 @@ func TestIngestMergesWithOneAgentCallAndARepeatChangesNothing(t *testing.T) {
 	}
 
 	before := files(t, dst)
-	res, err = a.IngestKnowledge(context.Background(), IngestInput{Data: data, Agent: task.Codex})
+	res, err = a.IngestKnowledge(context.Background(), IngestInput{Data: data})
 	if err != nil || res.Mode != IngestUnchanged || res.Saved || m.calls != 1 {
 		t.Fatalf("repeat: res = %+v, err = %v, calls = %d", res, err, m.calls)
 	}
@@ -222,7 +223,7 @@ func TestIngestFailuresLeaveTheStoreUnchanged(t *testing.T) {
 				defer unlock()
 			}
 			before := files(t, dst)
-			res, err := knowledgeApp(dst, m).IngestKnowledge(context.Background(), IngestInput{Data: data, Agent: task.Claude, DryRun: tc.dryRun})
+			res, err := knowledgeApp(dst, m).IngestKnowledge(context.Background(), IngestInput{Data: data, DryRun: tc.dryRun})
 			switch {
 			case tc.dryRun && (err != nil || res.Saved || res.Mode != IngestMerged || len(res.Result.Learnings) != 1):
 				t.Fatalf("dry run: res = %+v, err = %v", res, err)
@@ -249,7 +250,7 @@ func TestIngestDoesNotSaveOverAConcurrentWrite(t *testing.T) {
 		}
 		during = files(t, dst)
 	}
-	_, err := knowledgeApp(dst, m).IngestKnowledge(context.Background(), IngestInput{Data: exportOf(t, src), Agent: task.Claude})
+	_, err := knowledgeApp(dst, m).IngestKnowledge(context.Background(), IngestInput{Data: exportOf(t, src)})
 	if !errors.Is(err, ErrKnowledgeChanged) {
 		t.Fatalf("err = %v", err)
 	}
@@ -265,7 +266,7 @@ func TestIngestStopsOnAnUnresolvedMaintainerConflict(t *testing.T) {
 		return []knowledge.Group{{Members: refs, Kind: knowledge.Convention, Text: "Indent YAML consistently.", Conflict: "different indentation"}}
 	}}
 	before := files(t, dst)
-	_, err := knowledgeApp(dst, m).IngestKnowledge(context.Background(), IngestInput{Data: exportOf(t, src), Agent: task.Claude})
+	_, err := knowledgeApp(dst, m).IngestKnowledge(context.Background(), IngestInput{Data: exportOf(t, src)})
 	var conflict *knowledge.ConflictError
 	if !errors.As(err, &conflict) || !strings.Contains(err.Error(), "four spaces") || !strings.Contains(err.Error(), "two spaces") {
 		t.Fatalf("err = %v", err)

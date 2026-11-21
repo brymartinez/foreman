@@ -66,7 +66,6 @@ type Command struct {
 	// File is the export's output path (empty for stdout) or the ingest's input.
 	File   string
 	Rebind bool
-	Agent  task.Agent
 	DryRun bool
 	// Local holds the local issue commands' inputs.
 	Local *IssueInput
@@ -79,7 +78,7 @@ Usage:
   foreman -c                  Edit the configuration file
   foreman knowledge export owner/repo [-o FILE]
                               Write the repository's learned knowledge to FILE or stdout
-  foreman knowledge ingest FILE [--repo owner/repo [--rebind]] [--agent claude|codex] [--dry-run]
+  foreman knowledge ingest FILE [--repo owner/repo [--rebind]] [--dry-run]
                               Store an export, merging with this machine's knowledge
   foreman issue add --title TITLE [--url URL] [--repo owner/repo] [--description-file FILE|-]
                     [--triage-file FILE] [--notes-file FILE] [--tag TAG]...
@@ -118,7 +117,6 @@ Operation inputs:
     --repo owner/repo     Store under this repository; it must match the
                           export unless --rebind is given
     --rebind              Store the export under a different --repo
-    --agent claude|codex  Agent that merges the knowledge (default auto.agent)
     --dry-run             Print the merged result without saving it
 
 Precedence:
@@ -219,11 +217,6 @@ func parseKnowledge(argv []string) (Command, error) {
 			cmd.Rebind = true
 		case verb == "ingest" && arg == "--dry-run":
 			cmd.DryRun = true
-		case verb == "ingest" && arg == "--agent":
-			var v string
-			if v, err = value(&i, arg); err == nil {
-				cmd.Agent, err = task.ParseAgent(v)
-			}
 		case strings.HasPrefix(arg, "-") && arg != "-":
 			err = usagef("knowledge %s: unknown flag %s", verb, arg)
 		default:

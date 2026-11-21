@@ -45,8 +45,6 @@ type Config struct {
 	Learning      Learning         `yaml:"learning"`
 	Notifications Notifications    `yaml:"notifications"`
 	Models        task.ModelPolicy `yaml:"models"`
-	Claude        Claude           `yaml:"claude"`
-	Codex         Codex            `yaml:"codex"`
 	Cleanup       Cleanup          `yaml:"cleanup"`
 	Auto          Auto             `yaml:"auto"`
 	// IncludedRepos, when nonempty, limits the inbox to these repositories and
@@ -109,23 +107,6 @@ type Auto struct {
 	MaxConcurrent int `yaml:"max_concurrent"`
 }
 
-type Claude struct {
-	Command     string `yaml:"command"`
-	Model       string `yaml:"model"`        // standalone knowledge commands and legacy task records
-	PlanModel   string `yaml:"plan_model"`   // standalone evaluation; "" uses Model
-	ReviewModel string `yaml:"review_model"` // legacy task reviews; new tasks use models.*
-}
-
-type Codex struct {
-	Command               string `yaml:"command"`
-	Model                 string `yaml:"model"`        // standalone knowledge commands and legacy task records
-	PlanModel             string `yaml:"plan_model"`   // standalone evaluation; "" uses Model
-	ReviewModel           string `yaml:"review_model"` // legacy task reviews; new tasks use models.*
-	ReasoningEffort       string `yaml:"reasoning_effort"`
-	PlanReasoningEffort   string `yaml:"plan_reasoning_effort"`   // "" uses ReasoningEffort
-	ReviewReasoningEffort string `yaml:"review_reasoning_effort"` // "" uses ReasoningEffort
-}
-
 // Load starts from defaults, overlays the config file ($FOREMAN_CONFIG or
 // ~/.config/foreman/config.yaml), then FOREMAN_TASKS_DIR. Unset file keys keep their defaults.
 func Load() (Config, error) {
@@ -147,8 +128,6 @@ func Load() (Config, error) {
 		Mentions:        true,
 		DefaultSource:   task.GitHub,
 		Refresh:         DefaultRefresh,
-		Claude:          Claude{Command: "claude", Model: "claude-opus-5-5"},
-		Codex:           Codex{Command: "codex", Model: "gpt-6-sol"},
 		Cleanup:         Cleanup{OnDone: true, DeleteMergedBranch: true},
 		Budgets:         Budgets{ImplementerUSD: 3, ReviewerUSD: 1, TaskTokens: 2000000, PlanningTokens: 400000, CallTimeoutSeconds: 1800},
 		Learning:        Learning{Enabled: true, BudgetUSD: 0.5},

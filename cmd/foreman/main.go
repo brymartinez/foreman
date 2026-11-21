@@ -113,9 +113,8 @@ func run(argv []string) int {
 	var inSession atomic.Bool
 	ctx, stop := notifyContext(&inSession)
 	defer stop()
-	claude := agent.Claude{Bin: cfg.Claude.Command, Model: cfg.Claude.Model, PlanModel: cfg.Claude.PlanModel, ReviewModel: cfg.Claude.ReviewModel, Exec: agent.RunCommand}
-	codex := agent.Codex{Bin: cfg.Codex.Command, Model: cfg.Codex.Model, PlanModel: cfg.Codex.PlanModel, ReviewModel: cfg.Codex.ReviewModel,
-		ReasoningEffort: cfg.Codex.ReasoningEffort, PlanReasoningEffort: cfg.Codex.PlanReasoningEffort, ReviewReasoningEffort: cfg.Codex.ReviewReasoningEffort, Exec: agent.RunCommand}
+	claude := agent.Claude{Bin: "claude", Exec: agent.RunCommand}
+	codex := agent.Codex{Bin: "codex", Exec: agent.RunCommand}
 	a := app.App{
 		ReplyToPRFeedback:    false,
 		FullSuiteGate:        true,

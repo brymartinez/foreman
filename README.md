@@ -105,7 +105,7 @@ usage error. The other flags are inputs to one command:
 |---|---|
 | `foreman -c` | Open the config editor. Use it alone, without launch overrides. |
 | `foreman knowledge export owner/repo` | `-o`, `--output FILE` |
-| `foreman knowledge ingest FILE` | `--repo owner/repo`, `--rebind`, `--agent claude\|codex`, `--dry-run` |
+| `foreman knowledge ingest FILE` | `--repo owner/repo`, `--rebind`, `--dry-run` |
 | `foreman -h`, `--help` | Print command help. |
 | `foreman --version` | Print the version. |
 
@@ -120,8 +120,7 @@ launch flag.
 with defaults before the editor opens. Foreman checks it again when the editor exits.
 
 `knowledge export owner/repo` writes to stdout unless you pass `-o FILE` or
-`--output FILE`. `knowledge ingest FILE` accepts `--dry-run`, `--agent claude|codex`,
-and `--repo owner/repo`. Use `--rebind` with `--repo` to import an export under a
+`--output FILE`. `knowledge ingest FILE` accepts `--dry-run` and `--repo owner/repo`. Use `--rebind` with `--repo` to import an export under a
 different repository. See [Moving knowledge between machines](#moving-knowledge-between-machines).
 
 ## Dashboard
@@ -563,9 +562,8 @@ A file that is not a valid export changes nothing.
 - If this machine has no knowledge for the repository, the export is restored as it
   is, with no agent call.
 - If both machines have learnings, one tool-less agent turn groups equivalent
-  learnings, and foreman combines their evidence. The agent is `auto.agent` unless
-  you pass `--agent claude` or `--agent codex`; a Claude turn is capped at
-  `learning.budget_usd`.
+  learnings, and Foreman combines their evidence. The merge uses `models.planning`.
+  A Claude turn is capped at `learning.budget_usd`.
 - Ingesting the same export again changes nothing and calls no agent. The same task
   on both machines counts once; a different task under the same issue number keeps
   its own evidence under a renamed id.
@@ -643,19 +641,6 @@ models:
     agent: codex
     model: gpt-6.1-sol
     reasoning_effort: medium
-claude:
-  command: claude
-  model: claude-sonnet-5             # standalone knowledge commands
-  plan_model: claude-opus-5-5
-  review_model: claude-sonnet-5
-codex:
-  command: codex
-  model: gpt-6.1-sol                 # standalone knowledge commands
-  plan_model: ""
-  review_model: ""
-  reasoning_effort: ""               # implementation; "" uses the CLI default
-  plan_reasoning_effort: ""          # "" uses reasoning_effort
-  review_reasoning_effort: ""        # "" uses reasoning_effort
 include_repositories: []             # exact owner/name; when set, the inbox shows only these
 exclude_repositories: []             # exact owner/name hidden from the inbox when include is empty
 database: ""                        # SQLite file; "" uses <data>/foreman.db

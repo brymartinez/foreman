@@ -127,19 +127,6 @@ worktrees_dir: $sandbox/worktrees
 repositories_dir: $sandbox/repositories
 log_dir: $sandbox/logs
 knowledge_dir: $sandbox/knowledge
-claude:
-  command: $sandbox/bin/claude
-  model: opus
-  plan_model: sonnet
-  review_model: opus
-codex:
-  command: $sandbox/bin/codex
-  model: gpt-6-sol
-  plan_model: gpt-6-luna
-  review_model: gpt-6-sol
-  reasoning_effort: medium
-  plan_reasoning_effort: xhigh
-  review_reasoning_effort: medium
 models:
   planning:
     agent: claude

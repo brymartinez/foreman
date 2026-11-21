@@ -9,7 +9,6 @@
 
 selector:
   agent: claude
-  # model: "" uses claude.plan_model, else claude.model.
 
 profiles:
   claude:

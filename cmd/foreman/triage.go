@@ -30,9 +30,9 @@ func triageSession(cfg config.Config, active *atomic.Bool) func(context.Context,
 		var cmd *exec.Cmd
 		switch target.Agent {
 		case task.Codex:
-			cmd = exec.CommandContext(ctx, cfg.Codex.Command, "--model", target.Model, prompt)
+			cmd = exec.CommandContext(ctx, "codex", "--model", target.Model, prompt)
 		default:
-			cmd = exec.CommandContext(ctx, cfg.Claude.Command, "--model", target.Model, prompt)
+			cmd = exec.CommandContext(ctx, "claude", "--model", target.Model, prompt)
 		}
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 		if req.Key.Source != task.Local && req.Key.Repo != "" {

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -19,12 +18,13 @@ import (
 // runKnowledge runs `foreman knowledge export` or `ingest`. Neither needs the stage
 // files, the dashboard, or a task.
 func runKnowledge(ctx context.Context, cfg config.Config, st state, cmd cli.Command, stdout, stderr io.Writer) int {
-	claude := agent.Claude{Bin: cfg.Claude.Command, Model: cfg.Claude.Model, PlanModel: cfg.Claude.PlanModel, Exec: agent.RunCommand}
-	codex := agent.Codex{Bin: cfg.Codex.Command, Model: cfg.Codex.Model, PlanModel: cfg.Codex.PlanModel,
-		ReasoningEffort: cfg.Codex.ReasoningEffort, PlanReasoningEffort: cfg.Codex.PlanReasoningEffort, Exec: agent.RunCommand}
 	a := app.App{
-		Knowledge:         st.Knowledge,
-		Merger:            agent.Mergers{Claude: claude, Codex: codex},
+		Knowledge: st.Knowledge,
+		Merger: agent.Mergers{
+			Claude: agent.Claude{Bin: "claude", Exec: agent.RunCommand},
+			Codex:  agent.Codex{Bin: "codex", Exec: agent.RunCommand},
+		},
+		Models:            cfg.Models,
 		LearningBudgetUSD: cfg.Learning.BudgetUSD,
 		Now:               func() time.Time { return time.Now().Truncate(time.Second) },
 	}
@@ -54,7 +54,7 @@ func runKnowledge(ctx context.Context, cfg config.Config, st state, cmd cli.Comm
 		if err != nil {
 			return failed(err)
 		}
-		in := app.IngestInput{Data: data, Repo: string(cmd.Repo), Rebind: cmd.Rebind, Agent: cmp.Or(cmd.Agent, cfg.Auto.Agent), DryRun: cmd.DryRun, Log: stderr}
+		in := app.IngestInput{Data: data, Repo: string(cmd.Repo), Rebind: cmd.Rebind, DryRun: cmd.DryRun, Log: stderr}
 		res, err := a.IngestKnowledge(ctx, in)
 		var conflict *knowledge.ConflictError
 		if errors.As(err, &conflict) {

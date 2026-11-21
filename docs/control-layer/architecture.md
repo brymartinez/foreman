@@ -567,7 +567,9 @@ the same commit. The commit message records why it changed.
   and `models.adversarial_review` each store an agent, model, and reasoning effort. All three
   default to medium for Claude and Codex. Self-review shares the implementation target. Fixes, merges,
   final checks, and PR creation use that same target. Each task snapshots the resolved
-  policy before its first call, and each turn logs an `agent:model:step` line.
+  policy before its first call, and each task turn logs an `agent:model:step` line.
+  Learning uses the task's saved planning target. Standalone knowledge ingest uses
+  the current planning target. Foreman looks up `claude` and `codex` on `PATH`.
 
 ### Profiles and quota
 

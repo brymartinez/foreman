@@ -82,10 +82,8 @@ func (a App) Learn(ctx context.Context, key task.Key, log io.Writer) error {
 	brief := evidence(rec, a.Now())
 	brief.Feedback, brief.Learnings, brief.Earlier = feedback, learnings, earlier
 
-	in := agent.EvaluateInput{Agent: rec.Delegation.Implementer.Agent, Prompt: agent.EvaluationPrompt(brief), MaxBudgetUSD: a.LearningBudgetUSD, Log: log}
-	if p := rec.Delegation.Profile; p != nil {
-		in.Agent, in.Model, in.ReasoningEffort = p.Agent, p.PlanModel, p.PlanReasoningEffort
-	}
+	target := a.modelPolicy(rec.Delegation).Planning
+	in := agent.EvaluateInput{Agent: target.Agent, Model: target.Model, ReasoningEffort: target.ReasoningEffort, Prompt: agent.EvaluationPrompt(brief), MaxBudgetUSD: a.LearningBudgetUSD, Log: log}
 	if in.Agent == "" {
 		in.Agent = task.Claude
 	}

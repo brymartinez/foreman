@@ -29,8 +29,8 @@ func TestShippingConfigLoadsWithoutPersonalSettings(t *testing.T) {
 	if cfg.Mentions || cfg.Budgets.ImplementerUSD != 25 || cfg.Budgets.ReviewerUSD != 10 {
 		t.Errorf("shipping choices were not loaded: mentions=%t budgets=%+v", cfg.Mentions, cfg.Budgets)
 	}
-	if cfg.Claude.Model != "opus" || cfg.Claude.PlanModel != "sonnet" || cfg.Codex.PlanModel != "gpt-6-luna" {
-		t.Errorf("shipping models were not loaded: claude=%+v codex=%+v", cfg.Claude, cfg.Codex)
+	if cfg.Models.Planning.Model != "claude-opus-5-5" || cfg.Models.Implementation.Model != "claude-sonnet-5" || cfg.Models.AdversarialReview.Model != "gpt-6.1-sol" {
+		t.Errorf("shipping models were not loaded: %+v", cfg.Models)
 	}
 	if cfg.Notifications.WebhookURL != "" || len(cfg.IncludedRepos) != 0 || len(cfg.ExcludedRepos) != 0 {
 		t.Error("shipping config contains personal settings")
