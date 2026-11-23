@@ -38,6 +38,12 @@ func (s state) Close() { _ = s.DB.Close() }
 // of an earlier version into it the first time. A notice on w says what an upgrade
 // moved or deleted.
 func openState(cfg config.Config, w io.Writer) (state, error) {
+	return openStateGated(cfg, w, true)
+}
+
+// openStateGated is openState. `foreman storage move` passes gate false: the gate
+// refuses the unmoved database that the move exists to copy.
+func openStateGated(cfg config.Config, w io.Writer, gate bool) (state, error) {
 	d, err := db.Open(cfg.Database)
 	if err != nil {
 		return state{}, err
@@ -55,9 +61,11 @@ func openState(cfg config.Config, w io.Writer) (state, error) {
 		}
 		fmt.Fprintln(w)
 	}
-	if err := workspace.Gate(d, cfg.Storage); err != nil {
-		d.Close()
-		return state{}, err
+	if gate {
+		if err := workspace.Gate(d, cfg.Storage); err != nil {
+			d.Close()
+			return state{}, err
+		}
 	}
 	st := state{
 		DB:        d,

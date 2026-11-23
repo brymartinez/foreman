@@ -20,6 +20,11 @@ type Memory struct {
 	Fail    error // returned by every write while set
 	Writes  int
 	Trashed []string
+	// FailOnWrite makes the nth write (1-based) fail once, to model a crash partway.
+	FailOnWrite int
+	// Mangle changes an entry right after it was written, to model a store that
+	// does not keep what it was given.
+	Mangle func(*TaskEntry)
 }
 
 func (m *Memory) now() time.Time {
@@ -88,6 +93,9 @@ func (m *Memory) UpsertTask(_ context.Context, p TaskPublish) (string, error) {
 		return "", m.Fail
 	}
 	m.Writes++
+	if m.FailOnWrite == m.Writes {
+		return "", errors.New("store dropped the connection")
+	}
 	var e *TaskEntry
 	for _, c := range m.tasks {
 		if c.ID == p.Record.ID && (e == nil || c.CreatedAt.Before(e.CreatedAt)) {
@@ -103,6 +111,9 @@ func (m *Memory) UpsertTask(_ context.Context, p TaskPublish) (string, error) {
 	}
 	rec := p.Record
 	e.Record, e.ParseErr, e.EditedAt = &rec, nil, m.now()
+	if m.Mangle != nil {
+		m.Mangle(e)
+	}
 	return e.Ref, nil
 }
 

@@ -93,7 +93,8 @@ func KeyOf(id string) (task.Key, error) {
 	if err != nil || !githubID.MatchString(id) {
 		return task.Key{}, fmt.Errorf("%q is not a Foreman ID", id)
 	}
-	return task.Key{Repo: repo, Number: n, Source: task.GitHub}, nil
+	// The store keeps a GitHub task's source empty, and Get compares keys exactly.
+	return task.Key{Repo: repo, Number: n}, nil
 }
 
 type row struct {
@@ -253,31 +254,38 @@ func (s *Sync) Blocked(ctx context.Context, key task.Key, reason string) error {
 	return s.publish(ctx, key, reason)
 }
 
-func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
+// built is a task's shared record as the host's saved state builds it.
+type built struct {
+	r       Record
+	li      *localissues.Issue
+	triage  string
+	status  string
+	stageAt time.Time
+	prev    row
+}
+
+// build makes the record for key from saved state. It reports false when the host
+// holds neither a task nor a local issue for key.
+func (s *Sync) build(ctx context.Context, key task.Key) (built, bool, error) {
 	id := ForemanID(key)
-	unlock, err := s.lock(ctx, "publish:task:"+id)
-	if err != nil {
-		return err
-	}
-	defer unlock()
 	rec, err := s.taskFor(ctx, key)
 	if err != nil {
-		return err
+		return built{}, false, err
 	}
 	li, err := s.issueFor(key)
 	if err != nil {
-		return err
+		return built{}, false, err
 	}
 	if rec == nil && li == nil {
-		return nil
+		return built{}, false, nil
 	}
 	triage, err := s.triage(task.Key{Source: key.Source, ExternalID: key.ExternalID, Repo: key.Repo, Number: key.Number})
 	if err != nil && key.Source == task.Local {
-		return err
+		return built{}, false, err
 	}
 	prev, err := s.row("task", id)
 	if err != nil {
-		return err
+		return built{}, false, err
 	}
 	status := StatusInbox
 	if rec != nil {
@@ -289,8 +297,23 @@ func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
 	}
 	r, err := Build(Input{Task: rec, Issue: li, Triage: triage, StageAt: stageAt})
 	if err != nil {
+		return built{}, false, err
+	}
+	return built{r: r, li: li, triage: triage, status: status, stageAt: stageAt, prev: prev}, true, nil
+}
+
+func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
+	id := ForemanID(key)
+	unlock, err := s.lock(ctx, "publish:task:"+id)
+	if err != nil {
 		return err
 	}
+	defer unlock()
+	b, ok, err := s.build(ctx, key)
+	if err != nil || !ok {
+		return err
+	}
+	r, li, triage, prev, status, stageAt := b.r, b.li, b.triage, b.prev, b.status, b.stageAt
 	digest := hash(r.Digest(), reason)
 	if digest == prev.Digest {
 		return nil

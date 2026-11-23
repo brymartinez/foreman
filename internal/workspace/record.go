@@ -99,6 +99,9 @@ func Build(in Input) (Record, error) {
 	r := Record{Format: Format, Status: StatusInbox, Triage: strings.TrimSpace(in.Triage)}
 	if rec := in.Task; rec != nil {
 		r.ID, r.Source, r.Repo = TaskID(rec), rec.Source, string(rec.Repo)
+		if r.Source == "" { // the store keeps a GitHub task's source empty
+			r.Source = task.GitHub
+		}
 		r.Title, r.URL = rec.Title, rec.URL
 		r.Status = string(rec.State)
 		r.StageSince = sec(in.StageAt)
@@ -297,7 +300,7 @@ func (r Record) Hydrate(at time.Time) (*task.Record, error) {
 		if err != nil {
 			return nil, err
 		}
-		rec.Key = task.Key{Repo: repo, Number: num, Source: task.GitHub}
+		rec.Key = task.Key{Repo: repo, Number: num}
 		rec.Identifier = r.ID
 	}
 	return rec, nil

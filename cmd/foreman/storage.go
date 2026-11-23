@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/brymartinez/foreman/internal/cli"
 	"github.com/brymartinez/foreman/internal/config"
@@ -27,10 +28,29 @@ func newBackend(s config.Storage) (workspace.Backend, error) {
 	return nil, fmt.Errorf("storage.backend %q has no shared store", s.Backend)
 }
 
-// storageMove is set by the move service.
-var storageMove = func(ctx context.Context, cfg config.Config, stdout, stderr io.Writer) int {
-	fmt.Fprintln(stderr, "foreman: storage move is not available yet")
-	return 1
+// storageMove copies the SQLite workspace into the configured store. It opens the
+// database without the gate and builds no runner, learner, or agent.
+func storageMove(ctx context.Context, cfg config.Config, stdout, stderr io.Writer) int {
+	st, err := openStateGated(cfg, stderr, false)
+	if err != nil {
+		fmt.Fprintf(stderr, "foreman: %v\n", err)
+		return 1
+	}
+	defer st.Close()
+	sync, ok := st.Workspace.(*workspace.Sync)
+	if !ok {
+		fmt.Fprintln(stderr, "foreman: storage move needs storage.backend notion or obsidian")
+		return 1
+	}
+	sync.LockWait = time.Second
+	_, err = workspace.Move{Sync: sync, Storage: cfg.Storage, Report: func(format string, args ...any) {
+		fmt.Fprintf(stdout, format+"\n", args...)
+	}}.Run(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "foreman: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 // runStorageCommand runs `foreman storage check` and `foreman storage move`. Neither

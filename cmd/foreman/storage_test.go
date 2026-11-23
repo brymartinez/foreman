@@ -192,3 +192,36 @@ func TestStorageCheckOnSQLiteHasNothingToCheck(t *testing.T) {
 		t.Fatalf("check = %d %q", code, out)
 	}
 }
+
+func TestStorageMoveCopiesASQLiteWorkspaceIntoTheVaultAndOpensTheGate(t *testing.T) {
+	st, cfg := openTestState(t)
+	_, out, _ := runCmd(t, st, "", "issue", "add", "--title", "Moves with the workspace")
+	id := strings.TrimSpace(out)
+	st.Close()
+	vault := t.TempDir()
+	cfg.Storage = config.Storage{Backend: config.BackendObsidian, Obsidian: config.Obsidian{Vault: vault, Folder: "Foreman"}}
+
+	if _, err := openState(cfg, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "foreman storage move") {
+		t.Fatalf("before the move the gate must refuse and name the command, got %v", err)
+	}
+	code, out, errs := runStorage(t, cfg, "move")
+	if code != 0 {
+		t.Fatalf("move = %d\n%s\n%s", code, out, errs)
+	}
+	if !strings.Contains(out, "Moved 0 tasks, 1 issues without a task") {
+		t.Fatalf("output = %q", out)
+	}
+	notes, _ := filepath.Glob(filepath.Join(vault, "Foreman", "Tasks", "*.md"))
+	if len(notes) != 1 {
+		t.Fatalf("notes = %v, want one for %s", notes, id)
+	}
+	st2, err := openState(cfg, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("after the move the gate must pass: %v", err)
+	}
+	st2.Close()
+	code, out, _ = runStorage(t, cfg, "move")
+	if code != 0 || !strings.Contains(out, "already moved") {
+		t.Fatalf("second move = %d %q", code, out)
+	}
+}
