@@ -57,17 +57,17 @@ type App struct {
 	FullSuiteGate     bool // enabled in the CLI; every task copies it when it starts
 	LocalIssues       LocalIssues
 	// Workspace is the shared store in notion or obsidian mode; nil in sqlite mode.
-	Workspace Workspace
-	Models            task.ModelPolicy
-	Repositories      RepositoryManager
-	Worktrees         WorktreeManager
-	Agents            map[task.Agent]AgentAdapter
-	Runners           Runners
-	Stages            StageInstructionResolver
-	WorktreesDir      string
-	RepositoriesDir   string
-	ReviewRounds      int // reviewer passes per review; 0 means DefaultReviewRounds
-	FixRounds         int // fix and re-review cycles before asking; 0 means DefaultFixRounds
+	Workspace       Workspace
+	Models          task.ModelPolicy
+	Repositories    RepositoryManager
+	Worktrees       WorktreeManager
+	Agents          map[task.Agent]AgentAdapter
+	Runners         Runners
+	Stages          StageInstructionResolver
+	WorktreesDir    string
+	RepositoriesDir string
+	ReviewRounds    int // reviewer passes per review; 0 means DefaultReviewRounds
+	FixRounds       int // fix and re-review cycles before asking; 0 means DefaultFixRounds
 	// ReviewBeforePR is copied into each task's delegation when it starts. Runs read
 	// the task's copy, so a config change never alters a started task.
 	ReviewBeforePR       bool
