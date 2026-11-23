@@ -335,8 +335,8 @@ func TestFrameFooterFollowsTheMode(t *testing.T) {
 		mode Mode
 		want string
 	}{
-		{Browsing, "enter select"},
-		{ChoosingAgent, "[1] Claude"},
+		{Browsing, "enter · ? help"},
+		{ChoosingAgent, "[1] start"},
 		{TypingContext, "Context file"},
 		{ConfirmingCancel, "[y/n]"},
 	} {

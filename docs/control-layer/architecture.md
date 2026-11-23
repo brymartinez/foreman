@@ -672,7 +672,8 @@ the same commit. The commit message records why it changed.
 
 - **Model choice is deterministic.** Configured targets assign the provider and model
   for each role. No model call selects a provider or routes in prose. A task keeps its
-  saved targets across retries.
+  saved targets across retries. A retry with the same saved route keeps its original
+  route log entry.
 - **Check provider quota before each role call.** Confirmed exhaustion or absent setup
   pauses the role with its session and progress preserved. Unknown quota does not
   change the task's saved model policy. Quota never skips review or transfers a role silently.

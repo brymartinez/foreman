@@ -353,9 +353,13 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 				cur.Delegation.Action = nil
 			}
 		}
-		// A retry with the same agent keeps its route. Choosing another agent drops it.
-		if req.Profile == nil && sameAgent && prev.Profile != nil {
-			cur.Delegation.Profile, cur.Delegation.RouteReason, cur.Delegation.RouteLogged = prev.Profile, prev.RouteReason, prev.RouteLogged
+		if sameAgent && prev.Profile != nil {
+			if req.Profile == nil {
+				cur.Delegation.Profile, cur.Delegation.RouteReason = prev.Profile, prev.RouteReason
+			}
+			if *cur.Delegation.Profile == *prev.Profile && cur.Delegation.RouteReason == prev.RouteReason {
+				cur.Delegation.RouteLogged = prev.RouteLogged
+			}
 		}
 		if prev != nil && prev.Models != nil && prev.Implementer.Agent == req.Agent {
 			cur.Delegation.Models = prev.Models

@@ -35,10 +35,10 @@ func routeTo(t *testing.T, m *Model) Action {
 	return a
 }
 
-func TestChoosingAgentOffersRouteForNewIssue(t *testing.T) {
+func TestDelegationOffersRouteForNewIssue(t *testing.T) {
 	m := routingModel()
 	press(&m, Key{Kind: KeyEnter})
-	if got := footer(m); !strings.Contains(got, "[3] Route") {
+	if got := footer(m); !strings.Contains(got, "[3] route") {
 		t.Fatalf("footer = %q; want the route choice", got)
 	}
 }
@@ -61,13 +61,16 @@ func TestRouteNotOfferedForDelegatedIssueOrWhenRoutingIsOff(t *testing.T) {
 	}
 }
 
-func TestKeys1And2StartWithoutRouting(t *testing.T) {
-	for r, want := range map[rune]task.Agent{'1': task.Claude, '2': task.Codex} {
-		m := routingModel()
-		a := confirmBranch(t, &m, press(&m, Key{Kind: KeyEnter}, rune_(r), Key{Kind: KeyEnter}))
-		if a.Kind != ActionStart || a.Start.Agent != want || a.Start.Profile != nil {
-			t.Errorf("%c: action = %+v; want a start with %s and no profile", r, a, want)
-		}
+func TestConfiguredModelsStartWithoutRouting(t *testing.T) {
+	m := routingModel()
+	m.SetAuto(Auto{Agent: task.Codex})
+	press(&m, Key{Kind: KeyEnter})
+	if a := press(&m, rune_('2')); a.Kind != ActionNone || m.Mode != ChoosingAgent {
+		t.Fatalf("key 2 produced action %+v, mode %v", a, m.Mode)
+	}
+	a := confirmBranch(t, &m, press(&m, rune_('1'), Key{Kind: KeyEnter}))
+	if a.Kind != ActionStart || a.Start.Agent != task.Codex || a.Start.Profile != nil {
+		t.Errorf("action = %+v; want a start with the configured agent and no profile", a)
 	}
 }
 
@@ -111,14 +114,14 @@ func TestEnterConfirmsRouteAndStarts(t *testing.T) {
 	}
 }
 
-func TestEscFromConfirmReturnsToAgentChoice(t *testing.T) {
+func TestEscFromConfirmReturnsToDelegationChoice(t *testing.T) {
 	m := routingModel()
 	a := routeTo(t, &m)
 	m.Routed(a.RouteSeq, codexRoute, nil)
 	if a := press(&m, Key{Kind: KeyEscape}); a.Kind != ActionNone || m.Mode != ChoosingAgent {
-		t.Fatalf("action %+v mode %v; want the agent choice", a, m.Mode)
+		t.Fatalf("action %+v mode %v; want the delegation choice", a, m.Mode)
 	}
-	if a := confirmBranch(t, &m, press(&m, rune_('1'), Key{Kind: KeyEnter})); a.Kind != ActionStart || a.Start.Agent != task.Claude || a.Start.Profile != nil {
+	if a := confirmBranch(t, &m, press(&m, rune_('1'), Key{Kind: KeyEnter})); a.Kind != ActionStart || a.Start.Agent != "" || a.Start.Profile != nil {
 		t.Errorf("override after esc = %+v", a)
 	}
 }
