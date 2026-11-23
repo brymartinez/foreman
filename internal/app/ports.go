@@ -422,3 +422,57 @@ type Quota struct {
 type QuotaChecker interface {
 	Quota(ctx context.Context) (map[task.Agent]Quota, error)
 }
+
+// WorkspaceAnswer is an answer a person wrote in the workspace store for a task's
+// oldest unanswered question.
+type WorkspaceAnswer struct {
+	Key  task.Key
+	Text string
+	// Token identifies this answer to Ack, so one answer applies at most once.
+	Token string
+}
+
+// WorkspaceQueued is a task a person queued in the workspace store.
+type WorkspaceQueued struct {
+	Key      task.Key
+	QueuedAt time.Time
+	Token    string
+}
+
+// WorkspacePull is what a refresh finds in the store after syncing issues, triage,
+// and knowledge into the host database. Queued is oldest first.
+type WorkspacePull struct {
+	Answers []WorkspaceAnswer
+	Queued  []WorkspaceQueued
+}
+
+// WorkspaceAck says what the host did with a pulled item.
+type WorkspaceAck struct {
+	Key task.Key
+	// Kind is AckAnswer or AckQueue.
+	Kind  string
+	Token string
+}
+
+// Ack kinds.
+const (
+	AckAnswer = "answer"
+	AckQueue  = "queue"
+)
+
+// Workspace is the shared store of notion or obsidian mode. A nil Workspace is
+// sqlite mode: nothing is pulled or published.
+type Workspace interface {
+	// Pull syncs the store into the host database and returns what needs the app.
+	Pull(ctx context.Context) (WorkspacePull, error)
+	// Publish writes the saved state of one task to the store. It reads saved state
+	// only and skips the write when nothing changed.
+	Publish(ctx context.Context, key task.Key) error
+	// Blocked publishes why a queued task could not start; Queue stays ticked.
+	Blocked(ctx context.Context, key task.Key, reason string) error
+	// PublishKnowledge writes one repository's knowledge to the store.
+	PublishKnowledge(ctx context.Context, repo string) error
+	// Ack marks a pulled answer applied or a queued task started, and clears the
+	// field in the store.
+	Ack(ctx context.Context, ack WorkspaceAck) error
+}

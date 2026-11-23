@@ -56,6 +56,8 @@ type App struct {
 	ReplyToPRFeedback bool
 	FullSuiteGate     bool // enabled in the CLI; every task copies it when it starts
 	LocalIssues       LocalIssues
+	// Workspace is the shared store in notion or obsidian mode; nil in sqlite mode.
+	Workspace Workspace
 	Models            task.ModelPolicy
 	Repositories      RepositoryManager
 	Worktrees         WorktreeManager
