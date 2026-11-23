@@ -5,10 +5,12 @@
 #   FOREMAN_NOTION_TOKEN=secret_... scripts/probe-notion.sh <parent page id or URL>
 #
 # The page must be shared with the integration. The probe creates the Tasks and
-# Repository Knowledge databases under it if they are missing, creates one probe task,
-# runs `foreman storage check` and `foreman storage move` against a throwaway SQLite
-# workspace with one probe issue. It never reads or changes another page. The probe
-# task stays in Tasks for you to trash.
+# Repository Knowledge databases under it if they are missing, runs
+# `foreman storage check`, then adds one probe issue and confirms its scope from a
+# throwaway workspace, which publishes the entry and then updates it. It does not run
+# `storage move`: a move expects the store to hold only the workspace it copies, so
+# it would reject the entries a populated Tasks database already has. It never reads
+# or changes another page. The probe task stays in Tasks for you to trash.
 # Rerun it after Notion changes its API version.
 set -euo pipefail
 
@@ -30,18 +32,17 @@ log_dir: $work/logs
 notifications:
   enabled: false
 storage:
-  backend: sqlite
+  backend: notion
+  notion:
+    parent_page_id: $parent
 YAML
 export FOREMAN_CONFIG="$work/config.yaml"
 printf 'Probe scope.\n' >"$work/triage.md"
-id="$(printf 'Created by scripts/probe-notion.sh.' | "$work/foreman" issue add --title "Foreman probe $(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --description-file - --triage-file "$work/triage.md")"
-
-sed -i.bak '/^storage:$/,/^  backend: sqlite$/d' "$work/config.yaml"
-printf 'storage:\n  backend: notion\n  notion:\n    parent_page_id: %s\n' "$parent" >>"$work/config.yaml"
 
 echo "# Notion-Version $(sed -n "s/^const Version = //p" "$root/internal/notion/client.go")"
 "$work/foreman" storage check
-"$work/foreman" storage move
-"$work/foreman" storage move | grep -q 'already moved' && echo "ok   a second move changes nothing"
+id="$(printf 'Created by scripts/probe-notion.sh.' | "$work/foreman" issue add --title "Foreman probe $(date -u +%Y-%m-%dT%H:%M:%SZ)" --description-file -)"
+echo "ok   created $id"
+"$work/foreman" issue triage "$id" --file "$work/triage.md"
+echo "ok   confirmed its scope, which updates the entry"
 echo "The probe task $id stays in the Tasks database. Trash it in Notion when done."

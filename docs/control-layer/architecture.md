@@ -427,7 +427,7 @@ the same commit. The commit message records why it changed.
   change retried. Frontmatter is edited as a `yaml.Node`, so other keys, comments, and
   text survive. A note whose frontmatter does not parse is reported and left alone.
 - **Notion limits are the client's job** (`internal/notion/client.go`). 30-second request
-  timeout, 429 waits for `Retry-After`, 429 and 5xx retry up to 5 times with backoff,
+  timeout, 429 waits for `Retry-After` (a wait longer than the caller's deadline fails at once, and cancelling ends it), 429 and 5xx retry up to 5 times with backoff,
   rich text splits at 2000 characters, one block of Foreman's own text holds at most 60,000 characters (a longer line continues in blocks that start with an invisible word joiner, which the reader joins back onto it; where the reader would take a block for a continuation, a chunk that starts with the joiner, after any zero-width spaces, gets one more zero-width space in front, and text elsewhere is read as written), appends send at most 100 blocks and at most
   400 KB of JSON (Notion's limit is 500 KB). A 5xx answer to a create or an append is not
   retried, because Notion may have applied it; the caller looks the result up next time. The section is
@@ -449,9 +449,9 @@ the same commit. The commit message records why it changed.
   `workspace_entries.published_digest`. `App.update` publishes after a committed update;
   a failure is logged to `<log_dir>/workspace.log` and the next refresh retries.
   Issue commands and dashboard intake publish before they return (`state.publishIssue`).
-  Stage start time is kept per entry so the digest is stable between refreshes.
+  Confirming scope on the host after an entry exists copies it to the visible fields unless the store's copy changed since the host last reconciled it. Stage start time is kept per entry so the digest is stable between refreshes.
 - **The refresh pulls first.** `App.refreshWorkspace` runs at the start of the inbox
-  refresh. `Sync.Pull` gives a user-made entry a new `L-` ID, saves `Confirmed triage`
+  refresh. `Sync.Pull` gives a user-made entry a new `L-` ID (an entry whose payload names another task, such as a copied note, is never restored from it), saves `Confirmed triage`
   as triage while `Scope confirmed` is ticked (unticking removes nothing), rebuilds a
   missing task record by the `issue import` rules (idle, open PR becomes a reset mark),
   adopts changed knowledge, and returns answers and queued entries. The store's issue
@@ -465,7 +465,7 @@ the same commit. The commit message records why it changed.
   re-reads the entry under the publish lock, `Respond` checks the question key inside its
   transaction, and acking an answer leaves the field alone once the task has moved on to
   another question, so an answer never lands on or erases the wrong question. A row that holds an earlier revision's key for the same question is adopted; any other unrecognized key, including an empty one, is treated as untrusted and the answer in the store is cleared once. A queued task starts
-  oldest first by `App.startQueued`, with auto mode's rules (confirmed triage, one
+  oldest request first by `App.startQueued`: a request's age is when a pull first saw `Queue` ticked (`workspace_entries.queued_at`), not the store's edit time, which an unrelated edit or Foreman's own write moves, with auto mode's rules (confirmed triage, one
   allowed repository, filters, quota, `auto.max_concurrent`, branch proposal) whether or
   not auto mode is on. A start that cannot happen leaves `Queue` ticked and publishes the
   reason through `Blocked`.
@@ -491,12 +491,12 @@ the same commit. The commit message records why it changed.
   SQLite owns the workspace until the cutover. A publish that created an entry and failed
   leaves a partial row, and the next publish completes the description.
   Verification also compares the user-facing Confirmed triage field with the saved
-  scope. The move
+  scope and each issue's description with the host's. Every publish of a move resumes an unfinished description. The move
   sets no `Queue` and starts nothing. A second run after the marker reports that the
   workspace already moved. GitHub-only triage (no task yet) stays in the host database.
 - **Knowledge follows the store.** In shared modes the store's knowledge entries are the
   workspace's knowledge. A changed entry is adopted only after `knowledge.Parse` accepts
-  it; one that fails to parse is reported and neither adopted nor overwritten, and
+  it; one that fails to parse is reported and neither adopted nor overwritten (a publish also leaves an entry alone that changed or stopped parsing since the host last saw it, and the next pull adopts or pauses on it), and
   publishing for that repository pauses until it parses (`paused` in
   `workspace_entries.answer_digest`). Prompts still receive only the task repository's
   selection of at most 8 learnings and 2000 characters.

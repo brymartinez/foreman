@@ -225,3 +225,18 @@ func TestStorageMoveCopiesASQLiteWorkspaceIntoTheVaultAndOpensTheGate(t *testing
 		t.Fatalf("second move = %d %q", code, out)
 	}
 }
+
+func TestAFailedFirstSetupLeavesNoDatabaseSoTheNextRunStillSelectsTheSharedStore(t *testing.T) {
+	t.Setenv(config.NotionTokenEnv, "")
+	dir := t.TempDir()
+	cfg := config.Config{Database: filepath.Join(dir, "foreman.db"), TasksDir: filepath.Join(dir, "t"), TriageDir: filepath.Join(dir, "tr"), KnowledgeDir: filepath.Join(dir, "k"),
+		Storage: config.Storage{Backend: config.BackendNotion}}
+	for run := 1; run <= 2; run++ {
+		if _, err := openState(cfg, &bytes.Buffer{}); err == nil {
+			t.Fatalf("run %d: a Notion setup with no page must fail", run)
+		}
+		if _, err := os.Stat(cfg.Database); err == nil {
+			t.Fatalf("run %d: the failed setup left a database that makes the next run pick sqlite", run)
+		}
+	}
+}

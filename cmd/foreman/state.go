@@ -44,6 +44,15 @@ func openState(cfg config.Config, w io.Writer) (state, error) {
 // openStateGated is openState. `foreman storage move` passes gate false: the gate
 // refuses the unmoved database that the move exists to copy.
 func openStateGated(cfg config.Config, w io.Writer, gate bool) (state, error) {
+	// An unusable shared-store setup fails before the database file exists. The
+	// next run chooses sqlite when the file is there and no target is configured,
+	// so creating it first would quietly turn a failed first setup into a local
+	// workspace.
+	if cfg.Storage.Backend == config.BackendNotion || cfg.Storage.Backend == config.BackendObsidian {
+		if err := cfg.Storage.Validate(); err != nil {
+			return state{}, err
+		}
+	}
 	d, err := db.Open(cfg.Database)
 	if err != nil {
 		return state{}, err

@@ -747,7 +747,7 @@ storage:
 ```
 
 Tasks are notes in `<vault>/<folder>/Tasks/`, and knowledge is in
-`<vault>/<folder>/Repository Knowledge/<owner>/<repo>.md`. Run `foreman storage check` to
+`<vault>/<folder>/Repository Knowledge/<owner>/<repo>.md` (a leading or trailing dot in a name is written as `%2E`). Run `foreman storage check` to
 test it. Sync the vault to the host with whatever you already use.
 
 ### Moving an existing workspace

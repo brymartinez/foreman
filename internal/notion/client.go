@@ -101,7 +101,9 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		resp.Body.Close()
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 && retriesAfterServerError(method, path) {
 			if attempt < c.Retries {
-				c.sleep(retryDelay(resp, attempt))
+				if err := c.sleep(ctx, retryDelay(resp, attempt)); err != nil {
+					return err
+				}
 				continue
 			}
 		}
@@ -132,11 +134,24 @@ func retriesAfterServerError(method, path string) bool {
 	return true
 }
 
-func (c *Client) sleep(d time.Duration) {
+// sleep waits d before a retry. It gives up at once when the caller's deadline
+// falls before the wait ends, and returns early when the caller cancels, so a long
+// Retry-After cannot hold a publish, its task lock, or an interrupted command.
+func (c *Client) sleep(ctx context.Context, d time.Duration) error {
+	if dl, ok := ctx.Deadline(); ok && time.Until(dl) < d {
+		return fmt.Errorf("notion asked to wait %s, which is longer than the time left: %w", d.Round(time.Second), context.DeadlineExceeded)
+	}
 	if c.Sleep != nil {
 		c.Sleep(d)
-	} else {
-		time.Sleep(d)
+		return ctx.Err()
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
 	}
 }
 

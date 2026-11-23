@@ -847,3 +847,31 @@ func TestAnExistingParagraphStartingWithZeroWidthSpacesIsReadAsWritten(t *testin
 		t.Fatalf("description read back as %q, want %q", got, want)
 	}
 }
+
+func TestARetryAfterLongerThanTheDeadlineFailsAtOnce(t *testing.T) {
+	f := newFake(t)
+	f.Fail = func(m, p string) (int, string) { return http.StatusTooManyRequests, "120" }
+	c := f.client()
+	c.Sleep = nil // the real wait
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	start := time.Now()
+	err := c.do(ctx, "GET", "/v1/users/me", nil, nil)
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 5*time.Second {
+		t.Fatalf("err = %v after %s, want an immediate deadline error", err, time.Since(start))
+	}
+}
+
+func TestCancellingDuringARetryWaitReturnsPromptly(t *testing.T) {
+	f := newFake(t)
+	f.Fail = func(m, p string) (int, string) { return http.StatusTooManyRequests, "120" }
+	c := f.client()
+	c.Sleep = nil
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(50*time.Millisecond, cancel)
+	start := time.Now()
+	err := c.do(ctx, "GET", "/v1/users/me", nil, nil)
+	if !errors.Is(err, context.Canceled) || time.Since(start) > 5*time.Second {
+		t.Fatalf("err = %v after %s, want a prompt cancellation", err, time.Since(start))
+	}
+}
