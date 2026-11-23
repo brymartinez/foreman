@@ -2,6 +2,7 @@ package obsidian
 
 import (
 	"bytes"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"regexp"
@@ -16,6 +17,8 @@ const (
 	beginMarker   = "<!-- foreman:begin -->"
 	endMarker     = "<!-- foreman:end -->"
 	triageHeading = "## Confirmed triage"
+	regionKey     = "foreman_region"
+	regionTag     = " <!-- foreman:region "
 )
 
 // note is a Markdown note split into its frontmatter and body. The frontmatter
@@ -173,33 +176,85 @@ func (n *note) strs(key string) []string {
 	return out
 }
 
-// splitRegion cuts the body at Foreman's markers. Foreman escapes marker text in
-// what it writes, so its own region ends at the first end marker after its begin
-// marker. Of the pairs a note holds, the last one whose payload parses is Foreman's, so
-// marker or format text a person quotes is not mistaken for the region.
-func splitRegion(body string) (before, region, after string, ok bool) {
-	best := -1
-	var bestEnd int
-	for from := 0; ; {
-		i := strings.Index(body[from:], beginMarker)
-		if i < 0 {
-			break
+// noteRegion records ownership independently of whether the record can be read.
+type noteRegion struct {
+	before, text, after string
+	present             bool
+}
+
+func (r noteRegion) userBody() string { return r.before + r.after }
+
+func regionMarker(marker, id string) string {
+	return marker + regionTag + id + " -->"
+}
+
+func (n *note) splitRegion() (noteRegion, error) {
+	begin, end := beginMarker, endMarker
+	identified := n.value(regionKey) != nil
+	if identified {
+		id := n.str(regionKey)
+		if id == "" {
+			return noteRegion{}, errors.New("empty foreman_region in frontmatter")
 		}
-		b := from + i
-		e := strings.Index(body[b+len(beginMarker):], endMarker)
-		if e < 0 {
-			break
-		}
-		e += b + len(beginMarker)
-		if _, err := workspace.ParseSection(unescapeMarkers(body[b+len(beginMarker) : e])); err == nil {
-			best, bestEnd = b, e
-		}
-		from = b + len(beginMarker)
+		begin, end = regionMarker(begin, id), regionMarker(end, id)
+	} else if n.str("foreman_status") == "" {
+		return noteRegion{before: n.body}, nil
 	}
-	if best < 0 {
-		return body, "", "", false
+
+	var region noteRegion
+	var offset, start, contentStart int
+	open := false
+	for line := range strings.SplitSeq(n.body, "\n") {
+		next := offset + len(line) + 1
+		if !identified && (strings.HasPrefix(line, beginMarker+regionTag) || strings.HasPrefix(line, endMarker+regionTag)) {
+			return noteRegion{}, errors.New("Foreman region ID is missing from frontmatter")
+		}
+		// Before region IDs, Foreman opened its section with status or a queue
+		// reason. A quoted marker pair without that header is ordinary text.
+		if line == begin && (identified || startsLegacyRegion(n.body, next)) {
+			if open || region.present {
+				return noteRegion{}, errors.New("ambiguous Foreman regions in note")
+			}
+			start, contentStart, open = offset, next, true
+		}
+		if line == end {
+			if open {
+				region = noteRegion{
+					before:  n.body[:start],
+					text:    n.body[contentStart:offset],
+					after:   n.body[next-1:],
+					present: true,
+				}
+				open = false
+			} else if identified {
+				return noteRegion{}, errors.New("unmatched Foreman region end in note")
+			}
+		}
+		offset = next
 	}
-	return body[:best], body[best+len(beginMarker) : bestEnd], body[bestEnd+len(endMarker):], true
+	if open || !region.present {
+		return noteRegion{}, errors.New("missing Foreman region marker in note")
+	}
+	return region, nil
+}
+
+func startsLegacyRegion(body string, start int) bool {
+	if start >= len(body) {
+		return false
+	}
+	return strings.HasPrefix(body[start:], "Status: ") || strings.HasPrefix(body[start:], "Queued but not started: ")
+}
+
+// parseRecord reads the terminal payload directly. Fences in the preceding readable
+// text do not determine where the payload starts.
+func (r noteRegion) parseRecord() (workspace.Record, error) {
+	const opening = "\n```yaml\n"
+	text, closed := strings.CutSuffix(r.text, "```\n")
+	i := strings.LastIndex(text, opening)
+	if !closed || !strings.HasSuffix(text, "\n") || i < 0 {
+		return workspace.Record{}, errors.New("no terminal Foreman task payload")
+	}
+	return workspace.Parse([]byte(unescapeMarkers(text[i+len(opening):])))
 }
 
 var markerPrefix = regexp.MustCompile(`<!-- foreman\x{2063}*`)
@@ -226,18 +281,21 @@ func userText(s string) (desc, triage string) {
 	return strings.TrimSpace(s), ""
 }
 
-func regionText(content string) string {
-	return beginMarker + "\n" + escapeMarkers(strings.TrimRight(content, "\n")) + "\n" + endMarker
-}
-
-// setRegion replaces Foreman's region, or appends it when the note has none.
-func (n *note) setRegion(content string) {
-	region := regionText(content)
-	before, _, after, ok := splitRegion(n.body)
-	if ok {
-		n.body = before + region + after
-		return
+// setRegion replaces the owned section and assigns an ID on the first write.
+func (n *note) setRegion(r noteRegion, content string) error {
+	id := n.str(regionKey)
+	if id == "" {
+		id = rand.Text()
+		if err := n.set(regionKey, id); err != nil {
+			return err
+		}
 	}
+	region := regionMarker(beginMarker, id) + "\n" + escapeMarkers(strings.TrimRight(content, "\n")) + "\n" + regionMarker(endMarker, id)
+	if r.present {
+		n.body = r.before + region + r.after
+		return nil
+	}
+	n.body = r.before
 	if n.body != "" && !strings.HasSuffix(n.body, "\n") {
 		n.body += "\n"
 	}
@@ -245,19 +303,5 @@ func (n *note) setRegion(content string) {
 		n.body += "\n"
 	}
 	n.body += region + "\n"
-}
-
-// regionPayload is the section text between the markers, or "".
-func (n *note) regionPayload() string {
-	_, region, _, ok := splitRegion(n.body)
-	if !ok {
-		return ""
-	}
-	return unescapeMarkers(region)
-}
-
-// userBody is the body outside Foreman's region.
-func (n *note) userBody() string {
-	before, _, after, _ := splitRegion(n.body)
-	return before + after
+	return nil
 }

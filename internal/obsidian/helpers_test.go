@@ -30,15 +30,16 @@ func (b *Backend) writeUserFields(ctx context.Context, ref string, e workspace.T
 			}
 		}
 		if e.ConfirmedTriage != "" {
-			before, _, after, ok := splitRegion(n.body)
-			desc, _ := userText(before + after)
-			user := desc + "\n\n" + triageHeading + "\n\n" + e.ConfirmedTriage + "\n"
-			if ok {
-				_, region, _, _ := splitRegion(n.body)
-				n.body = user + "\n" + beginMarker + region + endMarker + "\n"
-			} else {
-				n.body = user
+			region, err := n.splitRegion()
+			if err != nil {
+				return err
 			}
+			desc, _ := userText(region.userBody())
+			user := desc + "\n\n" + triageHeading + "\n\n" + e.ConfirmedTriage + "\n"
+			if region.present {
+				user += "\n" + n.body[len(region.before):len(n.body)-len(region.after)] + "\n"
+			}
+			n.body = user
 		}
 		return nil
 	})

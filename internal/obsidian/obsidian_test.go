@@ -8,7 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/brymartinez/foreman/internal/db"
 	"github.com/brymartinez/foreman/internal/knowledge"
+	"github.com/brymartinez/foreman/internal/localissues"
+	"github.com/brymartinez/foreman/internal/store"
 	"github.com/brymartinez/foreman/internal/task"
 	"github.com/brymartinez/foreman/internal/workspace"
 	"github.com/brymartinez/foreman/internal/workspace/backendtest"
@@ -460,5 +463,245 @@ func TestANoteWrittenUnderItsUncappedTitleStillReadsBackUnderThatTitle(t *testin
 	}
 	if entries[0].Name != title {
 		t.Fatalf("name = %q, want the title %q", entries[0].Name, title)
+	}
+}
+
+func TestBrokenGeneratedPayloadDoesNotEnterIssueFields(t *testing.T) {
+	b := newBackend(t)
+	ctx := context.Background()
+	host, err := db.Open(filepath.Join(t.TempDir(), "foreman.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { host.Close() })
+	sync := &workspace.Sync{DB: host, Backend: b, Tasks: store.SQLite{DB: host}, Issues: localissues.Store{DB: host}, Knowledge: knowledge.SQLStore{DB: host}}
+	r := rec("L-0A1B2C3D", "INBOX")
+	pub := workspace.TaskPublish{Record: r, Create: workspace.TaskSeed{Name: "N", Description: "My description.", ConfirmedTriage: "My scope.", ScopeConfirmed: true}}
+	path, err := b.UpsertTask(ctx, pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken := strings.Replace(string(raw), "format: foreman-task/1", "format: broken", 1)
+	if broken == string(raw) {
+		t.Fatal("published note has no payload to damage")
+	}
+	if err := os.WriteFile(path, []byte(broken), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := b.ListTasks(ctx)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries = %d, err = %v", len(entries), err)
+	}
+	e := entries[0]
+	if e.ParseErr == nil || e.Record != nil {
+		t.Errorf("broken payload should be reported, got error %v and record %v", e.ParseErr, e.Record)
+	}
+	if _, err := sync.Pull(ctx); err != nil {
+		t.Fatal(err)
+	}
+	li, err := localissues.GetIn(host, r.ID)
+	if err != nil || li.Description != pub.Create.Description {
+		t.Errorf("host description = %q, err = %v", li.Description, err)
+	}
+	var triage string
+	if err := host.QueryRow("SELECT decisions FROM triage").Scan(&triage); err != nil || triage != pub.Create.ConfirmedTriage {
+		t.Errorf("host triage = %q, err = %v", triage, err)
+	}
+	if _, err := b.UpsertTask(ctx, pub); err != nil {
+		t.Fatal(err)
+	}
+	raw, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count := strings.Count(string(raw), beginMarker); count != 1 {
+		t.Errorf("published note has %d generated regions, want 1", count)
+	}
+}
+
+func TestAnUnclosedFenceInThePlanLeavesTheTaskRecordReadable(t *testing.T) {
+	b := newBackend(t)
+	ctx := context.Background()
+	r := rec("L-0A1B2C3D", "PLANNING")
+	w := workspaceWork
+	w.Plan = "First step.\n\n```\nAn unfinished example."
+	r.Work = &w
+	if _, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: r, Create: workspace.TaskSeed{Description: "User description."}}); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := b.ListTasks(ctx)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries = %d, err = %v", len(entries), err)
+	}
+	e := entries[0]
+	if e.ParseErr != nil || e.Record == nil || e.Record.Work == nil || e.Record.Work.Plan != w.Plan {
+		t.Errorf("saved plan did not round-trip, error = %v, record = %+v", e.ParseErr, e.Record)
+	}
+	if e.Description != "User description." || e.ConfirmedTriage != "" {
+		t.Errorf("description = %q, triage = %q", e.Description, e.ConfirmedTriage)
+	}
+}
+
+func TestAPastedTaskRecordAfterTheGeneratedRegionRemainsUserText(t *testing.T) {
+	b := newBackend(t)
+	ctx := context.Background()
+	r := rec("L-0A1B2C3D", "PLANNING")
+	pub := workspace.TaskPublish{Record: r, Create: workspace.TaskSeed{ConfirmedTriage: "My scope."}}
+	path, err := b.UpsertTask(ctx, pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pasted := "Example report:\n" + beginMarker + "\n" + rec("L-BADC0FFE", "INBOX").Render() + endMarker
+	if err := os.WriteFile(path, append(raw, ("\n"+pasted+"\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pub.Record.Status = "IMPLEMENTING"
+	if _, err := b.UpsertTask(ctx, pub); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := b.ListTasks(ctx)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries = %d, err = %v", len(entries), err)
+	}
+	e := entries[0]
+	if e.Record == nil || e.Record.ID != r.ID || e.Record.Status != pub.Record.Status {
+		t.Errorf("wrong record after republishing: %+v", e.Record)
+	}
+	prefix, ok := strings.CutSuffix(e.ConfirmedTriage, pasted)
+	if !ok || strings.TrimSpace(prefix) != "My scope." {
+		t.Errorf("confirmed triage lost user text: %q", e.ConfirmedTriage)
+	}
+}
+
+func TestAPublishUpgradesALegacyRegionFromACopiedNote(t *testing.T) {
+	b := newBackend(t)
+	ctx := context.Background()
+	const id = "L-0A1B2C3D"
+	const original = "L-BADC0FFE"
+	r := rec(original, "PLANNING")
+	path := writeNote(t, b, "Legacy", "---\nforeman_id: "+id+"\nforeman_status: Planning\n---\n"+
+		"Old description.\n\n"+beginMarker+"\n"+r.Render()+endMarker+"\n\nAn extra note.\n")
+	entries, err := b.ListTasks(ctx)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries = %d, err = %v", len(entries), err)
+	}
+	e := entries[0]
+	if e.ParseErr != nil || e.ID != id || e.Record == nil || e.Record.ID != original {
+		t.Fatalf("copy cannot be detected: id = %s, payload = %+v, err = %v", e.ID, e.Record, e.ParseErr)
+	}
+	r.ID, r.Status = id, "IMPLEMENTING"
+	if _, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: r}); err != nil {
+		t.Fatal(err)
+	}
+	entries, err = b.ListTasks(ctx)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries = %d, err = %v", len(entries), err)
+	}
+	e = entries[0]
+	if e.ParseErr != nil || e.ID != id || e.Record == nil || e.Record.ID != id || e.Record.Status != r.Status {
+		t.Fatalf("legacy note was not migrated: id = %s, payload = %+v, err = %v", e.ID, e.Record, e.ParseErr)
+	}
+	if fields := strings.Fields(e.Description); strings.Join(fields, " ") != "Old description. An extra note." {
+		t.Fatalf("description = %q", e.Description)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(raw), beginMarker) != 1 || !strings.Contains(string(raw), "foreman_region:") {
+		t.Fatalf("expected one upgraded region, note = %q", raw)
+	}
+}
+
+func TestADamagedOrAmbiguousRegionCannotSupplyIssueFields(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		legacy bool
+		damage func(string) string
+	}{
+		{"legacy opening missing", true, func(s string) string { return strings.Replace(s, beginMarker, "", 1) }},
+		{"legacy status missing", true, func(s string) string { return strings.Replace(s, "Status: Planning", "", 1) }},
+		{"owned end missing", false, func(s string) string { return strings.Replace(s, endMarker, "", 1) }},
+		{"owned region ID missing", false, func(s string) string {
+			lines := strings.Split(s, "\n")
+			for i, line := range lines {
+				if strings.HasPrefix(line, "foreman_region:") {
+					return strings.Join(append(lines[:i], lines[i+1:]...), "\n")
+				}
+			}
+			return s
+		}},
+		{"same region pasted twice", false, func(s string) string { return s + "\n" + s[strings.Index(s, beginMarker):] }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := newBackend(t)
+			ctx := context.Background()
+			r := rec("L-0A1B2C3D", "PLANNING")
+			pub := workspace.TaskPublish{Record: r, Create: workspace.TaskSeed{Description: "My note."}}
+			var path string
+			var err error
+			if tc.legacy {
+				path = writeNote(t, b, "Legacy", "---\nforeman_id: "+r.ID+"\nforeman_status: Planning\n---\n"+
+					"My note.\n\n"+beginMarker+"\n"+r.Render()+endMarker+"\n")
+			} else if path, err = b.UpsertTask(ctx, pub); err != nil {
+				t.Fatal(err)
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			damaged := tc.damage(string(raw))
+			if damaged == string(raw) {
+				t.Fatal("the note did not change")
+			}
+			if err := os.WriteFile(path, []byte(damaged), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			entries, err := b.ListTasks(ctx)
+			if err != nil || len(entries) != 1 {
+				t.Fatalf("entries = %d, err = %v", len(entries), err)
+			}
+			e := entries[0]
+			if e.ParseErr == nil || e.ID != "" || e.Record != nil || e.Description != "" || e.ConfirmedTriage != "" {
+				t.Fatalf("unsafe fields are visible to sync: %+v", e)
+			}
+			if _, err := b.UpsertTask(ctx, pub); err == nil {
+				t.Fatal("publish should refuse an unsafe rewrite")
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || string(after) != damaged {
+				t.Fatalf("a refused publish changed the note, err = %v", err)
+			}
+		})
+	}
+}
+
+func TestARecordPastedBeforeFirstPublishStaysInTheDescription(t *testing.T) {
+	b := newBackend(t)
+	ctx := context.Background()
+	pasted := beginMarker + "\n" + rec("L-BADC0FFE", "INBOX").Render() + endMarker
+	path := writeNote(t, b, "New", pasted+"\n")
+	r := rec("L-0A1B2C3D", "PLANNING")
+	if err := b.AssignID(ctx, path, r.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: r}); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := b.ListTasks(ctx)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries = %d, err = %v", len(entries), err)
+	}
+	e := entries[0]
+	if e.ParseErr != nil || e.Record == nil || e.Record.ID != r.ID || e.Description != pasted {
+		t.Fatalf("record = %+v, description = %q, err = %v", e.Record, e.Description, e.ParseErr)
 	}
 }

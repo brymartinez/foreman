@@ -217,6 +217,11 @@ func entryOf(f found) workspace.TaskEntry {
 		return e
 	}
 	n := f.n
+	region, err := n.splitRegion()
+	if err != nil {
+		e.ParseErr = err
+		return e
+	}
 	e.ID = n.str("foreman_id")
 	// The file name is the title with characters Obsidian cannot use replaced, so a
 	// note Foreman named reads back under its real title unless someone renamed it.
@@ -229,9 +234,9 @@ func entryOf(f found) workspace.TaskEntry {
 	}
 	e.Repository, e.SourceURL, e.Tags = n.str("repository"), n.str("source_url"), n.strs("tags")
 	e.ScopeConfirmed, e.Queue, e.Answer = n.boolean("scope_confirmed"), n.boolean("queue"), n.str("answer")
-	e.Description, e.ConfirmedTriage = userText(n.userBody())
-	if region := n.regionPayload(); region != "" {
-		if r, err := workspace.ParseSection(region); err == nil {
+	e.Description, e.ConfirmedTriage = userText(region.userBody())
+	if region.present {
+		if r, err := region.parseRecord(); err == nil {
 			e.Record = &r
 		} else {
 			e.ParseErr = err
@@ -284,16 +289,20 @@ func (b *Backend) UpsertTask(ctx context.Context, p workspace.TaskPublish) (stri
 	for _, f := range fs { // oldest first
 		if f.err == nil && f.n.str("foreman_id") == p.Record.ID {
 			return f.path, b.edit(f.path, func(n *note) error {
-				if err := b.setForeman(n, p.Record); err != nil {
+				region, err := n.splitRegion()
+				if err != nil {
 					return err
 				}
 				if p.Reseed {
-					if err := reseedTriage(n, p.Create); err != nil {
+					region, err = reseedTriage(n, region, p.Create)
+					if err != nil {
 						return err
 					}
 				}
-				n.setRegion(content)
-				return nil
+				if err := n.setRegion(region, content); err != nil {
+					return err
+				}
+				return b.setForeman(n, p.Record)
 			})
 		}
 	}
@@ -328,8 +337,9 @@ func (b *Backend) UpsertTask(ctx context.Context, p workspace.TaskPublish) (stri
 	if strings.TrimSpace(s.ConfirmedTriage) != "" {
 		body.WriteString(strings.TrimSpace(s.ConfirmedTriage) + "\n\n")
 	}
-	n.body = body.String()
-	n.setRegion(content)
+	if err := n.setRegion(noteRegion{before: body.String()}, content); err != nil {
+		return "", err
+	}
 	out, err := n.bytes()
 	if err != nil {
 		return "", err
@@ -551,26 +561,19 @@ func (b *Backend) Check(ctx context.Context, report func(workspace.Step)) error 
 	return nil
 }
 
-// reseedTriage replaces a note's confirmed triage section and scope flag with the
-// seed's, keeping the description and Foreman's region.
-func reseedTriage(n *note, s workspace.TaskSeed) error {
+// reseedTriage replaces the user triage and scope flag while keeping the description.
+func reseedTriage(n *note, region noteRegion, s workspace.TaskSeed) (noteRegion, error) {
 	if err := n.set("scope_confirmed", s.ScopeConfirmed); err != nil {
-		return err
+		return noteRegion{}, err
 	}
-	before, region, after, ok := splitRegion(n.body)
-	desc, _ := userText(before + after)
+	desc, _ := userText(region.userBody())
 	var user strings.Builder
-	if d := strings.TrimSpace(desc); d != "" {
-		user.WriteString(d + "\n\n")
+	if desc != "" {
+		user.WriteString(desc + "\n\n")
 	}
 	user.WriteString(triageHeading + "\n\n")
 	if t := strings.TrimSpace(s.ConfirmedTriage); t != "" {
 		user.WriteString(t + "\n\n")
 	}
-	if ok {
-		n.body = user.String() + beginMarker + region + endMarker + "\n"
-	} else {
-		n.body = user.String()
-	}
-	return nil
+	return noteRegion{before: user.String()}, nil
 }
