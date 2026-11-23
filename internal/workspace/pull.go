@@ -82,6 +82,13 @@ func (s *Sync) pullEntry(ctx context.Context, e TaskEntry, byID map[string]*task
 	if err != nil {
 		return // the connectivity check's test entry, or an ID Foreman did not write
 	}
+	if e.Record != nil && e.Record.ID != id {
+		// A copied note: its payload names another task. Restoring it would save that
+		// task's record over the live one, so the copy is just a new entry. The next
+		// publish writes its own record.
+		s.logf("%s holds the record of %s, so it is not restored from it", e.Name, e.Record.ID)
+		e.Record = nil
+	}
 	rec := byID[id]
 	if rec == nil {
 		if rec, err = s.hydrate(ctx, e, key); err != nil {

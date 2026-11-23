@@ -624,3 +624,26 @@ func TestAnAnswerBesideAnUntrackedRowIsNeverAppliedEvenWhenTheDigestMatches(t *t
 		t.Fatalf("a reply typed after the row was tracked again must apply: %+v", p.Answers)
 	}
 }
+
+func TestACopiedNoteNeverOverwritesTheTaskItsPayloadNames(t *testing.T) {
+	h := newHarness(t)
+	live := fullTask()
+	h.saveTask(live)
+	h.issue("L-0A1B2C3D")
+	if err := h.s.Publish(h.ctx, live.Key); err != nil {
+		t.Fatal(err)
+	}
+	orig := h.entries()[0]
+	// Someone copies the note and clears its Foreman ID.
+	cp := orig
+	cp.ID, cp.Name = "", "Copy of note"
+	h.mem.UserCreate(cp)
+	h.pull()
+	got, err := h.s.taskFor(h.ctx, live.Key)
+	if err != nil || got == nil || got.Delegation == nil || got.Delegation.RunnerPID != live.Delegation.RunnerPID || got.State != live.State {
+		t.Fatalf("the live task was replaced: %+v, %v", got, err)
+	}
+	if issues, _ := h.s.Issues.List(h.ctx); len(issues) != 2 {
+		t.Fatalf("the copy must become its own issue, have %d issues", len(issues))
+	}
+}

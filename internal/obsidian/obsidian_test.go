@@ -211,6 +211,33 @@ func TestKnowledgeNotesLiveUnderOwnerAndRepoInTheExportFormat(t *testing.T) {
 	}
 }
 
+func TestRepositoriesThatDifferOnlyByALeadingDotKeepSeparateKnowledgeNotes(t *testing.T) {
+	b := newBackend(t)
+	ctx := context.Background()
+	for _, repo := range []string{"acme/.github", "acme/github", "acme/x."} {
+		snap := knowledge.Snapshot{Format: knowledge.FormatVersion, Repo: repo, NextID: 1, Learnings: []knowledge.Learning{}, Evaluations: []knowledge.Evaluation{}}
+		if err := b.WriteKnowledge(ctx, workspace.KnowledgePublish{Repo: repo, Snapshot: snap}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := b.ListKnowledge(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	have := map[string]string{}
+	for _, e := range got {
+		if e.Snapshot == nil {
+			t.Fatalf("%s did not parse: %v", e.Repo, e.ParseErr)
+		}
+		have[e.Repo] = e.Snapshot.Repo
+	}
+	for _, repo := range []string{"acme/.github", "acme/github", "acme/x."} {
+		if have[repo] != repo {
+			t.Fatalf("read back %v, want every repository under its own name", have)
+		}
+	}
+}
+
 func TestCheckCreatesUpdatesReadsAndDeletesATestNote(t *testing.T) {
 	b := newBackend(t)
 	var steps []workspace.Step

@@ -7,6 +7,7 @@ import (
 
 	"github.com/brymartinez/foreman/internal/config"
 	"github.com/brymartinez/foreman/internal/knowledge"
+	"github.com/brymartinez/foreman/internal/localissues"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -316,5 +317,44 @@ func TestMoveRetryToTheSameDestinationCarriesScopeChangedInSQLite(t *testing.T) 
 		if e.ID == "L-0B0B0B0B" && e.ConfirmedTriage != "Changed scope." {
 			t.Fatalf("triage = %q", e.ConfirmedTriage)
 		}
+	}
+}
+
+func TestAMoveRetriedAfterAHalfWrittenDescriptionCompletesItAndPullKeepsTheLocalText(t *testing.T) {
+	h := newHarness(t)
+	h.seedWorkspace()
+	if _, err := h.s.DB.Exec(`UPDATE local_issues SET description = ? WHERE id = 'L-0B0B0B0B'`, "the full description of the issue"); err != nil {
+		t.Fatal(err)
+	}
+	h.mem.PartialOnWrite = 3 // the issue without a task is the third entry copied
+	if _, err := h.mover().Run(h.ctx); err == nil {
+		t.Fatal("the first attempt must fail")
+	}
+	h.mem.PartialOnWrite = 0
+	if _, err := h.mover().Run(h.ctx); err != nil {
+		t.Fatalf("the retry must complete the description: %v", err)
+	}
+	for _, e := range h.entries() {
+		if e.ID == "L-0B0B0B0B" && e.Description != "the full description of the issue" {
+			t.Fatalf("the page holds %q after the move reported success", e.Description)
+		}
+	}
+	h.pull()
+	li, err := localissues.GetIn(h.s.DB, "L-0B0B0B0B")
+	if err != nil || li.Description != "the full description of the issue" {
+		t.Fatalf("the local issue is %+v, %v", li, err)
+	}
+}
+
+func TestAMoveRefusesAnEntryWhoseDescriptionDiffersFromTheIssue(t *testing.T) {
+	h := newHarness(t)
+	h.seedWorkspace()
+	h.mem.Mangle = func(e *TaskEntry) {
+		if e.ID == "L-0B0B0B0B" {
+			e.Description = "trunc"
+		}
+	}
+	if _, err := h.mover().Run(h.ctx); err == nil || !strings.Contains(err.Error(), "description") {
+		t.Fatalf("a truncated description passed verification: %v", err)
 	}
 }

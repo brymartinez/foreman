@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -382,7 +383,32 @@ func (b *Backend) Trash(ctx context.Context, ref string) error { return os.Remov
 
 func (b *Backend) knowledgePath(repo string) string {
 	owner, name, _ := strings.Cut(repo, "/")
-	return filepath.Join(b.root(), knowledgeDir, safeName(owner), safeName(name)+".md")
+	return filepath.Join(b.root(), knowledgeDir, knowledgeName(owner), knowledgeName(name)+".md")
+}
+
+// knowledgeName is a repository's owner or name as a file name. Unlike safeName it
+// never maps two names to one file: a dot at either end (which a file system hides
+// or drops) and the percent sign itself are written as %XX, and unknowledgeName
+// reverses that.
+func knowledgeName(s string) string {
+	var out strings.Builder
+	last := len(s) - 1
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '%' || c == '/' || c == '\\' || ((c == '.' || c == ' ') && (i == 0 || i == last)) {
+			fmt.Fprintf(&out, "%%%02X", c)
+			continue
+		}
+		out.WriteByte(c)
+	}
+	return out.String()
+}
+
+func unknowledgeName(s string) string {
+	if u, err := url.PathUnescape(s); err == nil {
+		return u
+	}
+	return s
 }
 
 func (b *Backend) WriteKnowledge(ctx context.Context, p workspace.KnowledgePublish) error {
@@ -418,7 +444,8 @@ func (b *Backend) ListKnowledge(ctx context.Context) ([]workspace.KnowledgeEntry
 			return err
 		}
 		rel, _ := filepath.Rel(filepath.Join(b.root(), knowledgeDir), path)
-		repo := strings.TrimSuffix(filepath.ToSlash(rel), ".md")
+		owner, name, _ := strings.Cut(strings.TrimSuffix(filepath.ToSlash(rel), ".md"), "/")
+		repo := unknowledgeName(owner) + "/" + unknowledgeName(name)
 		info, _ := d.Info()
 		e := workspace.KnowledgeEntry{Repo: repo, Ref: path}
 		if info != nil {

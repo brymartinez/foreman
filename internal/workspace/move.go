@@ -235,6 +235,12 @@ func (m Move) verify(ctx context.Context, keys []task.Key, repos []string) []str
 			diffs = append(diffs, fmt.Sprintf("%s: the Confirmed triage field differs from the saved scope", id))
 			continue
 		}
+		if b.li != nil && strings.TrimSpace(got[0].Description) != strings.TrimSpace(b.li.Description) {
+			// A page whose description append failed holds a start of it. Pull would read
+			// that as an edit and save it over the complete local text.
+			diffs = append(diffs, fmt.Sprintf("%s: the description in the store differs from the issue", id))
+			continue
+		}
 		g := got[0].Record
 		if g == nil {
 			diffs = append(diffs, fmt.Sprintf("%s: the entry has no readable record: %v", id, got[0].ParseErr))

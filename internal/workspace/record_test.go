@@ -288,3 +288,24 @@ func TestScrubKeepsURLsAndOrdinaryText(t *testing.T) {
 		t.Fatalf("scrubHost changed %q to %q", s, got)
 	}
 }
+
+func TestAPlanHoldingAFencedExampleRoundTripsThroughASection(t *testing.T) {
+	in := fullInput()
+	plan := "1. Add the loop.\n\n```go\nfor range 3 {\n}\n```\n\n2. Test it.\n```\nplain fence\n```\n"
+	in.Task.Delegation.LocalPlan.Documents[task.ImplementationPlan] = plan
+	r, err := Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := r.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseSection("intro\n```yaml\n" + string(raw) + "```\nafter\n")
+	if err != nil {
+		t.Fatalf("a plan with a fence could not be read back: %v", err)
+	}
+	if got.Work == nil || got.Work.Plan != strings.TrimSpace(plan) && got.Work.Plan != plan {
+		t.Fatalf("plan came back as %q", got.Work.Plan)
+	}
+}

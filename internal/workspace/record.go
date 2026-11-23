@@ -231,7 +231,10 @@ func fencedBlocks(text string) []string {
 	var cur []string
 	in := false
 	for _, line := range strings.Split(text, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "```") {
+		// A fence starts at the beginning of the line. A line of the payload that
+		// reads like one is indented, since a YAML block scalar indents its text, so
+		// a plan holding a fenced example does not end the payload.
+		if strings.HasPrefix(line, "```") {
 			if in {
 				blocks = append(blocks, strings.Join(cur, "\n")+"\n")
 				cur = nil

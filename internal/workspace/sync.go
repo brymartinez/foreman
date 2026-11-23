@@ -380,7 +380,7 @@ func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
 	}
 	// An earlier attempt created the entry and did not finish writing it.
 	unfinished := prev.Ref != "" && prev.Digest == ""
-	ref, err := s.Backend.UpsertTask(ctx, TaskPublish{Record: r, Reason: scrubHost(reason, b.rec), Create: seed, Resume: unfinished, Reseed: s.Reseed})
+	ref, err := s.Backend.UpsertTask(ctx, TaskPublish{Record: r, Reason: scrubHost(reason, b.rec), Create: seed, Resume: unfinished || s.Reseed, Reseed: s.Reseed})
 	if err != nil {
 		if ref != "" && prev.Ref == "" {
 			// The entry exists half written. Remember it so the next pull does not
