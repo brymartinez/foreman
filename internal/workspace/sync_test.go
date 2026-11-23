@@ -842,3 +842,47 @@ func TestPullDoesNotPublishAQueuedTaskBeforeTheAppGivesItsReason(t *testing.T) {
 		t.Fatalf("a pull wrote %d times for a queued task the app publishes itself", h.mem.Writes-w)
 	}
 }
+
+func TestPullKeepsHostIssueEditsWhenTheStoreHoldsTheOlderAggregateFieldsHash(t *testing.T) {
+	h := newHarness(t)
+	h.issue("L-0A1B2C3D")
+	if err := h.s.Publish(h.ctx, localissues.Key("L-0A1B2C3D", "")); err != nil {
+		t.Fatal(err)
+	}
+	h.pull()
+	e := h.entries()[0]
+	if _, err := h.s.DB.Exec(`UPDATE workspace_entries SET fields_seen = ? WHERE kind = 'task' AND key = 'L-0A1B2C3D'`, legacyFieldsHash(e)); err != nil {
+		t.Fatal(err)
+	}
+	li := localissues.Issue{ID: "L-0A1B2C3D", Title: "Replaced on the host", Description: "new text", Status: localissues.Open, CreatedAt: t0, UpdatedAt: t0.Add(time.Hour)}
+	if err := localissues.PutIn(h.s.DB, li); err != nil {
+		t.Fatal(err)
+	}
+	h.pull()
+	got, _ := localissues.GetIn(h.s.DB, "L-0A1B2C3D")
+	if got.Title != "Replaced on the host" || got.Description != "new text" {
+		t.Fatalf("title = %q, description = %q: an unchanged store entry restored its text", got.Title, got.Description)
+	}
+	row, _ := h.s.row("task", "L-0A1B2C3D")
+	if row.FieldsSeen != fieldsHash(e) {
+		t.Fatalf("fields_seen = %q, want the per-field format", row.FieldsSeen)
+	}
+}
+
+func TestCorrectingAnInvalidRepositoryAppliesTheOtherEditsMadeWithIt(t *testing.T) {
+	h := newHarness(t)
+	h.issue("L-0A1B2C3D")
+	if err := h.s.Publish(h.ctx, localissues.Key("L-0A1B2C3D", "")); err != nil {
+		t.Fatal(err)
+	}
+	h.pull()
+	ref := h.entries()[0].Ref
+	h.mem.UserEdit(ref, func(e *TaskEntry) { e.Name = "Renamed"; e.Repository = "not a repo" })
+	h.pull()
+	h.mem.UserEdit(ref, func(e *TaskEntry) { e.Repository = "acme/api" })
+	h.pull()
+	got, _ := localissues.GetIn(h.s.DB, "L-0A1B2C3D")
+	if got.Title != "Renamed" || got.Repo != "acme/api" {
+		t.Fatalf("title = %q, repo = %q, want both edits", got.Title, got.Repo)
+	}
+}

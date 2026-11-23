@@ -66,10 +66,16 @@ func (b *Backend) Ensure(context.Context) error {
 
 const maxNameBytes = 120
 
+// sanitizeName replaces the characters Obsidian cannot use in a file name. Notes
+// written before names were capped carry its uncapped result.
+func sanitizeName(s string) string {
+	r := strings.NewReplacer("/", "-", "\\", "-", ":", "-", "*", "-", "?", "-", "\"", "-", "<", "-", ">", "-", "|", "-", "#", "-", "^", "-", "[", "-", "]", "-", "\n", " ")
+	return strings.Trim(strings.TrimSpace(r.Replace(s)), ". ")
+}
+
 // safeName makes a note file name from a title.
 func safeName(s string) string {
-	r := strings.NewReplacer("/", "-", "\\", "-", ":", "-", "*", "-", "?", "-", "\"", "-", "<", "-", ">", "-", "|", "-", "#", "-", "^", "-", "[", "-", "]", "-", "\n", " ")
-	s = strings.Trim(strings.TrimSpace(r.Replace(s)), ". ")
+	s = sanitizeName(s)
 	if s == "" {
 		return "Untitled"
 	}
@@ -216,7 +222,8 @@ func entryOf(f found) workspace.TaskEntry {
 	// note Foreman named reads back under its real title unless someone renamed it.
 	if t := n.str("foreman_title"); t != "" {
 		base := strings.TrimSuffix(filepath.Base(f.path), ".md")
-		if base == safeName(t) || e.ID != "" && base == safeName(t)+" "+safeName(e.ID) {
+		if st := sanitizeName(t); base == safeName(t) || e.ID != "" && base == safeName(t)+" "+safeName(e.ID) ||
+			st != "" && (base == st || e.ID != "" && base == st+" "+sanitizeName(e.ID)) {
 			e.Name = t
 		}
 	}

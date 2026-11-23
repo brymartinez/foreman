@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/brymartinez/foreman/internal/workspace"
 )
 
 const (
@@ -171,14 +173,10 @@ func (n *note) strs(key string) []string {
 	return out
 }
 
-// regionFormat is the line every Foreman region carries in its payload. A region is
-// recognized by it, so marker text a person quotes in their own part of the note is
-// not mistaken for the region.
-const regionFormat = "format: foreman-task/1"
-
 // splitRegion cuts the body at Foreman's markers. Foreman escapes marker text in
 // what it writes, so its own region ends at the first end marker after its begin
-// marker. Of the pairs a note holds, the last one carrying the record is Foreman's.
+// marker. Of the pairs a note holds, the last one whose payload parses is Foreman's, so
+// marker or format text a person quotes is not mistaken for the region.
 func splitRegion(body string) (before, region, after string, ok bool) {
 	best := -1
 	var bestEnd int
@@ -193,7 +191,7 @@ func splitRegion(body string) (before, region, after string, ok bool) {
 			break
 		}
 		e += b + len(beginMarker)
-		if strings.Contains(body[b:e], regionFormat) {
+		if _, err := workspace.ParseSection(unescapeMarkers(body[b+len(beginMarker) : e])); err == nil {
 			best, bestEnd = b, e
 		}
 		from = b + len(beginMarker)

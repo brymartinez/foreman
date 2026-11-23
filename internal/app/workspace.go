@@ -114,6 +114,9 @@ func (a App) startQueued(ctx context.Context, queued []WorkspaceQueued) []error 
 			continue
 		} else if existing != nil && existing.Delegation != nil {
 			// It already has a run; the request is met, or resuming is the developer's call.
+			// The pull left its record out of the stale-record retry, so publish it here:
+			// a failing Queue ack must not keep the shared status stale.
+			a.publish(ctx, existing.Key)
 			if err := a.Workspace.Ack(ctx, WorkspaceAck{Key: existing.Key, Kind: AckQueue, Token: q.Token}); err != nil {
 				warns = append(warns, err)
 			}

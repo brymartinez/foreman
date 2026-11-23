@@ -161,6 +161,11 @@ func fieldsHash(e TaskEntry) string {
 	return strings.Join(parts[:], ",")
 }
 
+// legacyFieldsHash is the single aggregate hash older databases recorded.
+func legacyFieldsHash(e TaskEntry) string {
+	return hash(strings.TrimSpace(e.Name), strings.TrimSpace(e.Description), e.SourceURL, strings.TrimSpace(e.Repository), strings.Join(e.Tags, "\x00"))
+}
+
 func fieldParts(e TaskEntry) [5]string {
 	return [5]string{hash(strings.TrimSpace(e.Name)), hash(strings.TrimSpace(e.Description)), hash(e.SourceURL), hash(strings.TrimSpace(e.Repository)), hash(strings.Join(e.Tags, "\x00"))}
 }

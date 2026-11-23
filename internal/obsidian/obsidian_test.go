@@ -414,3 +414,51 @@ func TestALongMultibyteTitleGetsAFileNameUnderTheByteLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestAnExampleOfTheMarkersAndFormatLineAfterTheRegionIsNotTakenForTheRegion(t *testing.T) {
+	b := newBackend(t)
+	ctx := context.Background()
+	path := writeNote(t, b, "Alpha", "Mine.\n")
+	if err := b.AssignID(ctx, path, "L-0A1B2C3D"); err != nil {
+		t.Fatal(err)
+	}
+	r := rec("L-0A1B2C3D", "PLANNING")
+	if _, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: r}); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	example := "\nExample: <!-- foreman:begin -->\nformat: foreman-task/1\n<!-- foreman:end -->\n"
+	if err := os.WriteFile(path, append(raw, example...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r.Status = "IMPLEMENTING"
+	for i := 0; i < 2; i++ {
+		if _, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: r}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, _ := os.ReadFile(path)
+	if !strings.Contains(string(out), example) {
+		t.Fatalf("the example was replaced:\n%s", out)
+	}
+	if n := strings.Count(string(out), "foreman-task/1\n<!-- foreman:end"); n != 1 {
+		t.Fatalf("the example ended up in a record: %d\n%s", n, out)
+	}
+	entries, _ := b.ListTasks(ctx)
+	if len(entries) != 1 || entries[0].Record == nil || entries[0].Record.Status != "IMPLEMENTING" {
+		t.Fatalf("entries = %+v", entries)
+	}
+}
+
+func TestANoteWrittenUnderItsUncappedTitleStillReadsBackUnderThatTitle(t *testing.T) {
+	b := newBackend(t)
+	title := "a/b " + strings.Repeat("漢", 60)
+	writeNote(t, b, sanitizeName(title), "---\nforeman_id: L-0A1B2C3D\nforeman_title: \""+title+"\"\n---\nbody\n")
+	entries, err := b.ListTasks(context.Background())
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries = %d, err = %v", len(entries), err)
+	}
+	if entries[0].Name != title {
+		t.Fatalf("name = %q, want the title %q", entries[0].Name, title)
+	}
+}

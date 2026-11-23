@@ -135,8 +135,16 @@ func (s *Sync) pullEntry(ctx context.Context, e TaskEntry, byID map[string]*task
 	// reconciled it. Otherwise a change made on the host (issue triage, a replacing
 	// import) would be undone by the older text the store still holds.
 	if fh := fieldsHash(e); key.Source == task.Local && fh != prev.FieldsSeen {
-		if err := s.syncIssue(ctx, e, key, prev.FieldsSeen); err != nil {
-			s.logf("sync issue %s: %v", id, err)
+		if prev.FieldsSeen != "" && prev.FieldsSeen == legacyFieldsHash(e) {
+			// Recorded as one aggregate hash before per-field hashes: the store is
+			// unchanged, so only the format is upgraded and host edits stay.
+			if err := s.setSeen(id, "fields_seen", fh); err != nil {
+				s.logf("record issue fields of %s: %v", id, err)
+			}
+		} else if err := s.syncIssue(ctx, e, key, prev.FieldsSeen); err != nil {
+			if !errors.Is(err, errHeld) {
+				s.logf("sync issue %s: %v", id, err)
+			}
 		} else if err := s.setSeen(id, "fields_seen", fh); err != nil {
 			s.logf("record issue fields of %s: %v", id, err)
 		}
@@ -159,6 +167,9 @@ func (s *Sync) pullEntry(ctx context.Context, e TaskEntry, byID map[string]*task
 	}
 	s.collect(ctx, e, id, key, rec, out)
 }
+
+// errHeld means a store edit was not applied because a field is invalid.
+var errHeld = errors.New("issue fields are invalid")
 
 func taskKey(key task.Key, rec *task.Record) task.Key {
 	if rec != nil {
@@ -260,7 +271,9 @@ func (s *Sync) syncIssue(ctx context.Context, e TaskEntry, key task.Key, seen st
 		}
 	}
 	if err := (localissues.Input{Title: next.Title, SourceURL: next.SourceURL, Repo: next.Repo}).Validate(); err != nil {
-		return nil // keep the host's copy until the field is fixed
+		// Keep the host's copy until the field is fixed. Not recording the fields as
+		// seen makes the next pull retry every edit together.
+		return errHeld
 	}
 	have := *li
 	if have.Tags == nil {

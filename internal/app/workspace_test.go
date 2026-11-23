@@ -22,6 +22,7 @@ type fakeWorkspace struct {
 	publishErr error
 	blocked    map[task.Key]string
 	acks       []WorkspaceAck
+	ackErr     error
 	knowledge  []string
 }
 
@@ -46,7 +47,7 @@ func (w *fakeWorkspace) PublishKnowledge(_ context.Context, repo string) error {
 }
 func (w *fakeWorkspace) Ack(_ context.Context, a WorkspaceAck) error {
 	w.acks = append(w.acks, a)
-	return nil
+	return w.ackErr
 }
 
 func TestEveryTaskUpdatePublishesTheSavedRecord(t *testing.T) {
@@ -214,6 +215,21 @@ func TestQueuedTaskThatAlreadyHasARunIsAckedWithoutStartingAgain(t *testing.T) {
 	f.app.refreshWorkspace(context.Background())
 	if len(ws.acks) != 1 || len(f.runners.spawned) != 0 {
 		t.Fatalf("acks %+v, spawned %d", ws.acks, len(f.runners.spawned))
+	}
+}
+
+func TestQueuedTaskThatAlreadyHasARunIsPublishedEvenWhenTheAckFails(t *testing.T) {
+	f := newFixture()
+	rec, err := f.app.Start(context.Background(), startReq(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws := &fakeWorkspace{pull: WorkspacePull{Queued: []WorkspaceQueued{{Key: rec.Key}}}, ackErr: errors.New("store is down")}
+	f.app.Workspace = ws
+	ws.published = nil
+	f.app.refreshWorkspace(context.Background())
+	if len(ws.published) != 1 || ws.published[0] != rec.Key {
+		t.Fatalf("published = %v, want the delegated task", ws.published)
 	}
 }
 
