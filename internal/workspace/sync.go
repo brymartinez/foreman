@@ -355,7 +355,9 @@ func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
 	// Any other value that is not this question's key, including the empty one that
 	// cannot say whether a question was pending, makes an answer in the store
 	// untrustworthy.
-	adopt := qk != "" && prev.Question == legacyQuestionKey(b.rec)
+	// A row with no key at all is the same when the record the store last received
+	// is exactly this one, pending question included.
+	adopt := qk != "" && (prev.Question == legacyQuestionKey(b.rec) || prev.Question == "" && digest == prev.Digest)
 	if digest == prev.Digest {
 		if prev.Question != stored {
 			if !adopt {

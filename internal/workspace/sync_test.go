@@ -600,3 +600,22 @@ type noRepublish struct{ *Memory }
 func (noRepublish) UpsertTask(context.Context, TaskPublish) (string, error) {
 	return "", errors.New("no writes during this pull")
 }
+
+func TestAnAnswerTypedForAQuestionAnUntrackedRowAlreadyPublishedIsStillApplied(t *testing.T) {
+	h := newHarness(t)
+	rec := fullTask()
+	h.saveTask(rec)
+	h.s.Publish(h.ctx, rec.Key)
+	// A row written before questions were tracked, for the record the store holds now.
+	if _, err := h.s.DB.Exec(`UPDATE workspace_entries SET question = ''`); err != nil {
+		t.Fatal(err)
+	}
+	h.mem.UserEdit(h.entries()[0].Ref, func(e *TaskEntry) { e.Answer = "B" })
+	p := h.pull()
+	if len(p.Answers) != 1 || p.Answers[0].Text != "B" {
+		t.Fatalf("answers = %+v: the reply to a question the store already showed was dropped", p.Answers)
+	}
+	if h.entries()[0].Answer != "B" {
+		t.Fatal("the republish cleared a valid answer")
+	}
+}

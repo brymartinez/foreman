@@ -649,3 +649,64 @@ func TestALongDescriptionLineReadsBackUnchanged(t *testing.T) {
 		t.Fatalf("the description came back with %d characters, want %d", len(es[0].Description), len(desc))
 	}
 }
+
+func TestACutShortNewerSectionNeverWinsOverTheLastCompleteOne(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	older := rec("L-0A1B2C3D", "PLANNING", "")
+	older.Work = &portable.Work{Repo: "o/r", State: "open", Plan: "the full plan"}
+	if _, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: older, Create: workspace.TaskSeed{Name: "N"}}); err != nil {
+		t.Fatal(err)
+	}
+	newer := rec("L-0A1B2C3D", "IMPLEMENTING", "")
+	newer.Work = &portable.Work{Repo: "o/r", State: "open", Plan: "the full plan", Branch: "feat/x"}
+	raw, err := newer.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A write that stopped between batches leaves a prefix. Find one the format accepts.
+	lines := strings.SplitAfter(string(raw), "\n")
+	prefix := ""
+	for k := len(lines) - 1; k > 0; k-- {
+		cut := strings.Join(lines[:k], "")
+		if r, perr := workspace.Parse([]byte(cut)); perr == nil && r.Status == "IMPLEMENTING" {
+			prefix = cut
+			break
+		}
+	}
+	if prefix == "" {
+		t.Fatal("the test needs a prefix of the payload that still parses")
+	}
+	page := b.findPageForTest(t, ctx, "L-0A1B2C3D")
+	heading := block("heading_2", map[string]any{"rich_text": richText(sectionTitle), "is_toggleable": true, "children": codeBlocks(prefix)})
+	if _, err := b.C.appendBlocks(ctx, page, []any{heading}); err != nil {
+		t.Fatal(err)
+	}
+	b.forget()
+	es, _ := b.ListTasks(ctx)
+	if got := es[0].Record; got == nil || got.Status != "PLANNING" {
+		t.Fatalf("record = %+v: a cut-short section replaced the last complete one", got)
+	}
+}
+
+func TestALongLineOfCharactersThatEscapeInJSONStillFitsEveryRequest(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	desc := strings.Repeat("<", 90_000) // 540 KB once each character is escaped
+	if _, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX", ""), Create: workspace.TaskSeed{Name: "N", Description: desc}}); err != nil {
+		t.Fatal(err) // the fake rejects any request over 500,000 bytes
+	}
+	es, _ := b.ListTasks(ctx)
+	if len(es) != 1 || es[0].Description != desc {
+		t.Fatalf("the description came back with %d characters, want %d", len(es[0].Description), len(desc))
+	}
+}
+
+func (b *Backend) findPageForTest(t *testing.T, ctx context.Context, id string) string {
+	t.Helper()
+	p, err := b.findByID(ctx, b.tasks.source, "Foreman ID", id, "rich_text")
+	if err != nil || p == nil {
+		t.Fatalf("no page for %s: %v", id, err)
+	}
+	return p.ID
+}

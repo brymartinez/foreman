@@ -58,29 +58,26 @@ func block(typ string, content map[string]any) map[string]any {
 	return map[string]any{"object": "block", "type": typ, typ: content}
 }
 
-// paragraphs makes one paragraph block per line of s. It is for the user's text,
-// which reads back by joining lines, so a line is never split.
+// continuationColor marks a paragraph that continues the line before it. A line
+// longer than one block can hold (a block of 60,000 characters stays under the
+// request limit even when every character escapes to six bytes) is written as
+// several blocks, and the reader joins a gray block that follows a full one back
+// onto its line instead of starting a new line.
+const continuationColor = "gray"
+
+// paragraphs makes one paragraph block per line of s.
 func paragraphs(s string) []any {
 	var out []any
 	for _, line := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
-		out = append(out, block("paragraph", map[string]any{"rich_text": richText(line)}))
-	}
-	return out
-}
-
-// sectionParagraphs is paragraphs for Foreman's own text, where nothing reads the
-// lines back. A line longer than a block can hold continues in the next block.
-func sectionParagraphs(s string) []any {
-	var out []any
-	for _, line := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
 		r := []rune(line)
-		for {
+		for first := true; first || len(r) > 0; first = false {
 			n := min(len(r), blockRunes)
-			out = append(out, block("paragraph", map[string]any{"rich_text": richText(string(r[:n]))}))
-			r = r[n:]
-			if len(r) == 0 {
-				break
+			content := map[string]any{"rich_text": richText(string(r[:n]))}
+			if !first {
+				content["color"] = continuationColor
 			}
+			out = append(out, block("paragraph", content))
+			r = r[n:]
 		}
 	}
 	return out
@@ -130,6 +127,14 @@ func (b *blockObj) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	return json.Unmarshal(data, &b.raw)
+}
+
+func (b blockObj) color() string {
+	var c struct {
+		Color string `json:"color"`
+	}
+	_ = json.Unmarshal(b.raw[b.Type], &c)
+	return c.Color
 }
 
 func (b blockObj) text() string {
@@ -239,6 +244,7 @@ func (c *Client) readBody(ctx context.Context, page string) (pageBody, error) {
 	}
 	var body pageBody
 	var lines []string
+	prevRunes := 0
 	for _, b := range blocks {
 		if b.Type == "heading_2" && b.text() == sectionTitle {
 			kids, err := c.blocksOf(ctx, b.ID)
@@ -255,9 +261,15 @@ func (c *Client) readBody(ctx context.Context, page string) (pageBody, error) {
 			body.Payloads = append(body.Payloads, sectionPayload{Text: payload.String(), Complete: complete})
 			continue
 		}
+		if b.Type == "paragraph" && len(lines) > 0 && b.color() == continuationColor && prevRunes == blockRunes {
+			lines[len(lines)-1] += b.text()
+			prevRunes = len([]rune(b.text()))
+			continue
+		}
 		switch b.Type {
 		case "paragraph", "heading_1", "heading_2", "heading_3", "bulleted_list_item", "numbered_list_item", "quote", "to_do", "code":
 			lines = append(lines, b.text())
+			prevRunes = len([]rune(b.text()))
 		}
 	}
 	body.Description = strings.Join(lines, "\n")
@@ -287,7 +299,7 @@ func (c *Client) replaceSection(ctx context.Context, page string, text, payload 
 	if err != nil {
 		return err
 	}
-	kids := append(append(sectionParagraphs(text), codeBlocks(payload)...), block("paragraph", map[string]any{"rich_text": richText(endMarker)}))
+	kids := append(append(paragraphs(text), codeBlocks(payload)...), block("paragraph", map[string]any{"rich_text": richText(endMarker)}))
 	first := kids[:takeBlocks(kids)]
 	heading := block("heading_2", map[string]any{"rich_text": richText(sectionTitle), "is_toggleable": true, "children": first})
 	ids, err := c.appendBlocks(ctx, page, []any{heading})

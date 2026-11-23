@@ -253,13 +253,15 @@ func (b *Backend) entry(ctx context.Context, p pageObj) (workspace.TaskEntry, er
 		return e, err
 	}
 	e.Description = body.Description
-	for i := len(body.Payloads) - 1; i >= 0; i-- {
-		if r, perr := workspace.Parse([]byte(body.Payloads[i].Text)); perr == nil {
-			e.Record, e.ParseErr = &r, nil
-			break
-		} else if e.ParseErr == nil && body.Payloads[i].Complete {
-			e.ParseErr = perr
-		}
+	var rec workspace.Record
+	if i, perr := selectPayload(body.Payloads, func(text string) error {
+		r, err := workspace.Parse([]byte(text))
+		rec = r
+		return err
+	}); i >= 0 {
+		e.Record, e.ParseErr = &rec, nil
+	} else {
+		e.ParseErr = perr
 	}
 	return e, nil
 }
@@ -497,13 +499,15 @@ func (b *Backend) ListKnowledge(ctx context.Context) ([]workspace.KnowledgeEntry
 			return nil, err
 		}
 		e.ParseErr = workspace.ErrNoPayload
-		for i := len(body.Payloads) - 1; i >= 0; i-- {
-			if snap, perr := knowledge.Parse([]byte(body.Payloads[i].Text)); perr == nil {
-				e.Snapshot, e.ParseErr, e.Digest = &snap, nil, workspace.SnapshotDigest(snap)
-				break
-			} else if body.Payloads[i].Complete {
-				e.ParseErr = perr
-			}
+		var snap knowledge.Snapshot
+		if i, perr := selectPayload(body.Payloads, func(text string) error {
+			x, err := knowledge.Parse([]byte(text))
+			snap = x
+			return err
+		}); i >= 0 {
+			e.Snapshot, e.ParseErr, e.Digest = &snap, nil, workspace.SnapshotDigest(snap)
+		} else if perr != nil {
+			e.ParseErr = perr
 		}
 		out = append(out, e)
 	}
@@ -610,4 +614,31 @@ func (b *Backend) Check(ctx context.Context, report func(workspace.Step)) error 
 		}
 	}
 	return nil
+}
+
+// selectPayload picks the section to read: the newest complete one whose payload
+// parses. Only when none exists does it fall back to the newest unmarked one that
+// parses, which is a section written before the end marker. A cut-short section
+// can parse too, because the formats accept an early end, so it must never win over
+// a complete one. It returns -1 and the newest complete section's error when nothing
+// parses; a cut-short section's error is not reported, which keeps a half written
+// page reading as "no payload".
+func selectPayload(ps []sectionPayload, parse func(string) error) (int, error) {
+	var first error
+	for i := len(ps) - 1; i >= 0; i-- {
+		if !ps[i].Complete {
+			continue
+		}
+		if err := parse(ps[i].Text); err == nil {
+			return i, nil
+		} else if first == nil {
+			first = err
+		}
+	}
+	for i := len(ps) - 1; i >= 0; i-- {
+		if !ps[i].Complete && parse(ps[i].Text) == nil {
+			return i, nil
+		}
+	}
+	return -1, first
 }
