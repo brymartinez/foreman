@@ -80,6 +80,11 @@ func run(argv []string) int {
 			fmt.Fprintf(os.Stderr, "foreman: %s\n", problem)
 		}
 	}
+	if cmd.Name == cli.StorageCheck || cmd.Name == cli.StorageMove {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+		defer stop()
+		return runStorageCommand(ctx, cfg, cmd, os.Stdout, os.Stderr)
+	}
 	if cmd.Name == cli.KnowledgeExport || cmd.Name == cli.KnowledgeIngest {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 		defer stop()
@@ -122,6 +127,9 @@ func run(argv []string) int {
 		Triage:               st.Triage,
 		GitHub:               github.New(),
 		LocalIssues:          st.Issues,
+		Workspace:            st.Workspace,
+		WorkspaceLog:         workspaceLog(cfg),
+		MaxConcurrent:        cfg.Auto.MaxConcurrent,
 		Repositories:         github.New(),
 		Worktrees:            worktree.Git{},
 		Accounts:             github.New(),

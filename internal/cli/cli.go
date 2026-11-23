@@ -31,6 +31,10 @@ const (
 	// machines.
 	KnowledgeExport Name = "knowledge export"
 	KnowledgeIngest Name = "knowledge ingest"
+	// StorageCheck tests the configured workspace store. StorageMove copies a SQLite
+	// workspace into it.
+	StorageCheck Name = "storage check"
+	StorageMove  Name = "storage move"
 )
 
 // AutoMode is a launch override for the dashboard's auto mode. AutoSaved keeps the
@@ -80,6 +84,10 @@ Usage:
                               Write the repository's learned knowledge to FILE or stdout
   foreman knowledge ingest FILE [--repo owner/repo [--rebind]] [--dry-run]
                               Store an export, merging with this machine's knowledge
+  foreman storage check       Test the configured workspace store (notion or obsidian) step by
+                              step; exits non-zero on the first failure. Changes no real task
+  foreman storage move        Copy this SQLite workspace into the configured store, verify the
+                              copy, and only then switch to it. Run it on the execution host
   foreman issue add --title TITLE [--url URL] [--repo owner/repo] [--description-file FILE|-]
                     [--triage-file FILE] [--notes-file FILE] [--tag TAG]...
                               Save a local issue and print its stable ID. With --triage-file the
@@ -129,7 +137,7 @@ Precedence:
   such as mentions: false, models, and budgets.
 
 Settings without launch flags:
-  config.yaml: refresh, repository filters, database and directories,
+  config.yaml: storage (notion, obsidian, or sqlite), refresh, repository filters, database and directories,
   agent commands and models, budgets, review policy, learning, notifications,
   cleanup, auto.agent, and auto.max_concurrent. Unknown keys are an error.
   routing.yaml: selector, profiles, and rules.
@@ -175,6 +183,11 @@ func Parse(argv []string) (Command, error) {
 		return Command{Name: verb, Repo: repo, Issue: n}, err
 	case "knowledge":
 		return parseKnowledge(rest)
+	case "storage":
+		if len(rest) != 1 || (rest[0] != "check" && rest[0] != "move") {
+			return Command{}, usagef("storage needs check or move, and no other argument")
+		}
+		return Command{Name: Name("storage " + rest[0])}, nil
 	case "issue":
 		return parseIssue(rest)
 	case "export":

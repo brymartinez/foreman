@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/brymartinez/foreman/internal/agent"
+	"github.com/brymartinez/foreman/internal/app"
 	"github.com/brymartinez/foreman/internal/config"
 	"github.com/brymartinez/foreman/internal/db"
 	"github.com/brymartinez/foreman/internal/localissues"
@@ -36,6 +37,8 @@ type localIntake struct {
 	planning task.ModelTarget
 	timeout  time.Duration
 	turns    map[task.Agent]intakeTurn
+	// workspace, when set, is told about a saved issue before Save returns.
+	workspace app.Workspace
 }
 
 type intakeRecord struct {
@@ -52,7 +55,8 @@ func newLocalIntake(cfg config.Config, st state, claude agent.Claude, codex agen
 	return localIntake{
 		db: st.DB, lockPath: path + ".intake.lock", dir: filepath.Dir(path),
 		planning: cfg.Models.Planning, timeout: time.Duration(cfg.Budgets.CallTimeoutSeconds) * time.Second,
-		turns: map[task.Agent]intakeTurn{task.Claude: claude.Intake, task.Codex: codex.Intake},
+		turns:     map[task.Agent]intakeTurn{task.Claude: claude.Intake, task.Codex: codex.Intake},
+		workspace: st.Workspace,
 	}
 }
 
@@ -181,6 +185,10 @@ func (i localIntake) Save(ctx context.Context, revision int64) (string, error) {
 	}
 	if err := tx.Commit(); err != nil {
 		return "", err
+	}
+	if i.workspace != nil {
+		// A failed publish leaves the entry for the next refresh; the issue is saved.
+		_ = i.workspace.Publish(ctx, task.Key{Source: task.Local, ExternalID: issue.ID})
 	}
 	return issue.ID, nil
 }

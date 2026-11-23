@@ -90,6 +90,7 @@ func runIssue(ctx context.Context, st state, cmd cli.Command, stdin io.Reader, s
 		if err := tx.Commit(); err != nil {
 			return failed(err)
 		}
+		st.publishIssue(ctx, stderr, issue.ID)
 		fmt.Fprintln(stdout, issue.ID)
 	case cli.IssueTriage:
 		text, err := readText(in.TriageFile, stdin)
@@ -102,6 +103,7 @@ func runIssue(ctx context.Context, st state, cmd cli.Command, stdin io.Reader, s
 		if err := st.Triage.Save(task.Key{Source: task.Local, ExternalID: in.ID}, text); err != nil {
 			return failed(err)
 		}
+		st.publishIssue(ctx, stderr, in.ID)
 		fmt.Fprintln(stdout, in.ID)
 	case cli.IssueList:
 		issues, err := st.Issues.List(ctx)
@@ -189,6 +191,9 @@ func runIssue(ctx context.Context, st state, cmd cli.Command, stdin io.Reader, s
 		if err != nil {
 			return failed(fmt.Errorf("%w; nothing was imported", err))
 		}
+		if plan.Applied {
+			publishImported(ctx, st, stderr, plan, portable.ConflictPolicy(in.OnConflict))
+		}
 	case cli.ExportNotes:
 		recs, err := st.Tasks.List(ctx)
 		if err != nil {
@@ -220,5 +225,26 @@ func printPlan(w io.Writer, p portable.Plan, dry bool) {
 	fmt.Fprintf(w, "%s %d new records; %d already present and unchanged; %d conflicts.\n", verb, len(p.Create), len(p.Unchanged), len(p.Conflicts))
 	for _, c := range p.Conflicts {
 		fmt.Fprintf(w, "  conflict: %s %s %s\n", c.Kind, c.ID, c.Detail)
+	}
+}
+
+// publishImported writes what an import created or replaced to the shared store.
+func publishImported(ctx context.Context, st state, stderr io.Writer, plan portable.Plan, policy portable.ConflictPolicy) {
+	ids := append([]string(nil), plan.Create...)
+	if policy == portable.Replace {
+		for _, c := range plan.Conflicts {
+			if c.Kind == "learnings" {
+				ids = append(ids, "learnings:"+c.ID)
+			} else {
+				ids = append(ids, c.ID)
+			}
+		}
+	}
+	for _, id := range ids {
+		if repo, ok := strings.CutPrefix(id, "learnings:"); ok {
+			st.publishKnowledge(ctx, stderr, repo)
+		} else {
+			st.publishIssue(ctx, stderr, id)
+		}
 	}
 }

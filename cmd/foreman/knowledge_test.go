@@ -58,3 +58,15 @@ func TestKnowledgeExportThenIngestRestoresOnAnotherMachine(t *testing.T) {
 		t.Fatalf("learnings = %+v, %v", ls, err)
 	}
 }
+
+func seedKnowledge(t *testing.T, st state) {
+	t.Helper()
+	at := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	err := st.Knowledge.Apply("acme/widgets", knowledge.Evaluation{
+		Task: "1", TaskAt: at, At: at, Fingerprint: "fp", Assessment: "fine", MaintainerRefs: []string{"D1"},
+		Proposals: []knowledge.Proposal{{Kind: knowledge.Convention, Text: "Wrap errors with the operation name.", Scope: knowledge.Reusable, Source: knowledge.Maintainer, Cites: []string{"D1"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}

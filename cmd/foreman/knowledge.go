@@ -20,6 +20,10 @@ import (
 func runKnowledge(ctx context.Context, cfg config.Config, st state, cmd cli.Command, stdout, stderr io.Writer) int {
 	a := app.App{
 		Knowledge: st.Knowledge,
+		Workspace: st.Workspace,
+		WorkspaceLog: func(format string, args ...any) {
+			fmt.Fprintf(stderr, "foreman: "+format+"\n", args...)
+		},
 		Merger: agent.Mergers{
 			Claude: agent.Claude{Bin: "claude", Exec: agent.RunCommand},
 			Codex:  agent.Codex{Bin: "codex", Exec: agent.RunCommand},
