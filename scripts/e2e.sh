@@ -127,6 +127,8 @@ worktrees_dir: $sandbox/worktrees
 repositories_dir: $sandbox/repositories
 log_dir: $sandbox/logs
 knowledge_dir: $sandbox/knowledge
+storage:
+  backend: sqlite
 models:
   planning:
     agent: claude
@@ -1567,7 +1569,177 @@ scenario_account() {
 	unset E2E_CLONE_URL
 }
 
-scenarios=${*:-runner review_before_pr retry_committed_correction self_assessment complete_diff_review quota_pause full_check final_check_stop plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui history local account knowledge_transfer}
+# use_storage <block> replaces the sandbox's storage section. A scenario that moves
+# the workspace into a vault or a Notion stand-in seeds its data under sqlite first.
+use_storage() {
+	sed -i.bak '/^storage:$/,/^  backend: sqlite$/d' "$sandbox/config.yaml"
+	printf '%s\n' "$1" >>"$sandbox/config.yaml"
+}
+
+# refresh_until <seconds> <expression> refreshes the dashboard, which pulls from and
+# publishes to the workspace store, until the shell expression succeeds.
+refresh_until() {
+	local end=$((SECONDS + $1))
+	until eval "$2"; do
+		[ $SECONDS -lt $end ] || return 1
+		dash --no-auto -s local -- refreshed >/dev/null 2>&1 || true
+		sleep 0.2
+	done
+}
+
+# note_get <file> <key> prints a frontmatter value of an Obsidian note without quotes.
+note_get() { sed -n "s/^$2: *//p" "$1" | head -1 | tr -d "\"'"; }
+# note_set <file> <key> <value> is a person editing one frontmatter key in Obsidian.
+note_set() {
+	python3 -I - "$@" <<'PY'
+import re, sys
+path, key, value = sys.argv[1:4]
+text = open(path).read()
+end = text.index("\n---\n", 4)
+front, rest = text[:end], text[end:]
+line = f"{key}: {value}"
+if re.search(rf"^{key}:.*$", front, re.M):
+    front = re.sub(rf"^{key}:.*$", lambda m: line, front, count=1, flags=re.M)
+else:
+    front += "\n" + line
+open(path, "w").write(front + rest)
+PY
+}
+
+# workflow <store> drives one task through the store the way a person does from another
+# device: create, confirm scope, queue, answer two questions, and see the PR. The store
+# adapter is a set of functions named <store>_create, _confirm, _queue, _answer, _field.
+workflow() {
+	local s=$1 id file
+	"${s}_create"
+	check "a refresh gives the new entry an L- ID" refresh_until 20 "[[ \"\$(${s}_field 'Foreman ID')\" =~ ^L-[0-9A-F]{8}\$ ]]"
+	id=$("${s}_field" 'Foreman ID')
+	file="$sandbox/tasks/acme-widgets-local-$id.md"
+	check "the new entry is a local issue" bash -c "'$work/foreman' issue list | grep -qF '$id'"
+	check "it is not triaged yet" bash -c "! '$work/foreman' issue list | grep -F '$id' | grep -qF triaged"
+	sleep 1
+	"${s}_confirm"
+	check "confirming scope in the store saves the triage" refresh_until 20 "'$work/foreman' issue list | grep -F '$id' | grep -qF triaged"
+	touch "$state/block-once"
+	"${s}_queue"
+	check "queueing starts the task with auto mode off" refresh_until 30 "grep -q '^state: NEEDS_DECISION' '$file'"
+	check "the question reaches the store" refresh_until 30 "${s}_field Question | grep -qF 'Retry 4xx?'"
+	check "the start clears the Queue box" refresh_until 20 "! ${s}_field Queue | grep -qi true"
+	sleep 1
+	"${s}_answer" B
+	check "the first answer leaves the second question" refresh_until 30 "${s}_field Question | grep -qF 'Cap retries?'"
+	check "and the answer box is cleared" refresh_until 20 "[ -z \"\$(${s}_field Answer)\" ]"
+	sleep 1
+	"${s}_answer" A
+	check "the second answer resumes the same planner session" refresh_until 30 "grep -q 'planner resume' '$state/role-sessions.log'"
+	check "the run reaches a clean review" eventually 40 grep -q 'verdict: clean' "$file"
+	check "the PR link reaches the store" refresh_until 40 "${s}_field PR | grep -q 'pull/'"
+	check "the planner resumed once" test "$(grep -c 'planner resume' "$state/role-sessions.log")" = 1
+	check "resume carries both answers" bash -c "grep -qF 'Decision: B. 4xx and 5xx' '$state/prompt.txt' && grep -qF 'Decision: A. 3 tries' '$state/prompt.txt'"
+	check "the store holds no host path" bash -c "! ${s}_dump | grep -qF '$sandbox'"
+	check "nor a provider session id or runner pid" bash -c "! ${s}_dump | grep -qi 'session_id\\|runner_pid'"
+}
+
+obsidian_note() { echo "$sandbox/vault/Foreman/Tasks/Search page.md"; }
+obsidian_create() {
+	mkdir -p "$sandbox/vault/Foreman/Tasks"
+	printf -- '---\nrepository: acme/widgets\n---\nAdd search to the widgets page.\n' >"$(obsidian_note)"
+}
+obsidian_confirm() {
+	printf '\n## Confirmed triage\n\nProceed with search as described. Implement in https://github.com/acme/widgets.\n' >>"$(obsidian_note)"
+	note_set "$(obsidian_note)" scope_confirmed true
+}
+obsidian_queue() { note_set "$(obsidian_note)" queue true; }
+obsidian_answer() { note_set "$(obsidian_note)" answer "$1"; }
+obsidian_dump() { cat "$(obsidian_note)"; }
+obsidian_field() {
+	case $1 in
+	'Foreman ID') note_get "$(obsidian_note)" foreman_id ;;
+	Question) note_get "$(obsidian_note)" foreman_question ;;
+	Queue) note_get "$(obsidian_note)" queue ;;
+	Answer) note_get "$(obsidian_note)" answer ;;
+	PR) note_get "$(obsidian_note)" foreman_pr ;;
+	esac
+}
+export -f note_get note_set obsidian_note obsidian_field obsidian_dump
+
+scenario_obsidian() {
+	echo "obsidian: move a workspace into a vault, then run a task from notes"
+	setup obsidian
+	local vault=$sandbox/vault out=$sandbox/out.txt id
+	mkdir -p "$vault"
+	printf 'Proceed with search as described. Implement in https://github.com/acme/widgets.\n' >"$sandbox/local-triage.md"
+	id=$(printf 'Kept from before the move.' | foreman issue add --title "Existing issue" --description-file - --triage-file "$sandbox/local-triage.md")
+	use_storage "storage:
+  backend: obsidian
+  obsidian:
+    vault: $vault"
+	if foreman issue list >"$out" 2>&1; then fail "an unmoved workspace is refused"; else check "an unmoved workspace is refused and names the move" contains "$out" "foreman storage move"; fi
+	check "storage check passes against the vault" foreman storage check
+	check "the check leaves no test note" bash -c "! ls '$vault/Foreman/Tasks' | grep -q 'connectivity check'"
+	foreman storage move >"$out" 2>&1 || true
+	check "the move reports its counts" contains "$out" "Moved 0 tasks, 1 issues without a task"
+	check "the issue is a note with its ID" bash -c "grep -rqF 'foreman_id: $id' '$vault/Foreman/Tasks'"
+	check "the move sets no Queue box" bash -c "! grep -rq '^queue: true' '$vault/Foreman/Tasks'"
+	check "the workspace opens after the move" foreman issue list
+	foreman storage move >"$out" 2>&1 || true
+	check "a second move changes nothing" contains "$out" "already moved"
+	workflow obsidian
+}
+
+notion_stub() { python3 -I "$root/scripts/notion-stub.py" "$@"; }
+notion_admin() { # notion_admin <verb> [json]
+	if [ $# -gt 1 ]; then
+		curl -fsS -X POST -H 'Content-Type: application/json' -d "$2" "$FOREMAN_NOTION_API/__admin/$1"
+	else
+		curl -fsS "$FOREMAN_NOTION_API/__admin/$1"
+	fi
+}
+notion_json() { python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(d.get(sys.argv[1], "") if isinstance(d, dict) else "")' "$1"; }
+notion_page() { curl -fsS -G --data-urlencode "prop=Name" --data-urlencode "equals=Search page" "$FOREMAN_NOTION_API/__admin/page"; }
+notion_field() { notion_page 2>/dev/null | notion_json "$1"; }
+notion_dump() { notion_admin pages; }
+notion_create() { notion_admin create '{"set":{"Name":"Search page","Repository":"acme/widgets"}}' >/dev/null; }
+notion_confirm() {
+	notion_admin edit '{"find":{"Name":"Search page"},"set":{"Confirmed triage":"Proceed with search as described. Implement in https://github.com/acme/widgets.","Scope confirmed":true}}' >/dev/null
+}
+notion_queue() { notion_admin edit '{"find":{"Name":"Search page"},"set":{"Queue":true}}' >/dev/null; }
+notion_answer() { notion_admin edit "{\"find\":{\"Name\":\"Search page\"},\"set\":{\"Answer\":\"$1\"}}" >/dev/null; }
+export -f notion_admin notion_json notion_page notion_field notion_dump
+
+scenario_notion() {
+	echo "notion: move a workspace into Notion with a retry, then run a task from pages"
+	setup notion
+	local out=$sandbox/out.txt id
+	notion_stub "$sandbox/notion-port" "$sandbox/notion-parent" >"$sandbox/notion.log" 2>&1 &
+	listeners="$listeners $!"
+	eventually 10 test -s "$sandbox/notion-port"
+	eventually 10 test -s "$sandbox/notion-parent"
+	export FOREMAN_NOTION_API="http://127.0.0.1:$(cat "$sandbox/notion-port")" FOREMAN_NOTION_TOKEN=secret_stub_token
+	printf 'Proceed with search as described. Implement in https://github.com/acme/widgets.\n' >"$sandbox/local-triage.md"
+	id=$(printf 'Kept from before the move.' | foreman issue add --title "Existing issue" --description-file - --triage-file "$sandbox/local-triage.md")
+	use_storage "storage:
+  backend: notion
+  notion:
+    parent_page_id: $(cat "$sandbox/notion-parent")"
+	if foreman issue list >"$out" 2>&1; then fail "an unmoved workspace is refused"; else check "an unmoved workspace is refused and names the move" contains "$out" "foreman storage move"; fi
+	check "storage check passes against the stand-in" foreman storage check
+	notion_admin fail '{"method":"PATCH","prefix":"/v1/blocks","status":400}' >/dev/null
+	if foreman storage move >"$out" 2>&1; then fail "a move that loses a write fails"; else pass "a move that loses a write fails"; fi
+	check "and the workspace is still refused" bash -c "! '$work/foreman' issue list"
+	notion_admin fail '{"clear":true}' >/dev/null
+	foreman storage move >"$out" 2>&1 || true
+	check "the retried move succeeds" contains "$out" "Moved 0 tasks, 1 issues without a task"
+	check "the retry made one page, not two" test "$(notion_admin pages | python3 -I -c 'import json,sys; print(len([p for p in json.load(sys.stdin) if p["Foreman ID"] == sys.argv[1]]))' "$id")" = 1
+	check "the move set no Queue box" bash -c "! notion_admin pages | grep -q '\"Queue\": true'"
+	foreman storage move >"$out" 2>&1 || true
+	check "a second move changes nothing" contains "$out" "already moved"
+	workflow notion
+	check "the token never reaches the logs or the task files" bash -c "! grep -rqF secret_stub_token '$sandbox/logs' '$sandbox/tasks' 2>/dev/null"
+	unset FOREMAN_NOTION_API FOREMAN_NOTION_TOKEN
+}
+
+scenarios=${*:-runner review_before_pr retry_committed_correction self_assessment complete_diff_review quota_pause full_check final_check_stop plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui history local account knowledge_transfer obsidian notion}
 for s in $scenarios; do "scenario_$s"; done
 if [ $failures -gt 0 ]; then
 	echo "$failures check(s) failed"
