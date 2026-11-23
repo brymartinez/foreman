@@ -174,6 +174,7 @@ func run(argv []string) int {
 			Version:  currentVersion(),
 			TaskFile: func(task.Key) string { return "task record in " + cfg.Database },
 			Triage:   triageSession(cfg, &inSession),
+			Intake:   newLocalIntake(cfg, st, claude, codex),
 		}); err != nil {
 			return fail(err)
 		}

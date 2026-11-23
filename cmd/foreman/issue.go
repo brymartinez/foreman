@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -35,6 +36,14 @@ func readText(name string, stdin io.Reader) (string, error) {
 	}
 	raw, err := os.ReadFile(name)
 	return string(raw), err
+}
+
+func createLocalIssue(ctx context.Context, tx *sql.Tx, in localissues.Input, decisions string) (localissues.Issue, error) {
+	issue, err := (localissues.Store{}).CreateIn(ctx, tx, in)
+	if err == nil && decisions != "" {
+		err = (store.SQLiteTriage{}).SaveIn(tx, task.Key{Source: task.Local, ExternalID: issue.ID}, decisions)
+	}
+	return issue, err
 }
 
 // runIssue runs the local issue commands. None needs stage files, an agent, or the
@@ -74,14 +83,9 @@ func runIssue(ctx context.Context, st state, cmd cli.Command, stdin io.Reader, s
 			return failed(err)
 		}
 		defer tx.Rollback()
-		issue, err := (localissues.Store{DB: st.DB}).CreateIn(ctx, tx, localissues.Input{Title: in.Title, Description: description, SourceURL: in.SourceURL, Repo: string(in.Repo), Notes: notes, Tags: in.Tags})
+		issue, err := createLocalIssue(ctx, tx, localissues.Input{Title: in.Title, Description: description, SourceURL: in.SourceURL, Repo: string(in.Repo), Notes: notes, Tags: in.Tags}, triage)
 		if err != nil {
 			return failed(err)
-		}
-		if triage != "" {
-			if err := (store.SQLiteTriage{DB: st.DB}).SaveIn(tx, task.Key{Source: task.Local, ExternalID: issue.ID}, triage); err != nil {
-				return failed(err)
-			}
 		}
 		if err := tx.Commit(); err != nil {
 			return failed(err)

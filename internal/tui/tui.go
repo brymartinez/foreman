@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -44,6 +45,7 @@ type Options struct {
 	// Triage runs an interactive triage session on the terminal and returns when it
 	// ends. The dashboard has given the terminal up for the call and takes it back.
 	Triage func(ctx context.Context, req TriageRequest) error
+	Intake Intake
 }
 
 // result is one finished background call. The event loop owns the model, so a
@@ -81,6 +83,10 @@ type result struct {
 	historySeq      int
 	history         []app.HistoryRow
 	historyWarnings []error
+	intake          ActionKind
+	intakeView      IntakeView
+	intakeID        string
+	intakeDiscarded bool
 }
 
 // staleView reports a refresh fetched for the view the developer has since left.
@@ -99,7 +105,11 @@ func Run(ctx context.Context, o Options) (err error) {
 	if err != nil {
 		return fmt.Errorf("put the terminal in raw mode: %w", err)
 	}
+	pasteEnabled := false
 	defer func() {
+		if pasteEnabled {
+			fmt.Fprint(o.Out, disablePaste)
+		}
 		// Restore the terminal even on a panic, so the shell stays usable.
 		fmt.Fprint(o.Out, showCursor+leaveAlt)
 		if restoreErr := term.Restore(int(o.In.Fd()), state); err == nil {
@@ -134,6 +144,7 @@ func Run(ctx context.Context, o Options) (err error) {
 	remote := time.NewTicker(o.GitHubEvery)
 	defer remote.Stop()
 
+	refreshAfterSave := false
 	refresh := func() {
 		if m.Refreshing {
 			return
@@ -173,8 +184,12 @@ func Run(ctx context.Context, o Options) (err error) {
 			}
 			stale := r.staleView(&m)
 			pending += settle(ctx, o.Source, &m, r, results)
-			if stale {
-				// The toggle came while this refresh ran, so fetch the new view now.
+			if r.intake == ActionSaveIntake && r.err == nil {
+				refreshAfterSave = m.Refreshing
+				refresh()
+			}
+			if stale || (refreshAfterSave && r.report != nil) {
+				refreshAfterSave = false
 				refresh()
 			}
 		case k := <-keys:
@@ -225,6 +240,23 @@ func Run(ctx context.Context, o Options) (err error) {
 				key, raw := a.Respond, a.Answer
 				pending++
 				go func() { results <- respond(ctx, o.Source, key, raw) }()
+			case ActionLoadIntake, ActionReplyIntake, ActionSaveIntake, ActionDiscardIntake:
+				if o.Intake == nil {
+					apply(&m, result{intake: a.Kind, err: fmt.Errorf("local issue intake is unavailable")})
+					break
+				}
+				finished := a.Kind == ActionSaveIntake || a.Kind == ActionDiscardIntake
+				if finished {
+					pending++
+				}
+				go func() {
+					r := runIntake(ctx, o.Intake, a)
+					r.finished = finished
+					select {
+					case results <- r:
+					case <-ctx.Done():
+					}
+				}()
 			case ActionTriage:
 				if o.Triage == nil {
 					m.Message = "! triage sessions are not available"
@@ -236,8 +268,8 @@ func Run(ctx context.Context, o Options) (err error) {
 					return termErr
 				}
 				screen.resize()
-				m.Message = triageMessage(req, sessionErr)
-				// The session may have saved a local issue or confirmed triage.
+				m.Message = triageMessage(sessionErr)
+				// The session may have confirmed triage.
 				refresh()
 			case ActionReadLog:
 				readLog(&m)
@@ -257,17 +289,21 @@ func Run(ctx context.Context, o Options) (err error) {
 				readLog(&m)
 			}
 		}
+		if intakeOpen := m.intake.panel != intakeClosed; intakeOpen != pasteEnabled {
+			pasteEnabled = intakeOpen
+			if pasteEnabled {
+				fmt.Fprint(o.Out, enablePaste)
+			} else {
+				fmt.Fprint(o.Out, disablePaste)
+			}
+		}
 		screen.paint(m)
 	}
 }
 
-// triageMessage says how a triage session ended.
-func triageMessage(req TriageRequest, err error) string {
+func triageMessage(err error) string {
 	if err != nil {
 		return "! triage session: " + err.Error()
-	}
-	if req.Key == (task.Key{}) {
-		return "Local intake ended. The inbox is refreshing."
 	}
 	return "Triage session ended. The inbox is refreshing."
 }
@@ -363,6 +399,10 @@ func launchAuto(ctx context.Context, s Source, m *Model, results chan<- result) 
 }
 
 func apply(m *Model, r result) {
+	if r.intake != ActionNone {
+		m.applyIntake(r)
+		return
+	}
 	if r.staleView(m) {
 		m.Refreshing = false
 		return
@@ -744,17 +784,51 @@ func readKeys(ctx context.Context, in io.Reader, out chan<- Key, wait time.Durat
 	go readBytes(in, raw)
 
 	var buf []byte
+	var paste []byte
+	var pasting, pasteTooLarge bool
 	// pending ticks only while buf holds bytes that are not yet a whole key.
 	var pending <-chan time.Time
 	// emit sends every whole key in buf and reports whether to keep reading. What it
 	// leaves in buf is a key that is not finished arriving.
 	emit := func(final bool) bool {
 		for len(buf) > 0 {
-			k, used, ok := DecodeKey(buf, final)
-			if !ok {
-				return true
+			var k Key
+			if pasting {
+				end := bytes.Index(buf, []byte(pasteEnd))
+				n := end
+				if end < 0 {
+					// Keep only the bytes that could still form the closing marker.
+					n = max(len(buf)-len(pasteEnd)+1, 0)
+				}
+				if !pasteTooLarge && len(paste)+n <= maxIntakeInput {
+					paste = append(paste, buf[:n]...)
+				} else {
+					paste, pasteTooLarge = nil, true
+				}
+				if end < 0 {
+					buf = buf[n:]
+					return true
+				}
+				buf = buf[end+len(pasteEnd):]
+				pasting = false
+				if pasteTooLarge {
+					k = Key{Kind: keyPasteTooLarge}
+				} else {
+					k = Key{Kind: KeyPaste, Text: pasteText(string(paste))}
+				}
+				paste, pasteTooLarge = nil, false
+			} else {
+				decoded, used, ok := DecodeKey(buf, final)
+				if !ok {
+					return true
+				}
+				buf = buf[used:]
+				if decoded.Kind == keyPasteStart {
+					pasting = true
+					continue
+				}
+				k = decoded
 			}
-			buf = buf[used:]
 			select {
 			case out <- k:
 			case <-ctx.Done():
@@ -778,7 +852,7 @@ func readKeys(ctx context.Context, in io.Reader, out chan<- Key, wait time.Durat
 				return
 			}
 			pending = nil
-			if len(buf) > 0 {
+			if len(buf) > 0 && !pasting {
 				pending = time.After(wait)
 			}
 		case <-pending:
@@ -807,13 +881,15 @@ func readBytes(in io.Reader, ch chan<- []byte) {
 }
 
 const (
-	enterAlt   = "\x1b[?1049h"
-	leaveAlt   = "\x1b[?1049l"
-	hideCursor = "\x1b[?25l"
-	showCursor = "\x1b[?25h"
-	clear      = "\x1b[2J"
-	home       = "\x1b[H"
-	eraseLine  = "\x1b[K"
+	enablePaste  = "\x1b[?2004h"
+	disablePaste = "\x1b[?2004l"
+	enterAlt     = "\x1b[?1049h"
+	leaveAlt     = "\x1b[?1049l"
+	hideCursor   = "\x1b[?25l"
+	showCursor   = "\x1b[?25h"
+	clear        = "\x1b[2J"
+	home         = "\x1b[H"
+	eraseLine    = "\x1b[K"
 )
 
 // draw repaints the whole screen. At one frame a second a full repaint inside the

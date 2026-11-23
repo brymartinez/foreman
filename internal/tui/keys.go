@@ -3,7 +3,11 @@
 // terminal.
 package tui
 
-import "unicode/utf8"
+import (
+	"strings"
+	"unicode"
+	"unicode/utf8"
+)
 
 type KeyKind int
 
@@ -28,12 +32,16 @@ const (
 	KeyCtrlU
 	KeyCtrlF
 	KeyCtrlB
+	KeyPaste
+	keyPasteStart
+	keyPasteTooLarge
 )
 
-// Key is one keystroke. Rune is set only for KeyRune.
+// Key is one keystroke or paste. Rune is set for KeyRune and Text for KeyPaste.
 type Key struct {
 	Kind KeyKind
 	Rune rune
+	Text string
 }
 
 // DecodeKey reads the first key in p. It returns the key, the bytes it consumed, and
@@ -110,6 +118,19 @@ func decodeEscape(p []byte, final bool) (Key, int, bool) {
 	return Key{Kind: KeyEscape}, 1, true
 }
 
+const pasteEnd = "\x1b[201~"
+
+func pasteText(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) && r != '\n' && r != '\t' {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 func escapeKey(params string, final byte) Key {
 	switch final {
 	case 'A':
@@ -126,6 +147,8 @@ func escapeKey(params string, final byte) Key {
 		return Key{Kind: KeyHome}
 	case '~':
 		switch params {
+		case "200":
+			return Key{Kind: keyPasteStart}
 		case "1", "7":
 			return Key{Kind: KeyHome}
 		case "3":

@@ -143,12 +143,6 @@ func TestExportMarkdownWritesEveryTaskForObsidian(t *testing.T) {
 }
 
 func TestTriagePromptNamesTheExactSaveCommand(t *testing.T) {
-	newIssue := triagePrompt("/bin/foreman", tui.TriageRequest{})
-	for _, want := range []string{"foreman-triage", "/bin/foreman issue add", "--triage-file", "Foreman never writes to that tracker"} {
-		if !strings.Contains(newIssue, want) {
-			t.Errorf("intake prompt lacks %q:\n%s", want, newIssue)
-		}
-	}
 	local := triagePrompt("/bin/foreman", tui.TriageRequest{Key: task.Key{Source: task.Local, ExternalID: "L-0000002A"}, Title: "Fix"})
 	if !strings.Contains(local, "issue triage L-0000002A --file") || !strings.Contains(local, "issue show L-0000002A") {
 		t.Errorf("local prompt:\n%s", local)

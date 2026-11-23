@@ -680,10 +680,14 @@ in Foreman's own database. Foreman holds no tracker credentials and never reads 
 writes the source: the link is context for you and the agent. Each issue has a stable
 ID like `L-0000002A`.
 
-- Press `F` in the dashboard (or run `foreman-triage` with a link) to interview and save
-  one. The skill reads the link with whatever access your agent session has, asks you to
-  paste the content otherwise, and saves with `foreman issue add`. Press `f` on an issue
-  marked **Awaiting triage** to triage it the same way. `c` still cancels.
+- Press `Shift+F` in the dashboard to open the local issue chat. Send a source link or
+  paste the issue text. If the planning agent cannot read the link, paste the content.
+  Press `Tab` to review a proposed draft, then `y` to save the issue and its triage.
+  Press `Esc` to return to the dashboard. `Shift+F` reopens the chat, even after a
+  restart. Inside the chat, press `Ctrl+D` and confirm to discard it.
+- Run the standalone `foreman-triage` skill to take in an issue from an agent CLI.
+  Press `f` on an issue marked **Awaiting triage** to open the skill for that issue.
+  Press `c` in the dashboard to cancel a task.
 - Without confirmed triage a local issue cannot start. With it, delegate it like any
   issue: Foreman proposes a repository from `owner/repo` links in the issue and triage,
   or you enter one. Auto mode starts it only when triage is confirmed and one

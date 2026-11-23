@@ -81,7 +81,7 @@ func TestDecodeKeyConsumesOneKeyAtATime(t *testing.T) {
 }
 
 func TestDecodeKeyDropsAnUnknownEscapeSequence(t *testing.T) {
-	got, n, ok := DecodeKey([]byte("\x1b[200~x"), false)
+	got, n, ok := DecodeKey([]byte("\x1b[999~x"), false)
 	if !ok || got.Kind != KeyUnknown || n != 6 {
 		t.Fatalf("DecodeKey = %+v, %d, %v; want the whole sequence dropped", got, n, ok)
 	}

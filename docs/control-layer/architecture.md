@@ -42,8 +42,9 @@ cannot share a `#0` log. Repository and PR operations always use `GitHubClient`.
 
 ## Execution model
 
-Runner turns are headless and return typed outcomes. The maintainer runs the
-standalone triage skill before starting an issue in Foreman.
+Runner turns are headless and return typed outcomes. The maintainer confirms
+triage through the standalone skill or the dashboard's new local issue chat
+before starting an issue in Foreman.
 
 ```
 app.Start, from the dashboard (enter on an inbox issue, or auto mode)
@@ -165,12 +166,15 @@ foreman [-a|--auto|--no-auto] [-s github|local|all] [--mentions|--no-mentions]
                            older chunk of the log file; g -> read back to its start
                          f on an open inbox issue marked Awaiting triage -> hand the
                            terminal to an interactive `foreman-triage` session for that
-                           GitHub or local issue (Claude or Codex, per models.planning);
-                           F -> the same skill for a new local issue. The dashboard
-                           leaves raw mode and the alternate screen, takes the session's
+                           GitHub or local issue (Claude or Codex, per models.planning).
+                           The dashboard leaves raw mode and the alternate screen, takes the session's
                            stdin back from its key reader, ignores SIGINT meant for the
                            session, and on exit restores the terminal and refreshes the
-                           inbox. c stays cancel
+                           inbox
+                         F -> open or resume the local issue chat in the dashboard
+                           (models.planning). Enter sends, Tab reviews the draft, y
+                           confirms, Esc returns to the inbox, Ctrl-D offers to discard
+                         c -> cancel the selected task
                          ? -> the keys and the version; any key closes it
                          c on a running task     -> confirm, app.Cancel
                          x on a FAILED task      -> confirm, app.Reset
@@ -346,11 +350,16 @@ the same commit. The commit message records why it changed.
 ### Local issues
 
 - **One stable ID.** A local issue is `L-` and eight hex digits, assigned once and
-  independent of the repository later chosen for it. `foreman issue add` is the one
-  intake command: the TUI's `F`, the standalone `foreman-triage` skill, and a person
-  at a shell all save through it. With `--triage-file` the scope is confirmed and the
-  issue is ready; without it the issue awaits triage and `foreman issue triage ID`
-  confirms it later. The issue and its triage save in one transaction.
+  independent of the repository later chosen for it. The dashboard chat and
+  `foreman issue add` share the issue creation path. With `--triage-file` the shell
+  command confirms scope. Without it, `foreman issue triage ID` confirms it later.
+  The issue and its confirmed triage save in one transaction.
+- **Dashboard intake.** One unfinished chat per database holds its transcript, the
+  planning target, the provider session ID, and any pending message. The terminal
+  stays with the dashboard during provider turns. On a missing session or interrupted
+  turn, Foreman can rebuild the context from the transcript. The agent proposes a
+  draft and the user reviews and confirms it in Foreman. That confirmation saves the
+  issue and clears the chat in the same transaction. Portable exports omit the chat.
 - **Only confirmed local triage counts.** A local issue never takes the GitHub
   `triaged` label or tracker comments as scope: a user tag spelled `triaged` is
   filtered out of its labels. A start without a triage record returns
@@ -528,7 +537,8 @@ the same commit. The commit message records why it changed.
   labels. Reviewers have their own schema and parser, `agent.ParseReview`.
   Claude may omit `findings` and `limitations` when they are empty; `ParseReview` treats
   omitted arrays as empty. Codex keeps the complete required-property schema for strict
-  output mode.
+  output mode. Dashboard intake parses its own reply and optional draft through
+  `agent.ParseIntakeReply`.
   Rejected: interactive sessions with terminal scraping.
 - **Permissions.** The dangerous bypass flags are never used. Claude runs with
   `acceptEdits` and the fixed `Bash,WebFetch,WebSearch` tool list; the list is not
@@ -969,8 +979,8 @@ the same commit. The commit message records why it changed.
   still needs a second task or a maintainer citation.
 - **Time and cost are context, not a score.** The evaluator prompt says so, and says
   CI is not evidence. A long or expensive task is not a failure by itself.
-- **Repository knowledge informs triage.** The triage interview can research relevant knowledge
-  before saving confirmed decisions. Planning, implementation,
+- **Repository knowledge informs standalone triage.** The standalone skill can research
+  relevant knowledge before saving confirmed decisions. Planning, implementation,
   correction, and review prompts omit repository knowledge.
 - **Knowledge moves between machines as one Markdown file.** `foreman knowledge
   export owner/repo` writes the rendered active guidance, then a fenced YAML payload

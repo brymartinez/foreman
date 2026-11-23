@@ -71,7 +71,7 @@ func TestShiftFStartsLocalIntakeFromAnywhere(t *testing.T) {
 	for _, focus := range []Pane{InboxPane, TaskPane} {
 		m := model()
 		m.Focus = focus
-		if a := press(&m, rune_('F')); a.Kind != ActionTriage || a.Triage.Key != (task.Key{}) {
+		if a := press(&m, rune_('F')); a.Kind != ActionLoadIntake || m.intake.panel != intakeChat {
 			t.Errorf("F with focus %v = %+v", focus, a)
 		}
 	}
@@ -88,7 +88,7 @@ func TestCStillCancelsAndFDoesNotShadowIt(t *testing.T) {
 func TestHelpAndFooterListTheTriageKeys(t *testing.T) {
 	m := model()
 	m.Width = 200
-	if got := footer(m); !strings.Contains(got, "f triage") || !strings.Contains(got, "F new") {
+	if got := footer(m); !strings.Contains(got, "f triage") || !strings.Contains(got, "F chat") {
 		t.Errorf("footer = %q", got)
 	}
 	var f, shiftF bool
@@ -102,13 +102,10 @@ func TestHelpAndFooterListTheTriageKeys(t *testing.T) {
 }
 
 func TestTriageMessageSaysHowTheSessionEnded(t *testing.T) {
-	if got := triageMessage(TriageRequest{}, nil); !strings.Contains(got, "Local intake ended") {
-		t.Errorf("intake = %q", got)
-	}
-	if got := triageMessage(TriageRequest{Key: task.Key{Repo: "a/b", Number: 1}}, nil); !strings.Contains(got, "Triage session ended") {
+	if got := triageMessage(nil); !strings.Contains(got, "Triage session ended") {
 		t.Errorf("triage = %q", got)
 	}
-	if got := triageMessage(TriageRequest{}, os.ErrInvalid); !strings.HasPrefix(got, "! triage session:") {
+	if got := triageMessage(os.ErrInvalid); !strings.HasPrefix(got, "! triage session:") {
 		t.Errorf("failure = %q", got)
 	}
 }

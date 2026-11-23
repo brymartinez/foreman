@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"syscall"
 	"time"
@@ -72,6 +71,7 @@ type Command struct {
 	Name   string
 	Args   []string
 	Dir    string
+	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
 }
@@ -79,21 +79,15 @@ type Command struct {
 // Exec runs a Command to completion. Tests replace it with recorded output.
 type Exec func(ctx context.Context, c Command) error
 
-// RunCommand connects stdin to /dev/null: claude -p waits 3s for piped stdin otherwise.
+// RunCommand uses os/exec's null input unless the adapter supplies stdin.
 // The agent runs in its own process group so a cancelled run stops the tools it
 // started too; WaitDelay stops a leftover grandchild holding the output pipe from
 // keeping the runner waiting.
 func RunCommand(ctx context.Context, c Command) error {
 	cmd := exec.CommandContext(ctx, c.Name, c.Args...)
-	cmd.Dir, cmd.Stdout, cmd.Stderr = c.Dir, c.Stdout, c.Stderr
+	cmd.Dir, cmd.Stdin, cmd.Stdout, cmd.Stderr = c.Dir, c.Stdin, c.Stdout, c.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
 	cmd.WaitDelay = 5 * time.Second
-	devnull, err := os.Open(os.DevNull)
-	if err != nil {
-		return err
-	}
-	defer devnull.Close()
-	cmd.Stdin = devnull
 	return cmd.Run()
 }

@@ -64,10 +64,13 @@ const (
 	ActionLoadHistory
 	// ActionTriage hands the terminal to an interactive foreman-triage session.
 	ActionTriage
+	ActionLoadIntake
+	ActionReplyIntake
+	ActionSaveIntake
+	ActionDiscardIntake
 )
 
-// TriageRequest asks for a triage session. A zero Key starts local intake for a new
-// local issue; otherwise the session triages that issue.
+// TriageRequest asks for a session to triage an existing issue.
 type TriageRequest struct {
 	Key task.Key
 	// Title names the issue in the session's first message.
@@ -92,7 +95,8 @@ type Action struct {
 	RouteSeq    int
 	ProposalSeq int
 	// Triage is the session to run for ActionTriage.
-	Triage TriageRequest
+	Triage         TriageRequest
+	IntakeRevision int64
 }
 
 // Model is everything the dashboard draws and everything a keystroke changes.
@@ -145,6 +149,7 @@ type Model struct {
 	// DecisionTop is the first wrapped question line in view while a decision is asked.
 	DecisionTop int
 
+	intake          intakeState
 	Mode            Mode
 	Input           string // the context file or the decision answer being typed
 	BranchCursor    int    // rune index in Input while editing a branch
@@ -369,6 +374,9 @@ func clamp(i, n int) int {
 
 // Key applies one keystroke and returns what the driver must do.
 func (m *Model) Key(k Key) Action {
+	if m.intake.panel != intakeClosed && k.Kind != KeyCtrlC {
+		return m.intakeKey(k)
+	}
 	if k.Kind == KeyRune && k.Rune == ' ' && m.logShown() {
 		m.LogPaused = !m.LogPaused
 		return Action{}
@@ -473,7 +481,7 @@ func (m *Model) browse(k Key) Action {
 	case k.Kind == KeyRune && k.Rune == 'f':
 		return m.triageSelected()
 	case k.Kind == KeyRune && k.Rune == 'F':
-		return Action{Kind: ActionTriage}
+		return m.openIntake()
 	case k.Kind == KeyRune && k.Rune == 'c':
 		return m.startCancel()
 	case k.Kind == KeyRune && k.Rune == 'x':
@@ -648,7 +656,7 @@ func (m *Model) triageSelected() Action {
 	e := m.selectedEntry()
 	switch {
 	case m.Focus != InboxPane || e == nil:
-		m.Message = "Select an open issue in INBOX that is awaiting triage, then press f. Shift+F starts a new local issue."
+		m.Message = "Select an open issue in INBOX that is awaiting triage, then press f. Shift+F opens local issue intake."
 	case e.Item.Kind != task.Issue || e.Item.State != "open" || e.Delegated:
 		m.Message = "f triages an open issue that has not been delegated."
 	case e.TriageError != "":
