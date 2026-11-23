@@ -103,6 +103,7 @@ func (a App) Learn(ctx context.Context, key task.Key, log io.Writer) error {
 	if err := a.Knowledge.Apply(repo, ev); err != nil {
 		return err
 	}
+	a.publishKnowledge(ctx, repo)
 	fmt.Fprintf(log, "learn: evaluated %s task %s: %d proposals, %d revisions\n", repo, id, len(out.Proposals), len(out.Revisions))
 	return nil
 }

@@ -57,7 +57,11 @@ type App struct {
 	FullSuiteGate     bool // enabled in the CLI; every task copies it when it starts
 	LocalIssues       LocalIssues
 	// Workspace is the shared store in notion or obsidian mode; nil in sqlite mode.
-	Workspace       Workspace
+	Workspace Workspace
+	// WorkspaceLog receives problems with the shared store that do not stop a command.
+	WorkspaceLog func(format string, args ...any)
+	// MaxConcurrent caps active runs before a task queued in the store waits. 0 sets no cap.
+	MaxConcurrent   int
 	Models          task.ModelPolicy
 	Repositories    RepositoryManager
 	Worktrees       WorktreeManager
@@ -137,6 +141,9 @@ func (a App) InboxView(ctx context.Context, allRepos bool) (InboxReport, error) 
 }
 
 func (a App) inboxView(ctx context.Context, allRepos bool, source task.Source) (InboxReport, error) {
+	// The shared store comes first: it may hold issues, scope, answers, and queue
+	// requests that this refresh then acts on.
+	workspaceWarnings := a.refreshWorkspace(ctx)
 	recs, err := a.Store.List(ctx)
 	if err != nil {
 		return InboxReport{}, err
@@ -212,7 +219,7 @@ func (a App) inboxView(ctx context.Context, allRepos bool, source task.Source) (
 	}
 	report.Truncated = truncated
 	report.SourcesFresh = fresh
-	report.Warnings = append(append(sourceWarnings, warnings...), refreshWarnings...)
+	report.Warnings = append(append(append(workspaceWarnings, sourceWarnings...), warnings...), refreshWarnings...)
 	for _, seen := range dirty {
 		if _, err := a.update(ctx, seen.Key, func(cur *task.Record) (*task.Record, error) {
 			return mergeObserved(cur, seen), nil

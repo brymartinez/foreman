@@ -1027,6 +1027,9 @@ func (a App) update(ctx context.Context, key task.Key, fn func(cur *task.Record)
 		}
 		return next, err
 	})
+	if err == nil && rec != nil {
+		a.publish(ctx, rec.Key)
+	}
 	if err == nil && rec != nil && rec.State != before {
 		a.notify(key, rec)
 		// Finished work closes its local issue, which keeps it out of the inbox.

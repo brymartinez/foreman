@@ -215,8 +215,10 @@ ON CONFLICT(id) DO UPDATE SET decisions = excluded.decisions`, id, strings.TrimS
 // taskFor finds the task record of a key. A local issue's task is stored under
 // the repository it was bound to, so it is found by its ID.
 func (s *Sync) taskFor(ctx context.Context, key task.Key) (*task.Record, error) {
-	if key.Source != task.Local {
-		return s.Tasks.Get(ctx, key)
+	if key.Source != task.Local || key.Repo != "" {
+		if rec, err := s.Tasks.Get(ctx, key); err != nil || rec != nil || key.Source != task.Local {
+			return rec, err
+		}
 	}
 	recs, err := s.Tasks.List(ctx)
 	if err != nil {
