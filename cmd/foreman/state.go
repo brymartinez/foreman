@@ -62,7 +62,7 @@ func openStateGated(cfg config.Config, w io.Writer, gate bool) (state, error) {
 		fmt.Fprintln(w)
 	}
 	if gate {
-		if err := workspace.Gate(d, cfg.Storage); err != nil {
+		if err := workspace.GateWith(d, cfg.Storage, func() error { return ensureStore(cfg.Storage) }); err != nil {
 			d.Close()
 			return state{}, err
 		}

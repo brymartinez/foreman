@@ -299,6 +299,17 @@ func rt(s string) map[string]any {
 	return map[string]any{"rich_text": richText(s)}
 }
 
+// rtLong holds text of any length a property can take: items of 2000 characters,
+// at most 100 of them. Confirmed triage is read back as the user's edit, so cutting
+// it to one item would turn the cut text into a "change".
+func rtLong(s string) map[string]any {
+	items := richText(s)
+	if len(items) > maxCodeItems {
+		items = items[:maxCodeItems]
+	}
+	return map[string]any{"rich_text": items}
+}
+
 func foremanProps(r workspace.Record, at time.Time) map[string]any {
 	props := map[string]any{
 		"Foreman ID": rt(r.ID), "Status": map[string]any{"select": map[string]any{"name": statusLabelOf(r)}},
@@ -345,7 +356,7 @@ func (b *Backend) UpsertTask(ctx context.Context, p workspace.TaskPublish) (stri
 		props := foremanProps(p.Record, b.now())
 		props["Name"] = map[string]any{"title": richText(s.Name)}
 		props["Repository"] = rt(s.Repository)
-		props["Confirmed triage"] = rt(s.ConfirmedTriage)
+		props["Confirmed triage"] = rtLong(strings.TrimSpace(s.ConfirmedTriage))
 		props["Scope confirmed"] = map[string]any{"checkbox": s.ScopeConfirmed}
 		if s.SourceURL != "" {
 			props["Source URL"] = map[string]any{"url": s.SourceURL}
@@ -359,7 +370,7 @@ func (b *Backend) UpsertTask(ctx context.Context, p workspace.TaskPublish) (stri
 		if strings.TrimSpace(s.Description) != "" {
 			desc = paragraphs(s.Description)
 		}
-		first := desc[:min(len(desc), maxAppend)]
+		first := desc[:takeBlocks(desc)]
 		body := map[string]any{"parent": map[string]any{"type": "data_source_id", "data_source_id": b.tasks.source}, "properties": props}
 		if len(first) > 0 {
 			body["children"] = first
@@ -449,7 +460,7 @@ func (b *Backend) ListKnowledge(ctx context.Context) ([]workspace.KnowledgeEntry
 		if err != nil {
 			return nil, err
 		}
-		e.ParseErr = errors.New("the entry has no knowledge payload")
+		e.ParseErr = workspace.ErrNoPayload
 		for i := len(body.Payloads) - 1; i >= 0; i-- {
 			if snap, perr := knowledge.Parse([]byte(body.Payloads[i])); perr == nil {
 				e.Snapshot, e.ParseErr, e.Digest = &snap, nil, workspace.SnapshotDigest(snap)

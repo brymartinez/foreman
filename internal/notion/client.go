@@ -99,7 +99,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		}
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 		resp.Body.Close()
-		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 && retriesAfterServerError(method, path) {
 			if attempt < c.Retries {
 				c.sleep(retryDelay(resp, attempt))
 				continue
@@ -115,6 +115,21 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		}
 		return json.Unmarshal(raw, out)
 	}
+}
+
+// retriesAfterServerError says whether a 5xx answer to this request is safe to
+// retry. Notion may already have applied a write that answered 503, so repeating a
+// create or an append could duplicate a database, a page, or a block of the
+// payload. Those callers look the result up on their next attempt instead. A 429
+// is always safe to retry: the request was refused.
+func retriesAfterServerError(method, path string) bool {
+	switch {
+	case method == http.MethodPost && (path == "/v1/databases" || path == "/v1/pages"):
+		return false
+	case method == http.MethodPatch && strings.HasSuffix(path, "/children"):
+		return false
+	}
+	return true
 }
 
 func (c *Client) sleep(d time.Duration) {

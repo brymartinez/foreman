@@ -4,12 +4,18 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"time"
 
 	"go.yaml.in/yaml/v3"
 
 	"github.com/brymartinez/foreman/internal/knowledge"
 )
+
+// ErrNoPayload is a knowledge entry's ParseErr when the entry exists but holds no
+// payload at all, as after a publish that created the page and then failed. Unlike
+// a payload that does not parse, it is not someone's edit, so publishing resumes.
+var ErrNoPayload = errors.New("the entry has no knowledge payload")
 
 // TaskEntry is one task as the store holds it: the user's fields, the
 // Foreman-owned fields it last published, and the parsed payload.

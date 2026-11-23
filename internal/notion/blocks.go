@@ -13,7 +13,28 @@ const (
 	maxCodeItems  = 100  // rich-text items per block
 	sectionTitle  = "Foreman record"
 	codeBlockSize = maxRichText * maxCodeItems
+	// maxRequestBytes keeps a request under Notion's 500 KB payload limit with room
+	// for the envelope.
+	maxRequestBytes = 400_000
 )
+
+// takeBlocks says how many of blocks go into one request: at most 100, and at most
+// maxRequestBytes of JSON, but always at least one.
+func takeBlocks(blocks []any) int {
+	size, n := 0, 0
+	for _, b := range blocks {
+		raw, err := json.Marshal(b)
+		if err != nil {
+			return max(n, 1)
+		}
+		if n > 0 && (n >= maxAppend || size+len(raw) > maxRequestBytes) {
+			break
+		}
+		size += len(raw)
+		n++
+	}
+	return n
+}
 
 // richText splits s into rich-text items of at most 2000 characters.
 func richText(s string) []any {
@@ -154,7 +175,7 @@ func (c *Client) blocksOf(ctx context.Context, parent string) ([]blockObj, error
 func (c *Client) appendBlocks(ctx context.Context, parent string, blocks []any) ([]string, error) {
 	var ids []string
 	for len(blocks) > 0 {
-		n := min(len(blocks), maxAppend)
+		n := takeBlocks(blocks)
 		var resp struct {
 			Results []struct{ ID string } `json:"results"`
 		}
@@ -233,7 +254,7 @@ func (c *Client) replaceSection(ctx context.Context, page string, text, payload 
 		return err
 	}
 	kids := append(paragraphs(text), codeBlocks(payload)...)
-	first := kids[:min(len(kids), maxAppend)]
+	first := kids[:takeBlocks(kids)]
 	heading := block("heading_2", map[string]any{"rich_text": richText(sectionTitle), "is_toggleable": true, "children": first})
 	ids, err := c.appendBlocks(ctx, page, []any{heading})
 	if err != nil {

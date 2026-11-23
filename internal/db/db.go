@@ -120,6 +120,11 @@ CREATE TABLE workspace_entries (
 ALTER TABLE workspace_entries ADD COLUMN stage TEXT NOT NULL DEFAULT '';
 ALTER TABLE workspace_entries ADD COLUMN stage_at TEXT NOT NULL DEFAULT '';
 `},
+	{4, "workspace entry question and store-edit tracking", `
+ALTER TABLE workspace_entries ADD COLUMN question TEXT NOT NULL DEFAULT '';
+ALTER TABLE workspace_entries ADD COLUMN fields_seen TEXT NOT NULL DEFAULT '';
+ALTER TABLE workspace_entries ADD COLUMN triage_seen TEXT NOT NULL DEFAULT '';
+`},
 }
 
 // SchemaVersion is the newest schema this build knows.

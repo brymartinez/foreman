@@ -80,6 +80,11 @@ func (m Move) Run(ctx context.Context) (MoveResult, error) {
 		return MoveResult{}, err
 	}
 
+	// Rows left by an earlier attempt describe another destination, or entries since
+	// removed. Clearing them makes every entry copy again to this one.
+	if _, err := s.DB.ExecContext(ctx, `DELETE FROM workspace_entries`); err != nil {
+		return MoveResult{}, err
+	}
 	keys, res, err := m.sourceKeys(ctx, recs)
 	if err != nil {
 		return MoveResult{}, err
@@ -220,6 +225,12 @@ func (m Move) verify(ctx context.Context, keys []task.Key, repos []string) []str
 		b, ok, err := s.build(ctx, k)
 		if err != nil || !ok {
 			diffs = append(diffs, fmt.Sprintf("%s: cannot rebuild from the database: %v", id, err))
+			continue
+		}
+		if want := strings.TrimSpace(b.triage); want != strings.TrimSpace(got[0].ConfirmedTriage) {
+			// The payload holds the full text; the user-facing field is what the first
+			// refresh reads back as an edit, so it must hold the full text too.
+			diffs = append(diffs, fmt.Sprintf("%s: the Confirmed triage field differs from the saved scope", id))
 			continue
 		}
 		g := got[0].Record

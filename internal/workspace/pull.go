@@ -8,7 +8,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/brymartinez/foreman/internal/app"
 	"github.com/brymartinez/foreman/internal/knowledge"
@@ -92,15 +91,31 @@ func (s *Sync) pullEntry(ctx context.Context, e TaskEntry, byID map[string]*task
 			byID[id] = rec
 		}
 	}
-	if key.Source == task.Local {
+	prev, rerr := s.row("task", id)
+	if rerr != nil {
+		s.logf("read entry map of %s: %v", id, rerr)
+		return
+	}
+	// The store's copy is applied only when it changed since the host last
+	// reconciled it. Otherwise a change made on the host (issue triage, a replacing
+	// import) would be undone by the older text the store still holds.
+	if fh := fieldsHash(e); key.Source == task.Local && fh != prev.FieldsSeen {
 		if err := s.syncIssue(ctx, e, key); err != nil {
 			s.logf("sync issue %s: %v", id, err)
+		} else if err := s.setSeen(id, "fields_seen", fh); err != nil {
+			s.logf("record issue fields of %s: %v", id, err)
 		}
 	}
-	if e.ScopeConfirmed && strings.TrimSpace(e.ConfirmedTriage) != "" {
-		if cur, err := s.triage(key); err == nil && cur != strings.TrimSpace(e.ConfirmedTriage) {
+	if text := strings.TrimSpace(e.ConfirmedTriage); e.ScopeConfirmed && text != "" && triageHash(text) != prev.TriageSeen {
+		if cur, err := s.triage(key); err == nil && cur != text {
 			if err := s.saveTriage(taskKey(key, rec), e.ConfirmedTriage); err != nil {
 				s.logf("save triage of %s: %v", id, err)
+				text = ""
+			}
+		}
+		if text != "" {
+			if err := s.setSeen(id, "triage_seen", triageHash(text)); err != nil {
+				s.logf("record triage of %s: %v", id, err)
 			}
 		}
 	}
@@ -221,9 +236,13 @@ func (s *Sync) collect(ctx context.Context, e TaskEntry, id string, key task.Key
 		s.logf("read entry map of %s: %v", id, err)
 		return
 	}
-	if ans := strings.TrimSpace(e.Answer); ans != "" && rec != nil {
-		if d := rec.Pending(); d != nil && e.EditedAt.After(d.AskedAt) {
-			token := hash(id, d.AskedAt.UTC().Format(time.RFC3339Nano), ans)
+	// An answer counts only for the question the store was last told is pending.
+	// Publishing clears an answer typed before a question appeared, so anything in
+	// the field now was written after it.
+	if qk := questionKey(rec); strings.TrimSpace(e.Answer) != "" && qk != "" && qk == prev.Question {
+		ans := strings.TrimSpace(e.Answer)
+		{
+			token := hash(id, qk, ans)
 			if token == prev.AnswerDigest {
 				// Already applied; the clear did not land. Try again.
 				if err := s.Backend.ClearAnswer(ctx, e.Ref); err != nil {
@@ -336,6 +355,20 @@ func (s *Sync) pullKnowledge(ctx context.Context) error {
 		prev, err := s.row("knowledge", e.Repo)
 		if err != nil {
 			return err
+		}
+		if errors.Is(e.ParseErr, ErrNoPayload) {
+			// The page exists but a publish never finished writing it. Nobody edited
+			// it, so publish again instead of pausing.
+			if prev.AnswerDigest == pausedMark {
+				prev.AnswerDigest = ""
+				if err := s.saveRow("knowledge", e.Repo, prev); err != nil {
+					return err
+				}
+			}
+			if err := s.PublishKnowledge(ctx, e.Repo); err != nil {
+				s.logf("%v", err)
+			}
+			continue
 		}
 		if e.ParseErr != nil || e.Snapshot == nil {
 			s.logf("the knowledge entry of %s does not parse and is left alone until it is fixed: %v", e.Repo, e.ParseErr)

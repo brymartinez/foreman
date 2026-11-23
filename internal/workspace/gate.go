@@ -108,7 +108,12 @@ func pidAlive(pid int) bool {
 // Gate decides whether this process may use the database under the configured
 // storage. An unset backend and sqlite pass until a cutover marker exists. A
 // database with no work gets its marker on the first successful setup.
-func Gate(d *sql.DB, s config.Storage) error {
+func Gate(d *sql.DB, s config.Storage) error { return GateWith(d, s, nil) }
+
+// GateWith is Gate with a check of the destination. An empty database is marked
+// only after verify succeeds, so a mistyped or unshared Notion page does not bind
+// the workspace to a destination nobody can reach. A nil verify skips the check.
+func GateWith(d *sql.DB, s config.Storage, verify func() error) error {
 	if running, err := MoveRunning(d); err != nil {
 		return err
 	} else if running {
@@ -137,6 +142,11 @@ func Gate(d *sql.DB, s config.Storage) error {
 	}
 	if work {
 		return fmt.Errorf("storage.backend is %s but the local database still holds tasks, issues, triage, or learnings; run foreman storage move to copy them, or set storage.backend: sqlite", s.Backend)
+	}
+	if verify != nil {
+		if err := verify(); err != nil {
+			return fmt.Errorf("the %s store is not usable yet, so the workspace was not bound to it: %w; run foreman storage check, or set storage.backend: sqlite", s.Backend, err)
+		}
 	}
 	return WriteMarker(d, Marker{Backend: s.Backend, Target: Target(s)})
 }

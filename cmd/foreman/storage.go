@@ -28,6 +28,18 @@ func newBackend(s config.Storage) (workspace.Backend, error) {
 	return nil, fmt.Errorf("storage.backend %q has no shared store", s.Backend)
 }
 
+// ensureStore proves a destination is reachable by creating what the store needs.
+// The gate runs it once, before it binds an empty workspace to the destination.
+func ensureStore(s config.Storage) error {
+	backend, err := newBackend(s)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	return backend.Ensure(ctx)
+}
+
 // storageMove copies the SQLite workspace into the configured store. It opens the
 // database without the gate and builds no runner, learner, or agent.
 func storageMove(ctx context.Context, cfg config.Config, stdout, stderr io.Writer) int {

@@ -106,7 +106,7 @@ func Build(in Input) (Record, error) {
 		r.Status = string(rec.State)
 		r.StageSince = sec(in.StageAt)
 		if o := rec.LastOutcome; o != nil {
-			r.Outcome = &Outcome{Status: o.Status, Summary: o.Summary, At: sec(o.At)}
+			r.Outcome = &Outcome{Status: o.Status, Summary: scrubHost(o.Summary, rec), At: sec(o.At)}
 		}
 		r.Work = portable.WorkOf(rec)
 	}
@@ -327,4 +327,31 @@ func (r Record) LocalIssue() *localissues.Issue {
 	return &localissues.Issue{ID: r.ID, Title: r.Title, Description: r.Issue.Description, SourceURL: r.URL,
 		Status: localissues.Status(r.Issue.Status), Repo: r.Repo, Notes: r.Issue.Notes, Tags: r.Issue.Tags,
 		CreatedAt: r.Issue.CreatedAt, UpdatedAt: r.Issue.UpdatedAt}
+}
+
+// hostPath matches an absolute path that starts a word. A path after "://" is a
+// URL and is kept.
+var hostPath = regexp.MustCompile(`(^|[\s"'(\[=,;])/(?:[\w.@+~-]+/)*[\w.@+~-]+`)
+
+// scrubHost removes host-local values from text that is about to leave the host:
+// the task's own paths and accounts first, then any absolute path. A launch failure
+// names the log path, and an account check names the pinned and active accounts.
+func scrubHost(s string, rec *task.Record) string {
+	if s == "" {
+		return s
+	}
+	// internal/app/account.go names the pinned account, the active one, and the SSH
+	// host. None of it belongs in the shared store.
+	if strings.Contains(s, "pinned to GitHub account") {
+		return "the GitHub account check failed on the host; see the task log there"
+	}
+	if rec != nil && rec.Delegation != nil {
+		d := rec.Delegation
+		for _, v := range []string{d.RepoDir, d.Worktree, d.RunnerLog, d.AccountEmail, d.Account} {
+			if v != "" {
+				s = strings.ReplaceAll(s, v, "<host>")
+			}
+		}
+	}
+	return hostPath.ReplaceAllString(s, "${1}<path>")
 }

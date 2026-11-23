@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/brymartinez/foreman/internal/portable"
 	"github.com/brymartinez/foreman/internal/task"
 	"github.com/brymartinez/foreman/internal/workspace"
 	"github.com/brymartinez/foreman/internal/workspace/backendtest"
@@ -427,4 +428,89 @@ func TestNewReadsTheTestOnlyBaseURLOverride(t *testing.T) {
 	if c := New("tok"); c.Base != DefaultBase {
 		t.Fatalf("base = %q", c.Base)
 	}
+}
+
+func TestClientDoesNotRepeatACreateThatAnsweredWithAServerError(t *testing.T) {
+	f := newFake(t)
+	f.Fail = func(m, p string) (int, string) {
+		if m == "POST" && p == "/v1/pages" {
+			return http.StatusServiceUnavailable, ""
+		}
+		return 0, ""
+	}
+	c := f.client()
+	if err := c.do(context.Background(), "POST", "/v1/pages", map[string]any{}, nil); err == nil {
+		t.Fatal("must fail")
+	}
+	if n := f.count("POST", "/v1/pages"); n != 1 {
+		t.Fatalf("create requests = %d, want 1: Notion may have applied the first one", n)
+	}
+}
+
+func TestClientStillRetriesAThrottledCreate(t *testing.T) {
+	f := newFake(t)
+	calls := 0
+	f.Fail = func(m, p string) (int, string) {
+		if m == "POST" && p == "/v1/pages" && calls == 0 {
+			calls++
+			return http.StatusTooManyRequests, "0"
+		}
+		return 0, ""
+	}
+	c := f.client()
+	if err := c.do(context.Background(), "POST", "/v1/pages", map[string]any{"parent": map[string]any{"page_id": "x"}}, nil); err != nil && IsNotFound(err) == false {
+		t.Fatalf("a refused request is safe to repeat: %v", err)
+	}
+	if n := f.count("POST", "/v1/pages"); n != 2 {
+		t.Fatalf("create requests = %d, want 2", n)
+	}
+}
+
+func TestAPlanLargerThanOneRequestIsSplitByBytesAndStaysReadable(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	r := rec("L-0A1B2C3D", "IMPLEMENTING", "")
+	// Fewer than 100 blocks, but the rendered text and the payload together exceed
+	// 500 KB; the fake rejects any larger request.
+	big := strings.Repeat("0123456789", 30_000) // 300 KB, one line
+	r.Work = &portable.Work{Repo: "o/r", State: "open", Plan: big}
+	if _, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: r, Create: workspace.TaskSeed{Name: "N"}}); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := b.ListTasks(ctx)
+	if err != nil || len(entries) != 1 || entries[0].Record == nil || entries[0].Record.Work == nil || entries[0].Record.Work.Plan != big {
+		t.Fatalf("the plan did not round trip: %v", err)
+	}
+}
+
+func TestConfirmedTriageLongerThan2000CharactersIsStoredWhole(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	text := strings.Repeat("scope ", 700) // 4200 characters
+	text = strings.TrimSpace(text)
+	if _, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX", ""), Create: workspace.TaskSeed{Name: "N", ConfirmedTriage: text, ScopeConfirmed: true}}); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := b.ListTasks(ctx)
+	if len(entries) != 1 || entries[0].ConfirmedTriage != text {
+		t.Fatalf("triage = %d characters, want %d", len(entries[0].ConfirmedTriage), len(text))
+	}
+}
+
+func TestAKnowledgePageWithNoPayloadIsReportedAsNoPayloadNotAsBroken(t *testing.T) {
+	b, f, _ := newBackend(t)
+	ctx := context.Background()
+	if err := b.Ensure(ctx); err != nil {
+		t.Fatal(err)
+	}
+	body := map[string]any{"parent": map[string]any{"type": "data_source_id", "data_source_id": b.knowledge.source},
+		"properties": map[string]any{"Repository": map[string]any{"title": richText("o/r")}}}
+	if err := b.C.do(ctx, "POST", "/v1/pages", body, nil); err != nil {
+		t.Fatal(err)
+	}
+	es, err := b.ListKnowledge(ctx)
+	if err != nil || len(es) != 1 || !errors.Is(es[0].ParseErr, workspace.ErrNoPayload) {
+		t.Fatalf("entries = %+v, err = %v", es, err)
+	}
+	_ = f
 }

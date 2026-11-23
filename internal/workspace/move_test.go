@@ -262,3 +262,39 @@ func (h *harness) githubTask() *task.Record {
 	h.t.Fatal("no GitHub task saved")
 	return nil
 }
+
+func TestMoveRetryToAnotherDestinationCopiesEverythingAgain(t *testing.T) {
+	h := newHarness(t)
+	h.seedWorkspace()
+	h.mem.FailOnWrite = 3 // two tasks reach the first destination, then the move fails
+	if _, err := h.mover().Run(h.ctx); err == nil {
+		t.Fatal("the dropped write must fail the move")
+	}
+	elsewhere := &Memory{Now: h.mem.Now}
+	h.s.Backend = elsewhere
+	if _, err := h.mover().Run(h.ctx); err != nil {
+		t.Fatalf("a retry against a new destination must copy what the first one already got: %v", err)
+	}
+	if es, _ := elsewhere.ListTasks(h.ctx); len(es) != 3 {
+		t.Fatalf("the new destination holds %d entries, want 3", len(es))
+	}
+	if ks, _ := elsewhere.ListKnowledge(h.ctx); len(ks) != 1 {
+		t.Fatalf("the new destination holds %d knowledge entries, want 1", len(ks))
+	}
+}
+
+func TestMoveFailsWhenTheStoreCutsTheConfirmedScopeShort(t *testing.T) {
+	h := newHarness(t)
+	h.seedWorkspace()
+	h.mem.Mangle = func(e *TaskEntry) {
+		if e.ID == "L-0B0B0B0B" {
+			e.ConfirmedTriage = "Do the"
+		}
+	}
+	if _, err := h.mover().Run(h.ctx); err == nil || !strings.Contains(err.Error(), "L-0B0B0B0B") {
+		t.Fatalf("err = %v", err)
+	}
+	if h.marker() != nil {
+		t.Fatal("no marker expected")
+	}
+}

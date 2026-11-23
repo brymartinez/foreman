@@ -216,24 +216,27 @@ func TestPullSavesConfirmedTriageOnlyWhileScopeIsConfirmed(t *testing.T) {
 	}
 }
 
-func TestPullReturnsAnAnswerOnceAndOnlyWhenItPostdatesTheQuestion(t *testing.T) {
+func TestPullReturnsAnAnswerOnceAndNeverOneTypedBeforeTheQuestion(t *testing.T) {
 	h := newHarness(t)
 	rec := fullTask()
+	rec.Decisions = rec.Decisions[:1] // nothing pending yet
 	h.saveTask(rec)
 	h.s.Publish(h.ctx, rec.Key)
 	ref := h.entries()[0].Ref
-	// An answer written before the question was asked is stale.
+	// An answer typed while no question is waiting is stale once one appears, even
+	// if someone edits the entry afterwards.
 	h.mem.UserEdit(ref, func(e *TaskEntry) { e.Answer = "old" })
-	h.mem.mu.Lock()
-	h.mem.find(ref).EditedAt = rec.Decisions[1].AskedAt.Add(-time.Hour)
-	h.mem.mu.Unlock()
+	rec = fullTask()
+	h.saveTask(rec)
+	h.s.Publish(h.ctx, rec.Key)
+	h.mem.UserEdit(ref, func(e *TaskEntry) { e.Tags = []string{"unrelated edit"} })
 	if p := h.pull(); len(p.Answers) != 0 {
 		t.Fatalf("a stale answer was returned: %+v", p.Answers)
 	}
+	if h.entries()[0].Answer != "" {
+		t.Fatal("publishing a new question must clear an answer typed before it")
+	}
 	h.mem.UserEdit(ref, func(e *TaskEntry) { e.Answer = "B" })
-	h.mem.mu.Lock()
-	h.mem.find(ref).EditedAt = rec.Decisions[1].AskedAt.Add(time.Hour)
-	h.mem.mu.Unlock()
 	p := h.pull()
 	if len(p.Answers) != 1 || p.Answers[0].Text != "B" || p.Answers[0].Key != rec.Key {
 		t.Fatalf("answers = %+v", p.Answers)
@@ -246,14 +249,81 @@ func TestPullReturnsAnAnswerOnceAndOnlyWhenItPostdatesTheQuestion(t *testing.T) 
 	}
 	// The clear is lost (the field comes back): the answer must not apply again.
 	h.mem.UserEdit(ref, func(e *TaskEntry) { e.Answer = "B" })
-	h.mem.mu.Lock()
-	h.mem.find(ref).EditedAt = rec.Decisions[1].AskedAt.Add(2 * time.Hour)
-	h.mem.mu.Unlock()
 	if p := h.pull(); len(p.Answers) != 0 {
 		t.Fatalf("an applied answer came back: %+v", p.Answers)
 	}
 	if h.entries()[0].Answer != "" {
 		t.Fatal("the leftover answer was not cleared")
+	}
+}
+
+func TestTwoQuestionsFromOneTurnTakeTheSameAnswerText(t *testing.T) {
+	h := newHarness(t)
+	rec := fullTask()
+	at := rec.Decisions[1].AskedAt
+	rec.Decisions = []task.Decision{
+		{AskedAt: at, Question: rec.Decisions[1].Question},
+		{AskedAt: at, Question: task.Question{Issue: "Other?", Options: []task.Option{{Label: "A"}, {Label: "B"}}}},
+	}
+	h.saveTask(rec)
+	h.s.Publish(h.ctx, rec.Key)
+	ref := h.entries()[0].Ref
+	answer := func() app.WorkspaceAnswer {
+		h.mem.UserEdit(ref, func(e *TaskEntry) { e.Answer = "A" })
+		p := h.pull()
+		if len(p.Answers) != 1 {
+			t.Fatalf("answers = %+v", p.Answers)
+		}
+		return p.Answers[0]
+	}
+	first := answer()
+	if err := h.s.Ack(h.ctx, app.WorkspaceAck{Key: rec.Key, Kind: app.AckAnswer, Token: first.Token}); err != nil {
+		t.Fatal(err)
+	}
+	cur, _ := h.s.Tasks.Get(h.ctx, rec.Key)
+	cur = rec // the respond path records the first answer and publishes the second question
+	cur.Decisions[0].Answer = "A"
+	h.saveTask(cur)
+	if err := h.s.Publish(h.ctx, cur.Key); err != nil {
+		t.Fatal(err)
+	}
+	second := answer()
+	if second.Token == first.Token {
+		t.Fatal("the second question's answer must not look like the first one's")
+	}
+}
+
+func TestPullDoesNotUndoTriageOrIssueEditsMadeOnTheHost(t *testing.T) {
+	h := newHarness(t)
+	h.issue("L-0A1B2C3D")
+	if _, err := h.s.DB.Exec(`INSERT INTO triage (id, decisions, confirmed_at) VALUES ('local/l-0a1b2c3d', 'Scope A', 'x')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.s.Publish(h.ctx, localissues.Key("L-0A1B2C3D", "")); err != nil {
+		t.Fatal(err)
+	}
+	h.pull() // the store still holds scope A and the old issue fields
+	// `foreman issue triage` and a replacing import change the host, and publish.
+	if err := h.s.saveTriage(localissues.Key("L-0A1B2C3D", ""), "Scope B"); err != nil {
+		t.Fatal(err)
+	}
+	li := localissues.Issue{ID: "L-0A1B2C3D", Title: "Renamed on the host", Description: "new", Status: localissues.Open, CreatedAt: t0, UpdatedAt: t0.Add(time.Hour)}
+	if err := localissues.PutIn(h.s.DB, li); err != nil {
+		t.Fatal(err)
+	}
+	h.pull()
+	if got, _ := h.s.triage(localissues.Key("L-0A1B2C3D", "")); got != "Scope B" {
+		t.Fatalf("triage = %q: a pull restored the store's older text", got)
+	}
+	got, _ := localissues.GetIn(h.s.DB, "L-0A1B2C3D")
+	if got.Title != "Renamed on the host" {
+		t.Fatalf("title = %q: a pull restored the store's older title", got.Title)
+	}
+	// A person editing the store field still wins.
+	h.mem.UserEdit(h.entries()[0].Ref, func(e *TaskEntry) { e.ConfirmedTriage = "Scope C"; e.ScopeConfirmed = true })
+	h.pull()
+	if got, _ := h.s.triage(localissues.Key("L-0A1B2C3D", "")); got != "Scope C" {
+		t.Fatalf("triage = %q, want the store edit", got)
 	}
 }
 
@@ -395,5 +465,22 @@ func TestPublishesOfOneTaskFromManyCallersAreSerialized(t *testing.T) {
 	}
 	if h.mem.Writes != 1 || len(h.entries()) != 1 {
 		t.Fatalf("writes = %d, entries = %d; concurrent publishes must write the entry once", h.mem.Writes, len(h.entries()))
+	}
+}
+
+func TestAKnowledgeEntryWithNoPayloadIsPublishedAgainNotPaused(t *testing.T) {
+	h := newHarness(t)
+	if err := h.know.Replace("o/r", snapshotOf("o/r", "Use tabs.")); err != nil {
+		t.Fatal(err)
+	}
+	// A first publish created the page and then failed before the payload landed.
+	h.mem.UserCorruptKnowledge("o/r", ErrNoPayload)
+	h.pull()
+	ks, _ := h.mem.ListKnowledge(h.ctx)
+	if len(ks) != 1 || ks[0].Snapshot == nil {
+		t.Fatalf("the snapshot was not published again: %+v", ks)
+	}
+	if row, _ := h.s.row("knowledge", "o/r"); row.AnswerDigest == pausedMark {
+		t.Fatal("an unfinished publish must not pause the repository")
 	}
 }

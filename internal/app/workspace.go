@@ -99,7 +99,16 @@ func (a App) startQueued(ctx context.Context, queued []WorkspaceQueued) []error 
 	}
 	var warns []error
 	for _, q := range queued {
-		if existing := findTask(recs, q.Key); existing != nil && existing.Delegation != nil {
+		if existing := findTask(recs, q.Key); existing != nil && existing.Delegation != nil && existing.State == task.Failed {
+			// A start that failed leaves a delegation behind. The request was not met:
+			// keep Queue ticked and show why. Starting over is the developer's call.
+			reason := "the last start failed; resume or reset the task from the dashboard"
+			if existing.LastOutcome != nil && existing.LastOutcome.Summary != "" {
+				reason = existing.LastOutcome.Summary
+			}
+			a.blockQueued(ctx, q.Key, reason)
+			continue
+		} else if existing != nil && existing.Delegation != nil {
 			// It already has a run; the request is met, or resuming is the developer's call.
 			if err := a.Workspace.Ack(ctx, WorkspaceAck{Key: existing.Key, Kind: AckQueue, Token: q.Token}); err != nil {
 				warns = append(warns, err)
@@ -149,6 +158,9 @@ func (a App) blockQueued(ctx context.Context, key task.Key, reason string) {
 // start yet and why.
 func (a App) startOne(ctx context.Context, key task.Key) (*task.Record, string, error) {
 	req := StartRequest{Repo: key.Repo, Issue: key.Number, NewOnly: true}
+	if key.Source != task.Local && !a.repoVisible(key.Repo, false) {
+		return nil, fmt.Sprintf("%s is excluded by the repository filters", key.Repo), nil
+	}
 	if key.Source == task.Local {
 		if a.Triage != nil {
 			text, err := a.Triage.Read(key)
@@ -169,6 +181,9 @@ func (a App) startOne(ctx context.Context, key task.Key) (*task.Record, string, 
 				return nil, "repository needs a choice: " + p.Reason, nil
 			}
 			req.Repo, req.Key.Repo = p.Repo, p.Repo
+		}
+		if !a.repoVisible(req.Repo, false) {
+			return nil, fmt.Sprintf("%s is excluded by the repository filters", req.Repo), nil
 		}
 	}
 	d, err := a.Route(ctx, RouteRequest{Key: req.Key, Repo: req.Repo, Issue: req.Issue})

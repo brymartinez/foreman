@@ -164,3 +164,41 @@ func TestTokenNeverAppearsInErrors(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestConfiguredNotionTargetKeepsTheBackendOnceTheDatabaseExists(t *testing.T) {
+	home := storageHome(t, "storage:\n  notion:\n    parent_page_id: 0123456789abcdef0123456789abcdef\n")
+	cfg, err := Load()
+	if err != nil || cfg.Storage.Backend != BackendNotion {
+		t.Fatalf("first run: backend = %q, err = %v", cfg.Storage.Backend, err)
+	}
+	db := filepath.Join(home, ".local/share/foreman/foreman.db")
+	os.MkdirAll(filepath.Dir(db), 0o755)
+	os.WriteFile(db, nil, 0o600)
+	cfg, err = Load()
+	if err != nil || cfg.Storage.Backend != BackendNotion {
+		t.Fatalf("second run: backend = %q, err = %v", cfg.Storage.Backend, err)
+	}
+}
+
+func TestConfiguredVaultSelectsObsidianWithoutAnExplicitBackend(t *testing.T) {
+	storageHome(t, "storage:\n  obsidian:\n    vault: /somewhere\n")
+	cfg, err := Load()
+	if err != nil || cfg.Storage.Backend != BackendObsidian {
+		t.Fatalf("backend = %q, err = %v", cfg.Storage.Backend, err)
+	}
+}
+
+func TestObsidianVaultExpandsTheHomeDirectory(t *testing.T) {
+	home := storageHome(t, "storage:\n  backend: obsidian\n  obsidian:\n    vault: ~/Documents/vault\n")
+	vault := filepath.Join(home, "Documents", "vault")
+	if err := os.MkdirAll(vault, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil || cfg.Storage.Obsidian.Vault != vault {
+		t.Fatalf("vault = %q, err = %v", cfg.Storage.Obsidian.Vault, err)
+	}
+	if err := cfg.Storage.Validate(); err != nil {
+		t.Fatalf("an existing vault under ~ must validate: %v", err)
+	}
+}

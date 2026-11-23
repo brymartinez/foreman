@@ -246,3 +246,73 @@ func TestNoteNamesAreSafeFileNames(t *testing.T) {
 		t.Fatal("an empty name must become Untitled")
 	}
 }
+
+func TestTwoGitHubTasksWithOneTitleBothGetANote(t *testing.T) {
+	b := newBackend(t)
+	ctx := context.Background()
+	for _, id := range []string{"o/r#1", "o/r#2"} {
+		r := rec(id, "IMPLEMENTING")
+		r.Source = task.GitHub
+		r.Title = "Same title"
+		if _, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: r, Create: workspace.TaskSeed{Name: "Same title"}}); err != nil {
+			t.Fatalf("%s: %v", id, err)
+		}
+	}
+	es, err := b.ListTasks(ctx)
+	if err != nil || len(es) != 2 {
+		t.Fatalf("entries = %d, %v", len(es), err)
+	}
+	for _, e := range es {
+		if e.Name != "Same title" {
+			t.Errorf("%s reads back as %q: the file name suffix is not part of the title", e.ID, e.Name)
+		}
+	}
+}
+
+func TestATitleWithReservedCharactersReadsBackUnchanged(t *testing.T) {
+	b := newBackend(t)
+	ctx := context.Background()
+	if _, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX"), Create: workspace.TaskSeed{Name: "Fix API: retry"}}); err != nil {
+		t.Fatal(err)
+	}
+	es, _ := b.ListTasks(ctx)
+	if len(es) != 1 || es[0].Name != "Fix API: retry" {
+		t.Fatalf("name = %q: the sanitized file name came back as the title", es[0].Name)
+	}
+}
+
+func TestARenamedNoteReadsBackUnderItsNewName(t *testing.T) {
+	b := newBackend(t)
+	ctx := context.Background()
+	ref, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX"), Create: workspace.TaskSeed{Name: "Old name"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(ref, filepath.Join(filepath.Dir(ref), "New name.md")); err != nil {
+		t.Fatal(err)
+	}
+	es, _ := b.ListTasks(ctx)
+	if len(es) != 1 || es[0].Name != "New name" {
+		t.Fatalf("name = %q, want the user's rename", es[0].Name)
+	}
+}
+
+func TestANoteWithWindowsLineEndingsKeepsItsFrontmatter(t *testing.T) {
+	b := newBackend(t)
+	ctx := context.Background()
+	path := writeNote(t, b, "Crlf", "---\r\nrepository: o/r\r\nqueue: true\r\nforeman_id: L-0A1B2C3D\r\n---\r\nBody line.\r\n")
+	es, err := b.ListTasks(ctx)
+	if err != nil || len(es) != 1 {
+		t.Fatalf("entries = %d, %v", len(es), err)
+	}
+	if e := es[0]; e.ID != "L-0A1B2C3D" || e.Repository != "o/r" || !e.Queue {
+		t.Fatalf("the frontmatter was not read: %+v", e)
+	}
+	if err := b.ClearQueue(ctx, path); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	if strings.Count(string(raw), "---") != 2 || strings.Contains(strings.ReplaceAll(string(raw), "\r\n", ""), "\n") {
+		t.Fatalf("the rewrite must keep one frontmatter block and CRLF endings: %q", raw)
+	}
+}

@@ -3,6 +3,7 @@ package notion
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -95,7 +96,12 @@ func (f *fake) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	var body map[string]any
 	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		raw, _ := io.ReadAll(r.Body)
+		if len(raw) > 500_000 { // Notion's payload limit
+			f.reply(w, 413, map[string]any{"code": "validation_error", "message": "payload too large"})
+			return
+		}
+		_ = json.Unmarshal(raw, &body)
 	}
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	if len(parts) < 2 || parts[0] != "v1" {

@@ -186,7 +186,7 @@ func Load() (Config, error) {
 	if strings.TrimSpace(cfg.Database) == "" { // database: with no value means the default
 		cfg.Database = filepath.Join(data, "foreman.db")
 	}
-	for _, p := range []*string{&cfg.Database, &cfg.TriageDir, &cfg.TasksDir, &cfg.WorktreesDir, &cfg.RepositoriesDir, &cfg.LogDir, &cfg.KnowledgeDir} {
+	for _, p := range []*string{&cfg.Database, &cfg.TriageDir, &cfg.TasksDir, &cfg.WorktreesDir, &cfg.RepositoriesDir, &cfg.LogDir, &cfg.KnowledgeDir, &cfg.Storage.Obsidian.Vault} {
 		*p = expandHome(*p, home)
 	}
 	_, statErr := os.Stat(cfg.Database)

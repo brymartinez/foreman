@@ -99,24 +99,69 @@ func KeyOf(id string) (task.Key, error) {
 
 type row struct {
 	Ref, Digest, AnswerDigest, Stage, StageAt string
+	// Question identifies the question the store was last told is pending, so an
+	// answer left in the store before that question was published is never applied.
+	Question string
+	// FieldsSeen and TriageSeen hash what the store held when the host last
+	// reconciled it. A pull applies the store's copy only when it differs, so a
+	// change made on the host is not undone by the stale copy the store still has.
+	FieldsSeen, TriageSeen string
 }
 
 func (s *Sync) row(kind, key string) (row, error) {
 	var r row
-	err := s.DB.QueryRow(`SELECT ref, published_digest, answer_digest, stage, stage_at FROM workspace_entries WHERE kind = ? AND key = ?`, kind, key).
-		Scan(&r.Ref, &r.Digest, &r.AnswerDigest, &r.Stage, &r.StageAt)
+	err := s.DB.QueryRow(`SELECT ref, published_digest, answer_digest, stage, stage_at, question, fields_seen, triage_seen FROM workspace_entries WHERE kind = ? AND key = ?`, kind, key).
+		Scan(&r.Ref, &r.Digest, &r.AnswerDigest, &r.Stage, &r.StageAt, &r.Question, &r.FieldsSeen, &r.TriageSeen)
 	if errors.Is(err, sql.ErrNoRows) {
 		return row{}, nil
 	}
 	return r, err
 }
 
+// saveRow writes the columns publishing and acks own. FieldsSeen and TriageSeen
+// are written only by setSeen, so a publish never overwrites what a pull recorded.
 func (s *Sync) saveRow(kind, key string, r row) error {
-	_, err := s.DB.Exec(`INSERT INTO workspace_entries (kind, key, ref, published_digest, answer_digest, stage, stage_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+	_, err := s.DB.Exec(`INSERT INTO workspace_entries (kind, key, ref, published_digest, answer_digest, stage, stage_at, question) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(kind, key) DO UPDATE SET ref = excluded.ref, published_digest = excluded.published_digest, answer_digest = excluded.answer_digest,
-	stage = excluded.stage, stage_at = excluded.stage_at`, kind, key, r.Ref, r.Digest, r.AnswerDigest, r.Stage, r.StageAt)
+	stage = excluded.stage, stage_at = excluded.stage_at, question = excluded.question`, kind, key, r.Ref, r.Digest, r.AnswerDigest, r.Stage, r.StageAt, r.Question)
 	return err
 }
+
+// setSeen records the hash of the store's copy of an entry's issue fields or
+// confirmed triage that the host has reconciled.
+func (s *Sync) setSeen(key, col, value string) error {
+	if col != "fields_seen" && col != "triage_seen" {
+		return fmt.Errorf("unknown column %q", col)
+	}
+	_, err := s.DB.Exec(`INSERT INTO workspace_entries (kind, key, `+col+`) VALUES ('task', ?, ?)
+ON CONFLICT(kind, key) DO UPDATE SET `+col+` = excluded.`+col, key, value)
+	return err
+}
+
+// questionKey names the oldest unanswered question of a task. Questions from one
+// turn share a time, so it includes how many were answered before it.
+func questionKey(rec *task.Record) string {
+	if rec == nil {
+		return ""
+	}
+	d := rec.Pending()
+	if d == nil {
+		return ""
+	}
+	answered := 0
+	for _, x := range rec.Decisions {
+		if x.Answer != "" {
+			answered++
+		}
+	}
+	return hash(d.AskedAt.UTC().Format(time.RFC3339Nano), fmt.Sprint(answered), d.Question.Issue)
+}
+
+func fieldsHash(e TaskEntry) string {
+	return hash(strings.TrimSpace(e.Name), strings.TrimSpace(e.Description), e.SourceURL, strings.TrimSpace(e.Repository), strings.Join(e.Tags, "\x00"))
+}
+
+func triageHash(text string) string { return hash(strings.TrimSpace(text)) }
 
 // lock serializes publishes of one entry across the dashboard, runners, and
 // learners on this host. It names its holder's pid, so a crashed holder's lock is
@@ -256,6 +301,7 @@ func (s *Sync) Blocked(ctx context.Context, key task.Key, reason string) error {
 
 // built is a task's shared record as the host's saved state builds it.
 type built struct {
+	rec     *task.Record
 	r       Record
 	li      *localissues.Issue
 	triage  string
@@ -299,7 +345,7 @@ func (s *Sync) build(ctx context.Context, key task.Key) (built, bool, error) {
 	if err != nil {
 		return built{}, false, err
 	}
-	return built{r: r, li: li, triage: triage, status: status, stageAt: stageAt, prev: prev}, true, nil
+	return built{rec: rec, r: r, li: li, triage: triage, status: status, stageAt: stageAt, prev: prev}, true, nil
 }
 
 func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
@@ -322,11 +368,45 @@ func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
 	if li != nil {
 		seed.Description, seed.Tags = li.Description, li.Tags
 	}
-	ref, err := s.Backend.UpsertTask(ctx, TaskPublish{Record: r, Reason: reason, Create: seed})
+	qk := questionKey(b.rec)
+	if qk != "" && qk != prev.Question {
+		// An answer already in the store was typed before this question existed.
+		if err := s.clearStaleAnswer(ctx, id); err != nil {
+			return fmt.Errorf("publish %s: %w", id, err)
+		}
+	}
+	ref, err := s.Backend.UpsertTask(ctx, TaskPublish{Record: r, Reason: scrubHost(reason, b.rec), Create: seed})
 	if err != nil {
 		return fmt.Errorf("publish %s: %w", id, err)
 	}
-	return s.saveRow("task", id, row{Ref: ref, Digest: digest, AnswerDigest: prev.AnswerDigest, Stage: status, StageAt: stageAt.Format(time.RFC3339)})
+	if err := s.saveRow("task", id, row{Ref: ref, Digest: digest, AnswerDigest: prev.AnswerDigest, Stage: status, StageAt: stageAt.Format(time.RFC3339), Question: qk}); err != nil {
+		return err
+	}
+	if prev.Ref == "" {
+		// A new entry was seeded from the host, so the store's copy is what the host has.
+		if err := s.setSeen(id, "fields_seen", hash(strings.TrimSpace(seed.Name), strings.TrimSpace(seed.Description), seed.SourceURL, strings.TrimSpace(seed.Repository), strings.Join(seed.Tags, "\x00"))); err != nil {
+			return err
+		}
+		return s.setSeen(id, "triage_seen", triageHash(seed.ConfirmedTriage))
+	}
+	return nil
+}
+
+// clearStaleAnswer empties the Answer field of an entry that is about to show a new
+// question.
+func (s *Sync) clearStaleAnswer(ctx context.Context, id string) error {
+	entries, err := s.Backend.ListTasks(ctx)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.ID == id && strings.TrimSpace(e.Answer) != "" {
+			if err := s.Backend.ClearAnswer(ctx, e.Ref); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // PublishKnowledge writes one repository's knowledge to the store, unless the

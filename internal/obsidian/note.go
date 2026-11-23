@@ -21,6 +21,9 @@ const (
 type note struct {
 	doc  *yaml.Node
 	body string
+	// crlf is set when the file used Windows line endings. Parsing works on LF text
+	// and bytes writes the endings back.
+	crlf bool
 }
 
 func newNote() *note {
@@ -34,6 +37,9 @@ func (n *note) mapping() *yaml.Node { return n.doc.Content[0] }
 func parseNote(raw []byte) (*note, error) {
 	s := string(raw)
 	n := newNote()
+	if strings.Contains(s, "\r\n") {
+		s, n.crlf = strings.ReplaceAll(s, "\r\n", "\n"), true
+	}
 	if !strings.HasPrefix(s, "---\n") {
 		n.body = s
 		return n, nil
@@ -71,6 +77,14 @@ func parseNote(raw []byte) (*note, error) {
 }
 
 func (n *note) bytes() ([]byte, error) {
+	out, err := n.lfBytes()
+	if err == nil && n.crlf {
+		out = []byte(strings.ReplaceAll(string(out), "\n", "\r\n"))
+	}
+	return out, err
+}
+
+func (n *note) lfBytes() ([]byte, error) {
 	var buf bytes.Buffer
 	if len(n.mapping().Content) > 0 {
 		enc := yaml.NewEncoder(&buf)

@@ -26,8 +26,9 @@ const DefaultObsidianFolder = "Foreman"
 
 // Storage selects the workspace store.
 type Storage struct {
-	// Backend is notion, obsidian, or sqlite. Unset means sqlite when the
-	// configured database file exists and notion otherwise.
+	// Backend is notion, obsidian, or sqlite. Unset means the store the config
+	// names a target for (a Notion page, then an Obsidian vault), else sqlite when
+	// the configured database file exists and notion otherwise.
 	Backend  Backend  `yaml:"backend"`
 	Notion   Notion   `yaml:"notion"`
 	Obsidian Obsidian `yaml:"obsidian"`
@@ -69,9 +70,17 @@ func NormalizePageID(s string) (string, error) {
 func resolveStorage(s *Storage, databaseExists bool) error {
 	switch s.Backend {
 	case "":
-		if databaseExists {
+		// A configured target is a decision to switch. It stays the choice on every
+		// run, so a first run that created the database file does not flip the
+		// backend to sqlite on the next one.
+		switch {
+		case strings.TrimSpace(s.Notion.ParentPageID) != "":
+			s.Backend = BackendNotion
+		case strings.TrimSpace(s.Obsidian.Vault) != "":
+			s.Backend = BackendObsidian
+		case databaseExists:
 			s.Backend = BackendSQLite
-		} else {
+		default:
 			s.Backend = BackendNotion
 		}
 	case BackendNotion, BackendObsidian, BackendSQLite:

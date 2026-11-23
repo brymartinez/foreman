@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -133,5 +134,27 @@ func TestGateRefusesWhileAMoveRuns(t *testing.T) {
 	d.Exec(`UPDATE locks SET pid = 2147483000`)
 	if err := Gate(d, config.Storage{Backend: config.BackendSQLite}); err != nil {
 		t.Fatalf("a dead mover's lock must not block: %v", err)
+	}
+}
+
+func TestGateDoesNotMarkAnEmptyDatabaseWhenTheDestinationIsUnreachable(t *testing.T) {
+	t.Setenv(config.NotionTokenEnv, "secret_x")
+	d := openDB(t)
+	bad := func() error { return errors.New("page not shared with the integration") }
+	err := GateWith(d, notionCfg(), bad)
+	if err == nil || !strings.Contains(err.Error(), "foreman storage check") {
+		t.Fatalf("err = %v", err)
+	}
+	if m, _ := ReadMarker(d); m != nil {
+		t.Fatalf("a marker %+v binds the workspace to an unreachable page", m)
+	}
+	// Correcting the target must still work, because nothing was bound.
+	fixed := notionCfg()
+	fixed.Notion.ParentPageID = "fedcba9876543210fedcba9876543210"
+	if err := GateWith(d, fixed, func() error { return nil }); err != nil {
+		t.Fatalf("the corrected target was refused: %v", err)
+	}
+	if m, _ := ReadMarker(d); m == nil || m.Target != fixed.Notion.ParentPageID {
+		t.Fatalf("marker = %+v", m)
 	}
 }

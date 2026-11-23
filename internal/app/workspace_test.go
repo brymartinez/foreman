@@ -266,3 +266,39 @@ func TestIngestPublishesTheRepositoryKnowledgeAfterReplace(t *testing.T) {
 		t.Fatal("a dry run must not publish")
 	}
 }
+
+func TestQueuedGitHubIssueInAnExcludedRepositoryDoesNotStart(t *testing.T) {
+	f, _, _ := queuedFixture(t)
+	f.app.ExcludedRepositories = []task.Repo{"testorg/example"}
+	key := task.Key{Repo: "testorg/example", Number: 9}
+	ws := &fakeWorkspace{pull: WorkspacePull{Queued: []WorkspaceQueued{{Key: key}}}}
+	f.app.Workspace = ws
+	f.app.refreshWorkspace(context.Background())
+	if len(f.runners.spawned) != 0 || len(ws.acks) != 0 {
+		t.Fatalf("an excluded repository started: spawned %d, acks %+v", len(f.runners.spawned), ws.acks)
+	}
+	if r := ws.blocked[key]; !strings.Contains(r, "filter") {
+		t.Fatalf("reason = %q", r)
+	}
+}
+
+func TestQueuedTaskWhoseLaunchFailedKeepsItsQueueOnEveryRefresh(t *testing.T) {
+	f := newFixture()
+	rec, err := f.app.Start(context.Background(), startReq(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.store.recs[rec.Key].State = task.Failed
+	f.store.recs[rec.Key].LastOutcome = &task.Outcome{Status: "failed", Summary: "the runner could not start"}
+	ws := &fakeWorkspace{pull: WorkspacePull{Queued: []WorkspaceQueued{{Key: rec.Key}}}}
+	f.app.Workspace = ws
+	for range 2 {
+		f.app.refreshWorkspace(context.Background())
+	}
+	if len(ws.acks) != 0 {
+		t.Fatalf("a failed launch cleared Queue: %+v", ws.acks)
+	}
+	if r := ws.blocked[rec.Key]; !strings.Contains(r, "could not start") {
+		t.Fatalf("reason = %q", r)
+	}
+}

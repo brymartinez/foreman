@@ -199,6 +199,14 @@ func entryOf(f found) workspace.TaskEntry {
 	}
 	n := f.n
 	e.ID = n.str("foreman_id")
+	// The file name is the title with characters Obsidian cannot use replaced, so a
+	// note Foreman named reads back under its real title unless someone renamed it.
+	if t := n.str("foreman_title"); t != "" {
+		base := strings.TrimSuffix(filepath.Base(f.path), ".md")
+		if base == safeName(t) || e.ID != "" && base == safeName(t)+" "+safeName(e.ID) {
+			e.Name = t
+		}
+	}
 	e.Repository, e.SourceURL, e.Tags = n.str("repository"), n.str("source_url"), n.strs("tags")
 	e.ScopeConfirmed, e.Queue, e.Answer = n.boolean("scope_confirmed"), n.boolean("queue"), n.str("answer")
 	e.Description, e.ConfirmedTriage = userText(n.userBody())
@@ -270,6 +278,11 @@ func (b *Backend) UpsertTask(ctx context.Context, p workspace.TaskPublish) (stri
 		return "", err
 	}
 	_ = n.set("foreman_created", b.now().Format(time.RFC3339))
+	title := s.Name
+	if title == "" {
+		title = p.Record.Title
+	}
+	_ = n.set("foreman_title", title) // the file name is a sanitized title
 	tags := s.Tags
 	if tags == nil {
 		tags = []string{}
@@ -302,7 +315,7 @@ func (b *Backend) UpsertTask(ctx context.Context, p workspace.TaskPublish) (stri
 	}
 	path := filepath.Join(b.tasks(), name+".md")
 	if err := create(path, out); errors.Is(err, os.ErrExist) {
-		path = filepath.Join(b.tasks(), name+" "+p.Record.ID+".md")
+		path = filepath.Join(b.tasks(), name+" "+safeName(p.Record.ID)+".md")
 		err = create(path, out)
 		if err != nil {
 			return "", err

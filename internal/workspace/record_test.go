@@ -253,3 +253,38 @@ func TestHydrateWithoutWorkBuildsNoTask(t *testing.T) {
 		t.Fatalf("%+v %v", rec, err)
 	}
 }
+
+func TestAFailedTaskSharesNoHostPathOrAccount(t *testing.T) {
+	in := fullInput()
+	in.Task.Delegation.Account, in.Task.Delegation.AccountEmail = "octo-work", "42+octo-work@users.noreply.github.com"
+	for name, summary := range map[string]string{
+		"a launch failure naming the log":     "open /home/dev/.local/share/foreman/logs/o-r-1.log: permission denied",
+		"a worktree path":                     "git failed in " + in.Task.Delegation.Worktree,
+		"the account check":                   "task is pinned to GitHub account octo-work, but gh is using octo-home. Run `gh auth switch --user octo-work`, then restart the task",
+		"an SSH host check":                   "task is pinned to GitHub account octo-work, but SSH host e2e-host pushes as octo-home.",
+		"the pinned account on its own":       "pushed as octo-work",
+		"the pinned account email on its own": "committed as 42+octo-work@users.noreply.github.com",
+	} {
+		t.Run(name, func(t *testing.T) {
+			in.Task.LastOutcome = &task.Outcome{Status: "failed", Summary: summary, At: t0}
+			r, err := Build(in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, _ := r.Encode()
+			text := string(raw) + r.RenderText()
+			for _, leak := range []string{"/home/dev", "octo-work", "octo-home", "e2e-host", "WORKTREE-SECRET", "RUNNERLOG-SECRET"} {
+				if strings.Contains(text, leak) {
+					t.Errorf("the shared record leaks %q", leak)
+				}
+			}
+		})
+	}
+}
+
+func TestScrubKeepsURLsAndOrdinaryText(t *testing.T) {
+	const s = "PR https://github.com/o/r/pull/7 and/or 1/2 stay"
+	if got := scrubHost(s, nil); got != s {
+		t.Fatalf("scrubHost changed %q to %q", s, got)
+	}
+}

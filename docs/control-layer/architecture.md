@@ -393,8 +393,10 @@ the same commit. The commit message records why it changed.
 ### Workspace store
 
 - **One store per workspace.** `storage.backend` is `notion`, `obsidian`, or `sqlite`.
-  Without a value it is `sqlite` when the `database` file exists and `notion` otherwise,
-  so an existing workspace stays put until the developer switches. `defaults/config.yaml`
+  Without a value it is the store the config names a target for (a Notion page, then a
+  vault), else `sqlite` when the `database` file exists and `notion` otherwise, so an
+  existing workspace stays put until the developer switches, and a first run that
+  creates the database file does not flip a configured target to sqlite. `defaults/config.yaml`
   sets `notion`. `sqlite` means everything below is off and nothing touches Notion or a
   vault. `internal/config/storage.go` validates the target: a Notion page ID is
   normalized to 32 hex, and a missing or bad value stops Foreman with a message that
@@ -416,7 +418,8 @@ the same commit. The commit message records why it changed.
   `Blocked`, `PublishKnowledge`, `Ack`. A nil `Workspace` is sqlite mode.
 - **Field ownership.** Foreman writes only its own fields (Notion: `Foreman ID`,
   `Status`, `Source`, `Question`, `Branch`, `PR`, `Commit`, `Updated by Foreman`, and the
-  `Foreman record` toggle section; Obsidian: `foreman_*` keys and the region between
+  `Foreman record` toggle section; Obsidian: `foreman_*` keys, including `foreman_title`
+  so a sanitized file name does not read back as a rename, and the region between
   `<!-- foreman:begin -->` and `<!-- foreman:end -->`). It writes user fields only to
   seed a new entry, to clear `Queue` after a start, to clear `Answer` after applying
   it, and to write a new entry's `Foreman ID`. Obsidian writes go through a temporary
@@ -425,12 +428,17 @@ the same commit. The commit message records why it changed.
   text survive. A note whose frontmatter does not parse is reported and left alone.
 - **Notion limits are the client's job** (`internal/notion/client.go`). 30-second request
   timeout, 429 waits for `Retry-After`, 429 and 5xx retry up to 5 times with backoff,
-  rich text splits at 2000 characters, appends send at most 100 blocks. The section is
+  rich text splits at 2000 characters, appends send at most 100 blocks and at most
+  400 KB of JSON (Notion's limit is 500 KB). A 5xx answer to a create or an append is not
+  retried, because Notion may have applied it; the caller looks the result up next time. The section is
   replaced by appending the new `Foreman record` toggle first and deleting the old one
   after, so a crash between the two leaves two sections, and a reader takes the last one
   whose payload parses. The token comes only from `FOREMAN_NOTION_TOKEN`; the client
   redacts it from errors, and `config.yaml` has no token key. `FOREMAN_NOTION_API`
   moves the base URL and exists for tests only.
+- **Shared text is scrubbed of host values.** `workspace.scrubHost` replaces the task's
+  paths and account, any absolute path, and the account-check message before an outcome
+  or a queue reason reaches the store.
 - **Publishing reads saved state and calls no model.** `Sync.Publish` takes a host-local
   lock per task or repository (the `locks` table, named by pid, taken over when the
   holder is dead), builds the record, and skips the write when its digest equals
@@ -442,9 +450,14 @@ the same commit. The commit message records why it changed.
   refresh. `Sync.Pull` gives a user-made entry a new `L-` ID, saves `Confirmed triage`
   as triage while `Scope confirmed` is ticked (unticking removes nothing), rebuilds a
   missing task record by the `issue import` rules (idle, open PR becomes a reset mark),
-  adopts changed knowledge, and returns answers and queued entries. An answer goes through
-  `App.Respond`, which resumes the same provider session. It applies once (the answer
-  digest is kept) and only when written after the question was asked. A queued task starts
+  adopts changed knowledge, and returns answers and queued entries. The store's issue
+  fields and confirmed triage are applied only when they differ from the copy the host
+  last reconciled (`fields_seen`, `triage_seen`), so a host-side `issue triage` or
+  replacing import is not undone by the older text the store still shows. An answer goes through
+  `App.Respond`, which resumes the same provider session. It applies once and only to the
+  question the store was last told is pending (`workspace_entries.question`): publishing
+  a new question first clears an answer typed before it, and the answer token includes
+  the question's position, so the same text answers two questions of one turn. A queued task starts
   oldest first by `App.startQueued`, with auto mode's rules (confirmed triage, one
   allowed repository, filters, quota, `auto.max_concurrent`, branch proposal) whether or
   not auto mode is on. A start that cannot happen leaves `Queue` ticked and publishes the
@@ -454,7 +467,8 @@ the same commit. The commit message records why it changed.
   lock is held every other command refuses; before the marker, a `notion` or `obsidian`
   config over a database with tasks, local issues, triage, or learnings is refused with
   a message naming `foreman storage move`; an empty database is marked at first setup;
-  after the marker, a different backend or target is refused. Moving back is not
+  after the marker, a different backend or target is refused. An empty database is marked
+  only after the backend's `Ensure` succeeds, so a mistyped page binds nothing. Moving back is not
   supported. `storage check` and `storage move` skip the gate, the stage files, and any
   agent. `Move.Run` refuses while a runner, a launch claim, a start lock, or a learner
   lock is live, takes the move lock, runs the check, upserts tasks (every task, then every
@@ -462,7 +476,10 @@ the same commit. The commit message records why it changed.
   stays), reads every entry back and compares the parsed record, key fields, counts, and
   each repository's knowledge digest, and only then writes the marker in one
   transaction. A failure names the entries that differ and leaves the workspace on
-  SQLite. Entries are found by Foreman ID, so a retry makes no duplicates. The move
+  SQLite. Entries are found by Foreman ID, so a retry makes no duplicates, and each move first
+  clears `workspace_entries` so a retry against another destination copies everything.
+  Verification also compares the user-facing Confirmed triage field with the saved
+  scope. The move
   sets no `Queue` and starts nothing. A second run after the marker reports that the
   workspace already moved. GitHub-only triage (no task yet) stays in the host database.
 - **Knowledge follows the store.** In shared modes the store's knowledge entries are the
