@@ -254,10 +254,10 @@ func (b *Backend) entry(ctx context.Context, p pageObj) (workspace.TaskEntry, er
 	}
 	e.Description = body.Description
 	for i := len(body.Payloads) - 1; i >= 0; i-- {
-		if r, perr := workspace.Parse([]byte(body.Payloads[i])); perr == nil {
+		if r, perr := workspace.Parse([]byte(body.Payloads[i].Text)); perr == nil {
 			e.Record, e.ParseErr = &r, nil
 			break
-		} else if e.ParseErr == nil {
+		} else if e.ParseErr == nil && body.Payloads[i].Complete {
 			e.ParseErr = perr
 		}
 	}
@@ -498,10 +498,10 @@ func (b *Backend) ListKnowledge(ctx context.Context) ([]workspace.KnowledgeEntry
 		}
 		e.ParseErr = workspace.ErrNoPayload
 		for i := len(body.Payloads) - 1; i >= 0; i-- {
-			if snap, perr := knowledge.Parse([]byte(body.Payloads[i])); perr == nil {
+			if snap, perr := knowledge.Parse([]byte(body.Payloads[i].Text)); perr == nil {
 				e.Snapshot, e.ParseErr, e.Digest = &snap, nil, workspace.SnapshotDigest(snap)
 				break
-			} else {
+			} else if body.Payloads[i].Complete {
 				e.ParseErr = perr
 			}
 		}

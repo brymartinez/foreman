@@ -345,23 +345,34 @@ func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
 	}
 	r, li, triage, prev, status, stageAt := b.r, b.li, b.triage, b.prev, b.status, b.stageAt
 	digest := hash(r.Digest(), reason)
+	qk := app.QuestionKey(b.rec)
+	stored := qk
+	if stored == "" {
+		stored = noQuestion
+	}
+	// A row written by an earlier revision names the question in its own format. If
+	// that is this question, the store was told about it and its answer is valid.
+	// Any other value that is not this question's key, including the empty one that
+	// cannot say whether a question was pending, makes an answer in the store
+	// untrustworthy.
+	adopt := qk != "" && prev.Question == legacyQuestionKey(b.rec)
 	if digest == prev.Digest {
+		if prev.Question != stored {
+			if !adopt {
+				if err := s.clearStaleAnswer(ctx, id); err != nil {
+					return fmt.Errorf("publish %s: %w", id, err)
+				}
+			}
+			prev.Question = stored
+			return s.saveRow("task", id, prev)
+		}
 		return nil
 	}
 	seed := TaskSeed{Name: r.Title, Repository: r.Repo, SourceURL: r.URL, ConfirmedTriage: triage, ScopeConfirmed: triage != ""}
 	if li != nil {
 		seed.Description, seed.Tags = li.Description, li.Tags
 	}
-	qk := app.QuestionKey(b.rec)
-	stored := qk
-	if stored == "" {
-		stored = noQuestion
-	}
-	// prev.Question is empty for a first publish and for a row written before
-	// questions were tracked. The second case published the record the store still
-	// shows, so a pending answer there was typed for it and is kept.
-	legacy := prev.Question == "" && prev.Digest != ""
-	if stored != prev.Question && !legacy {
+	if stored != prev.Question && !adopt {
 		// An answer already in the store was typed before this question existed.
 		if err := s.clearStaleAnswer(ctx, id); err != nil {
 			return fmt.Errorf("publish %s: %w", id, err)
@@ -391,6 +402,25 @@ func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
 		return s.setSeen(id, "triage_seen", triageHash(seed.ConfirmedTriage))
 	}
 	return nil
+}
+
+// legacyQuestionKey is the key an earlier revision stored for a task's pending
+// question, kept so a question already published under it is recognized.
+func legacyQuestionKey(rec *task.Record) string {
+	if rec == nil {
+		return ""
+	}
+	d := rec.Pending()
+	if d == nil {
+		return ""
+	}
+	answered := 0
+	for _, x := range rec.Decisions {
+		if x.Answer != "" {
+			answered++
+		}
+	}
+	return hash(d.AskedAt.UTC().Format(time.RFC3339Nano), fmt.Sprint(answered), d.Question.Issue)
 }
 
 // noQuestion is the stored question of a published record with nothing pending, so

@@ -321,13 +321,13 @@ func TestAnAnswerFromASnapshotOlderThanTheQuestionIsNotApplied(t *testing.T) {
 	}
 }
 
-func TestAnAnswerTypedAfterAnUpgradedRowsQuestionIsStillApplied(t *testing.T) {
+func TestAnAnswerTypedAfterAQuestionPublishedUnderTheEarlierKeyFormatIsStillApplied(t *testing.T) {
 	h := newHarness(t)
 	rec := fullTask()
 	h.saveTask(rec)
 	h.s.Publish(h.ctx, rec.Key)
-	// A row written before migration 4 has no question.
-	if _, err := h.s.DB.Exec(`UPDATE workspace_entries SET question = ''`); err != nil {
+	// The earlier revision stored this question under its own key format.
+	if _, err := h.s.DB.Exec(`UPDATE workspace_entries SET question = ?`, legacyQuestionKey(rec)); err != nil {
 		t.Fatal(err)
 	}
 	ref := h.entries()[0].Ref
@@ -343,6 +343,30 @@ func TestAnAnswerTypedAfterAnUpgradedRowsQuestionIsStillApplied(t *testing.T) {
 	}
 	if p := h.pull(); len(p.Answers) != 1 || p.Answers[0].Text != "B" {
 		t.Fatalf("answers = %+v", p.Answers)
+	}
+}
+
+func TestAnAnswerInTheStoreIsNotTrustedWhenTheRowCannotSayWhichQuestionWasPublished(t *testing.T) {
+	// An earlier revision stored an empty key both for "no question yet" and for
+	// rows it never tracked, so an answer next to one may belong to no question.
+	h := newHarness(t)
+	rec := fullTask()
+	rec.Decisions = rec.Decisions[:1] // nothing pending
+	h.saveTask(rec)
+	h.s.Publish(h.ctx, rec.Key)
+	if _, err := h.s.DB.Exec(`UPDATE workspace_entries SET question = ''`); err != nil {
+		t.Fatal(err)
+	}
+	ref := h.entries()[0].Ref
+	h.mem.UserEdit(ref, func(e *TaskEntry) { e.Answer = "typed for nothing" })
+	// The runner saves its first question before the next successful publish.
+	rec = fullTask()
+	h.saveTask(rec)
+	if p := h.pull(); len(p.Answers) != 0 {
+		t.Fatalf("an old answer was bound to the new question: %+v", p.Answers)
+	}
+	if h.entries()[0].Answer != "" {
+		t.Fatal("the stale answer was not cleared")
 	}
 }
 

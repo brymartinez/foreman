@@ -612,3 +612,40 @@ func TestReseedReplacesTheConfirmedTriageOfAnExistingPage(t *testing.T) {
 func snapshotForTest(repo string) knowledge.Snapshot {
 	return knowledge.Snapshot{Format: knowledge.FormatVersion, Repo: repo, NextID: 1, Learnings: []knowledge.Learning{}, Evaluations: []knowledge.Evaluation{}}
 }
+
+func TestASectionWrittenBeforeTheEndMarkerExistedStillReads(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	if err := b.Ensure(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r := rec("L-0A1B2C3D", "IMPLEMENTING", "")
+	payload, err := r.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	heading := block("heading_2", map[string]any{"rich_text": richText(sectionTitle), "is_toggleable": true, "children": codeBlocks(string(payload))})
+	body := map[string]any{"parent": map[string]any{"type": "data_source_id", "data_source_id": b.tasks.source},
+		"properties": map[string]any{"Name": map[string]any{"title": richText("N")}, "Foreman ID": map[string]any{"rich_text": richText(r.ID)}},
+		"children":   []any{heading}}
+	if err := b.C.do(ctx, "POST", "/v1/pages", body, nil); err != nil {
+		t.Fatal(err)
+	}
+	es, err := b.ListTasks(ctx)
+	if err != nil || len(es) != 1 || es[0].Record == nil || es[0].Record.Status != "IMPLEMENTING" {
+		t.Fatalf("entries = %+v, err = %v: a complete section with no marker must still restore the task", es, err)
+	}
+}
+
+func TestALongDescriptionLineReadsBackUnchanged(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	desc := strings.Repeat("x", 60_001)
+	if _, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX", ""), Create: workspace.TaskSeed{Name: "N", Description: desc}}); err != nil {
+		t.Fatal(err)
+	}
+	es, _ := b.ListTasks(ctx)
+	if len(es) != 1 || es[0].Description != desc {
+		t.Fatalf("the description came back with %d characters, want %d", len(es[0].Description), len(desc))
+	}
+}

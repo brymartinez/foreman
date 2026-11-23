@@ -58,9 +58,19 @@ func block(typ string, content map[string]any) map[string]any {
 	return map[string]any{"object": "block", "type": typ, typ: content}
 }
 
-// paragraphs makes one paragraph block per line of s. A line longer than a block
-// can hold continues in the next block.
+// paragraphs makes one paragraph block per line of s. It is for the user's text,
+// which reads back by joining lines, so a line is never split.
 func paragraphs(s string) []any {
+	var out []any
+	for _, line := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
+		out = append(out, block("paragraph", map[string]any{"rich_text": richText(line)}))
+	}
+	return out
+}
+
+// sectionParagraphs is paragraphs for Foreman's own text, where nothing reads the
+// lines back. A line longer than a block can hold continues in the next block.
+func sectionParagraphs(s string) []any {
 	var out []any
 	for _, line := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
 		r := []rune(line)
@@ -205,11 +215,19 @@ func (c *Client) appendBlocks(ctx context.Context, parent string, blocks []any) 
 	return ids, nil
 }
 
+// sectionPayload is one section's payload text. Complete says the section ends
+// with the end marker. A section without it was cut short, or was written before
+// the marker existed; a reader uses it only when its payload parses.
+type sectionPayload struct {
+	Text     string
+	Complete bool
+}
+
 // pageBody is what a page holds below its properties.
 type pageBody struct {
 	Description string
-	// Payloads is the text of each Foreman record section's code blocks, in page order.
-	Payloads []string
+	// Payloads is each Foreman record section's code blocks, in page order.
+	Payloads []sectionPayload
 }
 
 // readBody reads a page's blocks: the user's text outside Foreman's sections and
@@ -234,9 +252,7 @@ func (c *Client) readBody(ctx context.Context, page string) (pageBody, error) {
 					payload.WriteString(k.text())
 				}
 			}
-			if complete {
-				body.Payloads = append(body.Payloads, payload.String())
-			}
+			body.Payloads = append(body.Payloads, sectionPayload{Text: payload.String(), Complete: complete})
 			continue
 		}
 		switch b.Type {
@@ -271,7 +287,7 @@ func (c *Client) replaceSection(ctx context.Context, page string, text, payload 
 	if err != nil {
 		return err
 	}
-	kids := append(append(paragraphs(text), codeBlocks(payload)...), block("paragraph", map[string]any{"rich_text": richText(endMarker)}))
+	kids := append(append(sectionParagraphs(text), codeBlocks(payload)...), block("paragraph", map[string]any{"rich_text": richText(endMarker)}))
 	first := kids[:takeBlocks(kids)]
 	heading := block("heading_2", map[string]any{"rich_text": richText(sectionTitle), "is_toggleable": true, "children": first})
 	ids, err := c.appendBlocks(ctx, page, []any{heading})

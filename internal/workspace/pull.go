@@ -279,9 +279,8 @@ func (s *Sync) pendingAnswer(ctx context.Context, e TaskEntry, id string, key ta
 		s.logf("read entry map of %s: %v", id, err)
 		return nil
 	}
-	if prev.Question == "" && prev.Digest != "" {
-		// Published before the question was tracked: the record the store shows is
-		// the one it was last given, so its pending question is this one.
+	if prev.Question == legacyQuestionKey(rec) {
+		// Published under an earlier revision's key for this same question.
 		prev.Question = qk
 		if err := s.saveRow("task", id, prev); err != nil {
 			s.logf("%v", err)
