@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/brymartinez/foreman/internal/app"
 	"github.com/brymartinez/foreman/internal/knowledge"
@@ -37,10 +38,25 @@ func (s *Sync) Pull(ctx context.Context) (app.WorkspacePull, error) {
 	for _, r := range recs {
 		byID[TaskID(r)] = r
 	}
+	s.pullAt = s.now()
+	edited := map[string]time.Time{}
 	for _, e := range entries {
+		at := e.EditedAt
+		if at.IsZero() {
+			at = e.CreatedAt
+		}
+		edited[e.Ref] = at
 		s.pullEntry(ctx, e, byID, &out)
 	}
-	sort.SliceStable(out.Queued, func(i, j int) bool { return out.Queued[i].QueuedAt.Before(out.Queued[j].QueuedAt) })
+	// Oldest request first. Requests first seen in one pull share a time, and the
+	// store's edit time is the best order left among them.
+	sort.SliceStable(out.Queued, func(i, j int) bool {
+		a, b := out.Queued[i], out.Queued[j]
+		if !a.QueuedAt.Equal(b.QueuedAt) {
+			return a.QueuedAt.Before(b.QueuedAt)
+		}
+		return edited[a.Token].Before(edited[b.Token])
+	})
 	if err := s.pullKnowledge(ctx); err != nil {
 		s.logf("knowledge sync: %v", err)
 	}
@@ -247,10 +263,22 @@ func (s *Sync) collect(ctx context.Context, e TaskEntry, id string, key task.Key
 	if ans := s.pendingAnswer(ctx, e, id, key); ans != nil {
 		out.Answers = append(out.Answers, *ans)
 	}
+	seen, err := s.queuedAt(id)
+	if err != nil {
+		s.logf("read the queue request of %s: %v", id, err)
+	}
+	if !e.Queue && seen != "" {
+		if err := s.setSeen(id, "queued_at", ""); err != nil {
+			s.logf("%v", err)
+		}
+	}
 	if e.Queue && (key.Source != task.Local || localIssueOpen(s, key)) {
-		at := e.EditedAt
-		if at.IsZero() {
-			at = e.CreatedAt
+		at, perr := time.Parse(time.RFC3339Nano, seen)
+		if perr != nil {
+			at = s.pullAt
+			if err := s.setSeen(id, "queued_at", at.UTC().Format(time.RFC3339Nano)); err != nil {
+				s.logf("%v", err)
+			}
 		}
 		out.Queued = append(out.Queued, app.WorkspaceQueued{Key: key, QueuedAt: at, Token: e.Ref})
 	}

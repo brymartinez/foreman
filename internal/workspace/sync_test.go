@@ -647,3 +647,98 @@ func TestACopiedNoteNeverOverwritesTheTaskItsPayloadNames(t *testing.T) {
 		t.Fatalf("the copy must become its own issue, have %d issues", len(issues))
 	}
 }
+
+func TestAPublishNeverOverwritesAKnowledgeEditTheHostHasNotSeen(t *testing.T) {
+	h := newHarness(t)
+	h.know.Replace("o/r", snapshotOf("o/r", "Use tabs."))
+	h.pull()
+	h.mem.WriteKnowledge(h.ctx, KnowledgePublish{Repo: "o/r", Snapshot: snapshotOf("o/r", "Use spaces.")})
+	// A learner finishes before the next pull.
+	h.know.Replace("o/r", snapshotOf("o/r", "Use tabs, always."))
+	if err := h.s.PublishKnowledge(h.ctx, "o/r"); err != nil {
+		t.Fatal(err)
+	}
+	ks, _ := h.mem.ListKnowledge(h.ctx)
+	if len(ks) != 1 || ks[0].Snapshot.Learnings[0].Text != "Use spaces." {
+		t.Fatalf("the shared edit was overwritten: %+v", ks)
+	}
+	h.pull()
+	got, _ := h.know.Snapshot("o/r")
+	if got.Learnings[0].Text != "Use spaces." {
+		t.Fatalf("the edit was not adopted by the next pull: %+v", got.Learnings)
+	}
+}
+
+func TestAPublishNeverOverwritesAnEntryThatJustStoppedParsing(t *testing.T) {
+	h := newHarness(t)
+	h.know.Replace("o/r", snapshotOf("o/r", "Use tabs."))
+	h.pull()
+	h.mem.UserCorruptKnowledge("o/r", errors.New("broken"))
+	h.know.Replace("o/r", snapshotOf("o/r", "Use tabs, always."))
+	w := h.mem.Writes
+	if err := h.s.PublishKnowledge(h.ctx, "o/r"); err != nil || h.mem.Writes != w {
+		t.Fatalf("a broken entry was overwritten before a pull paused it: err %v, writes %d -> %d", err, w, h.mem.Writes)
+	}
+}
+
+func TestConfirmingAPublishedIssueOnTheHostFillsTheSharedConfirmationFields(t *testing.T) {
+	h := newHarness(t)
+	h.issue("L-0A1B2C3D")
+	key := localissues.Key("L-0A1B2C3D", "")
+	if err := h.s.Publish(h.ctx, key); err != nil {
+		t.Fatal(err)
+	}
+	if e := h.entries()[0]; e.ScopeConfirmed || e.ConfirmedTriage != "" {
+		t.Fatalf("entry = %+v", e)
+	}
+	if err := h.s.saveTriage(key, "Ship the small version."); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.s.Publish(h.ctx, key); err != nil {
+		t.Fatal(err)
+	}
+	if e := h.entries()[0]; !e.ScopeConfirmed || e.ConfirmedTriage != "Ship the small version." {
+		t.Fatalf("someone on another device sees %+v", e)
+	}
+	h.pull()
+	if got, _ := h.s.triage(key); got != "Ship the small version." {
+		t.Fatalf("the refresh undid the scope: %q", got)
+	}
+}
+
+func TestConfirmingOnTheHostKeepsAScopeSomeoneTypedInTheStore(t *testing.T) {
+	h := newHarness(t)
+	h.issue("L-0A1B2C3D")
+	key := localissues.Key("L-0A1B2C3D", "")
+	h.s.Publish(h.ctx, key)
+	h.mem.UserEdit(h.entries()[0].Ref, func(e *TaskEntry) { e.ConfirmedTriage, e.ScopeConfirmed = "From my phone.", true })
+	h.s.saveTriage(key, "From the CLI.")
+	if err := h.s.Publish(h.ctx, key); err != nil {
+		t.Fatal(err)
+	}
+	if e := h.entries()[0]; e.ConfirmedTriage != "From my phone." {
+		t.Fatalf("the store's edit was overwritten: %+v", e)
+	}
+}
+
+func TestAnUnrelatedEditDoesNotMoveAnOlderQueueRequestBehindANewerOne(t *testing.T) {
+	h := newHarness(t)
+	a := h.mem.UserCreate(TaskEntry{Name: "A", Queue: true})
+	h.pull()
+	b := h.mem.UserCreate(TaskEntry{Name: "B", Queue: true})
+	h.pull()
+	// A's title changes while both wait, so A has the newer edit time.
+	h.mem.UserEdit(a, func(e *TaskEntry) { e.Name = "A, renamed" })
+	p := h.pull()
+	if len(p.Queued) != 2 || p.Queued[0].Token != a || p.Queued[1].Token != b {
+		t.Fatalf("queued order = %+v, want A then B", p.Queued)
+	}
+	// Unticking and ticking again is a new request.
+	h.mem.UserEdit(a, func(e *TaskEntry) { e.Queue = false })
+	h.pull()
+	h.mem.UserEdit(a, func(e *TaskEntry) { e.Queue = true })
+	p = h.pull()
+	if len(p.Queued) != 2 || p.Queued[0].Token != b {
+		t.Fatalf("a request made again must queue behind B: %+v", p.Queued)
+	}
+}

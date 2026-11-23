@@ -125,6 +125,9 @@ ALTER TABLE workspace_entries ADD COLUMN question TEXT NOT NULL DEFAULT '';
 ALTER TABLE workspace_entries ADD COLUMN fields_seen TEXT NOT NULL DEFAULT '';
 ALTER TABLE workspace_entries ADD COLUMN triage_seen TEXT NOT NULL DEFAULT '';
 `},
+	{5, "workspace queue request order", `
+ALTER TABLE workspace_entries ADD COLUMN queued_at TEXT NOT NULL DEFAULT '';
+`},
 }
 
 // SchemaVersion is the newest schema this build knows.

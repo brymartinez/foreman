@@ -45,6 +45,7 @@ type Sync struct {
 	// already exist. `storage move` sets it while it owns the workspace.
 	Reseed bool
 
+	pullAt   time.Time // when the running pull began
 	mu       sync.Mutex
 	problems []string
 }
@@ -133,12 +134,24 @@ ON CONFLICT(kind, key) DO UPDATE SET ref = excluded.ref, published_digest = excl
 // setSeen records the hash of the store's copy of an entry's issue fields or
 // confirmed triage that the host has reconciled.
 func (s *Sync) setSeen(key, col, value string) error {
-	if col != "fields_seen" && col != "triage_seen" {
+	if col != "fields_seen" && col != "triage_seen" && col != "queued_at" {
 		return fmt.Errorf("unknown column %q", col)
 	}
 	_, err := s.DB.Exec(`INSERT INTO workspace_entries (kind, key, `+col+`) VALUES ('task', ?, ?)
 ON CONFLICT(kind, key) DO UPDATE SET `+col+` = excluded.`+col, key, value)
 	return err
+}
+
+// queuedAt is when a pull first saw the entry's Queue box ticked, or "" while it is
+// not. The store's edit time moves with every unrelated edit and with Foreman's own
+// writes, so it cannot say who asked first.
+func (s *Sync) queuedAt(id string) (string, error) {
+	var at string
+	err := s.DB.QueryRow(`SELECT queued_at FROM workspace_entries WHERE kind = 'task' AND key = ?`, id).Scan(&at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return at, err
 }
 
 func fieldsHash(e TaskEntry) string {
@@ -380,7 +393,14 @@ func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
 	}
 	// An earlier attempt created the entry and did not finish writing it.
 	unfinished := prev.Ref != "" && prev.Digest == ""
-	ref, err := s.Backend.UpsertTask(ctx, TaskPublish{Record: r, Reason: scrubHost(reason, b.rec), Create: seed, Resume: unfinished || s.Reseed, Reseed: s.Reseed})
+	// Scope confirmed on the host after the entry was created is copied to the
+	// visible fields, unless someone changed them in the store since the host last
+	// reconciled them.
+	confirm := false
+	if prev.Ref != "" && !unfinished && !s.Reseed && triageHash(triage) != seenOrEmpty(prev.TriageSeen) {
+		confirm = s.storeTriageUnchanged(ctx, prev)
+	}
+	ref, err := s.Backend.UpsertTask(ctx, TaskPublish{Record: r, Reason: scrubHost(reason, b.rec), Create: seed, Resume: unfinished || s.Reseed, Reseed: s.Reseed || confirm})
 	if err != nil {
 		if ref != "" && prev.Ref == "" {
 			// The entry exists half written. Remember it so the next pull does not
@@ -394,6 +414,11 @@ func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
 	if err := s.saveRow("task", id, row{Ref: ref, Digest: digest, AnswerDigest: prev.AnswerDigest, Stage: status, StageAt: stageAt.Format(time.RFC3339), Question: stored}); err != nil {
 		return err
 	}
+	if confirm {
+		if err := s.setSeen(id, "triage_seen", triageHash(triage)); err != nil {
+			return err
+		}
+	}
 	if prev.Ref == "" || unfinished {
 		// A new entry was seeded from the host, so the store's copy is what the host has.
 		if err := s.setSeen(id, "fields_seen", hash(strings.TrimSpace(seed.Name), strings.TrimSpace(seed.Description), seed.SourceURL, strings.TrimSpace(seed.Repository), strings.Join(seed.Tags, "\x00"))); err != nil {
@@ -402,6 +427,28 @@ func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
 		return s.setSeen(id, "triage_seen", triageHash(seed.ConfirmedTriage))
 	}
 	return nil
+}
+
+func seenOrEmpty(seen string) string {
+	if seen == "" {
+		return triageHash("")
+	}
+	return seen
+}
+
+// storeTriageUnchanged reports whether the store's confirmed-scope field is what the
+// host last reconciled, so writing the host's scope over it loses no edit.
+func (s *Sync) storeTriageUnchanged(ctx context.Context, prev row) bool {
+	entries, err := s.Backend.ListTasks(ctx)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.Ref == prev.Ref {
+			return triageHash(e.ConfirmedTriage) == seenOrEmpty(prev.TriageSeen)
+		}
+	}
+	return false
 }
 
 // legacyQuestionKey is the key an earlier revision stored for a task's pending
@@ -470,6 +517,25 @@ func (s *Sync) PublishKnowledge(ctx context.Context, repo string) error {
 	digest := SnapshotDigest(snap)
 	if digest == prev.Digest {
 		return nil
+	}
+	if !s.Reseed {
+		// Never write over an entry someone edited, or broke, since the host last
+		// saw it. The next pull adopts the edit or pauses on the broken entry.
+		entries, err := s.Backend.ListKnowledge(ctx)
+		if err != nil {
+			return fmt.Errorf("publish knowledge of %s: %w", repo, err)
+		}
+		for _, e := range entries {
+			if e.Repo != repo {
+				continue
+			}
+			if e.ParseErr != nil && !errors.Is(e.ParseErr, ErrNoPayload) {
+				return nil
+			}
+			if e.ParseErr == nil && e.Snapshot != nil && e.Digest != prev.Digest {
+				return nil
+			}
+		}
 	}
 	if err := s.Backend.WriteKnowledge(ctx, KnowledgePublish{Repo: repo, Snapshot: snap, Guidance: snap.Guidance(), Active: 0}); err != nil {
 		return fmt.Errorf("publish knowledge of %s: %w", repo, err)
