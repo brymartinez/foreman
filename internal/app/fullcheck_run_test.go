@@ -532,7 +532,7 @@ func TestCleanReviewCanReuseEarlierFullResultWithDocumentationEvidence(t *testin
 			t.Fatalf("paths=%v state=%s final checks=%d, outcome=%+v", paths, got.State,
 				countResumed(f, "## Final full check"), got.LastOutcome)
 		}
-		if !strings.Contains(f.codex.reviewed[1], "full suite passed on commit1") {
+		if !strings.Contains(f.codex.reviewed[1], "Full suite revision: commit1") {
 			t.Fatal("review was missing the recorded full-suite revision")
 		}
 	}

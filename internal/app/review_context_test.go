@@ -49,7 +49,7 @@ func TestAdversarialReviewFallsBackToFullDiffWhenAncestryCannotBeVerified(t *tes
 		}
 	}
 	for _, reviews := range [][]string{f.codex.reviewed} {
-		if len(reviews) != 2 || !strings.Contains(reviews[1], "git diff --no-ext-diff --no-textconv --ignore-submodules=none "+f.wt.reviewBase+"...c0ffee2 --") || strings.Contains(reviews[1], "4xx retried") {
+		if len(reviews) != 2 || !strings.Contains(reviews[1], "Assigned diff command: `git diff --no-ext-diff --no-textconv --ignore-submodules=none "+f.wt.reviewBase+"...c0ffee2 --") || strings.Contains(reviews[1], "4xx retried") {
 			t.Fatalf("follow-up review omitted the complete diff or included prior findings: %q", reviews)
 		}
 	}

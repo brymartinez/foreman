@@ -65,7 +65,7 @@ func (a App) codeReview(ctx context.Context, rec *task.Record, kind task.ReviewK
 		Worktree: d.Worktree, Log: log, MaxBudgetUSD: a.ReviewerBudgetUSD,
 		Model: model.Model, ReasoningEffort: model.ReasoningEffort,
 		Prompt: agent.ReviewPrompt(agent.ReviewBrief{
-			BaseHead: base, FromHead: action.FromHead, Head: head, Self: self, Passes: a.reviewRounds(),
+			BaseHead: base, FromHead: action.FromHead, Head: head, Passes: a.reviewRounds(),
 			StageInstructions: instructions.Content(), FullSuiteRevision: fullRevision,
 		}),
 		Purpose: purpose, Step: agent.StepReview,

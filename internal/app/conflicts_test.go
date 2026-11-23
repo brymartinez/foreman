@@ -91,7 +91,7 @@ func TestMergeTurnDoesNotUseFixRound(t *testing.T) {
 	if got.State != task.WaitingForCI || len(got.CompetingReviews()) != 2 || !got.LatestReview().Clean || got.ChangeRequestsSinceDecision() != 1 {
 		t.Fatalf("state %s reviews %d change requests %d", got.State, len(got.CompetingReviews()), got.ChangeRequestsSinceDecision())
 	}
-	if !strings.Contains(f.codex.reviewed[1], "Read the complete diff once") {
+	if !strings.Contains(f.codex.reviewed[1], "Review passes: 1") {
 		t.Errorf("the review after a merge must use the normal settings:\n%s", f.codex.reviewed[1])
 	}
 }

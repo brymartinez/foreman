@@ -57,7 +57,7 @@ func TestSelfReviewRunsBeforeTheCompetingReviewOfAPR(t *testing.T) {
 		t.Errorf("self-review budget %v steps %v", f.claude.reviewBudgets, f.claude.steps)
 	}
 	p := f.claude.reviewed[0]
-	if strings.Contains(p, "> Retry 5xx only.") || !strings.Contains(p, "git diff --no-ext-diff --no-textconv --ignore-submodules=none basehead...c0ffee1 --") || !strings.Contains(p, "Read the complete diff 2 times") {
+	if strings.Contains(p, "> Retry 5xx only.") || !strings.Contains(p, "Assigned diff command: `git diff --no-ext-diff --no-textconv --ignore-submodules=none basehead...c0ffee1 --") || !strings.Contains(p, "Review passes: 2") {
 		t.Errorf("self-review prompt must use the diff and pass count without the PR body:\n%s", p)
 	}
 	for _, leak := range []string{"sid-1", "Pull request comments", "Earlier review rounds"} {

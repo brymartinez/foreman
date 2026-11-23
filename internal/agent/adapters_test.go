@@ -691,10 +691,10 @@ func TestResumePromptsAskForSilentWork(t *testing.T) {
 	}
 }
 
-func TestReviewPromptAsksForSilentWork(t *testing.T) {
-	p := ReviewPrompt(ReviewBrief{BaseHead: "abc1234", Head: "def5678"})
-	if !strings.Contains(p, "## Working silently") || !strings.Contains(p, "review findings") {
-		t.Errorf("review prompt lacks the silent work section:\n%s", p)
+func TestReviewPromptUsesStageInstructionsInsteadOfEmbeddingReviewPolicy(t *testing.T) {
+	p := ReviewPrompt(ReviewBrief{BaseHead: "abc1234", Head: "def5678", StageInstructions: "Review findings with a failing case."})
+	if !strings.Contains(p, "## Stage instructions\n\nReview findings with a failing case.") || strings.Contains(p, "## Working silently") {
+		t.Errorf("review prompt must carry stage instructions without embedding review policy:\n%s", p)
 	}
 }
 
@@ -708,8 +708,8 @@ func TestSilentWorkRuleIsSharedByBothPrompts(t *testing.T) {
 	if !strings.Contains(ImplementationPrompt(TaskBrief{Key: task.Key{Repo: "a/b", Number: 7}}), section) {
 		t.Error("implementation prompt does not carry the shared section")
 	}
-	if !strings.Contains(ReviewPrompt(ReviewBrief{BaseHead: "abc1234", Head: "def5678"}), section) {
-		t.Error("review prompt does not carry the shared section")
+	if strings.Contains(ReviewPrompt(ReviewBrief{BaseHead: "abc1234", Head: "def5678"}), section) {
+		t.Error("review prompt should leave silent-work policy to stage instructions")
 	}
 }
 

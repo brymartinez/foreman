@@ -158,7 +158,6 @@ type ReviewBrief struct {
 	BaseHead          string
 	FromHead          string
 	Head              string
-	Self              bool
 	Passes            int
 	StageInstructions string
 	FullSuiteRevision string
@@ -167,42 +166,23 @@ type ReviewBrief struct {
 // ReviewPrompt gives a fresh reviewer the pinned branch or fix diff.
 func ReviewPrompt(b ReviewBrief) string {
 	var s strings.Builder
-	role := "competing reviewer"
-	if b.Self {
-		role = "self-reviewer"
-	}
-	fmt.Fprintf(&s, "You are the %s for this change. This is a read-only review session. Do not edit files, commit, or push.\n\n", role)
-	s.WriteString("## Review scope\n\nJudge concrete defects and regressions introduced by the supplied diff. Read surrounding code and tests as needed to verify a finding. Do not read the issue, plan, claims, decisions, PR description, previous reviews, or implementation transcript.\n\n")
+	s.WriteString("## Review data\n\n")
 	if b.FromHead != "" {
-		fmt.Fprintf(&s, "Read the fix diff with `git diff --no-ext-diff --no-textconv --ignore-submodules=none %s..%s --`. Review every changed line in this range.\n\n", b.FromHead, b.Head)
+		fmt.Fprintf(&s, "Assigned diff command: `git diff --no-ext-diff --no-textconv --ignore-submodules=none %s..%s --`\n\n", b.FromHead, b.Head)
 	} else {
-		fmt.Fprintf(&s, "Read the complete diff with `git diff --no-ext-diff --no-textconv --ignore-submodules=none %s...%s --` from the current working directory. Review every change before returning. If the tool truncates the output, inspect the missing paths separately using the same revisions.\n\n", b.BaseHead, b.Head)
+		fmt.Fprintf(&s, "Assigned diff command: `git diff --no-ext-diff --no-textconv --ignore-submodules=none %s...%s --`\n\n", b.BaseHead, b.Head)
 	}
-	if b.Passes > 1 {
-		fmt.Fprintf(&s, "Read the %s diff %d times, looking for missed problems on each pass.\n\n", diffLabel(b.FromHead), b.Passes)
-	} else if b.FromHead == "" {
-		s.WriteString("Read the complete diff once.\n\n")
-	}
-	silentWorkSection(&s)
-	if text := strings.TrimSpace(b.StageInstructions); text != "" {
-		s.WriteString("## Developer workflow instructions\n\nFollow these review methods where they agree with the scope above.\n\n")
-		s.WriteString(text + "\n\n")
-	}
-	s.WriteString("Use read-only tools to check files, callers, and test cases. Leave tests, builds, and execution of project code to the implementer.\n\n")
+	fmt.Fprintf(&s, "Review passes: %d\n", b.Passes)
 	if b.FullSuiteRevision != "" {
-		fmt.Fprintf(&s, "The full suite passed on %s. If your verdict is clean and repository-specific evidence shows every path in `git diff --name-only %s %s --` is documentation-only and cannot affect behavior or the full suite, list each path with its evidence in docOnly. The path or extension alone is insufficient. Set docOnly to null if any path is a suite input or you are unsure. This evidence does not change your review verdict.\n\n", b.FullSuiteRevision, b.FullSuiteRevision, b.Head)
+		fmt.Fprintf(&s, "Full suite revision: %s\n", b.FullSuiteRevision)
 	} else {
-		s.WriteString("Set docOnly to null.\n\n")
+		s.WriteString("Full suite revision: none\n")
 	}
-	s.WriteString("## Final response\n\nReply with JSON matching the provided schema. Report concrete defects with a failing case and its effect. Severity is blocking or should_fix. Set file and line when available. Use clean when you inspected the entire supplied diff and found no defects. If you cannot inspect the entire supplied diff, return changes_requested and a blocking limitation with the reason. Report only verified defects as findings.\n")
+	if text := strings.TrimSpace(b.StageInstructions); text != "" {
+		s.WriteString("\n## Stage instructions\n\n")
+		s.WriteString(text + "\n")
+	}
 	return s.String()
-}
-
-func diffLabel(from string) string {
-	if from != "" {
-		return "fix"
-	}
-	return "complete"
 }
 
 func oneLine(text string) string {

@@ -48,7 +48,7 @@ func TestReviewLoopCleanFirstRound(t *testing.T) {
 		t.Fatalf("wrong reviewer: codex %d claude %d", len(f.codex.reviewed), len(f.claude.reviewed))
 	}
 	p := f.codex.reviewed[0]
-	if !strings.Contains(p, "git diff --no-ext-diff --no-textconv --ignore-submodules=none basehead...c0ffee1 --") || strings.Contains(p, "Retry 5xx only.") || strings.Contains(p, "5xx-only retry semantics") || strings.Contains(p, "sid-1") {
+	if !strings.Contains(p, "Assigned diff command: `git diff --no-ext-diff --no-textconv --ignore-submodules=none basehead...c0ffee1 --") || strings.Contains(p, "Retry 5xx only.") || strings.Contains(p, "5xx-only retry semantics") || strings.Contains(p, "sid-1") {
 		t.Errorf("competing review lacks the full diff or leaks task context:\n%s", p)
 	}
 	if got.Delegation.RunnerPID != 0 || got.LastOutcome.Status != "review_clean" {
@@ -101,7 +101,7 @@ func TestReviewLoopFixesFindingsThenReReviews(t *testing.T) {
 	if strings.Contains(f.codex.reviewed[1], "Round 2 (one problem)") {
 		t.Errorf("re-review leaked an earlier round:\n%s", f.codex.reviewed[1])
 	}
-	if !strings.Contains(f.codex.reviewed[0], "Read the complete diff with") || !strings.Contains(f.codex.reviewed[1], "Read the complete diff with") {
+	if !strings.Contains(f.codex.reviewed[0], "Assigned diff command:") || !strings.Contains(f.codex.reviewed[1], "Assigned diff command:") {
 		t.Errorf("reviews must honor review_rounds:\n%s", f.codex.reviewed)
 	}
 }
@@ -164,7 +164,7 @@ func TestFixRoundsCapsTheLoopApartFromReviewRounds(t *testing.T) {
 	if got.State != task.NeedsDecision || len(got.CompetingReviews()) != 2 || f.claude.starts != 1 || len(f.claude.resumed) != 1 || !strings.Contains(got.Pending().Question.Issue, "after 1 round of fixes") {
 		t.Fatalf("state %s reviews %d", got.State, len(got.Reviews))
 	}
-	if !strings.Contains(f.codex.reviewed[0], "Read the complete diff 5 times") {
+	if !strings.Contains(f.codex.reviewed[0], "Review passes: 5") {
 		t.Errorf("review passes must follow review_rounds:\n%s", f.codex.reviewed[0])
 	}
 }
@@ -288,7 +288,7 @@ func TestReviewPromptGetsOnlyReviewInstructions(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := f.codex.reviewed[0]
-	if !strings.Contains(p, "## Developer workflow instructions") || !strings.Contains(p, "review instructions") {
+	if !strings.Contains(p, "## Stage instructions") || !strings.Contains(p, "review instructions") {
 		t.Fatalf("review prompt lacks review instructions:\n%s", p)
 	}
 	if strings.Contains(p, "implement instructions") || strings.Contains(p, "pr instructions") {
@@ -633,7 +633,7 @@ func TestCodexImplementsTheCheckedPlanAndClaudeReviewsTheDiff(t *testing.T) {
 	if len(f.codex.prompts) != 2 || !strings.Contains(f.codex.prompts[0], "## Plan first") || !strings.Contains(f.codex.prompt, "### Task 1") || len(f.codex.resumed) != 0 || got.Delegation.Implementer.ID != "th-2" {
 		t.Errorf("codex must implement in a fresh thread: prompts %q resumed %q session %q", f.codex.prompts, f.codex.resumed, got.Delegation.Implementer.ID)
 	}
-	if len(f.claude.reviewed) != 1 || strings.Contains(f.claude.reviewed[0], "R1. Retry 5xx.") || !strings.Contains(f.claude.reviewed[0], "git diff --no-ext-diff --no-textconv --ignore-submodules=none basehead...c0ffee1 --") || strings.Contains(f.claude.reviewed[0], "> Retry 5xx only.") {
+	if len(f.claude.reviewed) != 1 || strings.Contains(f.claude.reviewed[0], "R1. Retry 5xx.") || !strings.Contains(f.claude.reviewed[0], "Assigned diff command: `git diff --no-ext-diff --no-textconv --ignore-submodules=none basehead...c0ffee1 --") || strings.Contains(f.claude.reviewed[0], "> Retry 5xx only.") {
 		t.Errorf("claude's code review must receive the complete diff: %q", f.claude.reviewed)
 	}
 }

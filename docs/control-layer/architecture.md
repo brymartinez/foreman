@@ -721,7 +721,10 @@ the same commit. The commit message records why it changed.
   pinned `base...head` diff. After a fix, Foreman uses `reviewedHead..fixedHead` only
   when Git verifies the earlier head is an ancestor and the base remains valid.
   Retargets, rewritten history, and empty or missing ranges start a new full baseline. The
-  review prompt contains the role's stage instructions and the pinned diff command.
+  first pass in each review reads the full assigned diff. Later passes inspect only
+  paths and surrounding code flagged as risky on the first pass, while the final verdict
+  still covers the full assigned diff. Go supplies the verified diff command, pass
+  count, and review facts; the role's stage file supplies review guidance.
   Reviewers can read relevant code. The plan, implementation transcript, and earlier
   reviews stay outside their context.
 - **Findings return to their reviewer.** The retained implementer accounts for every
