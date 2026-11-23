@@ -114,6 +114,29 @@ model), `status` (`known` or not), and `effectivePercentRemaining`. Its help say
 codes are 0, 1 when every provider fails (the report is still printed), and 2 for a
 usage error. An exhausted provider was not observed live.
 
+## Notion API (2025-09-03)
+
+The backend in `internal/notion` relies on the behavior below. The unit tests check it
+against a stand-in (`internal/notion/fake_test.go`, `scripts/notion-stub.py`), which is
+written from Notion's documentation, not from a real workspace. Run
+`scripts/probe-notion.sh` with a token to re-verify it against a real page before
+trusting a change here.
+
+- Every request sends `Authorization: Bearer <token>` and `Notion-Version: 2025-09-03`.
+- Databases are created with `POST /v1/databases` under a parent page, with the schema in
+  `initial_data_source.properties`. The database lists its data sources
+  (`GET /v1/databases/{id}`), and properties are read and added with
+  `GET`/`PATCH /v1/data_sources/{id}`. Pages are queried with
+  `POST /v1/data_sources/{id}/query` and created with `POST /v1/pages` using a
+  `data_source_id` parent.
+- A parent page's child databases are found by title in `GET /v1/blocks/{page}/children`
+  (`child_database` blocks).
+- A page is trashed with `PATCH /v1/pages/{id}` and `in_trash: true`.
+- Body blocks are appended with `PATCH /v1/blocks/{id}/children` (at most 100 per call)
+  and removed with `DELETE /v1/blocks/{id}`. Rich text items hold at most 2000
+  characters.
+- 429 carries `Retry-After`. 429 and 5xx are retried, other 4xx are not.
+
 ## Progress text
 
 Checked on 2026-10-03 with Claude Code 2.1.288 and Codex CLI 0.160.0.

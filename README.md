@@ -496,7 +496,7 @@ every refresh tries again.
 
 ## Task files
 
-Each task is one Markdown file with YAML frontmatter, stored in
+With `storage.backend: sqlite` (see Workspace storage) each task is one Markdown file with YAML frontmatter, stored in
 `~/.local/share/foreman/tasks/<owner>-<repo>-<number>.md`. The frontmatter holds the
 state, session ids, PR, validation, review rounds, CI, and decisions. The body is yours,
 so you can add notes there.
@@ -701,6 +701,79 @@ ID like `L-0000002A`.
   active, retired, and superseded learnings with history, not pending proposals.
   `foreman issue import work.yaml` is atomic and repeatable, `--dry-run` previews
   conflicts, and it never starts an agent or touches a tracker.
+
+## Workspace storage
+
+`storage.backend` in `config.yaml` picks where your issues, plans, questions, and PR
+links live so you can reach them from any device: `notion`, `obsidian`, or `sqlite`.
+Without a value, an existing workspace (the `database` file exists) stays on `sqlite`,
+and a new one uses `notion`. Credentials, provider sessions, worktrees, and logs always
+stay on the machine that runs the agents, in its SQLite file.
+
+The machine that runs the agents (a VPS, say) keeps the dashboard open, for example
+`tmux new -s foreman foreman`. There is no daemon: each refresh pulls from the store and
+pushes to it. From a laptop or phone you only edit the store.
+
+### Notion
+
+1. Create a blank Notion page for Foreman.
+2. Create an internal connection at notion.so/profile/integrations, then share the page
+   with it (page menu, Connections).
+3. Put its token in `FOREMAN_NOTION_TOKEN` on the machine that runs the dashboard.
+   The token is never read from `config.yaml` and never printed.
+4. Set the page's ID or URL:
+
+```yaml
+storage:
+  backend: notion
+  notion:
+    parent_page_id: https://www.notion.so/Foreman-0123456789abcdef0123456789abcdef
+```
+
+5. Run `foreman storage check`. It creates the **Tasks** and **Repository Knowledge**
+   databases under the page, then creates, updates, reads, and trashes a test task and
+   reports each step.
+
+For a board, add a view of **Tasks** grouped by `Status`; Foreman creates no views.
+
+### Obsidian
+
+```yaml
+storage:
+  backend: obsidian
+  obsidian:
+    vault: ~/Documents/vault
+    folder: Foreman   # optional, the default
+```
+
+Tasks are notes in `<vault>/<folder>/Tasks/`, and knowledge is in
+`<vault>/<folder>/Repository Knowledge/<owner>/<repo>.md`. Run `foreman storage check` to
+test it. Sync the vault to the host with whatever you already use.
+
+### Moving an existing workspace
+
+With a config that says `notion` or `obsidian`, an old database that still holds work is
+refused until you run `foreman storage move` on the machine that has it. Stop the
+dashboard and runners first. The move runs the check, copies every task, local issue,
+confirmed triage, and repository knowledge, reads everything back, and only then
+switches over. If anything differs it names the entries and stays on SQLite. It is safe
+to run again, and it sets no `Queue` box. Moving back to `sqlite` is not supported.
+
+### Working from the store
+
+- **Create** a page in Tasks (or a note in `Tasks/`). The next refresh gives it an
+  `L-` ID.
+- **Confirm scope** by filling `Confirmed triage` (Obsidian: a `## Confirmed triage`
+  section) and ticking `Scope confirmed`.
+- **Queue** ticks start the task on the host at the next refresh, even with auto mode off.
+  The box clears when it starts. If it cannot start, it stays ticked and the Foreman
+  section says why.
+- **Answer** a waiting question by typing an option label or text into `Answer`
+  (Obsidian: the `answer` key). It resumes the same run, then the field clears.
+- **Status, question, branch, and PR** update after every change on the host.
+
+Foreman writes only its own fields (Obsidian: `foreman_*` keys and the region between
+`<!-- foreman:begin -->` and `<!-- foreman:end -->`). Your other keys and text are kept.
 
 ## Storage and upgrading
 
