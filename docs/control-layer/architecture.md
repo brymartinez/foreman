@@ -421,9 +421,10 @@ the same commit. The commit message records why it changed.
   `Foreman record` toggle section; Obsidian: `foreman_*` keys, including `foreman_title`
   so a sanitized file name does not read back as a rename, and the region between
   `<!-- foreman:begin -->` and `<!-- foreman:end -->`. Both marker lines carry the
-  same ID as `foreman_region` in frontmatter. Older notes use one unambiguous marker
-  pair with a status or queue header and receive an ID on publish. A missing or
-  ambiguous region in a published note is reported and held. Marker text inside
+  same ID as `foreman_region` in frontmatter. A published legacy note must have one
+  complete marker pair with a status or queue header before it can receive an ID.
+  Foreman holds notes with missing or ambiguous boundaries, including keyed markers
+  without their frontmatter ID. Marker text inside
   an owned region is escaped. Foreman reads its terminal YAML block independently
   of the readable Markdown and keeps an unreadable payload out of user fields).
   It writes user fields only to

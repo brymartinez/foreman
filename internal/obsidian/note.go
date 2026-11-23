@@ -191,14 +191,13 @@ func regionMarker(marker, id string) string {
 func (n *note) splitRegion() (noteRegion, error) {
 	begin, end := beginMarker, endMarker
 	identified := n.value(regionKey) != nil
+	legacy := !identified && n.str("foreman_status") != ""
 	if identified {
 		id := n.str(regionKey)
 		if id == "" {
 			return noteRegion{}, errors.New("empty foreman_region in frontmatter")
 		}
 		begin, end = regionMarker(begin, id), regionMarker(end, id)
-	} else if n.str("foreman_status") == "" {
-		return noteRegion{before: n.body}, nil
 	}
 
 	var region noteRegion
@@ -206,34 +205,38 @@ func (n *note) splitRegion() (noteRegion, error) {
 	open := false
 	for line := range strings.SplitSeq(n.body, "\n") {
 		next := offset + len(line) + 1
-		if !identified && (strings.HasPrefix(line, beginMarker+regionTag) || strings.HasPrefix(line, endMarker+regionTag)) {
+		switch {
+		case !identified && (strings.HasPrefix(line, beginMarker+regionTag) || strings.HasPrefix(line, endMarker+regionTag)):
 			return noteRegion{}, errors.New("Foreman region ID is missing from frontmatter")
-		}
-		// Before region IDs, Foreman opened its section with status or a queue
-		// reason. A quoted marker pair without that header is ordinary text.
-		if line == begin && (identified || startsLegacyRegion(n.body, next)) {
+		case !identified && !legacy:
+			// An unpublished note can quote the pre-ID markers freely.
+		case line == begin:
 			if open || region.present {
 				return noteRegion{}, errors.New("ambiguous Foreman regions in note")
 			}
+			if legacy && !startsLegacyRegion(n.body, next) {
+				return noteRegion{}, errors.New("missing legacy Foreman region header in note")
+			}
 			start, contentStart, open = offset, next, true
-		}
-		if line == end {
-			if open {
-				region = noteRegion{
-					before:  n.body[:start],
-					text:    n.body[contentStart:offset],
-					after:   n.body[next-1:],
-					present: true,
-				}
-				open = false
-			} else if identified {
+		case line == end:
+			if !open {
 				return noteRegion{}, errors.New("unmatched Foreman region end in note")
 			}
+			region = noteRegion{
+				before:  n.body[:start],
+				text:    n.body[contentStart:offset],
+				after:   n.body[next-1:],
+				present: true,
+			}
+			open = false
 		}
 		offset = next
 	}
-	if open || !region.present {
+	if open || (identified || legacy) && !region.present {
 		return noteRegion{}, errors.New("missing Foreman region marker in note")
+	}
+	if !region.present {
+		region.before = n.body
 	}
 	return region, nil
 }

@@ -622,6 +622,7 @@ func TestAPublishUpgradesALegacyRegionFromACopiedNote(t *testing.T) {
 }
 
 func TestADamagedOrAmbiguousRegionCannotSupplyIssueFields(t *testing.T) {
+	pastedLegacy := "\n" + beginMarker + "\n" + rec("L-BADC0FFE", "INBOX").Render() + endMarker + "\n"
 	for _, tc := range []struct {
 		name   string
 		legacy bool
@@ -629,6 +630,12 @@ func TestADamagedOrAmbiguousRegionCannotSupplyIssueFields(t *testing.T) {
 	}{
 		{"legacy opening missing", true, func(s string) string { return strings.Replace(s, beginMarker, "", 1) }},
 		{"legacy status missing", true, func(s string) string { return strings.Replace(s, "Status: Planning", "", 1) }},
+		{"damaged legacy opening with a complete pasted record", true, func(s string) string {
+			return strings.Replace(s, beginMarker, "", 1) + pastedLegacy
+		}},
+		{"damaged legacy status with a complete pasted record", true, func(s string) string {
+			return strings.Replace(s, "Status: Planning", "", 1) + pastedLegacy
+		}},
 		{"owned end missing", false, func(s string) string { return strings.Replace(s, endMarker, "", 1) }},
 		{"owned region ID missing", false, func(s string) string {
 			lines := strings.Split(s, "\n")
@@ -638,6 +645,15 @@ func TestADamagedOrAmbiguousRegionCannotSupplyIssueFields(t *testing.T) {
 				}
 			}
 			return s
+		}},
+		{"owned frontmatter removed", false, func(s string) string {
+			var note strings.Builder
+			for line := range strings.SplitAfterSeq(s, "\n") {
+				if !strings.HasPrefix(line, "foreman_region:") && !strings.HasPrefix(line, "foreman_status:") {
+					note.WriteString(line)
+				}
+			}
+			return note.String()
 		}},
 		{"same region pasted twice", false, func(s string) string { return s + "\n" + s[strings.Index(s, beginMarker):] }},
 	} {
