@@ -133,7 +133,7 @@ func exportIssue(q reader, recs []*task.Record, id string) (Issue, error) {
 	}
 	for _, rec := range recs {
 		if rec.Source == task.Local && rec.ExternalID == id {
-			out.Work = workOf(rec)
+			out.Work = WorkOf(rec)
 			break
 		}
 	}
@@ -157,7 +157,10 @@ func exportLearnings(q reader, repo string) (knowledge.Snapshot, error) {
 	return snap, nil
 }
 
-func workOf(rec *task.Record) *Work {
+// WorkOf is the portable work a task record holds: plan, decisions, reviews,
+// checkpoint, branch, commits, and PR. It copies named fields only, so a new
+// task field stays out until someone adds it here on purpose.
+func WorkOf(rec *task.Record) *Work {
 	w := &Work{Repo: string(rec.Repo), State: "open", Notes: rec.Body}
 	if rec.State == task.Done {
 		w.State = "done"
@@ -326,6 +329,9 @@ func (i Issue) validate() error {
 	return nil
 }
 
+// Validate checks the work the way an import does.
+func (w Work) Validate() error { return w.validate() }
+
 func (w Work) validate() error {
 	if _, err := task.ParseRepo(w.Repo); err != nil {
 		return err
@@ -373,7 +379,10 @@ func (w Work) validate() error {
 // recordFor is the task record an import restores. It has no delegation, session,
 // worktree, or runner, so nothing runs. An unfinished run's PR becomes a reset mark,
 // which the next start reads to continue that PR when it is still reachable.
-func (s Service) recordFor(i Issue) *task.Record {
+func (s Service) recordFor(i Issue) *task.Record { return RecordFor(i, s.now()) }
+
+// RecordFor is the idle task record that the issue's work restores, stamped at.
+func RecordFor(i Issue, at time.Time) *task.Record {
 	w := i.Work
 	rec := &task.Record{
 		Key:        localissues.Key(i.ID, task.Repo(w.Repo)),
@@ -398,7 +407,7 @@ func (s Service) recordFor(i Issue) *task.Record {
 		}
 		rec.Reviews = append(rec.Reviews, task.Review{Kind: kind, Round: r.Round, Reviewer: agent, Clean: r.Verdict == "clean", Summary: r.Summary, Findings: r.Findings, Head: r.Head, At: r.At})
 	}
-	imp := &task.ImportedWork{Fingerprint: w.Fingerprint, Branch: w.Branch, Commits: w.Commits, At: s.now()}
+	imp := &task.ImportedWork{Fingerprint: w.Fingerprint, Branch: w.Branch, Commits: w.Commits, At: at}
 	if w.Requirements != "" || w.Plan != "" {
 		imp.Documents = map[task.PlanDoc]string{}
 		if w.Requirements != "" {
@@ -414,7 +423,7 @@ func (s Service) recordFor(i Issue) *task.Record {
 	if pr := w.PR; pr != nil {
 		imp.PR, imp.PRURL = pr.Number, pr.URL
 		if rec.State != task.Done {
-			rec.Reset = &task.ResetMark{At: s.now(), PR: pr.Number, PRURL: pr.URL, Branch: w.Branch}
+			rec.Reset = &task.ResetMark{At: at, PR: pr.Number, PRURL: pr.URL, Branch: w.Branch}
 		}
 	}
 	rec.Imported = imp
