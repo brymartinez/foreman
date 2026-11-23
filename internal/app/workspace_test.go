@@ -302,3 +302,36 @@ func TestQueuedTaskWhoseLaunchFailedKeepsItsQueueOnEveryRefresh(t *testing.T) {
 		t.Fatalf("reason = %q", r)
 	}
 }
+
+func TestAnAnswerForAnEarlierQuestionIsNeitherAppliedNorAcked(t *testing.T) {
+	f, key := blockedTask(t)
+	cur, _ := f.store.Get(context.Background(), key)
+	ws := &fakeWorkspace{pull: WorkspacePull{Answers: []WorkspaceAnswer{{Key: key, Text: "B", Token: "tok", Question: QuestionKey(cur) + "-older"}}}}
+	f.app.Workspace = ws
+	f.runners.spawned = nil
+	if warns := f.app.refreshWorkspace(context.Background()); len(warns) != 0 {
+		t.Fatal(warns)
+	}
+	if got := f.store.recs[key].Decisions[0].Answer; got != "" {
+		t.Fatalf("an answer for another question was recorded: %q", got)
+	}
+	if len(ws.acks) != 0 || len(f.runners.spawned) != 0 {
+		t.Fatalf("acks %+v, spawned %d", ws.acks, len(f.runners.spawned))
+	}
+}
+
+func TestAFailedQueuedStartWithAnEmptySummaryStillShowsAReasonAndKeepsQueue(t *testing.T) {
+	f := newFixture()
+	rec, err := f.app.Start(context.Background(), startReq(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.store.recs[rec.Key].State = task.Failed
+	f.store.recs[rec.Key].LastOutcome = &task.Outcome{Status: "failed"}
+	ws := &fakeWorkspace{pull: WorkspacePull{Queued: []WorkspaceQueued{{Key: rec.Key}}}}
+	f.app.Workspace = ws
+	f.app.refreshWorkspace(context.Background())
+	if len(ws.acks) != 0 || ws.blocked[rec.Key] == "" {
+		t.Fatalf("acks %+v, reason %q", ws.acks, ws.blocked[rec.Key])
+	}
+}

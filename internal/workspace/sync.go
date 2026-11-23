@@ -41,6 +41,9 @@ type Sync struct {
 	Log func(format string, args ...any)
 	// LockWait bounds how long a publish waits for another publish of the same entry.
 	LockWait time.Duration
+	// Reseed makes publishes carry the host's confirmed triage into entries that
+	// already exist. `storage move` sets it while it owns the workspace.
+	Reseed bool
 
 	mu       sync.Mutex
 	problems []string
@@ -136,25 +139,6 @@ func (s *Sync) setSeen(key, col, value string) error {
 	_, err := s.DB.Exec(`INSERT INTO workspace_entries (kind, key, `+col+`) VALUES ('task', ?, ?)
 ON CONFLICT(kind, key) DO UPDATE SET `+col+` = excluded.`+col, key, value)
 	return err
-}
-
-// questionKey names the oldest unanswered question of a task. Questions from one
-// turn share a time, so it includes how many were answered before it.
-func questionKey(rec *task.Record) string {
-	if rec == nil {
-		return ""
-	}
-	d := rec.Pending()
-	if d == nil {
-		return ""
-	}
-	answered := 0
-	for _, x := range rec.Decisions {
-		if x.Answer != "" {
-			answered++
-		}
-	}
-	return hash(d.AskedAt.UTC().Format(time.RFC3339Nano), fmt.Sprint(answered), d.Question.Issue)
 }
 
 func fieldsHash(e TaskEntry) string {
@@ -368,21 +352,38 @@ func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
 	if li != nil {
 		seed.Description, seed.Tags = li.Description, li.Tags
 	}
-	qk := questionKey(b.rec)
-	if qk != "" && qk != prev.Question {
+	qk := app.QuestionKey(b.rec)
+	stored := qk
+	if stored == "" {
+		stored = noQuestion
+	}
+	// prev.Question is empty for a first publish and for a row written before
+	// questions were tracked. The second case published the record the store still
+	// shows, so a pending answer there was typed for it and is kept.
+	legacy := prev.Question == "" && prev.Digest != ""
+	if stored != prev.Question && !legacy {
 		// An answer already in the store was typed before this question existed.
 		if err := s.clearStaleAnswer(ctx, id); err != nil {
 			return fmt.Errorf("publish %s: %w", id, err)
 		}
 	}
-	ref, err := s.Backend.UpsertTask(ctx, TaskPublish{Record: r, Reason: scrubHost(reason, b.rec), Create: seed})
+	// An earlier attempt created the entry and did not finish writing it.
+	unfinished := prev.Ref != "" && prev.Digest == ""
+	ref, err := s.Backend.UpsertTask(ctx, TaskPublish{Record: r, Reason: scrubHost(reason, b.rec), Create: seed, Resume: unfinished, Reseed: s.Reseed})
 	if err != nil {
+		if ref != "" && prev.Ref == "" {
+			// The entry exists half written. Remember it so the next pull does not
+			// read its partial fields as an edit and the next publish completes it.
+			if serr := s.saveRow("task", id, row{Ref: ref, AnswerDigest: prev.AnswerDigest, Stage: prev.Stage, StageAt: prev.StageAt, Question: prev.Question}); serr != nil {
+				s.logf("%v", serr)
+			}
+		}
 		return fmt.Errorf("publish %s: %w", id, err)
 	}
-	if err := s.saveRow("task", id, row{Ref: ref, Digest: digest, AnswerDigest: prev.AnswerDigest, Stage: status, StageAt: stageAt.Format(time.RFC3339), Question: qk}); err != nil {
+	if err := s.saveRow("task", id, row{Ref: ref, Digest: digest, AnswerDigest: prev.AnswerDigest, Stage: status, StageAt: stageAt.Format(time.RFC3339), Question: stored}); err != nil {
 		return err
 	}
-	if prev.Ref == "" {
+	if prev.Ref == "" || unfinished {
 		// A new entry was seeded from the host, so the store's copy is what the host has.
 		if err := s.setSeen(id, "fields_seen", hash(strings.TrimSpace(seed.Name), strings.TrimSpace(seed.Description), seed.SourceURL, strings.TrimSpace(seed.Repository), strings.Join(seed.Tags, "\x00"))); err != nil {
 			return err
@@ -391,6 +392,10 @@ func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
 	}
 	return nil
 }
+
+// noQuestion is the stored question of a published record with nothing pending, so
+// an empty value still means "never tracked".
+const noQuestion = "-"
 
 // clearStaleAnswer empties the Answer field of an entry that is about to show a new
 // question.

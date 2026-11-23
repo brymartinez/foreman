@@ -316,3 +316,27 @@ func TestANoteWithWindowsLineEndingsKeepsItsFrontmatter(t *testing.T) {
 		t.Fatalf("the rewrite must keep one frontmatter block and CRLF endings: %q", raw)
 	}
 }
+
+func TestReseedReplacesTheConfirmedTriageSectionAndKeepsTheDescription(t *testing.T) {
+	b := newBackend(t)
+	ctx := context.Background()
+	pub := workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX"), Create: workspace.TaskSeed{Name: "N", Description: "keep me", ConfirmedTriage: "Scope A", ScopeConfirmed: true}}
+	if _, err := b.UpsertTask(ctx, pub); err != nil {
+		t.Fatal(err)
+	}
+	pub.Create.ConfirmedTriage = "Scope B"
+	if _, err := b.UpsertTask(ctx, pub); err != nil {
+		t.Fatal(err)
+	}
+	if es, _ := b.ListTasks(ctx); es[0].ConfirmedTriage != "Scope A" {
+		t.Fatalf("an ordinary publish must not touch user text: %q", es[0].ConfirmedTriage)
+	}
+	pub.Reseed = true
+	if _, err := b.UpsertTask(ctx, pub); err != nil {
+		t.Fatal(err)
+	}
+	es, _ := b.ListTasks(ctx)
+	if es[0].ConfirmedTriage != "Scope B" || es[0].Description != "keep me" || !es[0].ScopeConfirmed {
+		t.Fatalf("entry = %+v", es[0])
+	}
+}

@@ -158,3 +158,35 @@ func TestGateDoesNotMarkAnEmptyDatabaseWhenTheDestinationIsUnreachable(t *testin
 		t.Fatalf("marker = %+v", m)
 	}
 }
+
+func TestGateKeepsAMoveThatFinishedWhileTheDestinationWasBeingChecked(t *testing.T) {
+	t.Setenv(config.NotionTokenEnv, "secret_x")
+	d := openDB(t)
+	other := notionCfg()
+	other.Notion.ParentPageID = "fedcba9876543210fedcba9876543210"
+	during := func() error { // a storage move to another page commits its marker
+		return WriteMarker(d, Marker{Backend: other.Backend, Target: Target(other), Tasks: 7})
+	}
+	if err := GateWith(d, notionCfg(), during); err == nil {
+		t.Fatal("the first-run gate must refuse a destination another process bound meanwhile")
+	}
+	m, _ := ReadMarker(d)
+	if m == nil || m.Target != other.Notion.ParentPageID || m.Tasks != 7 {
+		t.Fatalf("the completed move's marker was overwritten: %+v", m)
+	}
+}
+
+func TestGateRefusesToMarkWhenWorkAppearedDuringTheDestinationCheck(t *testing.T) {
+	t.Setenv(config.NotionTokenEnv, "secret_x")
+	d := openDB(t)
+	during := func() error {
+		_, err := d.Exec(`INSERT INTO local_issues (id, title, status, created_at, updated_at) VALUES ('L-1','t','open','x','x')`)
+		return err
+	}
+	if err := GateWith(d, notionCfg(), during); err == nil || !strings.Contains(err.Error(), "foreman storage move") {
+		t.Fatalf("err = %v", err)
+	}
+	if m, _ := ReadMarker(d); m != nil {
+		t.Fatalf("a marker %+v binds a database that has work", m)
+	}
+}

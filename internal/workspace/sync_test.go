@@ -241,7 +241,7 @@ func TestPullReturnsAnAnswerOnceAndNeverOneTypedBeforeTheQuestion(t *testing.T) 
 	if len(p.Answers) != 1 || p.Answers[0].Text != "B" || p.Answers[0].Key != rec.Key {
 		t.Fatalf("answers = %+v", p.Answers)
 	}
-	if err := h.s.Ack(h.ctx, app.WorkspaceAck{Key: rec.Key, Kind: app.AckAnswer, Token: p.Answers[0].Token}); err != nil {
+	if err := h.s.Ack(h.ctx, app.WorkspaceAck{Key: rec.Key, Kind: app.AckAnswer, Token: p.Answers[0].Token, Question: p.Answers[0].Question}); err != nil {
 		t.Fatal(err)
 	}
 	if h.entries()[0].Answer != "" {
@@ -257,39 +257,92 @@ func TestPullReturnsAnAnswerOnceAndNeverOneTypedBeforeTheQuestion(t *testing.T) 
 	}
 }
 
-func TestTwoQuestionsFromOneTurnTakeTheSameAnswerText(t *testing.T) {
-	h := newHarness(t)
+func twoQuestionTask() *task.Record {
 	rec := fullTask()
 	at := rec.Decisions[1].AskedAt
 	rec.Decisions = []task.Decision{
 		{AskedAt: at, Question: rec.Decisions[1].Question},
 		{AskedAt: at, Question: task.Question{Issue: "Other?", Options: []task.Option{{Label: "A"}, {Label: "B"}}}},
 	}
+	return rec
+}
+
+func TestTwoQuestionsFromOneTurnTakeTheSameAnswerTextAndAckKeepsTheNextAnswer(t *testing.T) {
+	h := newHarness(t)
+	rec := twoQuestionTask()
 	h.saveTask(rec)
 	h.s.Publish(h.ctx, rec.Key)
 	ref := h.entries()[0].Ref
-	answer := func() app.WorkspaceAnswer {
-		h.mem.UserEdit(ref, func(e *TaskEntry) { e.Answer = "A" })
-		p := h.pull()
-		if len(p.Answers) != 1 {
-			t.Fatalf("answers = %+v", p.Answers)
-		}
-		return p.Answers[0]
+	h.mem.UserEdit(ref, func(e *TaskEntry) { e.Answer = "A" })
+	p := h.pull()
+	if len(p.Answers) != 1 {
+		t.Fatalf("answers = %+v", p.Answers)
 	}
-	first := answer()
-	if err := h.s.Ack(h.ctx, app.WorkspaceAck{Key: rec.Key, Kind: app.AckAnswer, Token: first.Token}); err != nil {
+	first := p.Answers[0]
+	// Production order: Respond records the answer and publishes the next question,
+	// then the app acks. The person answers the new question in between.
+	rec.Decisions[0].Answer = "A"
+	h.saveTask(rec)
+	if err := h.s.Publish(h.ctx, rec.Key); err != nil {
 		t.Fatal(err)
 	}
-	cur, _ := h.s.Tasks.Get(h.ctx, rec.Key)
-	cur = rec // the respond path records the first answer and publishes the second question
-	cur.Decisions[0].Answer = "A"
-	h.saveTask(cur)
-	if err := h.s.Publish(h.ctx, cur.Key); err != nil {
+	if h.entries()[0].Answer != "" {
+		t.Fatal("publishing the next question must clear the old answer")
+	}
+	h.mem.UserEdit(ref, func(e *TaskEntry) { e.Answer = "A" })
+	if err := h.s.Ack(h.ctx, app.WorkspaceAck{Key: rec.Key, Kind: app.AckAnswer, Token: first.Token, Question: first.Question}); err != nil {
 		t.Fatal(err)
 	}
-	second := answer()
-	if second.Token == first.Token {
-		t.Fatal("the second question's answer must not look like the first one's")
+	if h.entries()[0].Answer != "A" {
+		t.Fatal("the ack of the first answer erased the answer to the second question")
+	}
+	p = h.pull()
+	if len(p.Answers) != 1 || p.Answers[0].Token == first.Token || p.Answers[0].Question == first.Question {
+		t.Fatalf("the second question's answer must be its own: %+v", p.Answers)
+	}
+}
+
+func TestAnAnswerFromASnapshotOlderThanTheQuestionIsNotApplied(t *testing.T) {
+	h := newHarness(t)
+	rec := twoQuestionTask()
+	h.saveTask(rec)
+	h.s.Publish(h.ctx, rec.Key)
+	ref := h.entries()[0].Ref
+	h.mem.UserEdit(ref, func(e *TaskEntry) { e.Answer = "A" })
+	snapshot := h.entries()[0] // taken by a refresh that has not read the task yet
+	// Meanwhile another process answers the first question and publishes the second.
+	rec.Decisions[0].Answer = "A"
+	h.saveTask(rec)
+	if err := h.s.Publish(h.ctx, rec.Key); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.s.pendingAnswer(h.ctx, snapshot, ForemanID(rec.Key), rec.Key); got != nil {
+		t.Fatalf("the old snapshot's answer was handed to the new question: %+v", got)
+	}
+}
+
+func TestAnAnswerTypedAfterAnUpgradedRowsQuestionIsStillApplied(t *testing.T) {
+	h := newHarness(t)
+	rec := fullTask()
+	h.saveTask(rec)
+	h.s.Publish(h.ctx, rec.Key)
+	// A row written before migration 4 has no question.
+	if _, err := h.s.DB.Exec(`UPDATE workspace_entries SET question = ''`); err != nil {
+		t.Fatal(err)
+	}
+	ref := h.entries()[0].Ref
+	h.mem.UserEdit(ref, func(e *TaskEntry) { e.Answer = "B" })
+	// A publish forced by an unrelated change must not treat the answer as stale.
+	rec.LastOutcome = &task.Outcome{Status: "BLOCKED", Summary: "still waiting", At: t0}
+	h.saveTask(rec)
+	if err := h.s.Publish(h.ctx, rec.Key); err != nil {
+		t.Fatal(err)
+	}
+	if h.entries()[0].Answer != "B" {
+		t.Fatal("a publish after the upgrade cleared a valid answer")
+	}
+	if p := h.pull(); len(p.Answers) != 1 || p.Answers[0].Text != "B" {
+		t.Fatalf("answers = %+v", p.Answers)
 	}
 }
 
@@ -483,4 +536,43 @@ func TestAKnowledgeEntryWithNoPayloadIsPublishedAgainNotPaused(t *testing.T) {
 	if row, _ := h.s.row("knowledge", "o/r"); row.AnswerDigest == pausedMark {
 		t.Fatal("an unfinished publish must not pause the repository")
 	}
+}
+
+func TestAHalfWrittenEntryIsNotReadBackAsAnEditAndTheNextPublishCompletesIt(t *testing.T) {
+	h := newHarness(t)
+	li := localissues.Issue{ID: "L-0A1B2C3D", Title: "Add storage", Description: "first half and second half of a long description", Status: localissues.Open, CreatedAt: t0, UpdatedAt: t0}
+	if err := localissues.PutIn(h.s.DB, li); err != nil {
+		t.Fatal(err)
+	}
+	h.mem.PartialOnWrite = 1
+	if err := h.s.Publish(h.ctx, localissues.Key(li.ID, "")); err == nil {
+		t.Fatal("the dropped write must be reported")
+	}
+	if got := h.entries()[0].Description; got == li.Description {
+		t.Fatal("the test needs a half written entry")
+	}
+	h.mem.PartialOnWrite = 0
+	h.s.LockWait = time.Second
+	// The pull reads the partial description first; it must not replace the host's.
+	h.s.Backend = &noRepublish{h.mem}
+	h.pull()
+	got, _ := localissues.GetIn(h.s.DB, li.ID)
+	if got.Description != li.Description {
+		t.Fatalf("the host's description became %q", got.Description)
+	}
+	h.s.Backend = h.mem
+	if err := h.s.Publish(h.ctx, localissues.Key(li.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+	if d := h.entries()[0].Description; d != li.Description {
+		t.Fatalf("the entry holds %q, want the full description", d)
+	}
+}
+
+// noRepublish is a backend whose writes do nothing, so a pull shows what it reads
+// before any republish could repair the entry.
+type noRepublish struct{ *Memory }
+
+func (noRepublish) UpsertTask(context.Context, TaskPublish) (string, error) {
+	return "", errors.New("no writes during this pull")
 }

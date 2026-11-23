@@ -54,6 +54,14 @@ type TaskPublish struct {
 	Reason string
 	// Create holds the user fields to seed a new entry with.
 	Create TaskSeed
+	// Resume says an earlier publish created the entry and failed before it finished
+	// writing it, so a description that is only the start of Create.Description is
+	// completed.
+	Resume bool
+	// Reseed makes an existing entry take Create's confirmed triage and scope flag.
+	// Only a move sets it: until the cutover SQLite owns the workspace, so a retry
+	// must carry scope that changed there since the first attempt.
+	Reseed bool
 }
 
 // TaskSeed is the user-owned content of a new entry.

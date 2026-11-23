@@ -8,11 +8,17 @@ import (
 )
 
 const (
-	maxRichText   = 2000 // characters per rich-text item
-	maxAppend     = 100  // blocks per append request
-	maxCodeItems  = 100  // rich-text items per block
-	sectionTitle  = "Foreman record"
-	codeBlockSize = maxRichText * maxCodeItems
+	maxRichText  = 2000 // characters per rich-text item
+	maxAppend    = 100  // blocks per append request
+	maxCodeItems = 100  // rich-text items per block
+	sectionTitle = "Foreman record"
+	// endMarker is the last block of a complete section. A heading with children
+	// but no marker is a publish that failed midway, and readers skip it.
+	endMarker = "End of Foreman record"
+	// blockRunes caps the text of one block. At the worst case of 6 JSON bytes per
+	// character it stays well under the request limit, so one block always fits.
+	blockRunes    = 60_000
+	codeBlockSize = blockRunes
 	// maxRequestBytes keeps a request under Notion's 500 KB payload limit with room
 	// for the envelope.
 	maxRequestBytes = 400_000
@@ -52,11 +58,20 @@ func block(typ string, content map[string]any) map[string]any {
 	return map[string]any{"object": "block", "type": typ, typ: content}
 }
 
-// paragraphs makes one paragraph block per line of s.
+// paragraphs makes one paragraph block per line of s. A line longer than a block
+// can hold continues in the next block.
 func paragraphs(s string) []any {
 	var out []any
 	for _, line := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
-		out = append(out, block("paragraph", map[string]any{"rich_text": richText(line)}))
+		r := []rune(line)
+		for {
+			n := min(len(r), blockRunes)
+			out = append(out, block("paragraph", map[string]any{"rich_text": richText(string(r[:n]))}))
+			r = r[n:]
+			if len(r) == 0 {
+				break
+			}
+		}
 	}
 	return out
 }
@@ -213,12 +228,15 @@ func (c *Client) readBody(ctx context.Context, page string) (pageBody, error) {
 				return pageBody{}, err
 			}
 			var payload strings.Builder
+			complete := len(kids) > 0 && kids[len(kids)-1].Type == "paragraph" && kids[len(kids)-1].text() == endMarker
 			for _, k := range kids {
 				if k.Type == "code" {
 					payload.WriteString(k.text())
 				}
 			}
-			body.Payloads = append(body.Payloads, payload.String())
+			if complete {
+				body.Payloads = append(body.Payloads, payload.String())
+			}
 			continue
 		}
 		switch b.Type {
@@ -253,7 +271,7 @@ func (c *Client) replaceSection(ctx context.Context, page string, text, payload 
 	if err != nil {
 		return err
 	}
-	kids := append(paragraphs(text), codeBlocks(payload)...)
+	kids := append(append(paragraphs(text), codeBlocks(payload)...), block("paragraph", map[string]any{"rich_text": richText(endMarker)}))
 	first := kids[:takeBlocks(kids)]
 	heading := block("heading_2", map[string]any{"rich_text": richText(sectionTitle), "is_toggleable": true, "children": first})
 	ids, err := c.appendBlocks(ctx, page, []any{heading})

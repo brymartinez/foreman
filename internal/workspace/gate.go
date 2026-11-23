@@ -148,5 +148,37 @@ func GateWith(d *sql.DB, s config.Storage, verify func() error) error {
 			return fmt.Errorf("the %s store is not usable yet, so the workspace was not bound to it: %w; run foreman storage check, or set storage.backend: sqlite", s.Backend, err)
 		}
 	}
-	return WriteMarker(d, Marker{Backend: s.Backend, Target: Target(s)})
+	return markEmpty(d, s)
+}
+
+// markEmpty writes the first-run marker in one transaction that rechecks what the
+// destination check could not see: another process may have finished a move, or
+// saved work, while the check ran.
+func markEmpty(d *sql.DB, s config.Storage) error {
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	marker, err := ReadMarker(tx)
+	if err != nil {
+		return err
+	}
+	if marker != nil {
+		if marker.Backend == s.Backend && marker.Target == Target(s) {
+			return nil
+		}
+		return fmt.Errorf("this workspace moved to %s (%s) while it was being set up; set storage.backend and its target to match", marker.Backend, marker.Target)
+	}
+	work, err := HasWork(tx)
+	if err != nil {
+		return err
+	}
+	if work {
+		return fmt.Errorf("storage.backend is %s but the local database holds work now; run foreman storage move to copy it, or set storage.backend: sqlite", s.Backend)
+	}
+	if err := WriteMarker(tx, Marker{Backend: s.Backend, Target: Target(s)}); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

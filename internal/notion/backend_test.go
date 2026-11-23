@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/brymartinez/foreman/internal/knowledge"
 	"github.com/brymartinez/foreman/internal/portable"
 	"github.com/brymartinez/foreman/internal/task"
 	"github.com/brymartinez/foreman/internal/workspace"
@@ -513,4 +514,101 @@ func TestAKnowledgePageWithNoPayloadIsReportedAsNoPayloadNotAsBroken(t *testing.
 		t.Fatalf("entries = %+v, err = %v", es, err)
 	}
 	_ = f
+}
+
+func TestOneHugeLineOfMultiByteTextStillFitsEveryRequest(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	r := rec("L-0A1B2C3D", "IMPLEMENTING", "")
+	big := strings.Repeat("€", 180_000) // 540 KB as UTF-8, one line, fewer than 100 blocks
+	r.Work = &portable.Work{Repo: "o/r", State: "open", Plan: big}
+	if _, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: r, Create: workspace.TaskSeed{Name: "N"}}); err != nil {
+		t.Fatal(err) // the fake rejects any request over 500,000 bytes
+	}
+	entries, err := b.ListTasks(ctx)
+	if err != nil || len(entries) != 1 || entries[0].Record == nil || entries[0].Record.Work.Plan != big {
+		t.Fatalf("the plan did not round trip: %v", err)
+	}
+}
+
+func TestADescriptionThatFailedMidAppendIsCompletedByTheNextPublish(t *testing.T) {
+	b, f, _ := newBackend(t)
+	ctx := context.Background()
+	var lines []string
+	for i := 0; i < 150; i++ {
+		lines = append(lines, "line "+strings.Repeat("x", i%7))
+	}
+	desc := strings.Join(lines, "\n")
+	failed := false
+	f.Fail = func(m, p string) (int, string) {
+		if m == "PATCH" && strings.HasSuffix(p, "/children") && !failed {
+			failed = true
+			return http.StatusServiceUnavailable, ""
+		}
+		return 0, ""
+	}
+	pub := workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX", ""), Create: workspace.TaskSeed{Name: "N", Description: desc}}
+	ref, err := b.UpsertTask(ctx, pub)
+	if err == nil || ref == "" {
+		t.Fatalf("ref %q, err %v: the dropped append must fail the publish and name the page", ref, err)
+	}
+	pub.Resume = true
+	if _, err := b.UpsertTask(ctx, pub); err != nil {
+		t.Fatal(err)
+	}
+	b.forget()
+	es, _ := b.ListTasks(ctx)
+	if len(es) != 1 || es[0].Description != desc {
+		t.Fatalf("description has %d characters, want %d", len(es[0].Description), len(desc))
+	}
+}
+
+func TestAnInterruptedFirstKnowledgePublishIsNoPayloadNotBroken(t *testing.T) {
+	b, f, _ := newBackend(t)
+	ctx := context.Background()
+	f.Fail = func(m, p string) (int, string) {
+		if m == "PATCH" && strings.HasPrefix(p, "/v1/blocks/b") { // continuation of the new section
+			return http.StatusServiceUnavailable, ""
+		}
+		return 0, ""
+	}
+	snap := snapshotForTest("o/r")
+	err := b.WriteKnowledge(ctx, workspace.KnowledgePublish{Repo: "o/r", Snapshot: snap, Guidance: strings.Repeat("guidance line\n", 150)})
+	f.Fail = nil
+	if err == nil {
+		t.Fatal("the dropped append must fail the publish")
+	}
+	b.forget()
+	es, lerr := b.ListKnowledge(ctx)
+	if lerr != nil || len(es) != 1 || !errors.Is(es[0].ParseErr, workspace.ErrNoPayload) {
+		t.Fatalf("entries = %+v, err = %v", es, lerr)
+	}
+}
+
+func TestReseedReplacesTheConfirmedTriageOfAnExistingPage(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	pub := workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX", ""), Create: workspace.TaskSeed{Name: "N", Description: "keep me", ConfirmedTriage: "Scope A", ScopeConfirmed: true}}
+	if _, err := b.UpsertTask(ctx, pub); err != nil {
+		t.Fatal(err)
+	}
+	pub.Create.ConfirmedTriage = "Scope B"
+	if _, err := b.UpsertTask(ctx, pub); err != nil {
+		t.Fatal(err)
+	}
+	if es, _ := b.ListTasks(ctx); es[0].ConfirmedTriage != "Scope A" {
+		t.Fatalf("an ordinary publish must not touch user fields: %q", es[0].ConfirmedTriage)
+	}
+	pub.Reseed = true
+	if _, err := b.UpsertTask(ctx, pub); err != nil {
+		t.Fatal(err)
+	}
+	es, _ := b.ListTasks(ctx)
+	if es[0].ConfirmedTriage != "Scope B" || es[0].Description != "keep me" {
+		t.Fatalf("triage %q, description %q", es[0].ConfirmedTriage, es[0].Description)
+	}
+}
+
+func snapshotForTest(repo string) knowledge.Snapshot {
+	return knowledge.Snapshot{Format: knowledge.FormatVersion, Repo: repo, NextID: 1, Learnings: []knowledge.Learning{}, Evaluations: []knowledge.Evaluation{}}
 }

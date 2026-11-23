@@ -5,6 +5,8 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -430,6 +432,9 @@ type WorkspaceAnswer struct {
 	Text string
 	// Token identifies this answer to Ack, so one answer applies at most once.
 	Token string
+	// Question is QuestionKey of the question the answer is for. Applying checks it
+	// against the task, so an answer never lands on a question that came after it.
+	Question string
 }
 
 // WorkspaceQueued is a task a person queued in the workspace store.
@@ -452,6 +457,10 @@ type WorkspaceAck struct {
 	// Kind is AckAnswer or AckQueue.
 	Kind  string
 	Token string
+	// Question is the answer's question for AckAnswer. When the task has moved on
+	// to another question, publishing already cleared the old answer, and the
+	// field may now hold the answer to the next question.
+	Question string
 }
 
 // Ack kinds.
@@ -475,4 +484,25 @@ type Workspace interface {
 	// Ack marks a pulled answer applied or a queued task started, and clears the
 	// field in the store.
 	Ack(ctx context.Context, ack WorkspaceAck) error
+}
+
+// QuestionKey names the oldest unanswered question of a task, or "" when none
+// waits. Questions from one blocked turn share a time, so the key includes how
+// many were answered before it.
+func QuestionKey(rec *task.Record) string {
+	if rec == nil {
+		return ""
+	}
+	d := rec.Pending()
+	if d == nil {
+		return ""
+	}
+	answered := 0
+	for _, x := range rec.Decisions {
+		if x.Answer != "" {
+			answered++
+		}
+	}
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%s", d.AskedAt.UTC().Format(time.RFC3339Nano), answered, d.Question.Issue)))
+	return hex.EncodeToString(sum[:])
 }

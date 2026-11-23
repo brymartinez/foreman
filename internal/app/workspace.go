@@ -70,13 +70,15 @@ func (a App) refreshWorkspace(ctx context.Context) []error {
 // provider session, then acks it. A question someone already answered elsewhere is
 // acked too, so a stale answer is cleared.
 func (a App) applyAnswer(ctx context.Context, ans WorkspaceAnswer) error {
-	if _, err := a.Respond(ctx, ans.Key, ans.Text); err != nil {
+	if _, err := a.respond(ctx, ans.Key, ans.Text, ans.Question); errors.Is(err, errQuestionMoved) {
+		return nil // the next refresh judges the answer again against the new question
+	} else if err != nil {
 		cur, gerr := a.Store.Get(ctx, ans.Key)
 		if gerr != nil || (cur != nil && cur.Pending() != nil) {
 			return err
 		}
 	}
-	return a.Workspace.Ack(ctx, WorkspaceAck{Key: ans.Key, Kind: AckAnswer, Token: ans.Token})
+	return a.Workspace.Ack(ctx, WorkspaceAck{Key: ans.Key, Kind: AckAnswer, Token: ans.Token, Question: ans.Question})
 }
 
 // startQueued starts queued tasks, oldest first, under the rules auto mode uses:
@@ -217,10 +219,13 @@ func (a App) startOne(ctx context.Context, key task.Key) (*task.Record, string, 
 	}
 	if rec.State == task.Failed {
 		summary := "the start failed"
-		if rec.LastOutcome != nil {
+		if rec.LastOutcome != nil && rec.LastOutcome.Summary != "" {
 			summary = rec.LastOutcome.Summary
 		}
 		return nil, summary, nil
+	}
+	if rec == nil {
+		return nil, "the start returned no task", nil
 	}
 	return rec, "", nil
 }

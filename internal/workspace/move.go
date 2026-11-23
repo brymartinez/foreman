@@ -85,6 +85,8 @@ func (m Move) Run(ctx context.Context) (MoveResult, error) {
 	if _, err := s.DB.ExecContext(ctx, `DELETE FROM workspace_entries`); err != nil {
 		return MoveResult{}, err
 	}
+	s.Reseed = true
+	defer func() { s.Reseed = false }()
 	keys, res, err := m.sourceKeys(ctx, recs)
 	if err != nil {
 		return MoveResult{}, err

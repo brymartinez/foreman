@@ -428,12 +428,13 @@ the same commit. The commit message records why it changed.
   text survive. A note whose frontmatter does not parse is reported and left alone.
 - **Notion limits are the client's job** (`internal/notion/client.go`). 30-second request
   timeout, 429 waits for `Retry-After`, 429 and 5xx retry up to 5 times with backoff,
-  rich text splits at 2000 characters, appends send at most 100 blocks and at most
+  rich text splits at 2000 characters, one block holds at most 60,000 characters, appends send at most 100 blocks and at most
   400 KB of JSON (Notion's limit is 500 KB). A 5xx answer to a create or an append is not
   retried, because Notion may have applied it; the caller looks the result up next time. The section is
   replaced by appending the new `Foreman record` toggle first and deleting the old one
   after, so a crash between the two leaves two sections, and a reader takes the last one
-  whose payload parses. The token comes only from `FOREMAN_NOTION_TOKEN`; the client
+  whose payload parses. A section ends with an "End of Foreman record" block, and readers
+  skip one without it, so a publish that failed midway is not read as a broken payload. The token comes only from `FOREMAN_NOTION_TOKEN`; the client
   redacts it from errors, and `config.yaml` has no token key. `FOREMAN_NOTION_API`
   moves the base URL and exists for tests only.
 - **Shared text is scrubbed of host values.** `workspace.scrubHost` replaces the task's
@@ -457,7 +458,10 @@ the same commit. The commit message records why it changed.
   `App.Respond`, which resumes the same provider session. It applies once and only to the
   question the store was last told is pending (`workspace_entries.question`): publishing
   a new question first clears an answer typed before it, and the answer token includes
-  the question's position, so the same text answers two questions of one turn. A queued task starts
+  the question's position, so the same text answers two questions of one turn. The pull
+  re-reads the entry under the publish lock, `Respond` checks the question key inside its
+  transaction, and acking an answer leaves the field alone once the task has moved on to
+  another question, so an answer never lands on or erases the wrong question. A queued task starts
   oldest first by `App.startQueued`, with auto mode's rules (confirmed triage, one
   allowed repository, filters, quota, `auto.max_concurrent`, branch proposal) whether or
   not auto mode is on. A start that cannot happen leaves `Queue` ticked and publishes the
@@ -468,7 +472,9 @@ the same commit. The commit message records why it changed.
   config over a database with tasks, local issues, triage, or learnings is refused with
   a message naming `foreman storage move`; an empty database is marked at first setup;
   after the marker, a different backend or target is refused. An empty database is marked
-  only after the backend's `Ensure` succeeds, so a mistyped page binds nothing. Moving back is not
+  only after the backend's `Ensure` succeeds, in one transaction that rechecks the marker
+  and the work, so a move that finished meanwhile is never overwritten and a mistyped
+  page binds nothing. Moving back is not
   supported. `storage check` and `storage move` skip the gate, the stage files, and any
   agent. `Move.Run` refuses while a runner, a launch claim, a start lock, or a learner
   lock is live, takes the move lock, runs the check, upserts tasks (every task, then every
@@ -478,6 +484,9 @@ the same commit. The commit message records why it changed.
   transaction. A failure names the entries that differ and leaves the workspace on
   SQLite. Entries are found by Foreman ID, so a retry makes no duplicates, and each move first
   clears `workspace_entries` so a retry against another destination copies everything.
+  A retry also rewrites the Confirmed triage of entries a failed attempt created, since
+  SQLite owns the workspace until the cutover. A publish that created an entry and failed
+  leaves a partial row, and the next publish completes the description.
   Verification also compares the user-facing Confirmed triage field with the saved
   scope. The move
   sets no `Queue` and starts nothing. A second run after the marker reports that the

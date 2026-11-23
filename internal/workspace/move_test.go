@@ -298,3 +298,23 @@ func TestMoveFailsWhenTheStoreCutsTheConfirmedScopeShort(t *testing.T) {
 		t.Fatal("no marker expected")
 	}
 }
+
+func TestMoveRetryToTheSameDestinationCarriesScopeChangedInSQLite(t *testing.T) {
+	h := newHarness(t)
+	h.seedWorkspace()
+	h.mem.FailOnWrite = 4 // the two tasks and the issue copy; the knowledge write drops
+	if _, err := h.mover().Run(h.ctx); err == nil {
+		t.Fatal("the dropped write must fail the move")
+	}
+	if _, err := h.s.DB.Exec(`UPDATE triage SET decisions = 'Changed scope.' WHERE id = 'local/l-0b0b0b0b'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.mover().Run(h.ctx); err != nil {
+		t.Fatalf("the retry must not fail on the scope changed since the first attempt: %v", err)
+	}
+	for _, e := range h.entries() {
+		if e.ID == "L-0B0B0B0B" && e.ConfirmedTriage != "Changed scope." {
+			t.Fatalf("triage = %q", e.ConfirmedTriage)
+		}
+	}
+}

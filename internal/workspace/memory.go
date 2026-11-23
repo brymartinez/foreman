@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -25,6 +26,9 @@ type Memory struct {
 	// Mangle changes an entry right after it was written, to model a store that
 	// does not keep what it was given.
 	Mangle func(*TaskEntry)
+	// PartialOnWrite makes the nth write (1-based) create its entry with only the
+	// first half of the description and then fail, as an append that did not land.
+	PartialOnWrite int
 }
 
 func (m *Memory) now() time.Time {
@@ -108,6 +112,18 @@ func (m *Memory) UpsertTask(_ context.Context, p TaskPublish) (string, error) {
 		e = &TaskEntry{Ref: fmt.Sprintf("mem-%d", m.seq), ID: p.Record.ID, CreatedAt: m.now(), Name: s.Name, Repository: s.Repository,
 			SourceURL: s.SourceURL, Tags: s.Tags, Description: s.Description, ConfirmedTriage: s.ConfirmedTriage, ScopeConfirmed: s.ScopeConfirmed}
 		m.tasks = append(m.tasks, e)
+	}
+	if p.Resume && e.Description != "" {
+		if want := strings.TrimSpace(p.Create.Description); want != e.Description && strings.HasPrefix(want, e.Description) {
+			e.Description = want
+		}
+	}
+	if p.Reseed {
+		e.ConfirmedTriage, e.ScopeConfirmed = p.Create.ConfirmedTriage, p.Create.ScopeConfirmed
+	}
+	if m.PartialOnWrite == m.Writes {
+		e.Description = e.Description[:len(e.Description)/2]
+		return e.Ref, errors.New("store dropped the connection after creating the entry")
 	}
 	rec := p.Record
 	e.Record, e.ParseErr, e.EditedAt = &rec, nil, m.now()
@@ -213,6 +229,9 @@ func (m *Memory) WriteKnowledge(_ context.Context, p KnowledgePublish) error {
 		return m.Fail
 	}
 	m.Writes++
+	if m.FailOnWrite == m.Writes {
+		return errors.New("store dropped the connection")
+	}
 	if m.know == nil {
 		m.know = map[string]*KnowledgeEntry{}
 	}

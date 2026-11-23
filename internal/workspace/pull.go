@@ -96,6 +96,12 @@ func (s *Sync) pullEntry(ctx context.Context, e TaskEntry, byID map[string]*task
 		s.logf("read entry map of %s: %v", id, rerr)
 		return
 	}
+	if prev.Ref != "" && prev.Digest == "" {
+		// A publish created this entry and has not finished writing it. Its fields
+		// are partial, so they are not an edit. The republish at the end completes it.
+		s.collect(ctx, e, id, taskKey(key, rec), rec, out)
+		return
+	}
 	// The store's copy is applied only when it changed since the host last
 	// reconciled it. Otherwise a change made on the host (issue triage, a replacing
 	// import) would be undone by the older text the store still holds.
@@ -231,27 +237,8 @@ func (s *Sync) syncIssue(ctx context.Context, e TaskEntry, key task.Key) error {
 
 // collect adds the entry's pending answer and queue request to out.
 func (s *Sync) collect(ctx context.Context, e TaskEntry, id string, key task.Key, rec *task.Record, out *app.WorkspacePull) {
-	prev, err := s.row("task", id)
-	if err != nil {
-		s.logf("read entry map of %s: %v", id, err)
-		return
-	}
-	// An answer counts only for the question the store was last told is pending.
-	// Publishing clears an answer typed before a question appeared, so anything in
-	// the field now was written after it.
-	if qk := questionKey(rec); strings.TrimSpace(e.Answer) != "" && qk != "" && qk == prev.Question {
-		ans := strings.TrimSpace(e.Answer)
-		{
-			token := hash(id, qk, ans)
-			if token == prev.AnswerDigest {
-				// Already applied; the clear did not land. Try again.
-				if err := s.Backend.ClearAnswer(ctx, e.Ref); err != nil {
-					s.logf("clear the answer of %s: %v", id, err)
-				}
-			} else {
-				out.Answers = append(out.Answers, app.WorkspaceAnswer{Key: key, Text: ans, Token: token})
-			}
-		}
+	if ans := s.pendingAnswer(ctx, e, id, key); ans != nil {
+		out.Answers = append(out.Answers, *ans)
 	}
 	if e.Queue && (key.Source != task.Local || localIssueOpen(s, key)) {
 		at := e.EditedAt
@@ -260,6 +247,73 @@ func (s *Sync) collect(ctx context.Context, e TaskEntry, id string, key task.Key
 		}
 		out.Queued = append(out.Queued, app.WorkspaceQueued{Key: key, QueuedAt: at, Token: e.Ref})
 	}
+}
+
+// pendingAnswer returns the answer typed for the task's pending question, or nil.
+// It counts only for the question the store was last told is pending: publishing
+// clears an answer typed before a question appeared, so what is in the field now
+// came after it. It re-reads the entry and the task under the publish lock, so a
+// snapshot taken before another process published a new question cannot hand an
+// old answer to that question.
+func (s *Sync) pendingAnswer(ctx context.Context, e TaskEntry, id string, key task.Key) *app.WorkspaceAnswer {
+	if strings.TrimSpace(e.Answer) == "" {
+		return nil
+	}
+	unlock, err := s.lock(ctx, "publish:task:"+id)
+	if err != nil {
+		s.logf("%v", err)
+		return nil
+	}
+	defer unlock()
+	rec, err := s.taskFor(ctx, key)
+	if err != nil {
+		s.logf("read %s: %v", id, err)
+		return nil
+	}
+	qk := app.QuestionKey(rec)
+	if qk == "" {
+		return nil
+	}
+	prev, err := s.row("task", id)
+	if err != nil {
+		s.logf("read entry map of %s: %v", id, err)
+		return nil
+	}
+	if prev.Question == "" && prev.Digest != "" {
+		// Published before the question was tracked: the record the store shows is
+		// the one it was last given, so its pending question is this one.
+		prev.Question = qk
+		if err := s.saveRow("task", id, prev); err != nil {
+			s.logf("%v", err)
+			return nil
+		}
+	}
+	if qk != prev.Question {
+		return nil
+	}
+	entries, err := s.Backend.ListTasks(ctx)
+	if err != nil {
+		s.logf("read the answer of %s: %v", id, err)
+		return nil
+	}
+	var ans string
+	for _, f := range entries {
+		if f.Ref == e.Ref {
+			ans = strings.TrimSpace(f.Answer)
+		}
+	}
+	if ans == "" {
+		return nil
+	}
+	token := hash(id, qk, ans)
+	if token == prev.AnswerDigest {
+		// Already applied; the clear did not land. Try again.
+		if err := s.Backend.ClearAnswer(ctx, e.Ref); err != nil {
+			s.logf("clear the answer of %s: %v", id, err)
+		}
+		return nil
+	}
+	return &app.WorkspaceAnswer{Key: key, Text: ans, Token: token, Question: qk}
 }
 
 func localIssueOpen(s *Sync, key task.Key) bool {
@@ -277,13 +331,22 @@ func (s *Sync) Ack(ctx context.Context, a app.WorkspaceAck) error {
 		return err
 	}
 	prev, err := s.row("task", id)
+	moved := false
 	if err == nil && a.Kind == app.AckAnswer {
 		prev.AnswerDigest = a.Token
 		err = s.saveRow("task", id, prev)
+		if cur, gerr := s.taskFor(ctx, a.Key); err == nil && gerr == nil && a.Question != "" && app.QuestionKey(cur) != a.Question {
+			moved = true
+		}
 	}
 	unlock()
 	if err != nil {
 		return err
+	}
+	if moved {
+		// The task is on another question. Publishing it cleared this answer, and the
+		// field may already hold the answer to the new question.
+		return nil
 	}
 	ref, err := s.refFor(ctx, id)
 	if err != nil {

@@ -267,6 +267,11 @@ func (b *Backend) UpsertTask(ctx context.Context, p workspace.TaskPublish) (stri
 				if err := b.setForeman(n, p.Record); err != nil {
 					return err
 				}
+				if p.Reseed {
+					if err := reseedTriage(n, p.Create); err != nil {
+						return err
+					}
+				}
 				n.setRegion(content)
 				return nil
 			})
@@ -496,6 +501,30 @@ func (b *Backend) Check(ctx context.Context, report func(workspace.Step)) error 
 		if err := step(s.name, s.fn); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// reseedTriage replaces a note's confirmed triage section and scope flag with the
+// seed's, keeping the description and Foreman's region.
+func reseedTriage(n *note, s workspace.TaskSeed) error {
+	if err := n.set("scope_confirmed", s.ScopeConfirmed); err != nil {
+		return err
+	}
+	before, region, after, ok := splitRegion(n.body)
+	desc, _ := userText(before + after)
+	var user strings.Builder
+	if d := strings.TrimSpace(desc); d != "" {
+		user.WriteString(d + "\n\n")
+	}
+	user.WriteString(triageHeading + "\n\n")
+	if t := strings.TrimSpace(s.ConfirmedTriage); t != "" {
+		user.WriteString(t + "\n\n")
+	}
+	if ok {
+		n.body = user.String() + beginMarker + region + endMarker + "\n"
+	} else {
+		n.body = user.String()
 	}
 	return nil
 }

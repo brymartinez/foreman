@@ -387,12 +387,48 @@ func (b *Backend) UpsertTask(ctx context.Context, p workspace.TaskPublish) (stri
 		}
 	} else {
 		ref = page.ID
-		if err := b.C.do(ctx, "PATCH", "/v1/pages/"+ref, map[string]any{"properties": foremanProps(p.Record, b.now())}, nil); err != nil {
+		props := foremanProps(p.Record, b.now())
+		if p.Reseed {
+			props["Confirmed triage"] = rtLong(strings.TrimSpace(p.Create.ConfirmedTriage))
+			props["Scope confirmed"] = map[string]any{"checkbox": p.Create.ScopeConfirmed}
+		}
+		if err := b.C.do(ctx, "PATCH", "/v1/pages/"+ref, map[string]any{"properties": props}, nil); err != nil {
 			return ref, err
+		}
+		if p.Resume {
+			if err := b.completeDescription(ctx, ref, p.Create.Description); err != nil {
+				return ref, err
+			}
 		}
 	}
 	b.invalidate(ref)
 	return ref, b.C.replaceSection(ctx, ref, text, string(payload))
+}
+
+// completeDescription appends the rest of a description whose first batch of
+// blocks was all a failed publish managed to write. It touches the description only
+// when what the page holds is the start of what it should hold.
+func (b *Backend) completeDescription(ctx context.Context, ref, want string) error {
+	want = strings.TrimSpace(want)
+	if want == "" {
+		return nil
+	}
+	body, err := b.C.readBody(ctx, ref)
+	if err != nil {
+		return err
+	}
+	have := strings.TrimRight(body.Description, "\n")
+	if have == want || !strings.HasPrefix(want, have) {
+		return nil
+	}
+	rest := strings.TrimLeft(strings.TrimPrefix(want, have), "\n")
+	if rest == "" {
+		return nil
+	}
+	b.invalidate(ref)
+	blocks := paragraphs(rest)
+	_, err = b.C.appendBlocks(ctx, ref, blocks)
+	return err
 }
 
 func (b *Backend) patch(ctx context.Context, ref string, props map[string]any) error {
