@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -1027,7 +1028,10 @@ func (a App) update(ctx context.Context, key task.Key, fn func(cur *task.Record)
 		}
 		return next, err
 	})
-	if err == nil && rec != nil {
+	// A claim this process just took is followed by a runner spawn. Publishing to a
+	// slow store first would leave a quit in that window with an active task and no
+	// runner, so the spawn's own update and the runner publish instead.
+	if err == nil && rec != nil && !(rec.Delegation != nil && rec.Delegation.Launch != nil && rec.Delegation.Launch.PID == os.Getpid()) {
 		a.publish(ctx, rec.Key)
 	}
 	if err == nil && rec != nil && rec.State != before {

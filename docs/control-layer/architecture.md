@@ -420,7 +420,7 @@ the same commit. The commit message records why it changed.
   `Status`, `Source`, `Question`, `Branch`, `PR`, `Commit`, `Updated by Foreman`, and the
   `Foreman record` toggle section; Obsidian: `foreman_*` keys, including `foreman_title`
   so a sanitized file name does not read back as a rename, and the region between
-  `<!-- foreman:begin -->` and `<!-- foreman:end -->`). It writes user fields only to
+  `<!-- foreman:begin -->` and `<!-- foreman:end -->`; marker text inside the region is escaped with an invisible separator, and the region is the last pair that holds the record, so a person quoting the markers loses nothing). It writes user fields only to
   seed a new entry, to clear `Queue` after a start, to clear `Answer` after applying
   it, and to write a new entry's `Foreman ID`. Obsidian writes go through a temporary
   file and a rename, and a note that changed since it was read is read again and the

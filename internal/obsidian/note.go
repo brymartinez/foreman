@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -170,18 +171,50 @@ func (n *note) strs(key string) []string {
 	return out
 }
 
-// splitRegion cuts the body at Foreman's markers.
+// regionFormat is the line every Foreman region carries in its payload. A region is
+// recognized by it, so marker text a person quotes in their own part of the note is
+// not mistaken for the region.
+const regionFormat = "format: foreman-task/1"
+
+// splitRegion cuts the body at Foreman's markers. Foreman escapes marker text in
+// what it writes, so its own region ends at the first end marker after its begin
+// marker. Of the pairs a note holds, the last one carrying the record is Foreman's.
 func splitRegion(body string) (before, region, after string, ok bool) {
-	b := strings.Index(body, beginMarker)
-	if b < 0 {
+	best := -1
+	var bestEnd int
+	for from := 0; ; {
+		i := strings.Index(body[from:], beginMarker)
+		if i < 0 {
+			break
+		}
+		b := from + i
+		e := strings.Index(body[b+len(beginMarker):], endMarker)
+		if e < 0 {
+			break
+		}
+		e += b + len(beginMarker)
+		if strings.Contains(body[b:e], regionFormat) {
+			best, bestEnd = b, e
+		}
+		from = b + len(beginMarker)
+	}
+	if best < 0 {
 		return body, "", "", false
 	}
-	e := strings.Index(body[b:], endMarker)
-	if e < 0 {
-		return body, "", "", false
-	}
-	e += b
-	return body[:b], body[b+len(beginMarker) : e], body[e+len(endMarker):], true
+	return body[:best], body[best+len(beginMarker) : bestEnd], body[bestEnd+len(endMarker):], true
+}
+
+var markerPrefix = regexp.MustCompile(`<!-- foreman\x{2063}*`)
+
+// escapeMarkers keeps marker text in Foreman's own content from ending its region
+// early. It adds one invisible separator after "<!-- foreman", and unescapeMarkers
+// takes one away, so any text round-trips.
+func escapeMarkers(s string) string {
+	return markerPrefix.ReplaceAllStringFunc(s, func(m string) string { return m + "\u2063" })
+}
+
+func unescapeMarkers(s string) string {
+	return markerPrefix.ReplaceAllStringFunc(s, func(m string) string { return strings.TrimSuffix(m, "\u2063") })
 }
 
 // userText splits the user-owned body into the description and the confirmed triage.
@@ -196,7 +229,7 @@ func userText(s string) (desc, triage string) {
 }
 
 func regionText(content string) string {
-	return beginMarker + "\n" + strings.TrimRight(content, "\n") + "\n" + endMarker
+	return beginMarker + "\n" + escapeMarkers(strings.TrimRight(content, "\n")) + "\n" + endMarker
 }
 
 // setRegion replaces Foreman's region, or appends it when the note has none.
@@ -222,7 +255,7 @@ func (n *note) regionPayload() string {
 	if !ok {
 		return ""
 	}
-	return region
+	return unescapeMarkers(region)
 }
 
 // userBody is the body outside Foreman's region.

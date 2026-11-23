@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/brymartinez/foreman/internal/knowledge"
 	"github.com/brymartinez/foreman/internal/workspace"
@@ -63,6 +64,8 @@ func (b *Backend) Ensure(context.Context) error {
 	return nil
 }
 
+const maxNameBytes = 120
+
 // safeName makes a note file name from a title.
 func safeName(s string) string {
 	r := strings.NewReplacer("/", "-", "\\", "-", ":", "-", "*", "-", "?", "-", "\"", "-", "<", "-", ">", "-", "|", "-", "#", "-", "^", "-", "[", "-", "]", "-", "\n", " ")
@@ -70,8 +73,17 @@ func safeName(s string) string {
 	if s == "" {
 		return "Untitled"
 	}
-	if r := []rune(s); len(r) > 120 {
-		s = string(r[:120])
+	// File systems cap a name in bytes, not characters: 255 on most. A title and an
+	// ID suffix at 120 bytes each, plus the extension, stay under it.
+	if len(s) > maxNameBytes {
+		cut := maxNameBytes
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		s = strings.TrimRight(s[:cut], ". ")
+		if s == "" {
+			return "Untitled"
+		}
 	}
 	return s
 }

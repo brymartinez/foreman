@@ -29,6 +29,9 @@ type Memory struct {
 	// PartialOnWrite makes the nth write (1-based) create its entry with only the
 	// first half of the description and then fail, as an append that did not land.
 	PartialOnWrite int
+	// LoseRefOnWrite is PartialOnWrite for a create whose response never arrives, so
+	// the caller learns no reference.
+	LoseRefOnWrite int
 }
 
 func (m *Memory) now() time.Time {
@@ -120,6 +123,10 @@ func (m *Memory) UpsertTask(_ context.Context, p TaskPublish) (string, error) {
 	}
 	if p.Reseed {
 		e.ConfirmedTriage, e.ScopeConfirmed = p.Create.ConfirmedTriage, p.Create.ScopeConfirmed
+	}
+	if m.LoseRefOnWrite == m.Writes {
+		e.Description = e.Description[:len(e.Description)/2]
+		return "", errors.New("the response to the create was lost")
 	}
 	if m.PartialOnWrite == m.Writes {
 		e.Description = e.Description[:len(e.Description)/2]

@@ -60,7 +60,13 @@ func (s *Sync) Pull(ctx context.Context) (app.WorkspacePull, error) {
 	if err := s.pullKnowledge(ctx); err != nil {
 		s.logf("knowledge sync: %v", err)
 	}
-	s.republish(ctx)
+	// The app publishes a queued task itself, with the reason it waits. Publishing
+	// it here first would write the record without the reason and then again with it.
+	skip := map[string]bool{}
+	for _, q := range out.Queued {
+		skip[ForemanID(q.Key)] = true
+	}
+	s.republish(ctx, skip)
 	return out, nil
 }
 
@@ -129,7 +135,7 @@ func (s *Sync) pullEntry(ctx context.Context, e TaskEntry, byID map[string]*task
 	// reconciled it. Otherwise a change made on the host (issue triage, a replacing
 	// import) would be undone by the older text the store still holds.
 	if fh := fieldsHash(e); key.Source == task.Local && fh != prev.FieldsSeen {
-		if err := s.syncIssue(ctx, e, key); err != nil {
+		if err := s.syncIssue(ctx, e, key, prev.FieldsSeen); err != nil {
 			s.logf("sync issue %s: %v", id, err)
 		} else if err := s.setSeen(id, "fields_seen", fh); err != nil {
 			s.logf("record issue fields of %s: %v", id, err)
@@ -225,23 +231,33 @@ func (s *Sync) createIssue(e TaskEntry, id string) error {
 }
 
 // syncIssue copies edits a person made to the shared fields into the host's issue.
-func (s *Sync) syncIssue(ctx context.Context, e TaskEntry, key task.Key) error {
+// Only a field whose store value differs from what the host last saw is copied.
+func (s *Sync) syncIssue(ctx context.Context, e TaskEntry, key task.Key, seen string) error {
 	li, err := s.issueFor(key)
 	if err != nil || li == nil {
 		return err
 	}
 	next := *li
-	if t := strings.TrimSpace(e.Name); t != "" {
+	parts := fieldParts(e)
+	was := strings.Split(seen, ",")
+	changed := func(i int) bool { return len(was) != len(parts) || was[i] != parts[i] }
+	if t := strings.TrimSpace(e.Name); changed(0) && t != "" {
 		next.Title = t
 	}
-	next.Description = strings.TrimSpace(e.Description)
-	if e.SourceURL != "" || li.SourceURL == "" {
+	if changed(1) {
+		next.Description = strings.TrimSpace(e.Description)
+	}
+	if changed(2) && (e.SourceURL != "" || li.SourceURL == "") {
 		next.SourceURL = e.SourceURL
 	}
-	next.Repo = strings.TrimSpace(e.Repository)
-	next.Tags = e.Tags
-	if next.Tags == nil {
-		next.Tags = []string{}
+	if changed(3) {
+		next.Repo = strings.TrimSpace(e.Repository)
+	}
+	if changed(4) {
+		next.Tags = e.Tags
+		if next.Tags == nil {
+			next.Tags = []string{}
+		}
 	}
 	if err := (localissues.Input{Title: next.Title, SourceURL: next.SourceURL, Repo: next.Repo}).Validate(); err != nil {
 		return nil // keep the host's copy until the field is fixed
@@ -413,7 +429,7 @@ func (s *Sync) refFor(ctx context.Context, id string) (string, error) {
 
 // republish retries every task whose store copy is stale: after a failed publish,
 // or a change made by a process that could not reach the store.
-func (s *Sync) republish(ctx context.Context) {
+func (s *Sync) republish(ctx context.Context, skip map[string]bool) {
 	issues, err := s.Issues.List(ctx)
 	if err != nil {
 		s.logf("list issues: %v", err)
@@ -427,12 +443,15 @@ func (s *Sync) republish(ctx context.Context) {
 	}
 	for _, r := range recs {
 		seen[TaskID(r)] = true
+		if skip[ForemanID(r.Key)] {
+			continue
+		}
 		if err := s.Publish(ctx, r.Key); err != nil {
 			s.logf("%v", err)
 		}
 	}
 	for _, i := range issues {
-		if !seen[i.ID] {
+		if !seen[i.ID] && !skip[ForemanID(localissues.Key(i.ID, ""))] {
 			if err := s.Publish(ctx, localissues.Key(i.ID, "")); err != nil {
 				s.logf("%v", err)
 			}
@@ -486,13 +505,8 @@ func (s *Sync) pullKnowledge(ctx context.Context) error {
 			if s.Knowledge.Busy(e.Repo) {
 				continue // a learner is writing; try again next refresh
 			}
-			if err := s.Knowledge.Replace(e.Repo, *e.Snapshot); err != nil {
+			if err := s.adoptKnowledge(ctx, e); err != nil {
 				s.logf("adopt the knowledge of %s: %v", e.Repo, err)
-				continue
-			}
-			prev.Digest = e.Digest
-			if err := s.saveRow("knowledge", e.Repo, prev); err != nil {
-				return err
 			}
 			continue
 		}
@@ -512,6 +526,43 @@ func (s *Sync) pullKnowledge(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// adoptKnowledge replaces the host's knowledge with the store's entry. The listing
+// it came from may be older than a publish that has since finished, so under the
+// publish lock it reads the entry and the host's row again and adopts only a
+// snapshot that is still what the store holds and still differs from the host's.
+func (s *Sync) adoptKnowledge(ctx context.Context, e KnowledgeEntry) error {
+	unlock, err := s.lock(ctx, "publish:knowledge:"+e.Repo)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	entries, err := s.Backend.ListKnowledge(ctx)
+	if err != nil {
+		return err
+	}
+	var cur *KnowledgeEntry
+	for i := range entries {
+		if entries[i].Repo == e.Repo {
+			cur = &entries[i]
+		}
+	}
+	if cur == nil || cur.ParseErr != nil || cur.Snapshot == nil || cur.Digest != e.Digest {
+		return nil // the entry changed since the listing; the next pull decides
+	}
+	prev, err := s.row("knowledge", e.Repo)
+	if err != nil {
+		return err
+	}
+	if prev.Digest == cur.Digest || prev.AnswerDigest == pausedMark {
+		return nil
+	}
+	if err := s.Knowledge.Replace(e.Repo, *cur.Snapshot); err != nil {
+		return err
+	}
+	prev.Digest = cur.Digest
+	return s.saveRow("knowledge", e.Repo, prev)
 }
 
 var _ = knowledge.FormatVersion

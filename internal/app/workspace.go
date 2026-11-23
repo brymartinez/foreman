@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/brymartinez/foreman/internal/task"
@@ -99,6 +100,7 @@ func (a App) startQueued(ctx context.Context, queued []WorkspaceQueued) []error 
 			active++
 		}
 	}
+	active += startingElsewhere(recs)
 	var warns []error
 	for _, q := range queued {
 		if existing := findTask(recs, q.Key); existing != nil && existing.Delegation != nil && existing.State == task.Failed {
@@ -137,6 +139,43 @@ func (a App) startQueued(ctx context.Context, queued []WorkspaceQueued) []error 
 		}
 	}
 	return warns
+}
+
+// startsInFlight holds the tasks this process is starting. A start takes a slot
+// only when its first update commits, so a queued start that counts runs from the
+// database alone can pass the limit while the dashboard has another start under way.
+var (
+	startsMu       sync.Mutex
+	startsInFlight = map[task.Key]int{}
+)
+
+func trackStart(key task.Key, repo task.Repo, issue int) func() {
+	if key == (task.Key{}) {
+		key = task.Key{Repo: repo, Number: issue}
+	}
+	startsMu.Lock()
+	startsInFlight[key]++
+	startsMu.Unlock()
+	return func() {
+		startsMu.Lock()
+		if startsInFlight[key]--; startsInFlight[key] <= 0 {
+			delete(startsInFlight, key)
+		}
+		startsMu.Unlock()
+	}
+}
+
+// startingElsewhere counts starts under way that the task list does not show active.
+func startingElsewhere(recs []*task.Record) int {
+	startsMu.Lock()
+	defer startsMu.Unlock()
+	n := 0
+	for k := range startsInFlight {
+		if r := findTask(recs, k); r == nil || !r.State.Active() {
+			n++
+		}
+	}
+	return n
 }
 
 func findTask(recs []*task.Record, key task.Key) *task.Record {

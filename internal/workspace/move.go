@@ -41,22 +41,18 @@ func (m Move) say(format string, args ...any) {
 // duplicates.
 func (m Move) Run(ctx context.Context) (MoveResult, error) {
 	s := m.Sync
-	marker, err := ReadMarker(s.DB)
-	if err != nil {
-		return MoveResult{}, err
-	}
-	if marker != nil {
-		if marker.Backend == m.Storage.Backend && marker.Target == Target(m.Storage) {
-			m.say("The workspace already moved to %s on %s. Nothing to do.", marker.Backend, marker.MovedAt)
-			return MoveResult{AlreadyMoved: true, Tasks: marker.Tasks, Issues: marker.Issues, Repositories: marker.Repositories}, nil
-		}
-		return MoveResult{}, fmt.Errorf("this workspace already moved to %s (%s); moving to another store is not supported", marker.Backend, marker.Target)
+	if res, done, err := m.moved(); done || err != nil {
+		return res, err
 	}
 	unlock, err := s.lock(ctx, MoveLock)
 	if err != nil {
 		return MoveResult{}, errors.New("another foreman storage move is running")
 	}
 	defer unlock()
+	// Another move may have finished while this one waited for the lock.
+	if res, done, err := m.moved(); done || err != nil {
+		return res, err
+	}
 
 	recs, err := s.Tasks.List(ctx)
 	if err != nil {
@@ -130,6 +126,20 @@ func (m Move) Run(ctx context.Context) (MoveResult, error) {
 	}
 	m.say("Moved %d tasks, %d issues without a task, and the knowledge of %d repositories to %s.", res.Tasks, res.Issues, res.Repositories, m.Storage.Backend)
 	return res, nil
+}
+
+// moved reports a finished move: done when it went to this destination, an error
+// when it went somewhere else.
+func (m Move) moved() (MoveResult, bool, error) {
+	marker, err := ReadMarker(m.Sync.DB)
+	if err != nil || marker == nil {
+		return MoveResult{}, false, err
+	}
+	if marker.Backend == m.Storage.Backend && marker.Target == Target(m.Storage) {
+		m.say("The workspace already moved to %s on %s. Nothing to do.", marker.Backend, marker.MovedAt)
+		return MoveResult{AlreadyMoved: true, Tasks: marker.Tasks, Issues: marker.Issues, Repositories: marker.Repositories}, true, nil
+	}
+	return MoveResult{}, false, fmt.Errorf("this workspace already moved to %s (%s); moving to another store is not supported", marker.Backend, marker.Target)
 }
 
 // refuseWhileLive stops the move while a runner, a launch claim, or a learner is

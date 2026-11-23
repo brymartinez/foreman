@@ -40,6 +40,7 @@ var ErrDelegated = errors.New("already delegated")
 // Start prepares the worktree and task file, then launches the detached runner.
 // Rerunning it for a FAILED task, or one whose runner died, resumes from durable state.
 func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) {
+	defer trackStart(req.Key, req.Repo, req.Issue)()
 	if a.Triage != nil && req.Key.Source == task.Local {
 		unlock, err := a.Triage.LockStart(req.Key)
 		if err != nil {

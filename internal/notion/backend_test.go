@@ -875,3 +875,9 @@ func TestCancellingDuringARetryWaitReturnsPromptly(t *testing.T) {
 		t.Fatalf("err = %v after %s, want a prompt cancellation", err, time.Since(start))
 	}
 }
+
+func TestANewClientWaitsOnTheContextAwareTimer(t *testing.T) {
+	if c := New("token"); c.Sleep != nil {
+		t.Fatal("a new client sleeps without watching the caller's context")
+	}
+}

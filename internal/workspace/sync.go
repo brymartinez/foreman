@@ -154,8 +154,15 @@ func (s *Sync) queuedAt(id string) (string, error) {
 	return at, err
 }
 
+// fieldsHash holds one hash per shared issue field, so a pull can tell which
+// field a person edited and leave the others as the host has them.
 func fieldsHash(e TaskEntry) string {
-	return hash(strings.TrimSpace(e.Name), strings.TrimSpace(e.Description), e.SourceURL, strings.TrimSpace(e.Repository), strings.Join(e.Tags, "\x00"))
+	parts := fieldParts(e)
+	return strings.Join(parts[:], ",")
+}
+
+func fieldParts(e TaskEntry) [5]string {
+	return [5]string{hash(strings.TrimSpace(e.Name)), hash(strings.TrimSpace(e.Description)), hash(e.SourceURL), hash(strings.TrimSpace(e.Repository)), hash(strings.Join(e.Tags, "\x00"))}
 }
 
 func triageHash(text string) string { return hash(strings.TrimSpace(text)) }
@@ -402,9 +409,13 @@ func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
 	}
 	ref, err := s.Backend.UpsertTask(ctx, TaskPublish{Record: r, Reason: scrubHost(reason, b.rec), Create: seed, Resume: unfinished || s.Reseed, Reseed: s.Reseed || confirm})
 	if err != nil {
-		if ref != "" && prev.Ref == "" {
-			// The entry exists half written. Remember it so the next pull does not
+		if prev.Ref == "" {
+			// The entry may exist half written, and a create whose response was lost
+			// returns no reference. Remember it either way so the next pull does not
 			// read its partial fields as an edit and the next publish completes it.
+			if ref == "" {
+				ref = unknownRef
+			}
 			if serr := s.saveRow("task", id, row{Ref: ref, AnswerDigest: prev.AnswerDigest, Stage: prev.Stage, StageAt: prev.StageAt, Question: prev.Question}); serr != nil {
 				s.logf("%v", serr)
 			}
@@ -421,13 +432,16 @@ func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
 	}
 	if prev.Ref == "" || unfinished {
 		// A new entry was seeded from the host, so the store's copy is what the host has.
-		if err := s.setSeen(id, "fields_seen", hash(strings.TrimSpace(seed.Name), strings.TrimSpace(seed.Description), seed.SourceURL, strings.TrimSpace(seed.Repository), strings.Join(seed.Tags, "\x00"))); err != nil {
+		if err := s.setSeen(id, "fields_seen", fieldsHash(TaskEntry{Name: seed.Name, Description: seed.Description, SourceURL: seed.SourceURL, Repository: seed.Repository, Tags: seed.Tags})); err != nil {
 			return err
 		}
 		return s.setSeen(id, "triage_seen", triageHash(seed.ConfirmedTriage))
 	}
 	return nil
 }
+
+// unknownRef marks an entry a create may have made without telling the host where.
+const unknownRef = "unconfirmed"
 
 func seenOrEmpty(seen string) string {
 	if seen == "" {

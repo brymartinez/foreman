@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/brymartinez/foreman/internal/config"
 	"github.com/brymartinez/foreman/internal/knowledge"
@@ -356,5 +357,32 @@ func TestAMoveRefusesAnEntryWhoseDescriptionDiffersFromTheIssue(t *testing.T) {
 	}
 	if _, err := h.mover().Run(h.ctx); err == nil || !strings.Contains(err.Error(), "description") {
 		t.Fatalf("a truncated description passed verification: %v", err)
+	}
+}
+
+func TestAMoveThatWaitedForTheLockStopsWhenAnotherMoveFinishedFirst(t *testing.T) {
+	h := newHarness(t)
+	h.seedWorkspace()
+	m := h.mover()
+	h.s.LockWait = 5 * time.Second
+	unlock, err := h.s.lock(h.ctx, MoveLock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := m.Run(h.ctx); done <- err }()
+	time.Sleep(200 * time.Millisecond) // the second move has read an empty marker and waits
+	if err := WriteMarker(h.s.DB, Marker{Backend: "obsidian", Target: "/elsewhere"}); err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+	if err := <-done; err == nil || !strings.Contains(err.Error(), "already moved") {
+		t.Fatalf("err = %v, want a refusal because the workspace already moved", err)
+	}
+	if mk := h.marker(); mk.Backend != "obsidian" || mk.Target != "/elsewhere" {
+		t.Fatalf("marker = %+v: the second move overwrote the first", mk)
+	}
+	if h.mem.Writes != 0 {
+		t.Fatal("the second move wrote to its store")
 	}
 }

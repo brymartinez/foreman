@@ -742,3 +742,103 @@ func TestAnUnrelatedEditDoesNotMoveAnOlderQueueRequestBehindANewerOne(t *testing
 		t.Fatalf("a request made again must queue behind B: %+v", p.Queued)
 	}
 }
+
+func TestEditingOnlyTagsInTheStoreKeepsATitleAndDescriptionReplacedOnTheHost(t *testing.T) {
+	h := newHarness(t)
+	h.issue("L-0A1B2C3D")
+	if err := h.s.Publish(h.ctx, localissues.Key("L-0A1B2C3D", "")); err != nil {
+		t.Fatal(err)
+	}
+	h.pull()
+	li := localissues.Issue{ID: "L-0A1B2C3D", Title: "Replaced on the host", Description: "new text", Status: localissues.Open, CreatedAt: t0, UpdatedAt: t0.Add(time.Hour)}
+	if err := localissues.PutIn(h.s.DB, li); err != nil {
+		t.Fatal(err)
+	}
+	h.mem.UserEdit(h.entries()[0].Ref, func(e *TaskEntry) { e.Tags = []string{"urgent"} })
+	h.pull()
+	got, _ := localissues.GetIn(h.s.DB, "L-0A1B2C3D")
+	if got.Title != "Replaced on the host" || got.Description != "new text" {
+		t.Fatalf("title = %q, description = %q: the tag edit restored the store's older text", got.Title, got.Description)
+	}
+	if len(got.Tags) != 1 || got.Tags[0] != "urgent" {
+		t.Fatalf("tags = %v, want the store edit", got.Tags)
+	}
+}
+
+func TestACreateWhoseResponseWasLostIsNotReadBackAsAnEdit(t *testing.T) {
+	h := newHarness(t)
+	li := localissues.Issue{ID: "L-0A1B2C3D", Title: "Add storage", Description: "first half and second half of a long description", Status: localissues.Open, CreatedAt: t0, UpdatedAt: t0}
+	if err := localissues.PutIn(h.s.DB, li); err != nil {
+		t.Fatal(err)
+	}
+	h.mem.LoseRefOnWrite = 1
+	if err := h.s.Publish(h.ctx, localissues.Key(li.ID, "")); err == nil {
+		t.Fatal("the lost response must be reported")
+	}
+	h.mem.LoseRefOnWrite = 0
+	h.s.Backend = &noRepublish{h.mem}
+	h.pull()
+	got, _ := localissues.GetIn(h.s.DB, li.ID)
+	if got.Description != li.Description {
+		t.Fatalf("the host's description became %q", got.Description)
+	}
+	h.s.Backend = h.mem
+	if err := h.s.Publish(h.ctx, localissues.Key(li.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+	if d := h.entries()[0].Description; d != li.Description {
+		t.Fatalf("the entry holds %q, want the full description", d)
+	}
+	if n := len(h.entries()); n != 1 {
+		t.Fatalf("%d entries, want 1", n)
+	}
+}
+
+// staleKnowledge lists the entries it was armed with once, as a listing taken
+// before a publish finished would.
+type staleKnowledge struct {
+	*Memory
+	stale []KnowledgeEntry
+}
+
+func (s *staleKnowledge) ListKnowledge(ctx context.Context) ([]KnowledgeEntry, error) {
+	if s.stale != nil {
+		out := s.stale
+		s.stale = nil
+		return out, nil
+	}
+	return s.Memory.ListKnowledge(ctx)
+}
+
+func TestAPullWithAKnowledgeListingOlderThanAPublishKeepsTheNewerSnapshot(t *testing.T) {
+	h := newHarness(t)
+	h.know.Replace("o/r", snapshotOf("o/r", "Use tabs."))
+	if err := h.s.PublishKnowledge(h.ctx, "o/r"); err != nil {
+		t.Fatal(err)
+	}
+	old, _ := h.mem.ListKnowledge(h.ctx)
+	h.know.Replace("o/r", snapshotOf("o/r", "Use spaces."))
+	if err := h.s.PublishKnowledge(h.ctx, "o/r"); err != nil {
+		t.Fatal(err)
+	}
+	h.s.Backend = &staleKnowledge{Memory: h.mem, stale: old}
+	h.pull()
+	got, _ := h.know.Snapshot("o/r")
+	if len(got.Learnings) != 1 || got.Learnings[0].Text != "Use spaces." {
+		t.Fatalf("the older listing replaced the host's knowledge: %+v", got.Learnings)
+	}
+}
+
+func TestPullDoesNotPublishAQueuedTaskBeforeTheAppGivesItsReason(t *testing.T) {
+	h := newHarness(t)
+	h.issue("L-0A1B2C3D")
+	key := localissues.Key("L-0A1B2C3D", "")
+	h.s.Publish(h.ctx, key)
+	h.s.Blocked(h.ctx, key, "no confirmed triage")
+	h.mem.UserEdit(h.entries()[0].Ref, func(e *TaskEntry) { e.Queue = true })
+	w := h.mem.Writes
+	h.pull()
+	if h.mem.Writes != w {
+		t.Fatalf("a pull wrote %d times for a queued task the app publishes itself", h.mem.Writes-w)
+	}
+}

@@ -367,3 +367,50 @@ func TestReseedReplacesTheConfirmedTriageSectionAndKeepsTheDescription(t *testin
 		t.Fatalf("entry = %+v", es[0])
 	}
 }
+
+func TestAPlanQuotingBothMarkersRoundTripsAndUserMarkerTextSurvives(t *testing.T) {
+	b := newBackend(t)
+	ctx := context.Background()
+	quoted := "Quote: <!-- foreman:begin --> and <!-- foreman:end --> in a plan."
+	path := writeNote(t, b, "Alpha", "Mine, quoting <!-- foreman:begin --> and <!-- foreman:end --> here.\n")
+	if err := b.AssignID(ctx, path, "L-0A1B2C3D"); err != nil {
+		t.Fatal(err)
+	}
+	r := rec("L-0A1B2C3D", "PLANNING")
+	w := workspaceWork
+	w.Plan = quoted
+	r.Work = &w
+	for i := 0; i < 2; i++ {
+		if _, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: r}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, err := b.ListTasks(ctx)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries = %d, err = %v", len(entries), err)
+	}
+	e := entries[0]
+	if e.ParseErr != nil || e.Record == nil || e.Record.Work == nil || e.Record.Work.Plan != quoted {
+		t.Fatalf("record did not round-trip: err = %v, record = %+v", e.ParseErr, e.Record)
+	}
+	if want := "Mine, quoting <!-- foreman:begin --> and <!-- foreman:end --> here."; e.Description != want {
+		t.Fatalf("description = %q, want %q", e.Description, want)
+	}
+}
+
+func TestALongMultibyteTitleGetsAFileNameUnderTheByteLimit(t *testing.T) {
+	b := newBackend(t)
+	title := strings.Repeat("漢", 100)
+	r := rec("L-0A1B2C3D", "PLANNING")
+	r.Title = title
+	path, err := b.UpsertTask(context.Background(), workspace.TaskPublish{Record: r, Create: workspace.TaskSeed{Name: title}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(filepath.Base(path)); n > 255 {
+		t.Fatalf("file name is %d bytes", n)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	}
+}

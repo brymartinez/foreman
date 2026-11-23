@@ -35,7 +35,7 @@ type Client struct {
 	Token   string
 	Base    string
 	HTTP    *http.Client
-	Sleep   func(time.Duration) // swapped in tests
+	Sleep   func(time.Duration) // tests replace the context-aware wait; nil in production
 	Retries int
 }
 
@@ -46,7 +46,7 @@ func New(token string) *Client {
 	if base == "" {
 		base = DefaultBase
 	}
-	return &Client{Token: token, Base: strings.TrimRight(base, "/"), HTTP: &http.Client{Timeout: requestTimeout}, Sleep: time.Sleep, Retries: maxRetries}
+	return &Client{Token: token, Base: strings.TrimRight(base, "/"), HTTP: &http.Client{Timeout: requestTimeout}, Retries: maxRetries}
 }
 
 // Error is a Notion API error. Its text never contains the token.

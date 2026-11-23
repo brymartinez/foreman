@@ -335,3 +335,41 @@ func TestAFailedQueuedStartWithAnEmptySummaryStillShowsAReasonAndKeepsQueue(t *t
 		t.Fatalf("acks %+v, reason %q", ws.acks, ws.blocked[rec.Key])
 	}
 }
+
+func TestQueuedTaskWaitsWhileAnotherStartHoldsTheLastSlot(t *testing.T) {
+	f, unbound, triage := queuedFixture(t)
+	triage.Save(unbound, "Keep the cache API. Implement in https://github.com/testorg/example.")
+	f.app.MaxConcurrent = 1
+	other := task.Key{Repo: "testorg/example", Number: 9}
+	defer trackStart(other, other.Repo, other.Number)()
+	ws := &fakeWorkspace{pull: WorkspacePull{Queued: []WorkspaceQueued{{Key: unbound}}}}
+	f.app.Workspace = ws
+	f.app.refreshWorkspace(context.Background())
+	if r := ws.blocked[unbound]; !strings.Contains(r, "auto.max_concurrent") {
+		t.Fatalf("reason = %q", r)
+	}
+	if len(f.runners.spawned) != 0 {
+		t.Fatal("a queued start took the slot another start held")
+	}
+}
+
+func TestAnUpdateThatTakesALaunchClaimPublishesOnlyAfterTheSpawn(t *testing.T) {
+	f, _, _ := queuedFixture(t)
+	ws := &fakeWorkspace{}
+	f.app.Workspace = ws
+	key := task.Key{Repo: "testorg/example", Number: 3}
+	f.store.recs[key] = &task.Record{Key: key, State: task.Planning, Delegation: &task.Delegation{}}
+	_, err := f.app.update(context.Background(), key, func(cur *task.Record) (*task.Record, error) {
+		_, err := f.app.claimLaunch(cur)
+		return cur, err
+	})
+	if err != nil || len(ws.published) != 0 {
+		t.Fatalf("err = %v, published = %v: the claim's update published before the runner spawned", err, ws.published)
+	}
+	if _, err := f.app.update(context.Background(), key, func(cur *task.Record) (*task.Record, error) {
+		cur.Delegation.Launch = &task.Launch{Token: "t"}
+		return cur, nil
+	}); err != nil || len(ws.published) != 1 {
+		t.Fatalf("err = %v, published = %v: the update after the spawn must publish", err, ws.published)
+	}
+}
