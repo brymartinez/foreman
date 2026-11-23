@@ -280,13 +280,6 @@ func (s *Sync) pendingAnswer(ctx context.Context, e TaskEntry, id string, key ta
 		return nil
 	}
 	adopt := prev.Question == legacyQuestionKey(rec)
-	if !adopt && prev.Question == "" {
-		// A row from before questions were tracked: trusted only when the store last
-		// received this very record, so it was told about this question.
-		if b, ok, err := s.build(ctx, key); err == nil && ok && hash(b.r.Digest(), "") == prev.Digest {
-			adopt = true
-		}
-	}
 	if adopt {
 		// Published under an earlier revision's key for this same question.
 		prev.Question = qk

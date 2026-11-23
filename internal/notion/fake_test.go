@@ -162,6 +162,18 @@ func (f *fake) serve(w http.ResponseWriter, r *http.Request) {
 		f.reply(w, 200, f.pageJSON(pg))
 	case route[0] == "blocks" && len(route) == 3 && route[2] == "children":
 		f.children(w, r, route[1], body)
+	case r.Method == "PATCH" && route[0] == "blocks" && len(route) == 2:
+		b := f.blocks[route[1]]
+		if b == nil {
+			f.notFound(w)
+			return
+		}
+		if upd, ok := body[b.typ].(map[string]any); ok {
+			for k, v := range upd {
+				b.content[k] = v
+			}
+		}
+		f.reply(w, 200, f.blockJSON(b))
 	case r.Method == "DELETE" && route[0] == "blocks" && len(route) == 2:
 		b := f.blocks[route[1]]
 		if b == nil {

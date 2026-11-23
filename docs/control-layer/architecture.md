@@ -428,7 +428,7 @@ the same commit. The commit message records why it changed.
   text survive. A note whose frontmatter does not parse is reported and left alone.
 - **Notion limits are the client's job** (`internal/notion/client.go`). 30-second request
   timeout, 429 waits for `Retry-After`, 429 and 5xx retry up to 5 times with backoff,
-  rich text splits at 2000 characters, one block of Foreman's own text holds at most 60,000 characters (a longer line continues in gray blocks that the reader joins back onto it), appends send at most 100 blocks and at most
+  rich text splits at 2000 characters, one block of Foreman's own text holds at most 60,000 characters (a longer line continues in blocks that start with an invisible word joiner, which the reader joins back onto it), appends send at most 100 blocks and at most
   400 KB of JSON (Notion's limit is 500 KB). A 5xx answer to a create or an append is not
   retried, because Notion may have applied it; the caller looks the result up next time. The section is
   replaced by appending the new `Foreman record` toggle first and deleting the old one
@@ -464,7 +464,7 @@ the same commit. The commit message records why it changed.
   the question's position, so the same text answers two questions of one turn. The pull
   re-reads the entry under the publish lock, `Respond` checks the question key inside its
   transaction, and acking an answer leaves the field alone once the task has moved on to
-  another question, so an answer never lands on or erases the wrong question. A row that holds an earlier revision's key for the same question, or no key but the record the store last received (so it already showed the question), is adopted; any other unrecognized key, including an empty one, is treated as untrusted and the answer in the store is cleared once. A queued task starts
+  another question, so an answer never lands on or erases the wrong question. A row that holds an earlier revision's key for the same question is adopted; any other unrecognized key, including an empty one, is treated as untrusted and the answer in the store is cleared once. A queued task starts
   oldest first by `App.startQueued`, with auto mode's rules (confirmed triage, one
   allowed repository, filters, quota, `auto.max_concurrent`, branch proposal) whether or
   not auto mode is on. A start that cannot happen leaves `Queue` ticked and publishes the

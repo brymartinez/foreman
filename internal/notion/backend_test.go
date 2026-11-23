@@ -710,3 +710,61 @@ func (b *Backend) findPageForTest(t *testing.T, ctx context.Context, id string) 
 	}
 	return p.ID
 }
+
+func TestRetryingAnAppendThatFailedInsideALongLineKeepsItOneLine(t *testing.T) {
+	b, f, _ := newBackend(t)
+	ctx := context.Background()
+	desc := strings.Repeat("<", 90_000)
+	failed := false
+	f.Fail = func(m, p string) (int, string) {
+		if m == "PATCH" && strings.HasSuffix(p, "/children") && !failed {
+			failed = true
+			return http.StatusServiceUnavailable, ""
+		}
+		return 0, ""
+	}
+	// Force the line across two requests: the fake limit is bytes, so the first
+	// batch holds the first block and the second block goes in a later append.
+	pub := workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX", ""), Create: workspace.TaskSeed{Name: "N", Description: desc}}
+	ref, err := b.UpsertTask(ctx, pub)
+	if err == nil {
+		t.Skip("both blocks fit one request; nothing to retry")
+	}
+	if ref == "" {
+		t.Fatal("the publish must name the page it created")
+	}
+	pub.Resume = true
+	if _, err := b.UpsertTask(ctx, pub); err != nil {
+		t.Fatal(err)
+	}
+	b.forget()
+	es, _ := b.ListTasks(ctx)
+	if len(es) != 1 || es[0].Description != desc {
+		t.Fatalf("the description came back with %d characters, want %d (a newline was inserted?)", len(es[0].Description), len(desc))
+	}
+}
+
+func TestAGrayParagraphAPersonAddedIsNotReadAsAContinuation(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	first := strings.Repeat("a", 60_000)
+	pub := workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX", ""), Create: workspace.TaskSeed{Name: "N", Description: first + "\nsecond line"}}
+	ref, err := b.UpsertTask(ctx, pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Someone colors the second paragraph in Notion.
+	blocks, _ := b.C.blocksOf(ctx, ref)
+	for _, blk := range blocks {
+		if blk.Type == "paragraph" && blk.text() == "second line" {
+			if err := b.C.do(ctx, "PATCH", "/v1/blocks/"+blk.ID, map[string]any{"paragraph": map[string]any{"color": "gray", "rich_text": richText("second line")}}, nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	b.forget()
+	es, _ := b.ListTasks(ctx)
+	if got := es[0].Description; got != first+"\nsecond line" {
+		t.Fatalf("a styled paragraph was merged into the line before it: %d characters", len(got))
+	}
+}

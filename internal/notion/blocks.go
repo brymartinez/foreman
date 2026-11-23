@@ -58,12 +58,13 @@ func block(typ string, content map[string]any) map[string]any {
 	return map[string]any{"object": "block", "type": typ, typ: content}
 }
 
-// continuationColor marks a paragraph that continues the line before it. A line
+// continuationMark starts a paragraph that continues the line before it. A line
 // longer than one block can hold (a block of 60,000 characters stays under the
 // request limit even when every character escapes to six bytes) is written as
-// several blocks, and the reader joins a gray block that follows a full one back
-// onto its line instead of starting a new line.
-const continuationColor = "gray"
+// several blocks. The mark is an invisible word joiner that only Foreman writes, so
+// the reader can join such a block back onto its line without mistaking a paragraph
+// a person styled or typed for a continuation.
+const continuationMark = "\u2060"
 
 // paragraphs makes one paragraph block per line of s.
 func paragraphs(s string) []any {
@@ -72,11 +73,11 @@ func paragraphs(s string) []any {
 		r := []rune(line)
 		for first := true; first || len(r) > 0; first = false {
 			n := min(len(r), blockRunes)
-			content := map[string]any{"rich_text": richText(string(r[:n]))}
+			chunk := string(r[:n])
 			if !first {
-				content["color"] = continuationColor
+				chunk = continuationMark + chunk
 			}
-			out = append(out, block("paragraph", content))
+			out = append(out, block("paragraph", map[string]any{"rich_text": richText(chunk)}))
 			r = r[n:]
 		}
 	}
@@ -127,14 +128,6 @@ func (b *blockObj) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	return json.Unmarshal(data, &b.raw)
-}
-
-func (b blockObj) color() string {
-	var c struct {
-		Color string `json:"color"`
-	}
-	_ = json.Unmarshal(b.raw[b.Type], &c)
-	return c.Color
 }
 
 func (b blockObj) text() string {
@@ -231,6 +224,8 @@ type sectionPayload struct {
 // pageBody is what a page holds below its properties.
 type pageBody struct {
 	Description string
+	// DescBlocks is how many top-level blocks make up Description.
+	DescBlocks int
 	// Payloads is each Foreman record section's code blocks, in page order.
 	Payloads []sectionPayload
 }
@@ -261,15 +256,18 @@ func (c *Client) readBody(ctx context.Context, page string) (pageBody, error) {
 			body.Payloads = append(body.Payloads, sectionPayload{Text: payload.String(), Complete: complete})
 			continue
 		}
-		if b.Type == "paragraph" && len(lines) > 0 && b.color() == continuationColor && prevRunes == blockRunes {
-			lines[len(lines)-1] += b.text()
-			prevRunes = len([]rune(b.text()))
+		if t := b.text(); b.Type == "paragraph" && len(lines) > 0 && prevRunes == blockRunes && strings.HasPrefix(t, continuationMark) {
+			t = strings.TrimPrefix(t, continuationMark)
+			lines[len(lines)-1] += t
+			prevRunes = len([]rune(t))
+			body.DescBlocks++
 			continue
 		}
 		switch b.Type {
 		case "paragraph", "heading_1", "heading_2", "heading_3", "bulleted_list_item", "numbered_list_item", "quote", "to_do", "code":
 			lines = append(lines, b.text())
 			prevRunes = len([]rune(b.text()))
+			body.DescBlocks++
 		}
 	}
 	body.Description = strings.Join(lines, "\n")

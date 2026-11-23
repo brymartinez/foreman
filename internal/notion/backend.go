@@ -423,13 +423,15 @@ func (b *Backend) completeDescription(ctx context.Context, ref, want string) err
 	if have == want || !strings.HasPrefix(want, have) {
 		return nil
 	}
-	rest := strings.TrimLeft(strings.TrimPrefix(want, have), "\n")
-	if rest == "" {
+	// The blocks already on the page are the first ones paragraphs(want) makes, since
+	// they came from a prefix of it, so the rest are the ones after them. That keeps
+	// a line that was cut in the middle continuing as one line.
+	all := paragraphs(want)
+	if body.DescBlocks >= len(all) {
 		return nil
 	}
 	b.invalidate(ref)
-	blocks := paragraphs(rest)
-	_, err = b.C.appendBlocks(ctx, ref, blocks)
+	_, err = b.C.appendBlocks(ctx, ref, all[body.DescBlocks:])
 	return err
 }
 

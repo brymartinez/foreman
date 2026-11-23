@@ -601,21 +601,26 @@ func (noRepublish) UpsertTask(context.Context, TaskPublish) (string, error) {
 	return "", errors.New("no writes during this pull")
 }
 
-func TestAnAnswerTypedForAQuestionAnUntrackedRowAlreadyPublishedIsStillApplied(t *testing.T) {
+func TestAnAnswerBesideAnUntrackedRowIsNeverAppliedEvenWhenTheDigestMatches(t *testing.T) {
+	// The publisher before question tracking saved the record without clearing the
+	// Answer field, so an answer typed before the first question was published sits
+	// next to a matching digest and an empty key. Nothing tells it from a reply.
 	h := newHarness(t)
 	rec := fullTask()
 	h.saveTask(rec)
 	h.s.Publish(h.ctx, rec.Key)
-	// A row written before questions were tracked, for the record the store holds now.
 	if _, err := h.s.DB.Exec(`UPDATE workspace_entries SET question = ''`); err != nil {
 		t.Fatal(err)
 	}
 	h.mem.UserEdit(h.entries()[0].Ref, func(e *TaskEntry) { e.Answer = "B" })
-	p := h.pull()
-	if len(p.Answers) != 1 || p.Answers[0].Text != "B" {
-		t.Fatalf("answers = %+v: the reply to a question the store already showed was dropped", p.Answers)
+	if p := h.pull(); len(p.Answers) != 0 {
+		t.Fatalf("an answer of unknown age was applied: %+v", p.Answers)
 	}
-	if h.entries()[0].Answer != "B" {
-		t.Fatal("the republish cleared a valid answer")
+	if h.entries()[0].Answer != "" {
+		t.Fatal("the unverifiable answer was not cleared")
+	}
+	h.mem.UserEdit(h.entries()[0].Ref, func(e *TaskEntry) { e.Answer = "B" })
+	if p := h.pull(); len(p.Answers) != 1 {
+		t.Fatalf("a reply typed after the row was tracked again must apply: %+v", p.Answers)
 	}
 }
