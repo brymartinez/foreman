@@ -411,10 +411,12 @@ func (b *Backend) UpsertTask(ctx context.Context, p workspace.TaskPublish) (stri
 // blocks was all a failed publish managed to write. It touches the description only
 // when what the page holds is the start of what it should hold.
 func (b *Backend) completeDescription(ctx context.Context, ref, want string) error {
-	want = strings.TrimSpace(want)
-	if want == "" {
+	if strings.TrimSpace(want) == "" {
 		return nil
 	}
+	// Cut it the way creation did, so the blocks already on the page line up with
+	// paragraphs(want), blank lines at the start included.
+	want = strings.TrimRight(want, "\n")
 	body, err := b.C.readBody(ctx, ref)
 	if err != nil {
 		return err

@@ -66,6 +66,27 @@ func block(typ string, content map[string]any) map[string]any {
 // a person styled or typed for a continuation.
 const continuationMark = "\u2060"
 
+// escapeMark is put before a chunk that itself starts with the continuation mark or
+// with itself, so a line a person typed or imported with such a start is not read as
+// a continuation, and the reader can tell the escape from the text it guards.
+const escapeMark = "\u200b"
+
+func escapeChunk(c string) string {
+	if strings.HasPrefix(c, continuationMark) || strings.HasPrefix(c, escapeMark) {
+		return escapeMark + c
+	}
+	return c
+}
+
+// unescapeChunk undoes escapeChunk. An escape is the escape mark followed by either
+// mark, which no unescaped chunk starts with.
+func unescapeChunk(t string) string {
+	if strings.HasPrefix(t, escapeMark+continuationMark) || strings.HasPrefix(t, escapeMark+escapeMark) {
+		return strings.TrimPrefix(t, escapeMark)
+	}
+	return t
+}
+
 // paragraphs makes one paragraph block per line of s.
 func paragraphs(s string) []any {
 	var out []any
@@ -73,7 +94,7 @@ func paragraphs(s string) []any {
 		r := []rune(line)
 		for first := true; first || len(r) > 0; first = false {
 			n := min(len(r), blockRunes)
-			chunk := string(r[:n])
+			chunk := escapeChunk(string(r[:n]))
 			if !first {
 				chunk = continuationMark + chunk
 			}
@@ -257,7 +278,7 @@ func (c *Client) readBody(ctx context.Context, page string) (pageBody, error) {
 			continue
 		}
 		if t := b.text(); b.Type == "paragraph" && len(lines) > 0 && prevRunes == blockRunes && strings.HasPrefix(t, continuationMark) {
-			t = strings.TrimPrefix(t, continuationMark)
+			t = unescapeChunk(strings.TrimPrefix(t, continuationMark))
 			lines[len(lines)-1] += t
 			prevRunes = len([]rune(t))
 			body.DescBlocks++
@@ -265,8 +286,12 @@ func (c *Client) readBody(ctx context.Context, page string) (pageBody, error) {
 		}
 		switch b.Type {
 		case "paragraph", "heading_1", "heading_2", "heading_3", "bulleted_list_item", "numbered_list_item", "quote", "to_do", "code":
-			lines = append(lines, b.text())
-			prevRunes = len([]rune(b.text()))
+			t := b.text()
+			if b.Type == "paragraph" {
+				t = unescapeChunk(t)
+			}
+			lines = append(lines, t)
+			prevRunes = len([]rune(t))
 			body.DescBlocks++
 		}
 	}

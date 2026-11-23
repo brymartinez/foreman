@@ -768,3 +768,56 @@ func TestAGrayParagraphAPersonAddedIsNotReadAsAContinuation(t *testing.T) {
 		t.Fatalf("a styled paragraph was merged into the line before it: %d characters", len(got))
 	}
 }
+
+func TestALineStartingWithTheMarkerAfterAFullLineStaysItsOwnLine(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	for _, desc := range []string{
+		strings.Repeat("a", 60_000) + "\n⁠after",
+		strings.Repeat("a", 60_000) + "\n​after",
+		strings.Repeat("a", 120_000) + "\n⁠⁠after",
+		strings.Repeat("a", 60_001) + "\n⁠after",
+		strings.Repeat("⁠", 60_000) + "\n⁠after",
+	} {
+		pub := workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX", ""), Create: workspace.TaskSeed{Name: "N", Description: desc}}
+		if _, err := b.UpsertTask(ctx, pub); err != nil {
+			t.Fatal(err)
+		}
+		b.forget()
+		es, _ := b.ListTasks(ctx)
+		if got := es[len(es)-1].Description; got != desc {
+			t.Fatalf("description with %d characters came back with %d", len(desc), len(got))
+		}
+		for _, e := range es {
+			_ = b.Trash(ctx, e.Ref)
+		}
+		b.forget()
+	}
+}
+
+func TestRetryingAnImportWithLeadingBlankLinesAppendsTheVisibleText(t *testing.T) {
+	b, f, _ := newBackend(t)
+	ctx := context.Background()
+	desc := strings.Repeat("\n", 100) + "visible"
+	failed := false
+	f.Fail = func(m, p string) (int, string) {
+		if m == "PATCH" && strings.HasSuffix(p, "/children") && !failed {
+			failed = true
+			return http.StatusServiceUnavailable, ""
+		}
+		return 0, ""
+	}
+	pub := workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX", ""), Create: workspace.TaskSeed{Name: "N", Description: desc}}
+	if _, err := b.UpsertTask(ctx, pub); err == nil {
+		t.Skip("everything fit one request; nothing to retry")
+	}
+	pub.Resume = true
+	if _, err := b.UpsertTask(ctx, pub); err != nil {
+		t.Fatal(err)
+	}
+	b.forget()
+	es, _ := b.ListTasks(ctx)
+	if len(es) != 1 || es[0].Description != desc {
+		t.Fatalf("the retried description is %q, want the visible line after 100 blank ones", es[0].Description)
+	}
+}
