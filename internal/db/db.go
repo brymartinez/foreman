@@ -96,6 +96,26 @@ CREATE TABLE meta (
 	value TEXT NOT NULL
 );
 `},
+	{2, "workspace cutover marker and entry map", `
+CREATE TABLE workspace (
+	id           INTEGER PRIMARY KEY CHECK (id = 1),
+	backend      TEXT NOT NULL,
+	target       TEXT NOT NULL,
+	moved_at     TEXT NOT NULL,
+	tasks        INTEGER NOT NULL DEFAULT 0,
+	issues       INTEGER NOT NULL DEFAULT 0,
+	repositories INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE workspace_entries (
+	kind             TEXT NOT NULL,
+	key              TEXT NOT NULL,
+	ref              TEXT NOT NULL DEFAULT '',
+	published_digest TEXT NOT NULL DEFAULT '',
+	answer_digest    TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (kind, key)
+);
+`},
 }
 
 // SchemaVersion is the newest schema this build knows.

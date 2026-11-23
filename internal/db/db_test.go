@@ -17,7 +17,7 @@ func TestOpenCreatesTheVersionedSchema(t *testing.T) {
 	if err := d.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != SchemaVersion() {
 		t.Fatalf("schema version = %d, %v; want %d", version, err, SchemaVersion())
 	}
-	for _, table := range []string{"tasks", "triage", "start_locks", "local_issues", "learnings", "evaluations", "attempts", "locks", "meta"} {
+	for _, table := range []string{"tasks", "triage", "start_locks", "local_issues", "learnings", "evaluations", "attempts", "locks", "meta", "workspace", "workspace_entries"} {
 		if _, err := d.Exec(`SELECT 1 FROM ` + table + ` LIMIT 1`); err != nil {
 			t.Errorf("table %s: %v", table, err)
 		}

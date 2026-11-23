@@ -10,6 +10,7 @@ import (
 	"github.com/brymartinez/foreman/internal/knowledge"
 	"github.com/brymartinez/foreman/internal/localissues"
 	"github.com/brymartinez/foreman/internal/store"
+	"github.com/brymartinez/foreman/internal/workspace"
 )
 
 // state is everything Foreman persists, opened once per process from the one
@@ -44,6 +45,10 @@ func openState(cfg config.Config, w io.Writer) (state, error) {
 			fmt.Fprintf(w, " Your original task files are in %s/.pre-sqlite.", cfg.TasksDir)
 		}
 		fmt.Fprintln(w)
+	}
+	if err := workspace.Gate(d, cfg.Storage); err != nil {
+		d.Close()
+		return state{}, err
 	}
 	return state{
 		DB:        d,
