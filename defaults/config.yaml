@@ -38,3 +38,12 @@ cleanup:
   delete_merged_branch: true
 exclude_repositories: []
 include_repositories: []
+# Where the workspace's shared records live: notion, obsidian, or sqlite. The
+# Notion token is read from FOREMAN_NOTION_TOKEN on the execution host.
+storage:
+  backend: notion
+  notion:
+    parent_page_id: ""
+  # obsidian:
+  #   vault: ~/Vault
+  #   folder: Foreman

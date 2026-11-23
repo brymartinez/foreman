@@ -46,7 +46,9 @@ type Config struct {
 	Notifications Notifications    `yaml:"notifications"`
 	Models        task.ModelPolicy `yaml:"models"`
 	Cleanup       Cleanup          `yaml:"cleanup"`
-	Auto          Auto             `yaml:"auto"`
+	// Storage selects where the workspace's shared records live.
+	Storage Storage `yaml:"storage"`
+	Auto    Auto    `yaml:"auto"`
 	// IncludedRepos, when nonempty, limits the inbox to these repositories and
 	// overrides ExcludedRepos.
 	IncludedRepos []task.Repo `yaml:"include_repositories"`
@@ -186,6 +188,10 @@ func Load() (Config, error) {
 	}
 	for _, p := range []*string{&cfg.Database, &cfg.TriageDir, &cfg.TasksDir, &cfg.WorktreesDir, &cfg.RepositoriesDir, &cfg.LogDir, &cfg.KnowledgeDir} {
 		*p = expandHome(*p, home)
+	}
+	_, statErr := os.Stat(cfg.Database)
+	if err := resolveStorage(&cfg.Storage, statErr == nil); err != nil {
+		return Config{}, fmt.Errorf("%s: %w", path, err)
 	}
 	if cfg.Refresh < MinRefresh {
 		return Config{}, fmt.Errorf("%s: refresh is %d seconds; the minimum is %d", path, cfg.Refresh, MinRefresh)
