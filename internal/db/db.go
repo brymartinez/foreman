@@ -116,6 +116,10 @@ CREATE TABLE workspace_entries (
 	PRIMARY KEY (kind, key)
 );
 `},
+	{3, "workspace entry stage tracking", `
+ALTER TABLE workspace_entries ADD COLUMN stage TEXT NOT NULL DEFAULT '';
+ALTER TABLE workspace_entries ADD COLUMN stage_at TEXT NOT NULL DEFAULT '';
+`},
 }
 
 // SchemaVersion is the newest schema this build knows.
