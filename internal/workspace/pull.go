@@ -571,6 +571,17 @@ func (s *Sync) adoptKnowledge(ctx context.Context, e KnowledgeEntry) error {
 	if prev.Digest == cur.Digest || prev.AnswerDigest == pausedMark {
 		return nil
 	}
+	// A learner that started after the pull's Busy check holds its lock until its
+	// publish, which waits for the lock held here. Replacing now would drop what it
+	// saved, so take its lock and leave the entry to the next pull if it is held.
+	free, err := s.Knowledge.Lock(e.Repo)
+	if errors.Is(err, knowledge.ErrLocked) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer free()
 	if err := s.Knowledge.Replace(e.Repo, *cur.Snapshot); err != nil {
 		return err
 	}

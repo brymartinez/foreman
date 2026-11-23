@@ -24,6 +24,9 @@ type KnowledgeStore interface {
 	Replace(repo string, x knowledge.Snapshot) error
 	Repos() ([]string, error)
 	Busy(repo string) bool
+	// Lock is the learner's lock: it fails with knowledge.ErrLocked while a learner
+	// holds it.
+	Lock(repo string) (func(), error)
 }
 
 // Sync keeps the host database and the workspace store in step. It implements

@@ -886,3 +886,34 @@ func TestCorrectingAnInvalidRepositoryAppliesTheOtherEditsMadeWithIt(t *testing.
 		t.Fatalf("title = %q, repo = %q, want both edits", got.Title, got.Repo)
 	}
 }
+
+// learnerStarts takes the learner's lock during the listing that adoption does
+// under the publish lock, as a learner starting then would.
+type learnerStarts struct {
+	*Memory
+	h     *harness
+	calls int
+}
+
+func (l *learnerStarts) ListKnowledge(ctx context.Context) ([]KnowledgeEntry, error) {
+	l.calls++
+	if l.calls == 2 {
+		if _, err := l.h.know.Lock("o/r"); err != nil {
+			l.h.t.Fatal(err)
+		}
+	}
+	return l.Memory.ListKnowledge(ctx)
+}
+
+func TestAdoptionLeavesTheHostSnapshotAloneWhenALearnerStartsDuringItsRecheck(t *testing.T) {
+	h := newHarness(t)
+	h.know.Replace("o/r", snapshotOf("o/r", "Use tabs."))
+	h.pull()
+	h.mem.WriteKnowledge(h.ctx, KnowledgePublish{Repo: "o/r", Snapshot: snapshotOf("o/r", "Use spaces.")})
+	h.s.Backend = &learnerStarts{Memory: h.mem, h: h}
+	h.pull()
+	got, _ := h.know.Snapshot("o/r")
+	if len(got.Learnings) != 1 || got.Learnings[0].Text != "Use tabs." {
+		t.Fatalf("adoption replaced the snapshot a learner was writing: %+v", got.Learnings)
+	}
+}
