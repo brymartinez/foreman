@@ -5,10 +5,19 @@ import (
 	"strings"
 )
 
-// Render is the Foreman section's text: the readable progress, questions, PR,
-// plan, decisions, review findings, and checkpoint, then the payload in a fenced
-// block. Readers use only the payload.
+// Render is the readable text followed by the payload in a fenced block. Readers
+// use only the payload.
 func (r Record) Render() string {
+	raw, err := r.Encode()
+	if err != nil {
+		return r.RenderText()
+	}
+	return r.RenderText() + fmt.Sprintf("\n```yaml\n%s```\n", raw)
+}
+
+// RenderText is the readable progress, questions, PR, plan, decisions, review
+// findings, and checkpoint, without the payload.
+func (r Record) RenderText() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Status: %s\n", r.StatusLabel())
 	if !r.StageSince.IsZero() {
@@ -72,10 +81,6 @@ func (r Record) Render() string {
 				}
 			}
 		}
-	}
-	raw, err := r.Encode()
-	if err == nil {
-		fmt.Fprintf(&b, "\n```yaml\n%s```\n", raw)
 	}
 	return b.String()
 }
