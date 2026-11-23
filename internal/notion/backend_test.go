@@ -821,3 +821,29 @@ func TestRetryingAnImportWithLeadingBlankLinesAppendsTheVisibleText(t *testing.T
 		t.Fatalf("the retried description is %q, want the visible line after 100 blank ones", es[0].Description)
 	}
 }
+
+func TestAnExistingParagraphStartingWithZeroWidthSpacesIsReadAsWritten(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	// Raw paragraphs a person typed, or that an earlier writer left: none follows a
+	// full block, so none is an escape.
+	texts := []string{"​⁠typed", "​​typed", "​⁠"}
+	var blocks []any
+	for _, tx := range texts {
+		blocks = append(blocks, block("paragraph", map[string]any{"rich_text": richText(tx)}))
+	}
+	pub := workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX", ""), Create: workspace.TaskSeed{Name: "N", Description: "x"}}
+	ref, err := b.UpsertTask(ctx, pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.C.appendBlocks(ctx, ref, blocks); err != nil {
+		t.Fatal(err)
+	}
+	b.forget()
+	es, _ := b.ListTasks(ctx)
+	want := "x\n" + strings.Join(texts, "\n")
+	if got := es[0].Description; got != want {
+		t.Fatalf("description read back as %q, want %q", got, want)
+	}
+}

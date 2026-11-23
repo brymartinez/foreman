@@ -66,22 +66,23 @@ func block(typ string, content map[string]any) map[string]any {
 // a person styled or typed for a continuation.
 const continuationMark = "\u2060"
 
-// escapeMark is put before a chunk that itself starts with the continuation mark or
-// with itself, so a line a person typed or imported with such a start is not read as
-// a continuation, and the reader can tell the escape from the text it guards.
+// escapeMark guards a chunk that the reader would otherwise take for something it
+// is not. Only two places read a mark: the start of a block that follows a block of
+// exactly blockRunes characters, and the start of a continuation. A chunk written
+// there that starts with zero or more escape marks and then the continuation mark
+// gets one more escape mark in front, so typed text is not read as a continuation
+// and the reader can tell the escape from the text it guards. Text anywhere else is
+// written and read as is, so an existing paragraph that happens to start with these
+// characters is never altered.
 const escapeMark = "\u200b"
 
-func escapeChunk(c string) string {
-	if strings.HasPrefix(c, continuationMark) || strings.HasPrefix(c, escapeMark) {
-		return escapeMark + c
-	}
-	return c
+func needsEscape(c string) bool {
+	return strings.HasPrefix(strings.TrimLeft(c, escapeMark), continuationMark)
 }
 
-// unescapeChunk undoes escapeChunk. An escape is the escape mark followed by either
-// mark, which no unescaped chunk starts with.
+// unescapeChunk undoes the escape on a chunk read from a place the writer escapes.
 func unescapeChunk(t string) string {
-	if strings.HasPrefix(t, escapeMark+continuationMark) || strings.HasPrefix(t, escapeMark+escapeMark) {
+	if needsEscape(t) && strings.HasPrefix(t, escapeMark) {
 		return strings.TrimPrefix(t, escapeMark)
 	}
 	return t
@@ -90,16 +91,21 @@ func unescapeChunk(t string) string {
 // paragraphs makes one paragraph block per line of s.
 func paragraphs(s string) []any {
 	var out []any
+	prev := 0 // characters in the block before, 0 at the start
 	for _, line := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
 		r := []rune(line)
 		for first := true; first || len(r) > 0; first = false {
 			n := min(len(r), blockRunes)
-			chunk := escapeChunk(string(r[:n]))
+			chunk := string(r[:n])
+			if (!first || prev == blockRunes) && needsEscape(chunk) {
+				chunk = escapeMark + chunk
+			}
 			if !first {
 				chunk = continuationMark + chunk
 			}
 			out = append(out, block("paragraph", map[string]any{"rich_text": richText(chunk)}))
 			r = r[n:]
+			prev = n
 		}
 	}
 	return out
@@ -287,7 +293,7 @@ func (c *Client) readBody(ctx context.Context, page string) (pageBody, error) {
 		switch b.Type {
 		case "paragraph", "heading_1", "heading_2", "heading_3", "bulleted_list_item", "numbered_list_item", "quote", "to_do", "code":
 			t := b.text()
-			if b.Type == "paragraph" {
+			if b.Type == "paragraph" && len(lines) > 0 && prevRunes == blockRunes {
 				t = unescapeChunk(t)
 			}
 			lines = append(lines, t)
