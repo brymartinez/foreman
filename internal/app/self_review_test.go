@@ -243,8 +243,14 @@ func TestLocalChangeIsSelfReviewedBeforeTheCompetingReviewAndThePR(t *testing.T)
 		t.Errorf("local self-review = %+v", self)
 	}
 	p := f.claude.reviewed[0]
-	if strings.Contains(p, "Proposed pull request description") || strings.Contains(p, "Title: feat: retry 5xx") || strings.Contains(p, "## Confirmed triage scope") || !strings.Contains(p, "## Review scope") {
-		t.Errorf("local self-review prompt:\n%s", p)
+	if !strings.Contains(p, "Assigned diff command: `git diff --no-ext-diff --no-textconv --ignore-submodules=none basehead...commit1 --`") ||
+		!strings.Contains(p, "self-review instructions") {
+		t.Errorf("local self-review prompt lacks the assigned diff or stage instructions:\n%s", p)
+	}
+	for _, leak := range []string{"Proposed pull request description", proposedTitle, "Retry 5xx only.", "## Confirmed triage scope"} {
+		if strings.Contains(p, leak) {
+			t.Errorf("local self-review prompt carries %q:\n%s", leak, p)
+		}
 	}
 	if !strings.Contains(f.claude.resumed[0], "no test covers the 4xx path") {
 		t.Errorf("local correction turn lacks the self-review findings: %q", f.claude.resumed[0])

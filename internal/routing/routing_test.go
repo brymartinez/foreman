@@ -44,11 +44,11 @@ func TestLoadStarterFile(t *testing.T) {
 		t.Fatalf("rules %d, default %q", len(c.Rules), c.Default)
 	}
 	codex := c.Profiles["codex"]
-	if codex.Agent != task.Codex || codex.PlanModel != "gpt-6-luna" || codex.PlanReasoningEffort != "xhigh" || codex.Model != "gpt-6-sol" || codex.ReasoningEffort != "medium" {
+	if codex != (Profile{Agent: task.Codex}) {
 		t.Errorf("codex profile: %+v", codex)
 	}
 	claude := c.Profiles["claude"]
-	if claude.Agent != task.Claude || claude.PlanModel != "sonnet" || claude.Model != "opus" {
+	if claude != (Profile{Agent: task.Claude}) {
 		t.Errorf("claude profile: %+v", claude)
 	}
 	if got := c.Rules[2].Profiles; len(got) != 2 || got[0] != "claude" || got[1] != "codex" {

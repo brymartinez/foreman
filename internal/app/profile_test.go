@@ -68,10 +68,11 @@ func TestRestartKeepsProfileForSameAgent(t *testing.T) {
 func TestRestartDoesNotSwitchTheStoredImplementer(t *testing.T) {
 	f := newFixture()
 	failedRouted(f)
-	if _, err := f.app.Start(context.Background(), startReq(t)); err == nil || !strings.Contains(err.Error(), "retains its codex implementer") {
-		t.Fatalf("got %v, want the stored implementer retained", err)
+	rec, err := f.app.Start(context.Background(), startReq(t))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if d := f.store.recs[task.Key{Repo: "testorg/example", Number: 825}].Delegation; d.Implementer.Agent != task.Codex || d.Profile == nil || *d.Profile != codexProfile {
+	if d := rec.Delegation; d.Implementer.Agent != task.Codex || d.Profile == nil || *d.Profile != codexProfile {
 		t.Errorf("implementer %s profile %+v, want stored Codex profile", d.Implementer.Agent, d.Profile)
 	}
 }

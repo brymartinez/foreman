@@ -182,15 +182,16 @@ func TestEnterOpensSelectedLogAndKeysScrollIt(t *testing.T) {
 	press(&m, Key{Kind: KeyEscape})
 }
 
-func TestDelegateAsksAgentThenContext(t *testing.T) {
+func TestDelegateWithConfiguredModelsThenContext(t *testing.T) {
 	m := model()
+	m.SetAuto(Auto{Agent: task.Codex})
 	press(&m, Key{Kind: KeyDown}, Key{Kind: KeyEnter})
 	if m.Mode != ChoosingAgent {
 		t.Fatalf("mode after enter = %v", m.Mode)
 	}
-	press(&m, rune_('2'))
+	press(&m, rune_('1'))
 	if m.Mode != TypingContext {
-		t.Fatalf("mode after picking an agent = %v", m.Mode)
+		t.Fatalf("mode after starting with configured models = %v", m.Mode)
 	}
 	press(&m, rune_('c'), rune_('t'), rune_('x'), rune_('y'), Key{Kind: KeyBackspace})
 	if m.Input != "ctx" {
@@ -209,7 +210,7 @@ func TestDelegateAsksAgentThenContext(t *testing.T) {
 func TestDelegateWithoutAContextFile(t *testing.T) {
 	m := model()
 	got := confirmBranch(t, &m, press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter}))
-	want := app.StartRequest{Repo: "a/b", Issue: 1, Agent: task.Claude, BranchName: "feat/proposed"}
+	want := app.StartRequest{Repo: "a/b", Issue: 1, BranchName: "feat/proposed"}
 	if got.Kind != ActionStart || got.Start != want {
 		t.Fatalf("action = %+v; want start %+v", got, want)
 	}

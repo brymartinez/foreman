@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -533,9 +534,24 @@ func TestReviewAdaptersAreReadOnlyAndDisposable(t *testing.T) {
 		t.Errorf("claude review model = %q, want the review model", argValue(got.Args, "--model"))
 	}
 	if argValue(got.Args, "--permission-mode") != "dontAsk" || !slices.Contains(got.Args, "--no-session-persistence") ||
-		argValue(got.Args, "--json-schema") != string(ReviewSchema) || slices.Contains(got.Args, "--allowedTools=Bash") ||
+		slices.Contains(got.Args, "--allowedTools=Bash") ||
 		!slices.Contains(got.Args, "--allowedTools="+strings.Join(ReviewTools, ",")) {
 		t.Errorf("claude review argv = %q", got.Args)
+	}
+	var schema struct {
+		Required   []string                   `json:"required"`
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal([]byte(argValue(got.Args, "--json-schema")), &schema); err != nil {
+		t.Fatalf("decode Claude review schema: %v", err)
+	}
+	if want := []string{"verdict", "summary", "docOnly"}; !slices.Equal(schema.Required, want) {
+		t.Errorf("Claude review schema requires %v, want %v", schema.Required, want)
+	}
+	for _, field := range []string{"findings", "limitations"} {
+		if _, ok := schema.Properties[field]; !ok {
+			t.Errorf("Claude review schema does not allow %s", field)
+		}
 	}
 
 	codexExec := func(_ context.Context, c Command) error {

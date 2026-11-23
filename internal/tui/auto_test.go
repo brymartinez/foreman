@@ -179,8 +179,8 @@ func TestManualStartStillWorksWhenFull(t *testing.T) {
 		t.Fatalf("auto started %v with the limit full", got)
 	}
 	m.InboxCursor = 1
-	a := confirmBranch(t, &m, press(&m, Key{Kind: KeyEnter}, rune_('2'), Key{Kind: KeyEnter}))
-	if a.Kind != ActionStart || a.Start.Issue != 2 || a.Start.Agent != task.Codex {
+	a := confirmBranch(t, &m, press(&m, Key{Kind: KeyEnter}, rune_('1'), Key{Kind: KeyEnter}))
+	if a.Kind != ActionStart || a.Start.Issue != 2 || a.Start.Agent != task.Claude {
 		t.Fatalf("manual start with the limit full = %+v", a)
 	}
 }
