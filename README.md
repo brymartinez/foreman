@@ -84,6 +84,8 @@ foreman issue import work.yaml [--dry-run] [--on-conflict fail|skip|replace]
 foreman export markdown ~/vault/foreman       # one-way copy of tasks for Obsidian
 foreman knowledge export owner/repo -o knowledge.md
 foreman knowledge ingest knowledge.md --dry-run
+foreman knowledge review owner/repo
+foreman knowledge approve owner/repo --digest <shared-sha256> --host-digest <host-sha256>
 foreman --help
 foreman --version
 ```
@@ -530,6 +532,15 @@ text. Paths inside the repository are kept.
 
 The triage interview can use repository knowledge while researching an issue.
 Planning, implementation, correction, and review prompts omit repository knowledge.
+
+In shared-store mode, refresh leaves a new or changed knowledge snapshot in the store
+until you approve it on the execution host. The host keeps using its last approved
+snapshot. Run `foreman knowledge review owner/repo` to inspect the current host and
+shared snapshots and their digests. Run the printed `foreman knowledge approve`
+command to approve the exact shared snapshot you reviewed. Approval checks both
+digests again while it holds the repository publish and learner locks. If either
+snapshot changed, review it again. Refresh never applies an unapproved shared snapshot.
+Host-authored publication and the existing SQLite move remain trusted.
 
 Set `learning.enabled: false` to stop new evaluations. Triage can still use what is already learned. To forget a repository's knowledge, delete its directory. To remove
 one learning, delete its entry from `learnings.yaml`. Prompts read that file, and the

@@ -212,10 +212,40 @@ func TestParseKnowledgeIngest(t *testing.T) {
 	}
 }
 
+func TestParseKnowledgeReview(t *testing.T) {
+	got, err := Parse([]string{"knowledge", "review", "a/b"})
+	if want := (Command{Name: KnowledgeReview, Repo: "a/b"}); err != nil || got != want {
+		t.Fatalf("Parse(knowledge review a/b) = %+v, %v; want %+v", got, err, want)
+	}
+}
+
+func TestParseKnowledgeApprove(t *testing.T) {
+	shared, host := strings.Repeat("a", 64), strings.Repeat("b", 64)
+	for name, argv := range map[string][]string{
+		"flags after repository":  {"knowledge", "approve", "a/b", "--digest", shared, "--host-digest", host},
+		"flags before repository": {"knowledge", "approve", "--host-digest", host, "a/b", "--digest", shared},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := Parse(argv)
+			if want := (Command{Name: KnowledgeApprove, Repo: "a/b", Digest: shared, HostDigest: host}); err != nil || got != want {
+				t.Fatalf("Parse(%q) = %+v, %v; want %+v", argv, got, err, want)
+			}
+		})
+	}
+}
+
 func TestParseRejectsInvalidKnowledgeCommands(t *testing.T) {
 	for _, argv := range [][]string{
 		{"knowledge"},
 		{"knowledge", "sync"},
+		{"knowledge", "review"},
+		{"knowledge", "review", "not-a-repo"},
+		{"knowledge", "review", "a/b", "--digest", strings.Repeat("a", 64)},
+		{"knowledge", "approve", "a/b"},
+		{"knowledge", "approve", "a/b", "--digest", strings.Repeat("a", 64)},
+		{"knowledge", "approve", "a/b", "--digest", strings.Repeat("A", 64), "--host-digest", strings.Repeat("b", 64)},
+		{"knowledge", "approve", "a/b", "--digest", strings.Repeat("a", 64), "--digest", strings.Repeat("b", 64), "--host-digest", strings.Repeat("c", 64)},
+		{"knowledge", "approve", "a/b", "--digest", strings.Repeat("a", 64), "--host-digest"},
 		{"knowledge", "export"},
 		{"knowledge", "export", "not-a-repo"},
 		{"knowledge", "export", "a/b", "c/d"},
@@ -235,7 +265,7 @@ func TestParseRejectsInvalidKnowledgeCommands(t *testing.T) {
 }
 
 func TestUsageListsTheKnowledgeCommands(t *testing.T) {
-	for _, want := range []string{"foreman knowledge export owner/repo [-o FILE]", "foreman knowledge ingest FILE", "--rebind", "--dry-run"} {
+	for _, want := range []string{"foreman knowledge export owner/repo [-o FILE]", "foreman knowledge ingest FILE", "foreman knowledge review owner/repo", "foreman knowledge approve owner/repo", "--rebind", "--dry-run"} {
 		if !strings.Contains(Usage, want) {
 			t.Errorf("usage lacks %q:\n%s", want, Usage)
 		}
@@ -255,7 +285,7 @@ func TestUsageSeparatesLaunchOverridesFromOperationInputs(t *testing.T) {
 			t.Errorf("launch overrides lack %q:\n%s", flag, Usage)
 		}
 	}
-	for _, flag := range []string{"knowledge export", "-o, --output FILE", "knowledge ingest", "--repo owner/repo", "--rebind", "--dry-run"} {
+	for _, flag := range []string{"knowledge export", "-o, --output FILE", "knowledge ingest", "--repo owner/repo", "--rebind", "--dry-run", "knowledge approve", "--digest SHA256", "--host-digest SHA256"} {
 		if !strings.Contains(section(inputs, precedence), flag) {
 			t.Errorf("operation inputs lack %q:\n%s", flag, Usage)
 		}

@@ -29,8 +29,10 @@ const (
 	Learn Name = "__learn"
 	// KnowledgeExport and KnowledgeIngest move a repository's knowledge between
 	// machines.
-	KnowledgeExport Name = "knowledge export"
-	KnowledgeIngest Name = "knowledge ingest"
+	KnowledgeExport  Name = "knowledge export"
+	KnowledgeIngest  Name = "knowledge ingest"
+	KnowledgeReview  Name = "knowledge review"
+	KnowledgeApprove Name = "knowledge approve"
 	// StorageCheck tests the configured workspace store. StorageMove copies a SQLite
 	// workspace into it.
 	StorageCheck Name = "storage check"
@@ -68,9 +70,11 @@ type Command struct {
 	// -s override: github, local, or config.SourceAll, and empty to use default_source.
 	Source task.Source
 	// File is the export's output path (empty for stdout) or the ingest's input.
-	File   string
-	Rebind bool
-	DryRun bool
+	File       string
+	Rebind     bool
+	DryRun     bool
+	Digest     string
+	HostDigest string
 	// Local holds the local issue commands' inputs.
 	Local *IssueInput
 }
@@ -84,6 +88,10 @@ Usage:
                               Write the repository's learned knowledge to FILE or stdout
   foreman knowledge ingest FILE [--repo owner/repo [--rebind]] [--dry-run]
                               Store an export, merging with this machine's knowledge
+  foreman knowledge review owner/repo
+                              Inspect the shared and host snapshots before approval
+  foreman knowledge approve owner/repo --digest SHA256 --host-digest SHA256
+                              Approve the exact shared snapshot reviewed on this host
   foreman storage check       Test the configured workspace store (notion or obsidian) step by
                               step; exits non-zero on the first failure. Changes no real task
   foreman storage move        Copy this SQLite workspace into the configured store, verify the
@@ -126,6 +134,9 @@ Operation inputs:
                           export unless --rebind is given
     --rebind              Store the export under a different --repo
     --dry-run             Print the merged result without saving it
+  knowledge approve:
+    --digest SHA256       The shared snapshot digest printed by knowledge review
+    --host-digest SHA256  The host snapshot digest printed by knowledge review
 
 Precedence:
   Source and mentions: launch flag, then config.yaml (default_source, mentions),
@@ -199,8 +210,17 @@ func Parse(argv []string) (Command, error) {
 // parseKnowledge reads `knowledge export REPO [-o FILE]` and `knowledge ingest FILE`
 // with its flags. Flags may come before or after the positional argument.
 func parseKnowledge(argv []string) (Command, error) {
-	if len(argv) == 0 || (argv[0] != "export" && argv[0] != "ingest") {
-		return Command{}, usagef("knowledge needs export or ingest")
+	if len(argv) == 0 {
+		return Command{}, usagef("knowledge needs export, ingest, review, or approve")
+	}
+	switch argv[0] {
+	case "review":
+		return parseKnowledgeReview(argv[1:])
+	case "approve":
+		return parseKnowledgeApprove(argv[1:])
+	case "export", "ingest":
+	default:
+		return Command{}, usagef("knowledge needs export, ingest, review, or approve")
 	}
 	verb, rest := argv[0], argv[1:]
 	cmd := Command{Name: KnowledgeExport}
@@ -261,6 +281,74 @@ func parseKnowledge(argv []string) (Command, error) {
 	}
 	cmd.File = positional[0]
 	return cmd, nil
+}
+
+func parseKnowledgeReview(argv []string) (Command, error) {
+	if len(argv) != 1 {
+		return Command{}, usagef("knowledge review needs one owner/repo")
+	}
+	repo, err := task.ParseRepo(argv[0])
+	if err != nil {
+		return Command{}, usagef("knowledge review: %v", err)
+	}
+	return Command{Name: KnowledgeReview, Repo: repo}, nil
+}
+
+func parseKnowledgeApprove(argv []string) (Command, error) {
+	cmd := Command{Name: KnowledgeApprove}
+	var positional []string
+	for i := 0; i < len(argv); i++ {
+		arg := argv[i]
+		var dst *string
+		switch arg {
+		case "--digest":
+			dst = &cmd.Digest
+		case "--host-digest":
+			dst = &cmd.HostDigest
+		case "-", "":
+			positional = append(positional, arg)
+		default:
+			if strings.HasPrefix(arg, "-") {
+				return Command{}, usagef("knowledge approve: unknown flag %s", arg)
+			}
+			positional = append(positional, arg)
+		}
+		if dst == nil {
+			continue
+		}
+		if *dst != "" {
+			return Command{}, usagef("knowledge approve: %s may be set only once", arg)
+		}
+		i++
+		if i >= len(argv) {
+			return Command{}, usagef("%s needs a value", arg)
+		}
+		*dst = argv[i]
+	}
+	if len(positional) != 1 {
+		return Command{}, usagef("knowledge approve needs one owner/repo")
+	}
+	repo, err := task.ParseRepo(positional[0])
+	if err != nil {
+		return Command{}, usagef("knowledge approve: %v", err)
+	}
+	cmd.Repo = repo
+	if !sha256Digest(cmd.Digest) || !sha256Digest(cmd.HostDigest) {
+		return Command{}, usagef("knowledge approve needs --digest and --host-digest with 64 lowercase hex characters")
+	}
+	return cmd, nil
+}
+
+func sha256Digest(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for _, r := range value {
+		if !('0' <= r && r <= '9') && !('a' <= r && r <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // parseFlags reads the launch flags. -c opens the editor instead of the dashboard,

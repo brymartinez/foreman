@@ -498,7 +498,8 @@ func (b *Backend) ListKnowledge(ctx context.Context) ([]workspace.KnowledgeEntry
 	var out []workspace.KnowledgeEntry
 	for _, p := range pages {
 		e := workspace.KnowledgeEntry{Repo: strings.TrimSpace(plainOf(p.Properties["Repository"].Title)), Ref: p.ID, EditedAt: parseTime(p.Edited)}
-		body, err := b.body(ctx, p)
+		// Approval compares the current payload even when Notion's edit timestamp is unchanged.
+		body, err := b.C.readBody(ctx, p.ID)
 		if err != nil {
 			return nil, err
 		}

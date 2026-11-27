@@ -461,7 +461,7 @@ the same commit. The commit message records why it changed.
   refresh. `Sync.Pull` gives a user-made entry a new `L-` ID (an entry whose payload names another task, such as a copied note, is never restored from it), saves `Confirmed triage`
   as triage while `Scope confirmed` is ticked (unticking removes nothing), rebuilds a
   missing task record by the `issue import` rules (idle, open PR becomes a reset mark),
-  adopts changed knowledge, and returns answers and queued entries. The store's issue
+  reports changed shared knowledge for host approval, and returns answers and queued entries. The store's issue
   fields and confirmed triage are applied only when they differ from the copy the host
   last reconciled (`fields_seen`, `triage_seen`), so a host-side `issue triage` or
   replacing import is not undone by the older text the store still shows. An answer goes through
@@ -501,10 +501,18 @@ the same commit. The commit message records why it changed.
   scope and each issue's description with the host's. Every publish of a move resumes an unfinished description. The move
   sets no `Queue` and starts nothing. A second run after the marker reports that the
   workspace already moved. GitHub-only triage (no task yet) stays in the host database.
-- **Knowledge follows the store.** In shared modes the store's knowledge entries are the
-  workspace's knowledge. A changed entry is adopted only after `knowledge.Parse` accepts
-  it; one that fails to parse is reported and neither adopted nor overwritten (a publish also leaves an entry alone that changed or stopped parsing since the host last saw it, and the next pull adopts or pauses on it), and
-  publishing for that repository pauses until it parses (`paused` in
+- **Knowledge follows the store after host approval.** Shared entries hold the common
+  snapshots, while each execution host keeps using its current local snapshot until a
+  maintainer approves a new one. Refresh compares the store and host digests under the
+  repository publish and learner locks. It records a snapshot that the host already has,
+  but it never replaces different host knowledge. A changed shared snapshot stays in the
+  store and the local refresh report names its repository and digest. `knowledge review`
+  shows the complete host and shared snapshots with both digests. `knowledge approve`
+  re-reads both under the same locks and applies the shared snapshot only when both digests
+  match the review. Host-authored publication and `storage move` remain trusted paths.
+  A shared entry that fails to parse is reported and neither adopted nor overwritten (a
+  publish also leaves an entry alone that changed or stopped parsing since the host last
+  saw it), and publishing for that repository pauses until it parses (`paused` in
   `workspace_entries.answer_digest`). Prompts still receive only the task repository's
   selection of at most 8 learnings and 2000 characters.
 
@@ -1041,7 +1049,8 @@ the same commit. The commit message records why it changed.
 ### Learning
 
 - **Learning is explicit and separate from delegated tasks.** The `knowledge` commands
-  export and ingest repository knowledge; the task runner does not evaluate finished tasks.
+  export, ingest, review, and approve repository knowledge; the task runner does not
+  evaluate finished tasks. Review and approval apply only in shared-store mode.
   The store is the database: `learnings` holds each repository's learnings document
   (id, kind, text, status, evidence entries, and history), and `evaluations` and
   `attempts` hold one row per task. `knowledge.md`, the active learnings rendered for

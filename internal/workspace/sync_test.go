@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -476,20 +477,216 @@ func snapshotOf(repo, text string) knowledge.Snapshot {
 			Evidence: []knowledge.Evidence{{Task: "t1", Source: knowledge.Maintainer}}}}}
 }
 
-func TestPullAdoptsAChangedKnowledgeEntry(t *testing.T) {
+func TestPullLeavesAChangedKnowledgeEntryPending(t *testing.T) {
 	h := newHarness(t)
-	if err := h.know.Replace("o/r", snapshotOf("o/r", "Use tabs.")); err != nil {
+	old := snapshotOf("o/r", "Use tabs.")
+	if err := h.know.Replace("o/r", old); err != nil {
 		t.Fatal(err)
 	}
 	h.pull() // publishes the host's copy
 	if es, _ := h.mem.ListKnowledge(h.ctx); len(es) != 1 {
 		t.Fatalf("knowledge entries = %d", len(es))
 	}
-	h.mem.WriteKnowledge(h.ctx, KnowledgePublish{Repo: "o/r", Snapshot: snapshotOf("o/r", "Use spaces.")})
+	shared := snapshotOf("o/r", "Use spaces.")
+	if err := h.mem.WriteKnowledge(h.ctx, KnowledgePublish{Repo: "o/r", Snapshot: shared}); err != nil {
+		t.Fatal(err)
+	}
+	var logged strings.Builder
+	h.s.Log = func(format string, args ...any) { fmt.Fprintf(&logged, format, args...) }
 	h.pull()
 	got, _ := h.know.Snapshot("o/r")
-	if len(got.Learnings) != 1 || got.Learnings[0].Text != "Use spaces." {
-		t.Fatalf("the edited entry was not adopted: %+v", got.Learnings)
+	if len(got.Learnings) != 1 || got.Learnings[0].Text != "Use tabs." {
+		t.Fatalf("an unapproved shared edit replaced host knowledge: %+v", got.Learnings)
+	}
+	entries, _ := h.mem.ListKnowledge(h.ctx)
+	if len(entries) != 1 || entries[0].Snapshot.Learnings[0].Text != "Use spaces." {
+		t.Fatalf("the pending shared edit changed: %+v", entries)
+	}
+	problems := strings.Join(h.s.Problems(), "\n")
+	if !strings.Contains(problems, "o/r") || !strings.Contains(problems, SnapshotDigest(shared)) {
+		t.Fatalf("pending edit was not reported by repository and digest: %s", problems)
+	}
+	if strings.Contains(logged.String(), "Use spaces.") {
+		t.Fatalf("pending knowledge content reached workspace logs: %s", logged.String())
+	}
+}
+
+func TestPullLeavesANewSharedKnowledgeEntryPending(t *testing.T) {
+	h := newHarness(t)
+	shared := snapshotOf("o/r", "Use spaces.")
+	if err := h.mem.WriteKnowledge(h.ctx, KnowledgePublish{Repo: "o/r", Snapshot: shared}); err != nil {
+		t.Fatal(err)
+	}
+	h.pull()
+	got, _ := h.know.Snapshot("o/r")
+	if !got.Empty() {
+		t.Fatalf("new shared knowledge entered the host before approval: %+v", got)
+	}
+	problems := strings.Join(h.s.Problems(), "\n")
+	if !strings.Contains(problems, "o/r") || !strings.Contains(problems, SnapshotDigest(shared)) {
+		t.Fatalf("pending entry was not reported by repository and digest: %s", problems)
+	}
+	if strings.Contains(problems, "Use spaces.") {
+		t.Fatalf("pending knowledge content entered the refresh report: %s", problems)
+	}
+}
+
+func TestApproveKnowledgeRejectsAChangedSharedSnapshot(t *testing.T) {
+	h := newHarness(t)
+	if err := h.know.Replace("o/r", snapshotOf("o/r", "Use tabs.")); err != nil {
+		t.Fatal(err)
+	}
+	h.pull()
+	shared := snapshotOf("o/r", "Use spaces.")
+	if err := h.mem.WriteKnowledge(h.ctx, KnowledgePublish{Repo: "o/r", Snapshot: shared}); err != nil {
+		t.Fatal(err)
+	}
+	review, err := h.s.ReviewKnowledge(h.ctx, "o/r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	newShared := snapshotOf("o/r", "Use four spaces.")
+	if err := h.mem.WriteKnowledge(h.ctx, KnowledgePublish{Repo: "o/r", Snapshot: newShared}); err != nil {
+		t.Fatal(err)
+	}
+	err = h.s.ApproveKnowledge(h.ctx, "o/r", review.SharedDigest, review.HostDigest)
+	if !errors.Is(err, ErrKnowledgeReviewStale) {
+		t.Fatalf("approval error = %v, want stale review", err)
+	}
+	got, _ := h.know.Snapshot("o/r")
+	if got.Learnings[0].Text != "Use tabs." {
+		t.Fatalf("stale approval changed host knowledge: %+v", got.Learnings)
+	}
+}
+
+func TestApproveKnowledgeRejectsAChangedHostSnapshot(t *testing.T) {
+	h := newHarness(t)
+	if err := h.know.Replace("o/r", snapshotOf("o/r", "Use tabs.")); err != nil {
+		t.Fatal(err)
+	}
+	h.pull()
+	shared := snapshotOf("o/r", "Use spaces.")
+	if err := h.mem.WriteKnowledge(h.ctx, KnowledgePublish{Repo: "o/r", Snapshot: shared}); err != nil {
+		t.Fatal(err)
+	}
+	review, err := h.s.ReviewKnowledge(h.ctx, "o/r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	newHost := snapshotOf("o/r", "Use tabs, always.")
+	if err := h.know.Replace("o/r", newHost); err != nil {
+		t.Fatal(err)
+	}
+	err = h.s.ApproveKnowledge(h.ctx, "o/r", review.SharedDigest, review.HostDigest)
+	if !errors.Is(err, ErrKnowledgeReviewStale) {
+		t.Fatalf("approval error = %v, want stale review", err)
+	}
+	got, _ := h.know.Snapshot("o/r")
+	if got.Learnings[0].Text != "Use tabs, always." {
+		t.Fatalf("stale approval replaced a newer host write: %+v", got.Learnings)
+	}
+}
+
+func TestApproveKnowledgeAppliesTheReviewedSnapshotAndRetriesSafely(t *testing.T) {
+	h := newHarness(t)
+	if err := h.know.Replace("o/r", snapshotOf("o/r", "Use tabs.")); err != nil {
+		t.Fatal(err)
+	}
+	h.pull()
+	shared := snapshotOf("o/r", "Use spaces.")
+	if err := h.mem.WriteKnowledge(h.ctx, KnowledgePublish{Repo: "o/r", Snapshot: shared}); err != nil {
+		t.Fatal(err)
+	}
+	review, err := h.s.ReviewKnowledge(h.ctx, "o/r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if review.SharedDigest != SnapshotDigest(shared) || review.HostDigest != SnapshotDigest(snapshotOf("o/r", "Use tabs.")) {
+		t.Fatalf("review = %+v, want exact shared and host digests", review)
+	}
+	if err := h.s.ApproveKnowledge(h.ctx, "o/r", review.SharedDigest, review.HostDigest); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.s.ApproveKnowledge(h.ctx, "o/r", review.SharedDigest, review.HostDigest); err != nil {
+		t.Fatalf("repeating approval should converge: %v", err)
+	}
+	got, _ := h.know.Snapshot("o/r")
+	if got.Learnings[0].Text != "Use spaces." {
+		t.Fatalf("approved snapshot = %+v", got.Learnings)
+	}
+	row, err := h.s.row("knowledge", "o/r")
+	if err != nil || row.Digest != review.SharedDigest {
+		t.Fatalf("applied digest row = %+v, %v", row, err)
+	}
+}
+
+func TestPullFinalizesAnApprovedSnapshotAfterTheHostReplaceCommitted(t *testing.T) {
+	h := newHarness(t)
+	if err := h.know.Replace("o/r", snapshotOf("o/r", "Use tabs.")); err != nil {
+		t.Fatal(err)
+	}
+	h.pull()
+	shared := snapshotOf("o/r", "Use spaces.")
+	if err := h.mem.WriteKnowledge(h.ctx, KnowledgePublish{Repo: "o/r", Snapshot: shared}); err != nil {
+		t.Fatal(err)
+	}
+	review, err := h.s.ReviewKnowledge(h.ctx, "o/r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.s.DB.Exec(`CREATE TRIGGER fail_knowledge_ack BEFORE INSERT ON workspace_entries WHEN NEW.kind = 'knowledge' BEGIN SELECT RAISE(ABORT, 'test injected acknowledgement failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.s.ApproveKnowledge(h.ctx, "o/r", review.SharedDigest, review.HostDigest); err == nil {
+		t.Fatal("the interrupted acknowledgement must be reported")
+	}
+	if _, err := h.s.DB.Exec(`DROP TRIGGER fail_knowledge_ack`); err != nil {
+		t.Fatal(err)
+	}
+	h.s.problems = nil
+	h.pull()
+	got, _ := h.know.Snapshot("o/r")
+	if got.Learnings[0].Text != "Use spaces." {
+		t.Fatalf("refresh changed the already applied snapshot: %+v", got.Learnings)
+	}
+	row, err := h.s.row("knowledge", "o/r")
+	if err != nil || row.Digest != review.SharedDigest {
+		t.Fatalf("refresh did not record the applied digest: %+v, %v", row, err)
+	}
+	if problems := h.s.Problems(); len(problems) != 0 {
+		t.Fatalf("refresh still reports an already applied snapshot as pending: %v", problems)
+	}
+}
+
+func TestApproveKnowledgeDoesNotRaceAnActiveLearner(t *testing.T) {
+	h := newHarness(t)
+	if err := h.know.Replace("o/r", snapshotOf("o/r", "Use tabs.")); err != nil {
+		t.Fatal(err)
+	}
+	h.pull()
+	shared := snapshotOf("o/r", "Use spaces.")
+	if err := h.mem.WriteKnowledge(h.ctx, KnowledgePublish{Repo: "o/r", Snapshot: shared}); err != nil {
+		t.Fatal(err)
+	}
+	review, err := h.s.ReviewKnowledge(h.ctx, "o/r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := h.know.Lock("o/r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = h.s.ApproveKnowledge(h.ctx, "o/r", review.SharedDigest, review.HostDigest)
+	if !errors.Is(err, knowledge.ErrLocked) {
+		t.Fatalf("approval error = %v, want active learner lock", err)
+	}
+	got, _ := h.know.Snapshot("o/r")
+	if got.Learnings[0].Text != "Use tabs." {
+		t.Fatalf("approval changed host knowledge during a learner write: %+v", got.Learnings)
+	}
+	unlock()
+	if err := h.s.ApproveKnowledge(h.ctx, "o/r", review.SharedDigest, review.HostDigest); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -664,8 +861,8 @@ func TestAPublishNeverOverwritesAKnowledgeEditTheHostHasNotSeen(t *testing.T) {
 	}
 	h.pull()
 	got, _ := h.know.Snapshot("o/r")
-	if got.Learnings[0].Text != "Use spaces." {
-		t.Fatalf("the edit was not adopted by the next pull: %+v", got.Learnings)
+	if got.Learnings[0].Text != "Use tabs, always." {
+		t.Fatalf("the pending shared edit replaced a newer host write: %+v", got.Learnings)
 	}
 }
 
@@ -915,5 +1112,37 @@ func TestAdoptionLeavesTheHostSnapshotAloneWhenALearnerStartsDuringItsRecheck(t 
 	got, _ := h.know.Snapshot("o/r")
 	if len(got.Learnings) != 1 || got.Learnings[0].Text != "Use tabs." {
 		t.Fatalf("adoption replaced the snapshot a learner was writing: %+v", got.Learnings)
+	}
+}
+
+type knowledgeEntries struct {
+	*Memory
+	entries []KnowledgeEntry
+}
+
+func (b knowledgeEntries) ListKnowledge(context.Context) ([]KnowledgeEntry, error) {
+	return b.entries, nil
+}
+
+func TestKnowledgeApprovalRequiresAnUnambiguousRepository(t *testing.T) {
+	h := newHarness(t)
+	shared := snapshotOf("o/r", "Use tabs.")
+	entry := KnowledgeEntry{Repo: "o/r", Snapshot: &shared, Digest: SnapshotDigest(shared)}
+	other := snapshotOf("other/repo", "Use spaces.")
+	for _, entries := range [][]KnowledgeEntry{
+		{entry, entry},
+		{{Repo: entry.Repo, Snapshot: &other, Digest: SnapshotDigest(other)}},
+	} {
+		h.s.Backend = knowledgeEntries{Memory: h.mem, entries: entries}
+		if _, err := h.s.ReviewKnowledge(h.ctx, entry.Repo); err == nil {
+			t.Fatal("review accepted ambiguous or mismatched repository")
+		}
+		host, err := h.know.Snapshot(entry.Repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := h.s.ApproveKnowledge(h.ctx, entry.Repo, entries[0].Digest, SnapshotDigest(host)); err == nil {
+			t.Fatal("approval accepted ambiguous or mismatched repository")
+		}
 	}
 }

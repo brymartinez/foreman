@@ -85,7 +85,7 @@ func run(argv []string) int {
 		defer stop()
 		return runStorageCommand(ctx, cfg, cmd, os.Stdout, os.Stderr)
 	}
-	if cmd.Name == cli.KnowledgeExport || cmd.Name == cli.KnowledgeIngest {
+	if cmd.Name == cli.KnowledgeExport || cmd.Name == cli.KnowledgeIngest || cmd.Name == cli.KnowledgeReview || cmd.Name == cli.KnowledgeApprove {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 		defer stop()
 		st, err := openState(cfg, os.Stderr)

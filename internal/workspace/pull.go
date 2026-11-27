@@ -472,8 +472,8 @@ func (s *Sync) republish(ctx context.Context, skip map[string]bool) {
 	}
 }
 
-// pullKnowledge adopts store entries that changed, reports ones that do not parse,
-// and publishes repositories the store lacks or holds an older copy of.
+// pullKnowledge reports changed store entries for host approval, reports ones that
+// do not parse, and publishes repositories the store lacks or holds an older copy of.
 func (s *Sync) pullKnowledge(ctx context.Context) error {
 	entries, err := s.Backend.ListKnowledge(ctx)
 	if err != nil {
@@ -516,10 +516,11 @@ func (s *Sync) pullKnowledge(ctx context.Context) error {
 		}
 		if e.Digest != prev.Digest {
 			if s.Knowledge.Busy(e.Repo) {
+				s.logf("shared knowledge for %s awaits a host recheck at digest %s", e.Repo, e.Digest)
 				continue // a learner is writing; try again next refresh
 			}
-			if err := s.adoptKnowledge(ctx, e); err != nil {
-				s.logf("adopt the knowledge of %s: %v", e.Repo, err)
+			if err := s.reconcileKnowledge(ctx, e); err != nil {
+				s.logf("reconcile shared knowledge of %s: %v", e.Repo, err)
 			}
 			continue
 		}
@@ -541,25 +542,17 @@ func (s *Sync) pullKnowledge(ctx context.Context) error {
 	return nil
 }
 
-// adoptKnowledge replaces the host's knowledge with the store's entry. The listing
-// it came from may be older than a publish that has since finished, so under the
-// publish lock it reads the entry and the host's row again and adopts only a
-// snapshot that is still what the store holds and still differs from the host's.
-func (s *Sync) adoptKnowledge(ctx context.Context, e KnowledgeEntry) error {
+// reconcileKnowledge re-reads a changed entry under both repository locks. Refresh
+// never applies a shared snapshot; it only records one already present on the host.
+func (s *Sync) reconcileKnowledge(ctx context.Context, e KnowledgeEntry) error {
 	unlock, err := s.lock(ctx, "publish:knowledge:"+e.Repo)
 	if err != nil {
 		return err
 	}
 	defer unlock()
-	entries, err := s.Backend.ListKnowledge(ctx)
+	cur, err := s.readKnowledgeEntry(ctx, e.Repo)
 	if err != nil {
 		return err
-	}
-	var cur *KnowledgeEntry
-	for i := range entries {
-		if entries[i].Repo == e.Repo {
-			cur = &entries[i]
-		}
 	}
 	if cur == nil || cur.ParseErr != nil || cur.Snapshot == nil || cur.Digest != e.Digest {
 		return nil // the entry changed since the listing; the next pull decides
@@ -571,20 +564,24 @@ func (s *Sync) adoptKnowledge(ctx context.Context, e KnowledgeEntry) error {
 	if prev.Digest == cur.Digest || prev.AnswerDigest == pausedMark {
 		return nil
 	}
-	// A learner that started after the pull's Busy check holds its lock until its
-	// publish, which waits for the lock held here. Replacing now would drop what it
-	// saved, so take its lock and leave the entry to the next pull if it is held.
 	free, err := s.Knowledge.Lock(e.Repo)
 	if errors.Is(err, knowledge.ErrLocked) {
+		s.logf("shared knowledge for %s awaits a host recheck at digest %s", e.Repo, cur.Digest)
 		return nil
 	}
 	if err != nil {
 		return err
 	}
 	defer free()
-	if err := s.Knowledge.Replace(e.Repo, *cur.Snapshot); err != nil {
+	host, err := s.Knowledge.Snapshot(e.Repo)
+	if err != nil {
 		return err
 	}
+	if SnapshotDigest(host) != cur.Digest {
+		s.logf("shared knowledge for %s is pending host approval at digest %s", e.Repo, cur.Digest)
+		return nil
+	}
+	prev.AnswerDigest = ""
 	prev.Digest = cur.Digest
 	return s.saveRow("knowledge", e.Repo, prev)
 }
