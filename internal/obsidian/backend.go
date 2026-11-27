@@ -245,6 +245,25 @@ func entryOf(f found) workspace.TaskEntry {
 	return e
 }
 
+func (b *Backend) CodedAnswers() bool { return false }
+
+func (b *Backend) TaskFields(_ context.Context, id string) (*workspace.TaskEntry, error) {
+	matches, err := b.scan()
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range matches {
+		if f.err == nil && f.n.str("foreman_id") == id {
+			e := entryOf(f)
+			if e.ID == "" && e.ParseErr != nil {
+				return nil, e.ParseErr
+			}
+			return &e, nil
+		}
+	}
+	return nil, nil
+}
+
 func (b *Backend) ListTasks(context.Context) ([]workspace.TaskEntry, error) {
 	fs, err := b.scan()
 	if err != nil {

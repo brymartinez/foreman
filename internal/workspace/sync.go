@@ -374,6 +374,12 @@ func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
 	r, li, triage, prev, status, stageAt := b.r, b.li, b.triage, b.prev, b.status, b.stageAt
 	digest := hash(r.Digest(), reason)
 	qk := app.QuestionKey(b.rec)
+	var code string
+	coded := s.Backend.CodedAnswers()
+	if coded && qk != "" {
+		code = replyCode(id, qk)
+		digest = hash(digest, code)
+	}
 	stored := qk
 	if stored == "" {
 		stored = noQuestion
@@ -386,7 +392,7 @@ func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
 	adopt := qk != "" && prev.Question == legacyQuestionKey(b.rec)
 	if digest == prev.Digest {
 		if prev.Question != stored {
-			if !adopt {
+			if !coded && !adopt {
 				if err := s.clearStaleAnswer(ctx, id); err != nil {
 					return fmt.Errorf("publish %s: %w", id, err)
 				}
@@ -400,7 +406,7 @@ func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
 	if li != nil {
 		seed.Description, seed.Tags = li.Description, li.Tags
 	}
-	if stored != prev.Question && !adopt {
+	if !coded && stored != prev.Question && !adopt {
 		// An answer already in the store was typed before this question existed.
 		if err := s.clearStaleAnswer(ctx, id); err != nil {
 			return fmt.Errorf("publish %s: %w", id, err)
@@ -413,9 +419,12 @@ func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
 	// reconciled them.
 	confirm := false
 	if prev.Ref != "" && !unfinished && !s.Reseed && triageHash(triage) != seenOrEmpty(prev.TriageSeen) {
-		confirm = s.storeTriageUnchanged(ctx, prev)
+		confirm, err = s.storeTriageUnchanged(ctx, id, prev)
+		if err != nil {
+			return fmt.Errorf("read the shared confirmation for %s: %w", id, err)
+		}
 	}
-	ref, err := s.Backend.UpsertTask(ctx, TaskPublish{Record: r, Reason: scrubHost(reason, b.rec), Create: seed, Resume: unfinished || s.Reseed, Reseed: s.Reseed || confirm})
+	ref, err := s.Backend.UpsertTask(ctx, TaskPublish{Record: r, ReplyCode: code, Reason: scrubHost(reason, b.rec), Create: seed, Resume: unfinished || s.Reseed, Reseed: s.Reseed || confirm})
 	if err != nil {
 		if prev.Ref == "" {
 			// The entry may exist half written, and a create whose response was lost
@@ -460,17 +469,12 @@ func seenOrEmpty(seen string) string {
 
 // storeTriageUnchanged reports whether the store's confirmed-scope field is what the
 // host last reconciled, so writing the host's scope over it loses no edit.
-func (s *Sync) storeTriageUnchanged(ctx context.Context, prev row) bool {
-	entries, err := s.Backend.ListTasks(ctx)
-	if err != nil {
-		return false
+func (s *Sync) storeTriageUnchanged(ctx context.Context, id string, prev row) (bool, error) {
+	e, err := s.Backend.TaskFields(ctx, id)
+	if err != nil || e == nil || e.Ref != prev.Ref {
+		return false, err
 	}
-	for _, e := range entries {
-		if e.Ref == prev.Ref {
-			return triageHash(e.ConfirmedTriage) == seenOrEmpty(prev.TriageSeen)
-		}
-	}
-	return false
+	return triageHash(e.ConfirmedTriage) == seenOrEmpty(prev.TriageSeen), nil
 }
 
 // legacyQuestionKey is the key an earlier revision stored for a task's pending
@@ -499,18 +503,15 @@ const noQuestion = "-"
 // clearStaleAnswer empties the Answer field of an entry that is about to show a new
 // question.
 func (s *Sync) clearStaleAnswer(ctx context.Context, id string) error {
-	entries, err := s.Backend.ListTasks(ctx)
-	if err != nil {
+	e, err := s.Backend.TaskFields(ctx, id)
+	if err != nil || e == nil || strings.TrimSpace(e.Answer) == "" {
 		return err
 	}
-	for _, e := range entries {
-		if e.ID == id && strings.TrimSpace(e.Answer) != "" {
-			if err := s.Backend.ClearAnswer(ctx, e.Ref); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return s.Backend.ClearAnswer(ctx, e.Ref)
+}
+
+func replyCode(id, question string) string {
+	return hash(id, question)[:12]
 }
 
 // PublishKnowledge writes one repository's knowledge to the store, unless the
@@ -541,22 +542,14 @@ func (s *Sync) PublishKnowledge(ctx context.Context, repo string) error {
 		return nil
 	}
 	if !s.Reseed {
-		// Never write over an entry someone edited, or broke, since the host last
-		// saw it. The next pull adopts the edit or pauses on the broken entry.
-		entries, err := s.Backend.ListKnowledge(ctx)
+		// Leave a shared edit pending for approval, keeping the host snapshot.
+		entry, err := s.readKnowledgeEntry(ctx, repo)
 		if err != nil {
 			return fmt.Errorf("publish knowledge of %s: %w", repo, err)
 		}
-		for _, e := range entries {
-			if e.Repo != repo {
-				continue
-			}
-			if e.ParseErr != nil && !errors.Is(e.ParseErr, ErrNoPayload) {
-				return nil
-			}
-			if e.ParseErr == nil && e.Snapshot != nil && e.Digest != prev.Digest {
-				return nil
-			}
+		if entry != nil && !errors.Is(entry.ParseErr, ErrNoPayload) &&
+			(entry.ParseErr != nil || entry.Digest != prev.Digest) {
+			return nil
 		}
 	}
 	if err := s.Backend.WriteKnowledge(ctx, KnowledgePublish{Repo: repo, Snapshot: snap, Guidance: snap.Guidance(), Active: 0}); err != nil {

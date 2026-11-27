@@ -1146,3 +1146,123 @@ func TestKnowledgeApprovalRequiresAnUnambiguousRepository(t *testing.T) {
 		}
 	}
 }
+
+type replyCodeStore struct {
+	*Memory
+	failBody bool
+}
+
+func (b *replyCodeStore) CodedAnswers() bool { return true }
+
+func (b *replyCodeStore) UpsertTask(ctx context.Context, p TaskPublish) (string, error) {
+	ref, err := b.Memory.UpsertTask(ctx, p)
+	if err != nil {
+		return ref, err
+	}
+	b.UserEdit(ref, func(entry *TaskEntry) { entry.ReplyCode = p.ReplyCode })
+	if b.failBody {
+		return ref, errors.New("body write failed after page properties changed")
+	}
+	return ref, nil
+}
+
+func TestCodedReplySurvivesPartialPublishAndRejectsPreviousQuestion(t *testing.T) {
+	h := newHarness(t)
+	backend := &replyCodeStore{Memory: h.mem}
+	h.s.Backend = backend
+	rec := twoQuestionTask()
+	h.saveTask(rec)
+	if err := h.s.Publish(h.ctx, rec.Key); err != nil {
+		t.Fatal(err)
+	}
+	first := h.entries()[0]
+	firstReply := first.ReplyCode + " B"
+	h.mem.UserEdit(first.Ref, func(e *TaskEntry) { e.Answer = firstReply })
+	pulled := h.pull()
+	if len(pulled.Answers) != 1 || pulled.Answers[0].Text != "B" {
+		t.Fatalf("first answer = %+v", pulled.Answers)
+	}
+	old := pulled.Answers[0]
+	rec.Decisions[0].Answer = "B"
+	h.saveTask(rec)
+	backend.failBody = true
+	if err := h.s.Publish(h.ctx, rec.Key); err == nil {
+		t.Fatal("expected a partial publish")
+	}
+	second := h.entries()[0]
+	if second.ReplyCode == "" || second.ReplyCode == first.ReplyCode {
+		t.Fatalf("next visible code = %q, old = %q", second.ReplyCode, first.ReplyCode)
+	}
+	if got := h.pull().Answers; len(got) != 0 {
+		t.Fatalf("the old reply matched the next question: %+v", got)
+	}
+	secondReply := second.ReplyCode + " B"
+	h.mem.UserEdit(first.Ref, func(e *TaskEntry) { e.Answer = secondReply })
+	if err := h.s.Ack(h.ctx, app.WorkspaceAck{Key: old.Key, Kind: app.AckAnswer, Token: old.Token, Question: old.Question}); err != nil {
+		t.Fatal(err)
+	}
+	backend.failBody = false
+	next := h.pull().Answers
+	if len(next) != 1 || next[0].Text != "B" || next[0].Question == old.Question {
+		t.Fatalf("second answer = %+v", next)
+	}
+	if got := h.entries()[0].Answer; got != secondReply {
+		t.Fatalf("retry erased the answer: %q", got)
+	}
+}
+
+type failingTaskFields struct {
+	*Memory
+	err error
+}
+
+func (b *failingTaskFields) TaskFields(ctx context.Context, id string) (*TaskEntry, error) {
+	if b.err != nil {
+		return nil, b.err
+	}
+	return b.Memory.TaskFields(ctx, id)
+}
+
+func TestHostTriageRetriesAfterSharedConfirmationReadFails(t *testing.T) {
+	h := newHarness(t)
+	backend := &failingTaskFields{Memory: h.mem}
+	h.s.Backend = backend
+	h.issue("L-0A1B2C3D")
+	key := localissues.Key("L-0A1B2C3D", "")
+	if err := h.s.Publish(h.ctx, key); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.s.saveTriage(key, "Scope from the host"); err != nil {
+		t.Fatal(err)
+	}
+	backend.err = errors.New("temporary read failure")
+	if err := h.s.Publish(h.ctx, key); err == nil {
+		t.Fatal("expected the publish to remain retryable")
+	}
+	backend.err = nil
+	h.pull()
+	if e := h.entries()[0]; !e.ScopeConfirmed || e.ConfirmedTriage != "Scope from the host" {
+		t.Fatalf("host triage did not reach the store: %+v", e)
+	}
+}
+
+func TestQueueWaitsForCurrentRepositoryToValidate(t *testing.T) {
+	h := newHarness(t)
+	entry := TaskEntry{Name: "Valid", Repository: "o/r", ScopeConfirmed: true, ConfirmedTriage: "Do the task"}
+	ref := h.mem.UserCreate(entry)
+	h.pull()
+	h.mem.UserEdit(ref, func(e *TaskEntry) { e.Repository, e.Queue = "bad repo", true })
+	queued := h.pull().Queued
+	if len(queued) != 1 || queued[0].BlockedReason == "" {
+		t.Fatalf("invalid edit did not block the queue: %+v", queued)
+	}
+	h.mem.UserEdit(ref, func(e *TaskEntry) { e.Repository = "o/other" })
+	queued = h.pull().Queued
+	if len(queued) != 1 || queued[0].BlockedReason != "" {
+		t.Fatalf("corrected task is not eligible to start: %+v", queued)
+	}
+	issue, err := h.s.issueFor(queued[0].Key)
+	if err != nil || issue == nil || issue.Repo != "o/other" {
+		t.Fatalf("queue would start against stale issue fields: %+v %v", issue, err)
+	}
+}

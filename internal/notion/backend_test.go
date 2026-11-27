@@ -881,3 +881,27 @@ func TestANewClientWaitsOnTheContextAwareTimer(t *testing.T) {
 		t.Fatal("a new client sleeps without watching the caller's context")
 	}
 }
+
+func TestTaskFieldsReadsOnlyTheMatchingPageProperties(t *testing.T) {
+	b, f, _ := newBackend(t)
+	ctx := context.Background()
+	p := workspace.TaskPublish{
+		Record: rec("L-0A1B2C3D", "INBOX", ""),
+		Create: workspace.TaskSeed{Name: "Task", ConfirmedTriage: "Scope", ScopeConfirmed: true},
+	}
+	if _, err := b.UpsertTask(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	f.Fail = func(method, path string) (int, string) {
+		if strings.HasPrefix(path, "/v1/blocks/") {
+			return 400, ""
+		}
+		return 0, ""
+	}
+	if e, err := b.TaskFields(ctx, p.Record.ID); err != nil || e == nil || e.ConfirmedTriage != "Scope" {
+		t.Fatalf("task fields = %+v, %v", e, err)
+	}
+	if e, err := b.TaskFields(ctx, "L-FFFFFFFF"); err != nil || e != nil {
+		t.Fatalf("unknown task = %+v, %v", e, err)
+	}
+}

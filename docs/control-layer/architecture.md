@@ -465,15 +465,20 @@ the same commit. The commit message records why it changed.
   fields and confirmed triage are applied only when they differ from the copy the host
   last reconciled (`fields_seen`, `triage_seen`), so a host-side `issue triage` or
   replacing import is not undone by the older text the store still shows. An answer goes through
-  `App.Respond`, which resumes the same provider session. It applies once and only to the
-  question the store was last told is pending (`workspace_entries.question`): publishing
-  a new question first clears an answer typed before it, and the answer token includes
-  the question's position, so the same text answers two questions of one turn. The pull
-  re-reads the entry under the publish lock, `Respond` checks the question key inside its
-  transaction, and acking an answer leaves the field alone once the task has moved on to
-  another question, so an answer never lands on or erases the wrong question. A row that holds an earlier revision's key for the same question is adopted; any other unrecognized key, including an empty one, is treated as untrusted and the answer in the store is cleared once. A queued task starts
-  oldest request first by `App.startQueued`: a request's age is when a pull first saw `Queue` ticked (`workspace_entries.queued_at`), not the store's edit time, which an unrelated edit or Foreman's own write moves, with auto mode's rules (confirmed triage, one
-  allowed repository, filters, quota, `auto.max_concurrent`, branch proposal) whether or
+  `App.Respond`, which resumes the same provider session. In Notion each question
+  shows a reply code bound to its task and question key. A reply must include that
+  code. Foreman checks it against the current page property and the pending
+  question on the host, then checks the question again inside the response
+  transaction. The reply remains visible so no delayed publish or acknowledgement
+  erases a newly submitted reply. Notion reads answer and confirmation properties
+  through a single task lookup without downloading task bodies. Obsidian tracks
+  the last published question in `workspace_entries.question` and clears an answer
+  on a question change. A queued task starts oldest request first by
+  `App.startQueued`. A request's age is when a pull first saw `Queue` ticked
+  (`workspace_entries.queued_at`). Foreman waits for the latest shared issue fields
+  and any new confirmed triage to validate and sync before starting the request.
+  Auto mode's rules apply (confirmed triage, one allowed repository, filters,
+  quota, `auto.max_concurrent`, branch proposal) whether or
   not auto mode is on. A start that cannot happen leaves `Queue` ticked and publishes the
   reason through `Blocked`.
 - **Moving is explicit and verified.** The `workspace` table holds the cutover marker

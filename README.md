@@ -766,8 +766,13 @@ to run again, and it sets no `Queue` box. Moving back to `sqlite` is not support
 - **Queue** ticks start the task on the host at the next refresh, even with auto mode off.
   The box clears when it starts. If it cannot start, it stays ticked and the Foreman
   section says why.
-- **Answer** a waiting question by typing an option label or text into `Answer`
-  (Obsidian: the `answer` key). It resumes the same run, then the field clears.
+- **Answer in Notion** by copying the code in brackets shown with the current
+  question into `Answer`, followed by a space and your reply. For example, if
+  `Question` reads `[0123456789ab] Which approach?`, enter `0123456789ab A`.
+  Foreman resumes the same run and leaves the last reply visible. Replace it
+  with the new question's code and reply when you answer again.
+- **Answer in Obsidian** by typing an option label or text into the `answer`
+  key. It resumes the same run and Foreman clears the field.
 - **Status, question, branch, and PR** update after every change on the host.
 
 Foreman writes only its own fields (Obsidian: `foreman_*` keys and the region between

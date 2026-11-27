@@ -1628,7 +1628,7 @@ workflow() {
 	sleep 1
 	"${s}_answer" B
 	check "the first answer leaves the second question" refresh_until 30 "${s}_field Question | grep -qF 'Cap retries?'"
-	check "and the answer box is cleared" refresh_until 20 "[ -z \"\$(${s}_field Answer)\" ]"
+	check "and the answer is acknowledged" refresh_until 20 "${s}_answer_ack"
 	sleep 1
 	"${s}_answer" A
 	check "the second answer resumes the same planner session" refresh_until 30 "grep -q 'planner resume' '$state/role-sessions.log'"
@@ -1651,6 +1651,7 @@ obsidian_confirm() {
 }
 obsidian_queue() { note_set "$(obsidian_note)" queue true; }
 obsidian_answer() { note_set "$(obsidian_note)" answer "$1"; }
+obsidian_answer_ack() { [ -z "$(obsidian_field Answer)" ]; }
 obsidian_dump() { cat "$(obsidian_note)"; }
 obsidian_field() {
 	case $1 in
@@ -1704,7 +1705,13 @@ notion_confirm() {
 	notion_admin edit '{"find":{"Name":"Search page"},"set":{"Confirmed triage":"Proceed with search as described. Implement in https://github.com/acme/widgets.","Scope confirmed":true}}' >/dev/null
 }
 notion_queue() { notion_admin edit '{"find":{"Name":"Search page"},"set":{"Queue":true}}' >/dev/null; }
-notion_answer() { notion_admin edit "{\"find\":{\"Name\":\"Search page\"},\"set\":{\"Answer\":\"$1\"}}" >/dev/null; }
+notion_answer() {
+	local code
+	code=$(notion_field Question | sed -n 's/^\[\([0-9a-f][0-9a-f]*\)\].*/\1/p')
+	[ -n "$code" ] || return 1
+	notion_admin edit "{\"find\":{\"Name\":\"Search page\"},\"set\":{\"Answer\":\"$code $1\"}}" >/dev/null
+}
+notion_answer_ack() { notion_field Answer | grep -qE '^[a-f0-9]{12} B$'; }
 export -f notion_admin notion_json notion_page notion_field notion_dump
 
 scenario_notion() {

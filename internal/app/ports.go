@@ -439,9 +439,10 @@ type WorkspaceAnswer struct {
 
 // WorkspaceQueued is a task a person queued in the workspace store.
 type WorkspaceQueued struct {
-	Key      task.Key
-	QueuedAt time.Time
-	Token    string
+	Key           task.Key
+	QueuedAt      time.Time
+	Token         string
+	BlockedReason string
 }
 
 // WorkspacePull is what a refresh finds in the store after syncing issues, triage,

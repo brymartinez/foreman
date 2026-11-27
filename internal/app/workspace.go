@@ -103,6 +103,10 @@ func (a App) startQueued(ctx context.Context, queued []WorkspaceQueued) []error 
 	active += startingElsewhere(recs)
 	var warns []error
 	for _, q := range queued {
+		if q.BlockedReason != "" {
+			a.blockQueued(ctx, q.Key, q.BlockedReason)
+			continue
+		}
 		if existing := findTask(recs, q.Key); existing != nil && existing.Delegation != nil && existing.State == task.Failed {
 			// A start that failed leaves a delegation behind. The request was not met:
 			// keep Queue ticked and show why. Starting over is the developer's call.

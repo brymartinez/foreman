@@ -94,7 +94,15 @@ func (s *Sync) ApproveKnowledge(ctx context.Context, repo, sharedDigest, hostDig
 }
 
 func (s *Sync) readKnowledgeEntry(ctx context.Context, repo string) (*KnowledgeEntry, error) {
-	entries, err := s.Backend.ListKnowledge(ctx)
+	var entries []KnowledgeEntry
+	var err error
+	if reader, ok := s.Backend.(interface {
+		KnowledgeEntriesFor(context.Context, string) ([]KnowledgeEntry, error)
+	}); ok {
+		entries, err = reader.KnowledgeEntriesFor(ctx, repo)
+	} else {
+		entries, err = s.Backend.ListKnowledge(ctx)
+	}
 	if err != nil {
 		return nil, err
 	}

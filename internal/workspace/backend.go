@@ -38,6 +38,7 @@ type TaskEntry struct {
 	ScopeConfirmed  bool
 	Queue           bool
 	Answer          string
+	ReplyCode       string // the code published with the visible question
 
 	// Record is the parsed payload, nil when the entry has none yet. ParseErr says
 	// why a present payload was not accepted.
@@ -49,7 +50,8 @@ type TaskEntry struct {
 // fields only when the entry does not exist yet; an existing entry's user fields
 // are never touched.
 type TaskPublish struct {
-	Record Record
+	Record    Record
+	ReplyCode string
 	// Reason is why a queued task could not start, shown in the Foreman section.
 	Reason string
 	// Create holds the user fields to seed a new entry with.
@@ -113,6 +115,10 @@ type Backend interface {
 	Check(ctx context.Context, report func(Step)) error
 
 	ListTasks(ctx context.Context) ([]TaskEntry, error)
+	// TaskFields looks up the current user fields by Foreman ID without requiring the task payload.
+	TaskFields(ctx context.Context, id string) (*TaskEntry, error)
+	// CodedAnswers reports whether submitted answers carry the visible question's reply code.
+	CodedAnswers() bool
 	// UpsertTask finds the entry by Foreman ID and creates or updates it.
 	UpsertTask(ctx context.Context, p TaskPublish) (ref string, err error)
 	// AssignID writes the Foreman ID of an entry a user created.

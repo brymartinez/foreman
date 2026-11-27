@@ -61,6 +61,20 @@ func (m *Memory) Check(_ context.Context, report func(Step)) error {
 	return nil
 }
 
+func (m *Memory) CodedAnswers() bool { return false }
+
+func (m *Memory) TaskFields(_ context.Context, id string) (*TaskEntry, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, e := range m.tasks {
+		if e.ID == id {
+			copy := *e
+			return &copy, nil
+		}
+	}
+	return nil, nil
+}
+
 func (m *Memory) ListTasks(context.Context) ([]TaskEntry, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

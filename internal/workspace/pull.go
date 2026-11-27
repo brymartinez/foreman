@@ -112,9 +112,11 @@ func (s *Sync) pullEntry(ctx context.Context, e TaskEntry, byID map[string]*task
 		e.Record = nil
 	}
 	rec := byID[id]
+	var queueBlock string
 	if rec == nil {
 		if rec, err = s.hydrate(ctx, e, key); err != nil {
 			s.logf("restore %s: %v", id, err)
+			queueBlock = "wait for the issue to finish syncing before queueing"
 		}
 		if rec != nil {
 			byID[id] = rec
@@ -128,7 +130,7 @@ func (s *Sync) pullEntry(ctx context.Context, e TaskEntry, byID map[string]*task
 	if prev.Ref != "" && prev.Digest == "" {
 		// A publish created this entry and has not finished writing it. Its fields
 		// are partial, so they are not an edit. The republish at the end completes it.
-		s.collect(ctx, e, id, taskKey(key, rec), rec, out)
+		s.collect(ctx, e, id, taskKey(key, rec), "wait for the issue to finish syncing before queueing", out)
 		return
 	}
 	// The store's copy is applied only when it changed since the host last
@@ -142,34 +144,30 @@ func (s *Sync) pullEntry(ctx context.Context, e TaskEntry, byID map[string]*task
 				s.logf("record issue fields of %s: %v", id, err)
 			}
 		} else if err := s.syncIssue(ctx, e, key, prev.FieldsSeen); err != nil {
-			if !errors.Is(err, errHeld) {
-				s.logf("sync issue %s: %v", id, err)
-			}
+			queueBlock = "fix the current issue fields before starting: " + err.Error()
+			s.logf("sync issue %s: %v", id, err)
 		} else if err := s.setSeen(id, "fields_seen", fh); err != nil {
 			s.logf("record issue fields of %s: %v", id, err)
 		}
 	}
 	if text := strings.TrimSpace(e.ConfirmedTriage); e.ScopeConfirmed && text != "" && triageHash(text) != prev.TriageSeen {
-		if cur, err := s.triage(key); err == nil && cur != text {
-			if err := s.saveTriage(taskKey(key, rec), e.ConfirmedTriage); err != nil {
-				s.logf("save triage of %s: %v", id, err)
-				text = ""
-			}
+		cur, err := s.triage(key)
+		if err == nil && cur != text {
+			err = s.saveTriage(taskKey(key, rec), e.ConfirmedTriage)
 		}
-		if text != "" {
-			if err := s.setSeen(id, "triage_seen", triageHash(text)); err != nil {
-				s.logf("record triage of %s: %v", id, err)
-			}
+		if err == nil {
+			err = s.setSeen(id, "triage_seen", triageHash(text))
+		}
+		if err != nil {
+			queueBlock = "wait for the confirmed triage to finish syncing before starting"
+			s.logf("sync triage of %s: %v", id, err)
 		}
 	}
 	if rec != nil {
 		key = rec.Key
 	}
-	s.collect(ctx, e, id, key, rec, out)
+	s.collect(ctx, e, id, key, queueBlock, out)
 }
-
-// errHeld means a store edit was not applied because a field is invalid.
-var errHeld = errors.New("issue fields are invalid")
 
 func taskKey(key task.Key, rec *task.Record) task.Key {
 	if rec != nil {
@@ -252,8 +250,8 @@ func (s *Sync) syncIssue(ctx context.Context, e TaskEntry, key task.Key, seen st
 	parts := fieldParts(e)
 	was := strings.Split(seen, ",")
 	changed := func(i int) bool { return len(was) != len(parts) || was[i] != parts[i] }
-	if t := strings.TrimSpace(e.Name); changed(0) && t != "" {
-		next.Title = t
+	if changed(0) {
+		next.Title = strings.TrimSpace(e.Name)
 	}
 	if changed(1) {
 		next.Description = strings.TrimSpace(e.Description)
@@ -273,7 +271,7 @@ func (s *Sync) syncIssue(ctx context.Context, e TaskEntry, key task.Key, seen st
 	if err := (localissues.Input{Title: next.Title, SourceURL: next.SourceURL, Repo: next.Repo}).Validate(); err != nil {
 		// Keep the host's copy until the field is fixed. Not recording the fields as
 		// seen makes the next pull retry every edit together.
-		return errHeld
+		return err
 	}
 	have := *li
 	if have.Tags == nil {
@@ -288,7 +286,7 @@ func (s *Sync) syncIssue(ctx context.Context, e TaskEntry, key task.Key, seen st
 }
 
 // collect adds the entry's pending answer and queue request to out.
-func (s *Sync) collect(ctx context.Context, e TaskEntry, id string, key task.Key, rec *task.Record, out *app.WorkspacePull) {
+func (s *Sync) collect(ctx context.Context, e TaskEntry, id string, key task.Key, queueBlock string, out *app.WorkspacePull) {
 	if ans := s.pendingAnswer(ctx, e, id, key); ans != nil {
 		out.Answers = append(out.Answers, *ans)
 	}
@@ -309,16 +307,14 @@ func (s *Sync) collect(ctx context.Context, e TaskEntry, id string, key task.Key
 				s.logf("%v", err)
 			}
 		}
-		out.Queued = append(out.Queued, app.WorkspaceQueued{Key: key, QueuedAt: at, Token: e.Ref})
+		out.Queued = append(out.Queued, app.WorkspaceQueued{Key: key, QueuedAt: at, Token: e.Ref, BlockedReason: queueBlock})
 	}
 }
 
 // pendingAnswer returns the answer typed for the task's pending question, or nil.
-// It counts only for the question the store was last told is pending: publishing
-// clears an answer typed before a question appeared, so what is in the field now
-// came after it. It re-reads the entry and the task under the publish lock, so a
-// snapshot taken before another process published a new question cannot hand an
-// old answer to that question.
+// A coded reply must match the currently displayed question and the host's pending
+// question. Older adapters use the recorded publication and clear old replies
+// when the question changes. Both re-read the entry under the publish lock.
 func (s *Sync) pendingAnswer(ctx context.Context, e TaskEntry, id string, key task.Key) *app.WorkspaceAnswer {
 	if strings.TrimSpace(e.Answer) == "" {
 		return nil
@@ -343,7 +339,8 @@ func (s *Sync) pendingAnswer(ctx context.Context, e TaskEntry, id string, key ta
 		s.logf("read entry map of %s: %v", id, err)
 		return nil
 	}
-	adopt := prev.Question == legacyQuestionKey(rec)
+	coded := s.Backend.CodedAnswers()
+	adopt := !coded && prev.Question == legacyQuestionKey(rec)
 	if adopt {
 		// Published under an earlier revision's key for this same question.
 		prev.Question = qk
@@ -352,19 +349,24 @@ func (s *Sync) pendingAnswer(ctx context.Context, e TaskEntry, id string, key ta
 			return nil
 		}
 	}
-	if qk != prev.Question {
+	if !coded && qk != prev.Question {
 		return nil
 	}
-	entries, err := s.Backend.ListTasks(ctx)
+	fields, err := s.Backend.TaskFields(ctx, id)
 	if err != nil {
 		s.logf("read the answer of %s: %v", id, err)
 		return nil
 	}
-	var ans string
-	for _, f := range entries {
-		if f.Ref == e.Ref {
-			ans = strings.TrimSpace(f.Answer)
+	if fields == nil || fields.Ref != e.Ref {
+		return nil
+	}
+	ans := strings.TrimSpace(fields.Answer)
+	if coded {
+		code, reply, _ := strings.Cut(ans, " ")
+		if code != replyCode(id, qk) || code != fields.ReplyCode {
+			return nil
 		}
+		ans = strings.TrimSpace(reply)
 	}
 	if ans == "" {
 		return nil
@@ -372,8 +374,10 @@ func (s *Sync) pendingAnswer(ctx context.Context, e TaskEntry, id string, key ta
 	token := hash(id, qk, ans)
 	if token == prev.AnswerDigest {
 		// Already applied; the clear did not land. Try again.
-		if err := s.Backend.ClearAnswer(ctx, e.Ref); err != nil {
-			s.logf("clear the answer of %s: %v", id, err)
+		if !coded {
+			if err := s.Backend.ClearAnswer(ctx, e.Ref); err != nil {
+				s.logf("clear the answer of %s: %v", id, err)
+			}
 		}
 		return nil
 	}
@@ -407,7 +411,7 @@ func (s *Sync) Ack(ctx context.Context, a app.WorkspaceAck) error {
 	if err != nil {
 		return err
 	}
-	if moved {
+	if moved || a.Kind == app.AckAnswer && s.Backend.CodedAnswers() {
 		// The task is on another question. Publishing it cleared this answer, and the
 		// field may already hold the answer to the new question.
 		return nil
@@ -428,16 +432,14 @@ func (s *Sync) Ack(ctx context.Context, a app.WorkspaceAck) error {
 }
 
 func (s *Sync) refFor(ctx context.Context, id string) (string, error) {
-	entries, err := s.Backend.ListTasks(ctx)
+	e, err := s.Backend.TaskFields(ctx, id)
 	if err != nil {
 		return "", err
 	}
-	for _, e := range entries {
-		if e.ID == id {
-			return e.Ref, nil
-		}
+	if e == nil {
+		return "", fmt.Errorf("the store has no entry for %s", id)
 	}
-	return "", fmt.Errorf("the store has no entry for %s", id)
+	return e.Ref, nil
 }
 
 // republish retries every task whose store copy is stale: after a failed publish,

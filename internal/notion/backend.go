@@ -233,7 +233,7 @@ func (b *Backend) invalidate(page string) {
 	b.mu.Unlock()
 }
 
-func (b *Backend) entry(ctx context.Context, p pageObj) (workspace.TaskEntry, error) {
+func taskFields(p pageObj) workspace.TaskEntry {
 	pr := p.Properties
 	e := workspace.TaskEntry{
 		Ref: p.ID, ID: strings.TrimSpace(plainOf(pr["Foreman ID"].RichText)),
@@ -248,6 +248,14 @@ func (b *Backend) entry(ctx context.Context, p pageObj) (workspace.TaskEntry, er
 	for _, t := range pr["Tags"].MultiSelect {
 		e.Tags = append(e.Tags, t.Name)
 	}
+	if question, ok := strings.CutPrefix(plainOf(pr["Question"].RichText), "["); ok {
+		e.ReplyCode, _, _ = strings.Cut(question, "] ")
+	}
+	return e
+}
+
+func (b *Backend) entry(ctx context.Context, p pageObj) (workspace.TaskEntry, error) {
+	e := taskFields(p)
 	body, err := b.body(ctx, p)
 	if err != nil {
 		return e, err
@@ -264,6 +272,20 @@ func (b *Backend) entry(ctx context.Context, p pageObj) (workspace.TaskEntry, er
 		e.ParseErr = perr
 	}
 	return e, nil
+}
+
+func (b *Backend) CodedAnswers() bool { return true }
+
+func (b *Backend) TaskFields(ctx context.Context, id string) (*workspace.TaskEntry, error) {
+	if err := b.ready(ctx); err != nil {
+		return nil, err
+	}
+	page, err := b.findByID(ctx, b.tasks.source, "Foreman ID", id, "rich_text")
+	if err != nil || page == nil {
+		return nil, err
+	}
+	fields := taskFields(*page)
+	return &fields, nil
 }
 
 func (b *Backend) ListTasks(ctx context.Context) ([]workspace.TaskEntry, error) {
@@ -312,11 +334,15 @@ func rtLong(s string) map[string]any {
 	return map[string]any{"rich_text": items}
 }
 
-func foremanProps(r workspace.Record, at time.Time) map[string]any {
+func foremanProps(r workspace.Record, replyCode string, at time.Time) map[string]any {
+	question := r.QuestionText()
+	if replyCode != "" && question != "" {
+		question = "[" + replyCode + "] " + question
+	}
 	props := map[string]any{
 		"Foreman ID": rt(r.ID), "Status": map[string]any{"select": map[string]any{"name": statusLabelOf(r)}},
 		"Source":   map[string]any{"select": map[string]any{"name": sourceLabel(r.Source)}},
-		"Question": rt(r.QuestionText()), "Commit": rt(r.Commit()), "Branch": rt(""), "PR": map[string]any{"url": nil},
+		"Question": rt(question), "Commit": rt(r.Commit()), "Branch": rt(""), "PR": map[string]any{"url": nil},
 		"Updated by Foreman": map[string]any{"date": map[string]any{"start": at.Format(time.RFC3339)}},
 	}
 	if w := r.Work; w != nil {
@@ -355,7 +381,7 @@ func (b *Backend) UpsertTask(ctx context.Context, p workspace.TaskPublish) (stri
 	var ref string
 	if page == nil {
 		s := p.Create
-		props := foremanProps(p.Record, b.now())
+		props := foremanProps(p.Record, p.ReplyCode, b.now())
 		props["Name"] = map[string]any{"title": richText(s.Name)}
 		props["Repository"] = rt(s.Repository)
 		props["Confirmed triage"] = rtLong(strings.TrimSpace(s.ConfirmedTriage))
@@ -389,7 +415,7 @@ func (b *Backend) UpsertTask(ctx context.Context, p workspace.TaskPublish) (stri
 		}
 	} else {
 		ref = page.ID
-		props := foremanProps(p.Record, b.now())
+		props := foremanProps(p.Record, p.ReplyCode, b.now())
 		if p.Reseed {
 			props["Confirmed triage"] = rtLong(strings.TrimSpace(p.Create.ConfirmedTriage))
 			props["Scope confirmed"] = map[string]any{"checkbox": p.Create.ScopeConfirmed}
@@ -488,18 +514,32 @@ func (b *Backend) Duplicates(ctx context.Context) ([]workspace.Duplicate, error)
 }
 
 func (b *Backend) ListKnowledge(ctx context.Context) ([]workspace.KnowledgeEntry, error) {
+	return b.listKnowledge(ctx, nil)
+}
+
+// KnowledgeEntriesFor reads one repository directly because approval must see
+// the current payload even when the page's edit timestamp is unchanged.
+func (b *Backend) KnowledgeEntriesFor(ctx context.Context, repo string) ([]workspace.KnowledgeEntry, error) {
+	return b.listKnowledge(ctx, map[string]any{"property": "Repository", "title": map[string]any{"equals": repo}})
+}
+
+func (b *Backend) listKnowledge(ctx context.Context, filter map[string]any) ([]workspace.KnowledgeEntry, error) {
 	if err := b.ready(ctx); err != nil {
 		return nil, err
 	}
-	pages, err := b.queryPages(ctx, b.knowledge.source, nil)
+	pages, err := b.queryPages(ctx, b.knowledge.source, filter)
 	if err != nil {
 		return nil, err
 	}
 	var out []workspace.KnowledgeEntry
 	for _, p := range pages {
 		e := workspace.KnowledgeEntry{Repo: strings.TrimSpace(plainOf(p.Properties["Repository"].Title)), Ref: p.ID, EditedAt: parseTime(p.Edited)}
-		// Approval compares the current payload even when Notion's edit timestamp is unchanged.
-		body, err := b.C.readBody(ctx, p.ID)
+		var body pageBody
+		if filter != nil {
+			body, err = b.C.readBody(ctx, p.ID)
+		} else {
+			body, err = b.body(ctx, p)
+		}
 		if err != nil {
 			return nil, err
 		}
