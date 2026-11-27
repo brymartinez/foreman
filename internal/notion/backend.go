@@ -490,7 +490,14 @@ func (b *Backend) reseedDescription(ctx context.Context, ref string, p workspace
 	}
 	if len(body.LegacyParagraphs) > 0 || body.LegacyDescription != "" {
 		previous, err := previousDescription(body.Payloads, p.Record.ID)
-		if err != nil || len(body.LegacyParagraphs) != body.DescBlocks ||
+		plain := len(body.LegacyParagraphs) == body.DescBlocks
+		if errors.Is(err, workspace.ErrNoPayload) && plain && body.Description == body.LegacyDescription &&
+			strings.HasPrefix(strings.TrimRight(p.Create.Description, "\n"), strings.TrimRight(body.LegacyDescription, "\n")) {
+			// Older failed moves can leave only the first flat paragraphs. A known
+			// prefix of the current SQLite text can continue in its existing blocks.
+			return b.completeDescription(ctx, ref, p.Create.Description)
+		}
+		if err != nil || !plain ||
 			!strings.HasSuffix(strings.TrimSpace(previous), strings.TrimSpace(body.LegacyDescription)) {
 			return fmt.Errorf("cannot safely replace the existing description of %s; reconcile its user blocks before retrying the move", p.Record.ID)
 		}

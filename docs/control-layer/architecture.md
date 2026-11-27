@@ -507,7 +507,9 @@ the same commit. The commit message records why it changed.
   A retry reseeds the SQLite-owned issue fields and confirmed triage. Notion copies
   imported descriptions into a linked section, so replacements can complete before
   the prior section is removed. Flat paragraphs from an older copy are retired only
-  when they can be matched to that copy's record. Verification checks the title,
+  when they can be matched to that copy's record. A legacy partial copy without a
+  record can continue from a verified prefix of the current SQLite description.
+  Verification checks the title,
   repository, URL, tags, description, confirmed triage, and scope checkbox as seen by
   refresh. For ordinary publishing, an unfinished new entry is retried and its
   partial description completed. The move

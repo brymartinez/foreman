@@ -993,3 +993,41 @@ func TestMoveRetryOverwritesSeededIssueFieldsAndKeepsOriginalTagNames(t *testing
 		})
 	}
 }
+
+func TestMoveResumesLegacyDescriptionPrefixWithoutARecord(t *testing.T) {
+	b, f, _ := newBackend(t)
+	ctx := context.Background()
+	desc := strings.Repeat("<", 90_000)
+	r := rec("L-0A1B2C3D", "INBOX", "")
+	r.Issue = &workspace.Issue{Description: desc, Status: "open"}
+	p := workspace.TaskPublish{Record: r, Create: workspace.TaskSeed{Name: "Task", Description: desc}}
+	f.Fail = func(method, path string) (int, string) {
+		if method == "PATCH" && strings.HasPrefix(path, "/v1/blocks/") {
+			return 400, ""
+		}
+		return 0, ""
+	}
+	ref, err := b.UpsertTask(ctx, p)
+	f.Fail = nil
+	if ref == "" || err == nil {
+		t.Fatalf("legacy write should leave a partial page: ref = %q, error = %v", ref, err)
+	}
+	es, err := b.ListTasks(ctx)
+	if err != nil || len(es) != 1 || es[0].Record != nil ||
+		len(es[0].Description) != 60_000 || !strings.HasPrefix(desc, es[0].Description) {
+		t.Fatalf("unexpected legacy prefix: entries = %d, error = %v", len(es), err)
+	}
+	p.Move, p.Reseed = true, true
+	p.Create.Description = "unrelated replacement"
+	if _, err := b.UpsertTask(ctx, p); err == nil {
+		t.Fatal("move overwrote ambiguous legacy text")
+	}
+	p.Create.Description = desc
+	if got, err := b.UpsertTask(ctx, p); err != nil || got != ref {
+		t.Fatalf("resume legacy prefix: ref = %q, error = %v", got, err)
+	}
+	es, err = b.ListTasks(ctx)
+	if err != nil || len(es) != 1 || es[0].Description != desc || es[0].Record == nil {
+		t.Fatalf("legacy prefix did not resume as one line: entries = %d, error = %v", len(es), err)
+	}
+}
