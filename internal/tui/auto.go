@@ -145,10 +145,11 @@ func (m *Model) Done(key task.Key) {
 	delete(m.starting, key)
 }
 
-// wait is an auto start routing held back: no suitable profile could run.
+// wait is an auto start held back: no slot was free, or no suitable profile could run.
 type wait struct {
 	reason    string
 	selection agent.Selection
+	unrouted  bool // routing has not chosen for it, so there is nothing to reuse
 }
 
 // autoWaiting marks an issue routing held back. It stays tried until the next
@@ -158,6 +159,20 @@ func (m *Model) autoWaiting(key task.Key, reason string, sel agent.Selection) {
 		m.waiting = map[task.Key]wait{}
 	}
 	m.waiting[key] = wait{reason: reason, selection: sel}
+}
+
+// autoFull marks an issue that found no free slot. Like a routing wait it stays tried
+// until the next refresh, and it keeps what an earlier route chose.
+func (m *Model) autoFull(key task.Key, reason string) {
+	w, routed := m.waiting[key]
+	if !routed {
+		w.unrouted = true
+	}
+	if m.waiting == nil {
+		m.waiting = map[task.Key]wait{}
+	}
+	w.reason = reason
+	m.waiting[key] = w
 }
 
 // retryWaiting lets auto mode route the waiting issues again after a refresh.
@@ -170,7 +185,7 @@ func (m *Model) retryWaiting() {
 // prior is the selection an earlier route of key made, so a retry skips the selector.
 func (m *Model) prior(key task.Key) *agent.Selection {
 	w, ok := m.waiting[key]
-	if !ok {
+	if !ok || w.unrouted {
 		return nil
 	}
 	return &w.selection

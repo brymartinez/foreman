@@ -130,6 +130,7 @@ func run(argv []string) int {
 		Workspace:            st.Workspace,
 		WorkspaceLog:         workspaceLog(cfg),
 		MaxConcurrent:        cfg.Auto.MaxConcurrent,
+		Launches:             &app.Launches{},
 		Repositories:         github.New(),
 		Worktrees:            worktree.Git{},
 		Accounts:             github.New(),

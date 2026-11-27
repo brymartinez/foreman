@@ -1031,3 +1031,33 @@ func TestMoveResumesLegacyDescriptionPrefixWithoutARecord(t *testing.T) {
 		t.Fatalf("legacy prefix did not resume as one line: entries = %d, error = %v", len(es), err)
 	}
 }
+
+func TestOversizedConfirmedTriageIsRefusedNotCutShort(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	if err := b.Ensure(ctx); err != nil {
+		t.Fatal(err)
+	}
+	long := strings.Repeat("a", maxRichText*maxCodeItems+1)
+	publish := workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX", ""), Create: workspace.TaskSeed{Name: "N", ConfirmedTriage: long, ScopeConfirmed: true}}
+	if _, err := b.UpsertTask(ctx, publish); err == nil || !strings.Contains(err.Error(), "confirmed triage") {
+		t.Fatalf("create = %v", err)
+	}
+	if entries, err := b.ListTasks(ctx); err != nil || len(entries) != 0 {
+		t.Fatalf("a refused create left %d entries, %v", len(entries), err)
+	}
+	publish.Create.ConfirmedTriage = "short"
+	if _, err := b.UpsertTask(ctx, publish); err != nil {
+		t.Fatal(err)
+	}
+	publish.Create.ConfirmedTriage, publish.Reseed = long, true
+	if _, err := b.UpsertTask(ctx, publish); err == nil {
+		t.Fatal("a reseed cut the scope short")
+	}
+	if wrote, err := b.ConfirmScope(ctx, "L-0A1B2C3D", long, func(string) bool { return true }); err == nil || wrote {
+		t.Fatalf("confirm = %v, %v", wrote, err)
+	}
+	if got, err := b.TaskFields(ctx, "L-0A1B2C3D"); err != nil || got.ConfirmedTriage != "short" {
+		t.Fatalf("stored scope changed: %v", err)
+	}
+}

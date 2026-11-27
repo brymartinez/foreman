@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -273,25 +274,122 @@ func unescapeMarkers(s string) string {
 	return markerPrefix.ReplaceAllStringFunc(s, func(m string) string { return strings.TrimSuffix(m, "\u2063") })
 }
 
-// userText splits the user-owned body into the description and the confirmed triage.
-func userText(s string) (desc, triage string) {
+// triageMarker is the line Foreman writes under the Confirmed triage heading it
+// owns. It carries the note's region ID, so text that merely holds the heading,
+// such as a description quoting another note, does not start the section.
+func triageMarker(id string) string { return "<!-- foreman:triage " + id + " -->" }
+
+// userSection is the user-owned text of a note Foreman writes: the description,
+// then the triage heading and the confirmed triage. An empty id leaves the heading
+// unmarked.
+func userSection(id, desc, triage string) string {
+	var b strings.Builder
+	if desc = strings.TrimSpace(desc); desc != "" {
+		b.WriteString(desc + "\n\n")
+	}
+	b.WriteString(triageHeading + "\n")
+	if id != "" {
+		b.WriteString(triageMarker(id) + "\n")
+	}
+	b.WriteString("\n")
+	if triage = strings.TrimSpace(triage); triage != "" {
+		b.WriteString(triage + "\n\n")
+	}
+	return b.String()
+}
+
+// userText splits the user-owned body into the description and the confirmed
+// triage. With the marker, the heading nearest above it starts the triage, and text
+// typed between the two is triage too. A note without the marker needs exactly one
+// heading outside code blocks. Anything ambiguous is an error, because a wrong
+// split would replace the confirmed scope.
+func userText(s, id string) (desc, triage string, err error) {
 	lines := strings.Split(s, "\n")
-	for i, l := range lines {
-		if strings.TrimSpace(l) == triageHeading {
-			return strings.TrimSpace(strings.Join(lines[:i], "\n")), strings.TrimSpace(strings.Join(lines[i+1:], "\n"))
+	split := func(heading int, rest []string) (string, string, error) {
+		return strings.TrimSpace(strings.Join(lines[:heading], "\n")), strings.TrimSpace(strings.Join(rest, "\n")), nil
+	}
+	if id != "" {
+		var marks []int
+		for i, l := range lines {
+			if strings.TrimSpace(l) == triageMarker(id) {
+				marks = append(marks, i)
+			}
+		}
+		if len(marks) > 1 {
+			return "", "", errors.New("more than one foreman:triage line; keep the one under the real Confirmed triage heading")
+		}
+		if len(marks) == 1 {
+			m := marks[0]
+			h := m - 1
+			for h >= 0 && !isTriageHeading(lines[h]) {
+				h--
+			}
+			if h < 0 {
+				return "", "", fmt.Errorf("the foreman:triage line must follow the %q heading", triageHeading)
+			}
+			return split(h, slices.Concat(lines[h+1:m], lines[m+1:]))
 		}
 	}
-	return strings.TrimSpace(s), ""
+	var headings []int
+	var fence string // the opening run of the code block the line is in
+	hidden := false  // the open code block holds the heading
+	for i, l := range lines {
+		t := strings.TrimSpace(l)
+		switch {
+		case fence != "":
+			if strings.HasPrefix(t, fence) && strings.Trim(t, fence[:1]) == "" {
+				fence, hidden = "", false
+			} else if isTriageHeading(l) {
+				hidden = true
+			}
+		case openingFence(t) != "":
+			fence = openingFence(t)
+		case isTriageHeading(l):
+			headings = append(headings, i)
+		}
+	}
+	switch {
+	case hidden:
+		return "", "", fmt.Errorf("an unclosed code block holds the %q heading", triageHeading)
+	case len(headings) > 1:
+		return "", "", fmt.Errorf("more than one %q heading; keep one, or put the others in a code block", triageHeading)
+	case len(headings) == 1:
+		return split(headings[0], lines[headings[0]+1:])
+	}
+	return strings.TrimSpace(s), "", nil
+}
+
+// isTriageHeading reports the heading line. Four spaces would make it code.
+func isTriageHeading(l string) bool {
+	t := strings.TrimLeft(l, " ")
+	return len(l)-len(t) <= 3 && strings.TrimRight(t, " \t") == triageHeading
+}
+
+// openingFence returns the run of backticks or tildes that opens a code block.
+func openingFence(t string) string {
+	for _, c := range []string{"`", "~"} {
+		n := len(t) - len(strings.TrimLeft(t, c))
+		if n >= 3 && (c == "~" || !strings.Contains(t[n:], c)) {
+			return t[:n]
+		}
+	}
+	return ""
+}
+
+// regionID is the note's region ID, assigned on first use.
+func (n *note) regionID() (string, error) {
+	if id := n.str(regionKey); id != "" {
+		return id, nil
+	}
+	id := rand.Text()
+	return id, n.set(regionKey, id)
 }
 
 // setRegion replaces the owned section and assigns an ID on the first write.
 func (n *note) setRegion(r noteRegion, content string) error {
-	id := n.str(regionKey)
-	if id == "" {
-		id = rand.Text()
-		if err := n.set(regionKey, id); err != nil {
-			return err
-		}
+	id, err := n.regionID()
+	if err != nil {
+		return err
 	}
 	region := regionMarker(beginMarker, id) + "\n" + escapeMarkers(strings.TrimRight(content, "\n")) + "\n" + regionMarker(endMarker, id)
 	if r.present {

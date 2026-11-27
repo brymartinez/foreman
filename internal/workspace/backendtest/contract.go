@@ -123,6 +123,44 @@ func Run(t *testing.T, newEnv func(t *testing.T) Env) {
 			t.Fatalf("after ClearAnswer: %+v", got)
 		}
 	})
+	t.Run("a publish that replaces the question clears the answer with it", func(t *testing.T) {
+		e := newEnv(t)
+		e.Backend.Ensure(ctx)
+		ref, _ := e.Backend.UpsertTask(ctx, workspace.TaskPublish{Record: record("L-0A1B2C3D", "NEEDS_DECISION")})
+		e.UserEdit(ref, func(x *workspace.TaskEntry) { x.Queue, x.Answer = true, "A" })
+		if _, err := e.Backend.UpsertTask(ctx, workspace.TaskPublish{Record: record("L-0A1B2C3D", "IMPLEMENTING"), ClearAnswer: true}); err != nil {
+			t.Fatal(err)
+		}
+		if got := find(t, e.Backend, "L-0A1B2C3D"); got.Answer != "" || !got.Queue || got.Record == nil || got.Record.Status != "IMPLEMENTING" {
+			t.Fatalf("after the publish: %+v", got)
+		}
+	})
+	t.Run("confirmed scope is written only over the text the caller accepts", func(t *testing.T) {
+		e := newEnv(t)
+		e.Backend.Ensure(ctx)
+		ref, _ := e.Backend.UpsertTask(ctx, workspace.TaskPublish{Record: record("L-0A1B2C3D", "INBOX"), Create: workspace.TaskSeed{Name: "A", Description: "desc", ConfirmedTriage: "old", ScopeConfirmed: true}})
+		holds := func(want string) func(string) bool { return func(got string) bool { return got == want } }
+		e.UserEdit(ref, func(x *workspace.TaskEntry) { x.ConfirmedTriage = "typed in the store" })
+		if wrote, err := e.Backend.ConfirmScope(ctx, "L-0A1B2C3D", "from the host", holds("old")); err != nil || wrote {
+			t.Fatalf("overwrote a newer edit: %v, %v", wrote, err)
+		}
+		if got := find(t, e.Backend, "L-0A1B2C3D"); got.ConfirmedTriage != "typed in the store" {
+			t.Fatalf("scope = %q", got.ConfirmedTriage)
+		}
+		for _, text := range []string{"from the host", ""} {
+			current := find(t, e.Backend, "L-0A1B2C3D").ConfirmedTriage
+			if wrote, err := e.Backend.ConfirmScope(ctx, "L-0A1B2C3D", text, holds(current)); err != nil || !wrote {
+				t.Fatalf("confirm %q: %v, %v", text, wrote, err)
+			}
+			got := find(t, e.Backend, "L-0A1B2C3D")
+			if got.ConfirmedTriage != text || got.ScopeConfirmed != (text != "") || got.Description != "desc" || got.Record == nil {
+				t.Fatalf("after confirming %q: %+v", text, got)
+			}
+		}
+		if wrote, err := e.Backend.ConfirmScope(ctx, "L-FFFFFFFF", "x", holds("")); err != nil || wrote {
+			t.Fatalf("a missing entry: %v, %v", wrote, err)
+		}
+	})
 	t.Run("duplicates are listed oldest first and trashing one leaves the other", func(t *testing.T) {
 		e := newEnv(t)
 		e.Backend.Ensure(ctx)

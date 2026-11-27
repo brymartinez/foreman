@@ -34,8 +34,15 @@ func (b *Backend) writeUserFields(ctx context.Context, ref string, e workspace.T
 			if err != nil {
 				return err
 			}
-			desc, _ := userText(region.userBody())
-			user := desc + "\n\n" + triageHeading + "\n\n" + e.ConfirmedTriage + "\n"
+			id, err := n.regionID()
+			if err != nil {
+				return err
+			}
+			desc, _, err := userText(region.userBody(), id)
+			if err != nil {
+				return err
+			}
+			user := userSection(id, desc, e.ConfirmedTriage)
 			if region.present {
 				user += "\n" + n.body[len(region.before):len(n.body)-len(region.after)] + "\n"
 			}

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/brymartinez/foreman/internal/task"
@@ -59,6 +58,9 @@ func (a App) refreshWorkspace(ctx context.Context) []error {
 	}
 	var warns []error
 	for _, ans := range pull.Answers {
+		if a.Launches.stopping() {
+			break
+		}
 		if err := a.applyAnswer(ctx, ans); err != nil {
 			warns = append(warns, fmt.Errorf("workspace: answer for %s: %w", ans.Key.ExternalID+fmt.Sprint(ans.Key.Number), err))
 		}
@@ -94,15 +96,11 @@ func (a App) startQueued(ctx context.Context, queued []WorkspaceQueued) []error 
 	if err != nil {
 		return []error{fmt.Errorf("workspace: list tasks: %w", err)}
 	}
-	active := 0
-	for _, r := range recs {
-		if r.State.Active() {
-			active++
-		}
-	}
-	active += startingElsewhere(recs)
 	var warns []error
 	for _, q := range queued {
+		if a.Launches.stopping() {
+			break
+		}
 		if q.BlockedReason != "" {
 			a.blockQueued(ctx, q.Key, q.BlockedReason)
 			continue
@@ -126,19 +124,25 @@ func (a App) startQueued(ctx context.Context, queued []WorkspaceQueued) []error 
 			}
 			continue
 		}
-		if a.MaxConcurrent > 0 && active >= a.MaxConcurrent {
-			a.blockQueued(ctx, q.Key, fmt.Sprintf("waiting for a free slot: %d runs are active and auto.max_concurrent is %d", active, a.MaxConcurrent))
+		release, err := a.ReserveSlot(ctx, q.Key)
+		if errors.Is(err, ErrNoSlot) {
+			a.blockQueued(ctx, q.Key, err.Error())
+			continue
+		} else if err != nil {
+			warns = append(warns, fmt.Errorf("workspace: %w", err))
 			continue
 		}
 		rec, reason, err := a.startOne(ctx, q.Key)
+		release()
 		switch {
+		case errors.Is(err, errQuitting):
+			return warns // the request stays queued for the next refresh
 		case err != nil:
 			a.blockQueued(ctx, q.Key, err.Error())
 			warns = append(warns, fmt.Errorf("workspace: start %s: %w", q.Key.ExternalID+fmt.Sprint(q.Key.Number), err))
 		case reason != "":
 			a.blockQueued(ctx, q.Key, reason)
 		default:
-			active++
 			recs = append(recs, rec)
 			if err := a.Workspace.Ack(ctx, WorkspaceAck{Key: rec.Key, Kind: AckQueue, Token: q.Token}); err != nil {
 				warns = append(warns, err)
@@ -148,46 +152,12 @@ func (a App) startQueued(ctx context.Context, queued []WorkspaceQueued) []error 
 	return warns
 }
 
-// startsInFlight holds the tasks this process is starting. A start takes a slot
-// only when its first update commits, so a queued start that counts runs from the
-// database alone can pass the limit while the dashboard has another start under way.
-var (
-	startsMu       sync.Mutex
-	startsInFlight = map[task.Key]int{}
-)
-
-func trackStart(key task.Key, repo task.Repo, issue int) func() {
-	if key == (task.Key{}) {
-		key = task.Key{Repo: repo, Number: issue}
-	}
-	startsMu.Lock()
-	startsInFlight[key]++
-	startsMu.Unlock()
-	return func() {
-		startsMu.Lock()
-		if startsInFlight[key]--; startsInFlight[key] <= 0 {
-			delete(startsInFlight, key)
-		}
-		startsMu.Unlock()
-	}
-}
-
-// startingElsewhere counts starts under way that the task list does not show active.
-func startingElsewhere(recs []*task.Record) int {
-	startsMu.Lock()
-	defer startsMu.Unlock()
-	n := 0
-	for k := range startsInFlight {
-		if r := findTask(recs, k); r == nil || !r.State.Active() {
-			n++
-		}
-	}
-	return n
-}
-
 func findTask(recs []*task.Record, key task.Key) *task.Record {
+	if key.Source == task.Local {
+		return task.LocalPrimary(recs, key.ExternalID)
+	}
 	for _, r := range recs {
-		if r.Key == key || key.Source == task.Local && r.Key.Source == task.Local && r.Key.ExternalID == key.ExternalID {
+		if r.Key == key {
 			return r
 		}
 	}

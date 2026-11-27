@@ -25,6 +25,11 @@ var errQuestionMoved = errors.New("the task is waiting on a different question n
 // transaction when the pending question is another one.
 func (a App) respond(ctx context.Context, key task.Key, raw, expect string) (*task.Record, error) {
 	now := a.Now()
+	release, err := a.Launches.hold()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	var token string
 	rec, err := a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
 		if cur == nil || cur.State != task.NeedsDecision || cur.Pending() == nil {

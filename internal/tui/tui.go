@@ -3,6 +3,7 @@ package tui
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -74,7 +75,9 @@ type result struct {
 	repository  *app.RepositoryProposal
 	proposal    *app.BranchProposal
 	proposalSeq int
-	// wait is why routing held an auto start back; selection is what it chose.
+	// wait is why an auto start was held back; selection is what routing chose. full
+	// says no slot was free, so nothing was routed.
+	full      bool
 	wait      string
 	selection agent.Selection
 	// historyLoad marks a PR history load coming back, for the allRepos view.
@@ -143,6 +146,10 @@ func Run(ctx context.Context, o Options) (err error) {
 	defer local.Stop()
 	remote := time.NewTicker(o.GitHubEvery)
 	defer remote.Stop()
+
+	// A refresh starts queued runs and relaunches others. Every way out waits for the
+	// launches under way, so none leaves a task claimed with no runner.
+	defer func() { awaitLaunches(o.Out, &m, o.Source.StopLaunches()) }()
 
 	refreshAfterSave := false
 	refresh := func() {
@@ -357,6 +364,18 @@ func finish(ctx context.Context, out io.Writer, m *Model, results <-chan result,
 	return nil
 }
 
+// awaitLaunches blocks until done closes, saying why when that is not at once.
+func awaitLaunches(out io.Writer, m *Model, done <-chan struct{}) {
+	select {
+	case <-done:
+		return
+	default:
+	}
+	m.Message = "Finishing the last launch…"
+	draw(out, Frame(*m))
+	<-done
+}
+
 // settle applies a background result and returns how many auto starts it launched.
 // A failed refresh starts nothing.
 func settle(ctx context.Context, s Source, m *Model, r result, results chan<- result) int {
@@ -444,9 +463,12 @@ func apply(m *Model, r result) {
 		}
 	}
 	if r.auto && r.finished {
-		if r.wait != "" {
+		switch {
+		case r.full:
+			m.autoFull(r.key, r.wait)
+		case r.wait != "":
 			m.autoWaiting(r.key, r.wait, r.selection)
-		} else {
+		default:
 			delete(m.waiting, r.key)
 		}
 	}
@@ -514,6 +536,20 @@ func propose(ctx context.Context, s Source, req app.StartRequest, seq int) resul
 // profile. When no suitable profile can run, nothing starts and the result says why.
 func autoStart(ctx context.Context, s Source, req app.StartRequest, prior *agent.Selection) result {
 	key := requestKey(req)
+	// Held through routing and the branch proposal, so a queued start in a running
+	// refresh cannot take this slot.
+	release, err := s.ReserveSlot(ctx, key)
+	switch {
+	case errors.Is(err, app.ErrNoSlot):
+		name := fmt.Sprintf("%s#%d", req.Repo, req.Issue)
+		if key.Source == task.Local {
+			name = key.ExternalID
+		}
+		return result{message: fmt.Sprintf("! auto: %s waits: %v", name, err), wait: err.Error(), full: true, key: key, auto: true, finished: true}
+	case err != nil:
+		return result{err: fmt.Errorf("auto: %w", err), key: key, auto: true, finished: true}
+	}
+	defer release()
 	if req.Key.Source == task.Local && req.Repo == "" {
 		p, err := s.ProposeRepository(ctx, req.Key)
 		if err != nil {

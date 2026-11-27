@@ -704,8 +704,8 @@ ID like `L-0000002A`.
 
 `storage.backend` in `config.yaml` picks where your issues, plans, questions, and PR
 links live so you can reach them from any device: `notion`, `obsidian`, or `sqlite`.
-Without a value or a configured store target, an existing workspace stays on
-`sqlite` and a new one uses `notion`. The agent host keeps the local SQLite
+Without a value or a configured store target, an existing workspace (including one
+from the Markdown versions) stays on `sqlite` and a new one uses `notion`. The agent host keeps the local SQLite
 database, credentials, provider sessions, worktrees, and raw logs.
 
 The machine that runs the agents (a VPS, say) keeps the dashboard open, for example
@@ -770,10 +770,15 @@ from SQLite and leaves the queue alone. Moving back to `sqlite` is not supported
 - **Create** a page in Tasks (or a note in `Tasks/`). The next refresh gives it an
   `L-` ID.
 - **Confirm scope** by filling `Confirmed triage` (Obsidian: a `## Confirmed triage`
-  section) and ticking `Scope confirmed`.
+  section) and ticking `Scope confirmed`. In Obsidian, keep the hidden
+  `foreman:triage` line under the heading Foreman wrote. A note without it needs exactly
+  one such heading outside code blocks. Foreman leaves an ambiguous note unread and
+  says why in `workspace.log`. A Notion property holds at most 200,000 characters, and
+  Foreman refuses longer triage.
 - **Queue** ticks start the task on the host at the next refresh, even with auto mode off.
   The box clears when it starts. If it cannot start, it stays ticked and the Foreman
-  section says why.
+  section says why. A task that has not started uses the current `Repository` field
+  and triage links; a reset task stays in its repository.
 - **Answer in Notion** by copying the code in brackets shown with the current
   question into `Answer`, followed by a space and your reply. For example, if
   `Question` reads `[0123456789ab] Which approach?`, enter `0123456789ab A`.

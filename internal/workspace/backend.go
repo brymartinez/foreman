@@ -17,6 +17,11 @@ import (
 // a payload that does not parse, it is not someone's edit, so publishing resumes.
 var ErrNoPayload = errors.New("the entry has no knowledge payload")
 
+// ErrScopeUnreadable is ConfirmScope's refusal of an entry whose confirmed scope it
+// cannot tell from the rest of the user's text. The rest of the entry still takes
+// publishes.
+var ErrScopeUnreadable = errors.New("the entry's confirmed scope cannot be read")
+
 // TaskEntry is one task as the store holds it: the user's fields, the
 // Foreman-owned fields it last published, and the parsed payload.
 type TaskEntry struct {
@@ -64,6 +69,9 @@ type TaskPublish struct {
 	Reseed bool
 	// Move rewrites the task fields copied by an earlier attempt at cutover.
 	Move bool
+	// ClearAnswer empties an existing entry's answer in the same write that shows
+	// the new question, so no reply to the old question survives into the new one.
+	ClearAnswer bool
 }
 
 // TaskSeed is the user-owned content of a new entry.
@@ -121,6 +129,10 @@ type Backend interface {
 	CodedAnswers() bool
 	// UpsertTask finds the entry by Foreman ID and creates or updates it.
 	UpsertTask(ctx context.Context, p TaskPublish) (ref string, err error)
+	// ConfirmScope writes confirmed scope to an existing entry, only while unchanged
+	// accepts the scope the entry holds at the time of the write. Empty triage clears
+	// the scope and unticks the checkbox. It reports whether it wrote.
+	ConfirmScope(ctx context.Context, id, triage string, unchanged func(current string) bool) (bool, error)
 	// AssignID writes the Foreman ID of an entry a user created.
 	AssignID(ctx context.Context, ref, id string) error
 	ClearQueue(ctx context.Context, ref string) error

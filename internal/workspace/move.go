@@ -191,12 +191,17 @@ func (m Move) sourceKeys(ctx context.Context, recs []*task.Record) ([]task.Key, 
 	var keys []task.Key
 	haveLocal := map[string]bool{}
 	for _, r := range recs {
-		keys = append(keys, r.Key)
 		if r.Source == task.Local {
+			primary := task.LocalPrimary(recs, r.ExternalID)
+			if r != primary {
+				m.say("%s also has a task in %s. Its shared entry shows the one in %s, and the other stays in the local database.", r.ExternalID, r.Repo, primary.Repo)
+				continue
+			}
 			haveLocal[r.ExternalID] = true
 		}
+		keys = append(keys, r.Key)
 	}
-	res := MoveResult{Tasks: len(recs)}
+	res := MoveResult{Tasks: len(keys)}
 	issues, err := m.Sync.Issues.List(ctx)
 	if err != nil {
 		return nil, res, err

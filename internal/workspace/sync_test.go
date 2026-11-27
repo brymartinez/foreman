@@ -1211,21 +1211,21 @@ func TestCodedReplySurvivesPartialPublishAndRejectsPreviousQuestion(t *testing.T
 	}
 }
 
-type failingTaskFields struct {
+type failingConfirm struct {
 	*Memory
 	err error
 }
 
-func (b *failingTaskFields) TaskFields(ctx context.Context, id string) (*TaskEntry, error) {
+func (b *failingConfirm) ConfirmScope(ctx context.Context, id, triage string, unchanged func(string) bool) (bool, error) {
 	if b.err != nil {
-		return nil, b.err
+		return false, b.err
 	}
-	return b.Memory.TaskFields(ctx, id)
+	return b.Memory.ConfirmScope(ctx, id, triage, unchanged)
 }
 
 func TestHostTriageRetriesAfterSharedConfirmationReadFails(t *testing.T) {
 	h := newHarness(t)
-	backend := &failingTaskFields{Memory: h.mem}
+	backend := &failingConfirm{Memory: h.mem}
 	h.s.Backend = backend
 	h.issue("L-0A1B2C3D")
 	key := localissues.Key("L-0A1B2C3D", "")

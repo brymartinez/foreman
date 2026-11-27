@@ -14,6 +14,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/brymartinez/foreman/internal/store"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -190,7 +191,10 @@ func Load() (Config, error) {
 		*p = expandHome(*p, home)
 	}
 	_, statErr := os.Stat(cfg.Database)
-	if err := resolveStorage(&cfg.Storage, statErr == nil); err != nil {
+	// An earlier version kept its work in Markdown, and the upgrade that moves it
+	// into the database has yet to run.
+	existing := statErr == nil || store.HasLegacy(store.Legacy{TasksDir: cfg.TasksDir, TriageDir: cfg.TriageDir, KnowledgeDir: cfg.KnowledgeDir})
+	if err := resolveStorage(&cfg.Storage, existing); err != nil {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
 	}
 	if cfg.Refresh < MinRefresh {

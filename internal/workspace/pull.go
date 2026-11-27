@@ -36,6 +36,9 @@ func (s *Sync) Pull(ctx context.Context) (app.WorkspacePull, error) {
 	}
 	byID := map[string]*task.Record{}
 	for _, r := range recs {
+		if r.Source == task.Local {
+			r = task.LocalPrimary(recs, r.ExternalID)
+		}
 		byID[TaskID(r)] = r
 	}
 	s.pullAt = s.now()
@@ -130,7 +133,7 @@ func (s *Sync) pullEntry(ctx context.Context, e TaskEntry, byID map[string]*task
 	if prev.Ref != "" && prev.Digest == "" {
 		// A publish created this entry and has not finished writing it. Its fields
 		// are partial, so they are not an edit. The republish at the end completes it.
-		s.collect(ctx, e, id, taskKey(key, rec), "wait for the issue to finish syncing before queueing", out)
+		s.collect(ctx, e, id, key, rec, "wait for the issue to finish syncing before queueing", out)
 		return
 	}
 	// The store's copy is applied only when it changed since the host last
@@ -163,10 +166,7 @@ func (s *Sync) pullEntry(ctx context.Context, e TaskEntry, byID map[string]*task
 			s.logf("sync triage of %s: %v", id, err)
 		}
 	}
-	if rec != nil {
-		key = rec.Key
-	}
-	s.collect(ctx, e, id, key, queueBlock, out)
+	s.collect(ctx, e, id, key, rec, queueBlock, out)
 }
 
 func taskKey(key task.Key, rec *task.Record) task.Key {
@@ -256,7 +256,8 @@ func (s *Sync) syncIssue(ctx context.Context, e TaskEntry, key task.Key, seen st
 	if changed(1) {
 		next.Description = strings.TrimSpace(e.Description)
 	}
-	if changed(2) && (e.SourceURL != "" || li.SourceURL == "") {
+	// With no record of what the store held, an empty field is not a deletion.
+	if changed(2) && (e.SourceURL != "" || len(was) == len(parts)) {
 		next.SourceURL = e.SourceURL
 	}
 	if changed(3) {
@@ -285,9 +286,24 @@ func (s *Sync) syncIssue(ctx context.Context, e TaskEntry, key task.Key, seen st
 	return localissues.PutIn(s.DB, next)
 }
 
+// queueTarget is the key a queued start asks for, and why it cannot start. A local
+// task that never started binds no repository, so the start chooses one from the
+// issue's current fields. A reset task keeps its repository, so a Repository field
+// that names another one holds the request.
+func queueTarget(e TaskEntry, key task.Key, rec *task.Record) (task.Key, string) {
+	if rec == nil || key.Source == task.Local && rec.Binding() == 0 {
+		return key, ""
+	}
+	want := strings.TrimSpace(e.Repository)
+	if key.Source == task.Local && rec.Delegation == nil && want != "" && !strings.EqualFold(want, string(rec.Repo)) {
+		return rec.Key, fmt.Sprintf("the Repository field names %s, but this task already belongs to %s; set Repository to %s to continue it", want, rec.Repo, rec.Repo)
+	}
+	return rec.Key, ""
+}
+
 // collect adds the entry's pending answer and queue request to out.
-func (s *Sync) collect(ctx context.Context, e TaskEntry, id string, key task.Key, queueBlock string, out *app.WorkspacePull) {
-	if ans := s.pendingAnswer(ctx, e, id, key); ans != nil {
+func (s *Sync) collect(ctx context.Context, e TaskEntry, id string, key task.Key, rec *task.Record, queueBlock string, out *app.WorkspacePull) {
+	if ans := s.pendingAnswer(ctx, e, id, taskKey(key, rec)); ans != nil {
 		out.Answers = append(out.Answers, *ans)
 	}
 	seen, err := s.queuedAt(id)
@@ -307,7 +323,11 @@ func (s *Sync) collect(ctx context.Context, e TaskEntry, id string, key task.Key
 				s.logf("%v", err)
 			}
 		}
-		out.Queued = append(out.Queued, app.WorkspaceQueued{Key: key, QueuedAt: at, Token: e.Ref, BlockedReason: queueBlock})
+		target, held := queueTarget(e, key, rec)
+		if queueBlock == "" {
+			queueBlock = held
+		}
+		out.Queued = append(out.Queued, app.WorkspaceQueued{Key: target, QueuedAt: at, Token: e.Ref, BlockedReason: queueBlock})
 	}
 }
 
@@ -381,7 +401,7 @@ func (s *Sync) pendingAnswer(ctx context.Context, e TaskEntry, id string, key ta
 		}
 		return nil
 	}
-	return &app.WorkspaceAnswer{Key: key, Text: ans, Token: token, Question: qk}
+	return &app.WorkspaceAnswer{Key: rec.Key, Text: ans, Token: token, Question: qk}
 }
 
 func localIssueOpen(s *Sync, key task.Key) bool {
@@ -457,8 +477,12 @@ func (s *Sync) republish(ctx context.Context, skip map[string]bool) {
 		return
 	}
 	for _, r := range recs {
-		seen[TaskID(r)] = true
-		if skip[ForemanID(r.Key)] {
+		id := TaskID(r)
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		if skip[id] {
 			continue
 		}
 		if err := s.Publish(ctx, r.Key); err != nil {

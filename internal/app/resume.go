@@ -19,6 +19,11 @@ func (a App) Resume(ctx context.Context, key task.Key) (*task.Record, error) {
 	if err := a.resumable(key, rec); err != nil {
 		return nil, err
 	}
+	release, err := a.Launches.hold()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	var token string
 	if _, err := a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
 		if err := a.resumable(key, cur); err != nil {

@@ -721,3 +721,240 @@ func TestARecordPastedBeforeFirstPublishStaysInTheDescription(t *testing.T) {
 		t.Fatalf("record = %+v, description = %q, err = %v", e.Record, e.Description, e.ParseErr)
 	}
 }
+
+func TestADescriptionHoldingTheTriageHeadingDoesNotReplaceTheScope(t *testing.T) {
+	for name, desc := range map[string]string{
+		"in a code block": "Template:\n\n```md\n## Confirmed triage\nexample scope\n```\n\nEnd.",
+		"in plain text":   "Copied from another note:\n\n## Confirmed triage\n\nexample scope",
+	} {
+		t.Run(name, func(t *testing.T) {
+			b := newBackend(t)
+			ctx := context.Background()
+			seed := workspace.TaskSeed{Name: "N", Description: desc, ConfirmedTriage: "approved scope", ScopeConfirmed: true}
+			if _, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX"), Create: seed}); err != nil {
+				t.Fatal(err)
+			}
+			entries, err := b.ListTasks(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if e := entries[0]; e.ParseErr != nil || e.Description != desc || e.ConfirmedTriage != "approved scope" {
+				t.Fatalf("description %q\ntriage %q\nerr %v", e.Description, e.ConfirmedTriage, e.ParseErr)
+			}
+		})
+	}
+}
+
+func TestANoteAPersonWroteSplitsOnTheOneHeadingOutsideCode(t *testing.T) {
+	for name, c := range map[string]struct {
+		body, desc, triage string
+		held               bool
+	}{
+		"fenced example first": {body: "~~~\n## Confirmed triage\n~~~\n\n## Confirmed triage\n\nscope", desc: "~~~\n## Confirmed triage\n~~~", triage: "scope"},
+		"longer fence":         {body: "````\n```\n## Confirmed triage\n````\n## Confirmed triage\nscope", desc: "````\n```\n## Confirmed triage\n````", triage: "scope"},
+		"indented code":        {body: "    ## Confirmed triage\n\ntext", desc: "## Confirmed triage\n\ntext"},
+		"two headings":         {body: "## Confirmed triage\nfirst\n## Confirmed triage\nsecond", held: true},
+		"unclosed code block":  {body: "```\n## Confirmed triage\nscope", held: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			b := newBackend(t)
+			writeNote(t, b, "N", "---\nforeman_id: L-0A1B2C3D\nscope_confirmed: true\n---\n"+c.body+"\n")
+			entries, err := b.ListTasks(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			e := entries[0]
+			if c.held {
+				if e.ParseErr == nil || e.ID != "" || e.ConfirmedTriage != "" || e.Description != "" {
+					t.Fatalf("an ambiguous note supplied fields: %+v", e)
+				}
+				return
+			}
+			if e.ParseErr != nil || e.Description != c.desc || e.ConfirmedTriage != c.triage {
+				t.Fatalf("description %q, triage %q, err %v", e.Description, e.ConfirmedTriage, e.ParseErr)
+			}
+		})
+	}
+}
+
+func TestTextTypedAboveTheTriageMarkerIsStillTriage(t *testing.T) {
+	b := newBackend(t)
+	ctx := context.Background()
+	seed := workspace.TaskSeed{Name: "N", Description: "## Confirmed triage\n\nquoted"}
+	ref, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX"), Create: seed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(ref)
+	before, after, found := strings.Cut(string(raw), "<!-- foreman:triage ")
+	if !found {
+		t.Fatalf("no marker:\n%s", raw)
+	}
+	if err := os.WriteFile(ref, []byte(before+"typed scope\n<!-- foreman:triage "+after), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := b.ListTasks(ctx)
+	if e := entries[0]; e.ParseErr != nil || e.Description != seed.Description || e.ConfirmedTriage != "typed scope" {
+		t.Fatalf("description %q, triage %q, err %v", e.Description, e.ConfirmedTriage, e.ParseErr)
+	}
+}
+
+// typesDuringWrite makes a person's edit land while Foreman is writing the note.
+func typesDuringWrite(t *testing.T, b *Backend, old, new string) {
+	t.Helper()
+	b.beforeCommit = func(path string) {
+		b.beforeCommit = nil
+		raw, err := os.ReadFile(path)
+		if err != nil || !strings.Contains(string(raw), old) {
+			t.Fatalf("note lacks %q: %v\n%s", old, err, raw)
+		}
+		if err := os.WriteFile(path, []byte(strings.Replace(string(raw), old, new, 1)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestAReplyTypedDuringThePublishOfANewQuestionIsCleared(t *testing.T) {
+	b := newBackend(t)
+	ctx := context.Background()
+	ref, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: rec("L-0A1B2C3D", "NEEDS_DECISION"), Create: workspace.TaskSeed{Name: "N"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	typesDuringWrite(t, b, `answer: ""`, "answer: typed for the old question")
+	if _, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: rec("L-0A1B2C3D", "IMPLEMENTING"), ClearAnswer: true}); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(ref)
+	if strings.Contains(string(raw), "typed for the old question") || !strings.Contains(string(raw), "foreman_status: Implementing") {
+		t.Fatalf("note:\n%s", raw)
+	}
+}
+
+func TestAScopeEditDuringAConfirmationIsKept(t *testing.T) {
+	b := newBackend(t)
+	ctx := context.Background()
+	seed := workspace.TaskSeed{Name: "N", Description: "desc", ConfirmedTriage: "old scope", ScopeConfirmed: true}
+	if _, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX"), Create: seed}); err != nil {
+		t.Fatal(err)
+	}
+	typesDuringWrite(t, b, "old scope\n", "newer scope\n")
+	wrote, err := b.ConfirmScope(ctx, "L-0A1B2C3D", "host scope", func(current string) bool { return current == "old scope" })
+	if err != nil || wrote {
+		t.Fatalf("wrote %v, err %v", wrote, err)
+	}
+	entries, _ := b.ListTasks(ctx)
+	if e := entries[0]; e.ConfirmedTriage != "newer scope" || e.Description != "desc" || e.Record == nil {
+		t.Fatalf("entry = %+v", e)
+	}
+}
+
+func TestConfirmingScopeOnALegacyNoteLeavesItReadable(t *testing.T) {
+	b := newBackend(t)
+	ctx := context.Background()
+	const id = "L-0A1B2C3D"
+	r := rec(id, "PLANNING")
+	path := writeNote(t, b, "Legacy", "---\nforeman_id: "+id+"\nforeman_status: Planning\n---\n"+
+		"Old description.\n\n## Confirmed triage\n\nold scope\n\n"+beginMarker+"\n"+r.Render()+endMarker+"\n")
+	wrote, err := b.ConfirmScope(ctx, id, "host scope", func(current string) bool { return current == "old scope" })
+	if err != nil || !wrote {
+		t.Fatalf("wrote %v, err %v", wrote, err)
+	}
+	entries, err := b.ListTasks(ctx)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries = %d, err = %v", len(entries), err)
+	}
+	if e := entries[0]; e.ParseErr != nil || e.ID != id || e.Description != "Old description." || e.ConfirmedTriage != "host scope" || e.Record == nil || e.Record.Status != "PLANNING" {
+		t.Fatalf("entry = %+v", e)
+	}
+	r.Status = "IMPLEMENTING"
+	if _, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: r}); err != nil {
+		t.Fatalf("the note no longer takes publishes: %v", err)
+	}
+	raw, _ := os.ReadFile(path)
+	if strings.Count(string(raw), beginMarker) != 1 || !strings.Contains(string(raw), beginMarker+regionTag) {
+		t.Fatalf("want one marked region:\n%s", raw)
+	}
+}
+
+func TestConfirmingScopeOnANoteWithoutARegionLeavesItReadable(t *testing.T) {
+	b := newBackend(t)
+	writeNote(t, b, "N", "---\nforeman_id: L-0A1B2C3D\n---\nMy description.\n")
+	wrote, err := b.ConfirmScope(context.Background(), "L-0A1B2C3D", "host scope", func(current string) bool { return current == "" })
+	if err != nil || !wrote {
+		t.Fatalf("wrote %v, err %v", wrote, err)
+	}
+	entries, _ := b.ListTasks(context.Background())
+	if e := entries[0]; e.ParseErr != nil || e.Description != "My description." || e.ConfirmedTriage != "host scope" {
+		t.Fatalf("entry = %+v", e)
+	}
+}
+
+func TestAnAmbiguousNoteStillShowsTheQuestionAndGetsTheScopeOnceFixed(t *testing.T) {
+	b := newBackend(t)
+	ctx := context.Background()
+	host, err := db.Open(filepath.Join(t.TempDir(), "foreman.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { host.Close() })
+	tasks := store.SQLite{DB: host}
+	sync := &workspace.Sync{DB: host, Backend: b, Tasks: tasks, Issues: localissues.Store{DB: host}, Knowledge: knowledge.SQLStore{DB: host}}
+	key := task.Key{Repo: "o/r", Source: task.Local, ExternalID: "L-0A1B2C3D"}
+	run := &task.Record{Key: key, Identifier: key.ExternalID, Kind: task.Issue, Title: "T", State: task.Planning, Delegation: &task.Delegation{}}
+	if err := tasks.Save(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if err := sync.Publish(ctx, key); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := b.ListTasks(ctx)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries = %d, err = %v", len(entries), err)
+	}
+	path := entries[0].Ref
+	edit := func(old, new string) {
+		t.Helper()
+		raw, err := os.ReadFile(path)
+		if err != nil || !strings.Contains(string(raw), old) {
+			t.Fatalf("note lacks %q: %v\n%s", old, err, raw)
+		}
+		if err := os.WriteFile(path, []byte(strings.Replace(string(raw), old, new, 1)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A second heading and no marker: the scope cannot be told from the text.
+	raw, _ := os.ReadFile(path)
+	_, marker, _ := strings.Cut(string(raw), "<!-- foreman:triage ")
+	marker, _, _ = strings.Cut(marker, "\n")
+	edit("<!-- foreman:triage "+marker+"\n", "\n## Confirmed triage\n")
+
+	run.State = task.NeedsDecision
+	run.Decisions = []task.Decision{{AskedAt: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), Question: task.Question{Issue: "Which store?", Options: []task.Option{{Label: "A"}, {Label: "B"}}}}}
+	if err := tasks.Save(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := host.Exec(`INSERT INTO triage (id, decisions, confirmed_at) VALUES ('local/l-0a1b2c3d', 'host scope', 'x')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := sync.Publish(ctx, key); err != nil {
+		t.Fatalf("publish to an ambiguous note: %v", err)
+	}
+	raw, _ = os.ReadFile(path)
+	if !strings.Contains(string(raw), "foreman_question: Which store?") || strings.Contains(string(raw), "host scope\n\n<!-- foreman:begin") {
+		t.Fatalf("note:\n%s", raw)
+	}
+	if len(sync.Problems()) == 0 {
+		t.Fatal("the unwritten scope was not reported")
+	}
+
+	edit("\n## Confirmed triage\n", "\n")
+	// Nothing else changed on the host, so only the scope is left to copy.
+	if err := sync.Publish(ctx, key); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ = b.ListTasks(ctx)
+	if e := entries[0]; e.ParseErr != nil || e.ConfirmedTriage != "host scope" || !e.ScopeConfirmed {
+		t.Fatalf("entry = %+v", e)
+	}
+}

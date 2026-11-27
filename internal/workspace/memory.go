@@ -142,6 +142,9 @@ func (m *Memory) UpsertTask(_ context.Context, p TaskPublish) (string, error) {
 	if p.Reseed {
 		e.ConfirmedTriage, e.ScopeConfirmed = p.Create.ConfirmedTriage, p.Create.ScopeConfirmed
 	}
+	if p.ClearAnswer {
+		e.Answer = ""
+	}
 	if m.LoseRefOnWrite == m.Writes {
 		e.Description = e.Description[:len(e.Description)/2]
 		return "", errors.New("the response to the create was lost")
@@ -156,6 +159,25 @@ func (m *Memory) UpsertTask(_ context.Context, p TaskPublish) (string, error) {
 		m.Mangle(e)
 	}
 	return e.Ref, nil
+}
+
+func (m *Memory) ConfirmScope(_ context.Context, id, triage string, unchanged func(string) bool) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.Fail != nil {
+		return false, m.Fail
+	}
+	var e *TaskEntry
+	for _, c := range m.tasks {
+		if c.ID == id && (e == nil || c.CreatedAt.Before(e.CreatedAt)) {
+			e = c
+		}
+	}
+	if e == nil || !unchanged(e.ConfirmedTriage) {
+		return false, nil
+	}
+	e.ConfirmedTriage, e.ScopeConfirmed, e.EditedAt = triage, triage != "", m.now()
+	return true, nil
 }
 
 func (m *Memory) AssignID(_ context.Context, ref, id string) error {

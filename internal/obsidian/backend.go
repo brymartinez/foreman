@@ -222,6 +222,11 @@ func entryOf(f found) workspace.TaskEntry {
 		e.ParseErr = err
 		return e
 	}
+	desc, triage, err := userText(region.userBody(), n.str(regionKey))
+	if err != nil {
+		e.ParseErr = err
+		return e
+	}
 	e.ID = n.str("foreman_id")
 	// The file name is the title with characters Obsidian cannot use replaced, so a
 	// note Foreman named reads back under its real title unless someone renamed it.
@@ -234,7 +239,7 @@ func entryOf(f found) workspace.TaskEntry {
 	}
 	e.Repository, e.SourceURL, e.Tags = n.str("repository"), n.str("source_url"), n.strs("tags")
 	e.ScopeConfirmed, e.Queue, e.Answer = n.boolean("scope_confirmed"), n.boolean("queue"), n.str("answer")
-	e.Description, e.ConfirmedTriage = userText(region.userBody())
+	e.Description, e.ConfirmedTriage = desc, triage
 	if region.present {
 		if r, err := region.parseRecord(); err == nil {
 			e.Record = &r
@@ -318,12 +323,19 @@ func (b *Backend) UpsertTask(ctx context.Context, p workspace.TaskPublish) (stri
 					}
 				}
 				if p.Reseed {
-					desc, _ := userText(region.userBody())
-					if p.Move {
-						desc = strings.TrimSpace(p.Create.Description)
+					desc := p.Create.Description
+					if !p.Move {
+						if desc, _, err = userText(region.userBody(), n.str(regionKey)); err != nil {
+							return err
+						}
 					}
 					region, err = reseedTriage(n, desc, p.Create)
 					if err != nil {
+						return err
+					}
+				}
+				if p.ClearAnswer {
+					if err := n.set("answer", ""); err != nil {
 						return err
 					}
 				}
@@ -357,15 +369,11 @@ func (b *Backend) UpsertTask(ctx context.Context, p workspace.TaskPublish) (stri
 			return "", err
 		}
 	}
-	var body strings.Builder
-	if strings.TrimSpace(s.Description) != "" {
-		body.WriteString(strings.TrimSpace(s.Description) + "\n\n")
+	regionID, err := n.regionID()
+	if err != nil {
+		return "", err
 	}
-	body.WriteString(triageHeading + "\n\n")
-	if strings.TrimSpace(s.ConfirmedTriage) != "" {
-		body.WriteString(strings.TrimSpace(s.ConfirmedTriage) + "\n\n")
-	}
-	if err := n.setRegion(noteRegion{before: body.String()}, content); err != nil {
+	if err := n.setRegion(noteRegion{before: userSection(regionID, s.Description, s.ConfirmedTriage)}, content); err != nil {
 		return "", err
 	}
 	out, err := n.bytes()
@@ -615,13 +623,55 @@ func reseedTriage(n *note, desc string, s workspace.TaskSeed) (noteRegion, error
 	if err := n.set("scope_confirmed", s.ScopeConfirmed); err != nil {
 		return noteRegion{}, err
 	}
-	var user strings.Builder
-	if desc != "" {
-		user.WriteString(desc + "\n\n")
+	id, err := n.regionID()
+	if err != nil {
+		return noteRegion{}, err
 	}
-	user.WriteString(triageHeading + "\n\n")
-	if t := strings.TrimSpace(s.ConfirmedTriage); t != "" {
-		user.WriteString(t + "\n\n")
+	return noteRegion{before: userSection(id, desc, s.ConfirmedTriage)}, nil
+}
+
+var errScopeMoved = errors.New("the confirmed triage changed in the note")
+
+// ConfirmScope compares and writes inside one edit, which reads the note again and
+// compares again when it changes underneath.
+func (b *Backend) ConfirmScope(_ context.Context, id, triage string, unchanged func(string) bool) (bool, error) {
+	fs, err := b.scan()
+	if err != nil {
+		return false, err
 	}
-	return noteRegion{before: user.String()}, nil
+	for _, f := range fs { // oldest first
+		if f.err != nil || f.n.str("foreman_id") != id {
+			continue
+		}
+		err := b.edit(f.path, func(n *note) error {
+			region, err := n.splitRegion()
+			if err != nil {
+				return err
+			}
+			desc, current, err := userText(region.userBody(), n.str(regionKey))
+			if err != nil {
+				return fmt.Errorf("%w: %w", workspace.ErrScopeUnreadable, err)
+			}
+			if !unchanged(current) {
+				return errScopeMoved
+			}
+			// A note with no region gets no ID, because an ID promises a marked region.
+			var regionID, owned string
+			if region.present {
+				if regionID, err = n.regionID(); err != nil {
+					return err
+				}
+				// The region's content stays as it is. Its markers are written with the
+				// ID, which a legacy region gets here.
+				owned = regionMarker(beginMarker, regionID) + "\n" + region.text + regionMarker(endMarker, regionID) + "\n"
+			}
+			n.body = userSection(regionID, desc, triage) + owned
+			return n.set("scope_confirmed", strings.TrimSpace(triage) != "")
+		})
+		if errors.Is(err, errScopeMoved) {
+			return false, nil
+		}
+		return err == nil, err
+	}
+	return false, nil
 }

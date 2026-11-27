@@ -60,8 +60,10 @@ type App struct {
 	Workspace Workspace
 	// WorkspaceLog receives problems with the shared store that do not stop a command.
 	WorkspaceLog func(format string, args ...any)
-	// MaxConcurrent caps active runs before a task queued in the store waits. 0 sets no cap.
-	MaxConcurrent   int
+	// MaxConcurrent caps active runs before an automatic start waits. 0 sets no cap.
+	MaxConcurrent int
+	// Launches lets the dashboard finish its launches before it exits. nil tracks none.
+	Launches        *Launches
 	Models          task.ModelPolicy
 	Repositories    RepositoryManager
 	Worktrees       WorktreeManager

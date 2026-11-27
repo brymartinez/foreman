@@ -331,8 +331,8 @@ func rt(s string) map[string]any {
 }
 
 // rtLong holds text of any length a property can take: items of 2000 characters,
-// at most 100 of them. Confirmed triage is read back as the user's edit, so cutting
-// it to one item would turn the cut text into a "change".
+// at most 100 of them. Callers holding text that is read back as the user's edit
+// check the length first.
 func rtLong(s string) map[string]any {
 	items := richText(s)
 	if len(items) > maxCodeItems {
@@ -411,12 +411,18 @@ func (b *Backend) UpsertTask(ctx context.Context, p workspace.TaskPublish) (stri
 		return "", err
 	}
 	text := p.Record.RenderText()
+	scope := strings.TrimSpace(p.Create.ConfirmedTriage)
 	if p.Reason != "" {
 		text = "Queued but not started: " + p.Reason + "\n\n" + text
 	}
 	page, err := b.findByID(ctx, b.tasks.source, "Foreman ID", p.Record.ID, "rich_text")
 	if err != nil {
 		return "", err
+	}
+	if page == nil || p.Reseed {
+		if err := checkScopeLength(p.Record.ID, scope); err != nil {
+			return "", err
+		}
 	}
 	var ref string
 	if page == nil {
@@ -425,7 +431,7 @@ func (b *Backend) UpsertTask(ctx context.Context, p workspace.TaskPublish) (stri
 		if err := seedIssueProps(props, s); err != nil {
 			return "", err
 		}
-		props["Confirmed triage"] = rtLong(strings.TrimSpace(s.ConfirmedTriage))
+		props["Confirmed triage"] = rtLong(scope)
 		props["Scope confirmed"] = map[string]any{"checkbox": s.ScopeConfirmed}
 		var desc []any
 		if !p.Move && strings.TrimSpace(s.Description) != "" {
@@ -455,8 +461,11 @@ func (b *Backend) UpsertTask(ctx context.Context, p workspace.TaskPublish) (stri
 			}
 		}
 		if p.Reseed {
-			props["Confirmed triage"] = rtLong(strings.TrimSpace(p.Create.ConfirmedTriage))
+			props["Confirmed triage"] = rtLong(scope)
 			props["Scope confirmed"] = map[string]any{"checkbox": p.Create.ScopeConfirmed}
+		}
+		if p.ClearAnswer {
+			props["Answer"] = map[string]any{"rich_text": []any{}}
 		}
 		if err := b.C.do(ctx, "PATCH", "/v1/pages/"+ref, map[string]any{"properties": props}, nil); err != nil {
 			return ref, err
@@ -568,6 +577,36 @@ func (b *Backend) completeDescription(ctx context.Context, ref, want string) err
 
 func (b *Backend) patch(ctx context.Context, ref string, props map[string]any) error {
 	return b.C.do(ctx, "PATCH", "/v1/pages/"+ref, map[string]any{"properties": props}, nil)
+}
+
+// checkScopeLength refuses confirmed scope a property cannot hold. Cut short, the
+// prefix would read back as an edit and replace the host's full copy.
+func checkScopeLength(id, scope string) error {
+	if n, limit := len([]rune(scope)), maxRichText*maxCodeItems; n > limit {
+		return fmt.Errorf("the confirmed triage of %s has %d characters and a Notion property holds %d; shorten it", id, n, limit)
+	}
+	return nil
+}
+
+// ConfirmScope reads the page immediately before it writes. Notion has no
+// conditional update, so an edit made between those two requests is still lost.
+func (b *Backend) ConfirmScope(ctx context.Context, id, triage string, unchanged func(string) bool) (bool, error) {
+	if err := b.ready(ctx); err != nil {
+		return false, err
+	}
+	triage = strings.TrimSpace(triage)
+	if err := checkScopeLength(id, triage); err != nil {
+		return false, err
+	}
+	page, err := b.findByID(ctx, b.tasks.source, "Foreman ID", id, "rich_text")
+	if err != nil || page == nil || !unchanged(taskFields(*page).ConfirmedTriage) {
+		return false, err
+	}
+	err = b.patch(ctx, page.ID, map[string]any{
+		"Confirmed triage": rtLong(triage),
+		"Scope confirmed":  map[string]any{"checkbox": triage != ""},
+	})
+	return err == nil, err
 }
 
 func (b *Backend) AssignID(ctx context.Context, ref, id string) error {

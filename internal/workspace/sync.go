@@ -270,24 +270,17 @@ ON CONFLICT(id) DO UPDATE SET decisions = excluded.decisions`, id, strings.TrimS
 	return err
 }
 
-// taskFor finds the task record of a key. A local issue's task is stored under
-// the repository it was bound to, so it is found by its ID.
+// taskFor finds the task record of a key. A local issue has one shared entry, so
+// every key of it, whatever its repository, reads the issue's primary record.
 func (s *Sync) taskFor(ctx context.Context, key task.Key) (*task.Record, error) {
-	if key.Source != task.Local || key.Repo != "" {
-		if rec, err := s.Tasks.Get(ctx, key); err != nil || rec != nil || key.Source != task.Local {
-			return rec, err
-		}
+	if key.Source != task.Local {
+		return s.Tasks.Get(ctx, key)
 	}
-	recs, err := s.Tasks.List(ctx)
+	recs, err := s.Tasks.ListLocal(ctx, key.ExternalID)
 	if err != nil {
 		return nil, err
 	}
-	for _, r := range recs {
-		if r.Source == task.Local && r.ExternalID == key.ExternalID {
-			return r, nil
-		}
-	}
-	return nil, nil
+	return task.LocalPrimary(recs, key.ExternalID), nil
 }
 
 func (s *Sync) issueFor(key task.Key) (*localissues.Issue, error) {
@@ -399,6 +392,26 @@ func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
 	// cannot say whether a question was pending, makes an answer in the store
 	// untrustworthy.
 	adopt := qk != "" && prev.Question == legacyQuestionKey(b.rec)
+	// An earlier attempt created the entry and did not finish writing it.
+	unfinished := prev.Ref != "" && prev.Digest == ""
+	// Scope confirmed on the host after the entry was created is copied to the
+	// visible fields, unless someone changed them in the store since the host last
+	// reconciled them. The backend makes that comparison as it writes. This runs
+	// before an unchanged record is skipped, so a copy that could not be made is
+	// tried again.
+	if seen := seenOrEmpty(prev.TriageSeen); prev.Ref != "" && !unfinished && !s.Reseed && triageHash(triage) != seen {
+		wrote, err := s.Backend.ConfirmScope(ctx, id, triage, func(current string) bool { return triageHash(current) == seen })
+		switch {
+		case errors.Is(err, ErrScopeUnreadable):
+			s.logf("copy the confirmed scope of %s: %v", id, err)
+		case err != nil:
+			return fmt.Errorf("copy the confirmed scope of %s: %w", id, err)
+		case wrote:
+			if err := s.setSeen(id, "triage_seen", triageHash(triage)); err != nil {
+				return err
+			}
+		}
+	}
 	if digest == prev.Digest {
 		if prev.Question != stored {
 			if !coded && !adopt {
@@ -412,25 +425,10 @@ func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
 		return nil
 	}
 	seed := b.seed()
-	if !coded && stored != prev.Question && !adopt {
-		// An answer already in the store was typed before this question existed.
-		if err := s.clearStaleAnswer(ctx, id); err != nil {
-			return fmt.Errorf("publish %s: %w", id, err)
-		}
-	}
-	// An earlier attempt created the entry and did not finish writing it.
-	unfinished := prev.Ref != "" && prev.Digest == ""
-	// Scope confirmed on the host after the entry was created is copied to the
-	// visible fields, unless someone changed them in the store since the host last
-	// reconciled them.
-	confirm := false
-	if prev.Ref != "" && !unfinished && !s.Reseed && triageHash(triage) != seenOrEmpty(prev.TriageSeen) {
-		confirm, err = s.storeTriageUnchanged(ctx, id, prev)
-		if err != nil {
-			return fmt.Errorf("read the shared confirmation for %s: %w", id, err)
-		}
-	}
-	ref, err := s.Backend.UpsertTask(ctx, TaskPublish{Record: r, ReplyCode: code, Reason: scrubHost(reason, b.rec), Create: seed, Resume: unfinished, Reseed: s.Reseed || confirm, Move: s.Reseed})
+	// A reply already in the store answers the question it shows, so it goes in the
+	// write that replaces that question.
+	clearAnswer := !coded && stored != prev.Question && !adopt
+	ref, err := s.Backend.UpsertTask(ctx, TaskPublish{Record: r, ReplyCode: code, Reason: scrubHost(reason, b.rec), Create: seed, Resume: unfinished, Reseed: s.Reseed, Move: s.Reseed, ClearAnswer: clearAnswer})
 	if err != nil {
 		if prev.Ref == "" {
 			// The entry may exist half written, and a create whose response was lost
@@ -447,11 +445,6 @@ func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
 	}
 	if err := s.saveRow("task", id, row{Ref: ref, Digest: digest, AnswerDigest: prev.AnswerDigest, Stage: status, StageAt: stageAt.Format(time.RFC3339), Question: stored}); err != nil {
 		return err
-	}
-	if confirm {
-		if err := s.setSeen(id, "triage_seen", triageHash(triage)); err != nil {
-			return err
-		}
 	}
 	if prev.Ref == "" || unfinished {
 		// A new entry was seeded from the host, so the store's copy is what the host has.
@@ -471,16 +464,6 @@ func seenOrEmpty(seen string) string {
 		return triageHash("")
 	}
 	return seen
-}
-
-// storeTriageUnchanged reports whether the store's confirmed-scope field is what the
-// host last reconciled, so writing the host's scope over it loses no edit.
-func (s *Sync) storeTriageUnchanged(ctx context.Context, id string, prev row) (bool, error) {
-	e, err := s.Backend.TaskFields(ctx, id)
-	if err != nil || e == nil || e.Ref != prev.Ref {
-		return false, err
-	}
-	return triageHash(e.ConfirmedTriage) == seenOrEmpty(prev.TriageSeen), nil
 }
 
 // legacyQuestionKey is the key an earlier revision stored for a task's pending
@@ -506,8 +489,8 @@ func legacyQuestionKey(rec *task.Record) string {
 // an empty value still means "never tracked".
 const noQuestion = "-"
 
-// clearStaleAnswer empties the Answer field of an entry that is about to show a new
-// question.
+// clearStaleAnswer empties the Answer field of an entry that already shows the
+// question the host is only now recording.
 func (s *Sync) clearStaleAnswer(ctx context.Context, id string) error {
 	e, err := s.Backend.TaskFields(ctx, id)
 	if err != nil || e == nil || strings.TrimSpace(e.Answer) == "" {

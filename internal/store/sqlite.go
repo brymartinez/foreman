@@ -167,6 +167,30 @@ func (s SQLite) List(ctx context.Context) ([]*task.Record, error) {
 	return recs, nil
 }
 
+// ListLocal returns the records of one local issue, one per repository, in List's order.
+func (s SQLite) ListLocal(ctx context.Context, externalID string) ([]*task.Record, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, document FROM tasks WHERE source = ? AND external_id = ? ORDER BY repo`, string(task.Local), externalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var recs []*task.Record
+	for rows.Next() {
+		var id, doc string
+		if err := rows.Scan(&id, &doc); err != nil {
+			return nil, err
+		}
+		rec, err := decode([]byte(doc))
+		if err != nil {
+			return nil, fmt.Errorf("task %s: %w", id, err)
+		}
+		if rec != nil {
+			recs = append(recs, rec)
+		}
+	}
+	return recs, rows.Err()
+}
+
 // Document is the task's stored Markdown, for export.
 func (s SQLite) Document(key task.Key) (string, error) {
 	_, doc, err := s.read(s.DB, key)

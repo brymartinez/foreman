@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/brymartinez/foreman/internal/agent"
 	"github.com/brymartinez/foreman/internal/knowledge"
@@ -387,5 +388,179 @@ func TestAnUpdateThatTakesALaunchClaimPublishesOnlyAfterTheSpawn(t *testing.T) {
 		return cur, nil
 	}); err != nil || len(ws.published) != 1 {
 		t.Fatalf("err = %v, published = %v: the update after the spawn must publish", err, ws.published)
+	}
+}
+
+func TestStoppingLaunchesWaitsForAQueuedStartToSpawnItsRunner(t *testing.T) {
+	f, unbound, triage := queuedFixture(t)
+	if err := triage.Save(unbound, "Keep the cache API. Implement in https://github.com/testorg/example."); err != nil {
+		t.Fatal(err)
+	}
+	f.app.Launches = &Launches{}
+	ws := &fakeWorkspace{pull: WorkspacePull{Queued: []WorkspaceQueued{{Key: unbound, Token: "ref-1"}}}}
+	f.app.Workspace = ws
+	entered, release := make(chan struct{}), make(chan struct{})
+	f.runners.entered, f.runners.release = entered, release
+	refreshed := make(chan []error, 1)
+	go func() { refreshed <- f.app.refreshWorkspace(context.Background()) }()
+	<-entered // the claim is saved and the runner is not yet started
+
+	done := f.app.StopLaunches()
+	select {
+	case <-done:
+		t.Fatal("a quitting process could exit between the claim and the spawn")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the launch never finished")
+	}
+	if warns := <-refreshed; len(warns) != 0 {
+		t.Fatal(warns)
+	}
+}
+
+func TestAStoppedProcessLaunchesNothingAndLeavesRequestsAlone(t *testing.T) {
+	f, unbound, triage := queuedFixture(t)
+	if err := triage.Save(unbound, "Keep the cache API. Implement in https://github.com/testorg/example."); err != nil {
+		t.Fatal(err)
+	}
+	f.app.Launches = &Launches{}
+	<-f.app.StopLaunches()
+	ws := &fakeWorkspace{pull: WorkspacePull{Queued: []WorkspaceQueued{{Key: unbound}}}}
+	f.app.Workspace = ws
+	f.app.refreshWorkspace(context.Background())
+	bound := unbound
+	bound.Repo = "testorg/example"
+	if _, err := f.app.Start(context.Background(), StartRequest{Key: bound, Repo: bound.Repo, Agent: task.Claude, BranchName: "feat/x"}); !errors.Is(err, errQuitting) {
+		t.Fatalf("start = %v, want a refusal", err)
+	}
+	if len(f.runners.spawned) != 0 || len(ws.acks) != 0 || len(ws.blocked) != 0 {
+		t.Fatalf("spawned %d, acks %+v, blocked %v", len(f.runners.spawned), ws.acks, ws.blocked)
+	}
+	if rec := f.store.recs[bound]; rec != nil && rec.Delegation != nil {
+		t.Fatalf("a refused start saved a claim: %+v", rec.Delegation)
+	}
+}
+
+// routeProbe reads the slots while a queued start is still resolving.
+type routeProbe struct {
+	TaskStore
+	probe func()
+}
+
+func (p *routeProbe) Get(ctx context.Context, key task.Key) (*task.Record, error) {
+	if probe := p.probe; probe != nil {
+		p.probe = nil
+		probe()
+	}
+	return p.TaskStore.Get(ctx, key)
+}
+
+func TestAQueuedStartHoldsItsSlotWhileItResolves(t *testing.T) {
+	f, unbound, triage := queuedFixture(t)
+	if err := triage.Save(unbound, "Keep the cache API. Implement in https://github.com/testorg/example."); err != nil {
+		t.Fatal(err)
+	}
+	f.app.MaxConcurrent = 1
+	var during error
+	probed := false
+	probe := &routeProbe{TaskStore: f.app.Store}
+	f.app.Store = probe
+	dashboard := f.app
+	probe.probe = func() {
+		probed = true
+		release, err := dashboard.ReserveSlot(context.Background(), task.Key{Repo: "testorg/example", Number: 9})
+		if err == nil {
+			release()
+		}
+		during = err
+	}
+	f.app.Workspace = &fakeWorkspace{pull: WorkspacePull{Queued: []WorkspaceQueued{{Key: unbound}}}}
+	if warns := f.app.refreshWorkspace(context.Background()); len(warns) != 0 {
+		t.Fatal(warns)
+	}
+	if !probed || !errors.Is(during, ErrNoSlot) {
+		t.Fatalf("probed %v: auto mode got a slot the queued start holds: %v", probed, during)
+	}
+	if len(f.runners.spawned) != 1 {
+		t.Fatalf("spawned = %d", len(f.runners.spawned))
+	}
+}
+
+func TestAReservedSlotCountsOnceHoweverItsKeyIsWritten(t *testing.T) {
+	f, unbound, _ := queuedFixture(t)
+	f.app.MaxConcurrent = 2
+	release, err := f.app.ReserveSlot(context.Background(), unbound)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	bound := unbound
+	bound.Repo = "testorg/example"
+	defer trackStart(bound, bound.Repo, 0)() // the start that follows the reservation
+	second, err := f.app.ReserveSlot(context.Background(), task.Key{Repo: "testorg/example", Number: 9})
+	if err != nil {
+		t.Fatalf("one task took two slots: %v", err)
+	}
+	defer second()
+	if _, err := f.app.ReserveSlot(context.Background(), task.Key{Repo: "testorg/example", Number: 10}); !errors.Is(err, ErrNoSlot) {
+		t.Fatalf("third reservation = %v", err)
+	}
+}
+
+// signalStore refuses a cancelled context, as the SQLite store does, and cancels the
+// caller as soon as a launch claim is saved.
+type signalStore struct {
+	TaskStore
+	signal context.CancelFunc
+}
+
+func (s *signalStore) Get(ctx context.Context, key task.Key) (*task.Record, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.TaskStore.Get(ctx, key)
+}
+
+func (s *signalStore) Update(ctx context.Context, key task.Key, fn func(*task.Record) (*task.Record, error)) (*task.Record, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	rec, err := s.TaskStore.Update(ctx, key, fn)
+	if err == nil && rec != nil && rec.Delegation != nil && rec.Delegation.Launch != nil && rec.Delegation.Launch.PID != 0 {
+		s.signal()
+	}
+	return rec, err
+}
+
+func TestASignalAfterTheClaimStillSettlesTheLaunch(t *testing.T) {
+	for name, spawnErr := range map[string]error{"spawned": nil, "spawn failed": errors.New("no such binary")} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture()
+			f.runners.spawnErr = spawnErr
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			f.app.Store = &signalStore{TaskStore: f.app.Store, signal: cancel}
+			rec, err := f.app.Start(ctx, startReq(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ctx.Err() == nil {
+				t.Fatal("the signal never arrived")
+			}
+			if len(f.runners.spawned) != 1 {
+				t.Fatalf("spawned = %d", len(f.runners.spawned))
+			}
+			saved := f.store.recs[rec.Key]
+			if spawnErr == nil && saved.Delegation.RunnerPID == 0 {
+				t.Fatalf("an active task has no runner: %s %+v", saved.State, saved.Delegation.Launch)
+			}
+			if spawnErr != nil && (saved.State != task.Failed || saved.Delegation.Launch != nil) {
+				t.Fatalf("the failed launch was not recorded: %s %+v", saved.State, saved.Delegation.Launch)
+			}
+		})
 	}
 }

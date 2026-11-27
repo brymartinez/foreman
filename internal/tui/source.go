@@ -17,6 +17,11 @@ type Source interface {
 	// Tasks re-reads delegated work from the task files. It makes no GitHub call.
 	Tasks(ctx context.Context) ([]*task.Record, error)
 	Start(ctx context.Context, req app.StartRequest) (*task.Record, error)
+	// ReserveSlot holds a concurrency slot for an auto start, as App.ReserveSlot does.
+	ReserveSlot(ctx context.Context, key task.Key) (func(), error)
+	// StopLaunches refuses further launches, and its channel closes once those under
+	// way have their runners.
+	StopLaunches() <-chan struct{}
 	ProposeRepository(ctx context.Context, key task.Key) (app.RepositoryProposal, error)
 	ProposeBranch(ctx context.Context, req app.StartRequest) (app.BranchProposal, error)
 	// Route picks the profile a never-delegated issue starts with. It returns

@@ -202,3 +202,26 @@ func TestObsidianVaultExpandsTheHomeDirectory(t *testing.T) {
 		t.Fatalf("an existing vault under ~ must validate: %v", err)
 	}
 }
+
+func TestBackendDefaultsToSQLiteForAMarkdownWorkspaceNotYetMigrated(t *testing.T) {
+	for name, file := range map[string][2]string{
+		"task":      {"tasks/o-r-1.md", "---\nrepo: o/r\n---\n"},
+		"triage":    {"triage/github/o/r/1.md", "decisions\n"},
+		"knowledge": {"knowledge/o/r/knowledge.md", "learned\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			home := storageHome(t, "")
+			path := filepath.Join(home, ".local/share/foreman", file[0])
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(file[1]), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load()
+			if err != nil || cfg.Storage.Backend != BackendSQLite {
+				t.Fatalf("backend = %q, err = %v", cfg.Storage.Backend, err)
+			}
+		})
+	}
+}

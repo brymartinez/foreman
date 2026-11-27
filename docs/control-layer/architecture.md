@@ -394,7 +394,8 @@ the same commit. The commit message records why it changed.
 
 - **One store per workspace.** `storage.backend` is `notion`, `obsidian`, or `sqlite`.
   Without a value it is the store the config names a target for (a Notion page, then a
-  vault), else `sqlite` when the `database` file exists and `notion` otherwise, so an
+  vault), else `sqlite` when the host already has a workspace (the `database` file, or
+  Markdown tasks, triage, or learnings an earlier version kept) and `notion` otherwise, so an
   existing workspace stays put until the developer switches, and a first run that
   creates the database file does not flip a configured target to sqlite. `defaults/config.yaml`
   sets `notion`. `sqlite` means everything below is off and nothing touches Notion or a
@@ -411,11 +412,18 @@ the same commit. The commit message records why it changed.
   working copy of each task for locked updates. A new task field is host-local until
   someone adds it to `Build`. Rejected: mirroring the whole task document, which would
   leak host state and make two writers fight over it.
+- **One entry per issue.** A local issue can hold a task record in each repository it had
+  work in. `task.LocalPrimary` picks the one every publish, pull, queued start, and move
+  uses: the delegation, else the reset mark, else the newest import. The others stay in
+  the host database.
 - **Backends are interchangeable behind `workspace.Backend`.** `internal/notion` (standard
   library `net/http` only, `Notion-Version: 2025-09-03`) and `internal/obsidian`
   implement it, and `internal/workspace/backendtest` is the contract both pass.
   `internal/app` sees only the `Workspace` port in `ports.go`: `Pull`, `Publish`,
-  `Blocked`, `PublishKnowledge`, `Ack`. A nil `Workspace` is sqlite mode.
+  `Blocked`, `PublishKnowledge`, `Ack`. A nil `Workspace` is sqlite mode. A write that
+  depends on what the store holds is one `Backend` call: `UpsertTask` clears a stale
+  answer with the question it replaces, and `ConfirmScope` compares the shared scope as
+  it writes.
 - **Field ownership.** Foreman writes only its own fields (Notion: `Foreman ID`,
   `Status`, `Source`, `Question`, `Branch`, `PR`, `Commit`, `Updated by Foreman`, and the
   `Foreman record` toggle section; Obsidian: `foreman_*` keys, including `foreman_title`
@@ -428,7 +436,8 @@ the same commit. The commit message records why it changed.
   an owned region is escaped. Foreman reads its terminal YAML block independently
   of the readable Markdown and keeps an unreadable payload out of user fields).
   It writes user fields only to
-  seed a new entry, to clear `Queue` after a start, to clear an Obsidian answer after applying it, and to
+  seed a new entry, to copy scope confirmed on the host, to clear `Queue` after a start,
+  to clear an Obsidian answer after applying it or replacing its question, and to
   write a new entry's `Foreman ID`. Notion stores tags containing commas or using
   the Foreman alias prefix under safe option names, with the original names in the
   alias property. Unmarked legacy record sections remain readable. Foreman only
@@ -436,6 +445,14 @@ the same commit. The commit message records why it changed.
   file and a rename, and a note that changed since it was read is read again and the
   change retried. Frontmatter is edited as a `yaml.Node`, so other keys, comments, and
   text survive. A note whose frontmatter does not parse is reported and left alone.
+- **A description cannot become confirmed scope.** Where Foreman writes the
+  `## Confirmed triage` heading, it adds a `<!-- foreman:triage ID -->` line under it,
+  keyed by the note's `foreman_region`. The heading nearest above that line starts the
+  scope. A note without the line needs exactly one such heading outside code blocks.
+  A repeated line or heading, a line with no heading above, or an unclosed code block
+  around the heading makes the note ambiguous: no field is read from it, and it is
+  logged until someone fixes it. Rejected: taking the first or last matching heading,
+  since both a description and a triage text can quote it.
 - **Notion limits are the client's job** (`internal/notion/client.go`). 30-second request
   timeout, 429 waits for `Retry-After` (a wait longer than the caller's deadline fails at once, and cancelling ends it), 429 and 5xx retry up to 5 times with backoff,
   rich text splits at 2000 characters, one block of Foreman's own text holds at most 60,000 characters (a longer line continues in blocks that start with an invisible word joiner, which the reader joins back onto it; where the reader would take a block for a continuation, a chunk that starts with the joiner, after any zero-width spaces, gets one more zero-width space in front, and text elsewhere is read as written), appends send at most 100 blocks and at most
@@ -449,7 +466,9 @@ the same commit. The commit message records why it changed.
   section written before the marker still reads, and a publish that failed midway is not
   reported as a broken payload. The token comes only from `FOREMAN_NOTION_TOKEN`; the client
   redacts it from errors, and `config.yaml` has no token key. `FOREMAN_NOTION_API`
-  moves the base URL and exists for tests only.
+  moves the base URL and exists for tests only. Confirmed triage longer than one
+  property holds (100 items of 2000 characters) is refused with an error, never cut,
+  because the prefix would read back as an edit.
 - **Shared text is scrubbed of host values.** `workspace.scrubHost` replaces the task's
   paths and account, any absolute path, and the account-check message before an outcome
   or a queue reason reaches the store.
@@ -459,7 +478,7 @@ the same commit. The commit message records why it changed.
   `workspace_entries.published_digest`. `App.update` publishes after a committed update;
   a failure is logged to `<log_dir>/workspace.log` and the next refresh retries.
   Issue commands and dashboard intake publish before they return (`state.publishIssue`).
-  Confirming scope on the host after an entry exists copies it to the visible fields unless the store's copy changed since the host last reconciled it. Stage start time is kept per entry so the digest is stable between refreshes.
+  Confirming scope on the host after an entry exists copies it to the visible fields unless the store's copy changed since the host last reconciled it. The backend makes that comparison as it writes: Obsidian inside the note edit, Notion on a page read immediately before the update. Notion has no conditional update, so an edit made between those two requests is lost. Each publish tries again while the host and the store differ. A note whose scope cannot be read keeps its text and still takes the status and question. Stage start time is kept per entry so the digest is stable between refreshes.
 - **The refresh pulls first.** `App.refreshWorkspace` runs at the start of the inbox
   refresh. `Sync.Pull` gives a user-made entry a new `L-` ID (an entry whose payload names another task, such as a copied note, is never restored from it), saves `Confirmed triage`
   as triage while `Scope confirmed` is ticked (unticking removes nothing), rebuilds a
@@ -467,7 +486,8 @@ the same commit. The commit message records why it changed.
   reports changed shared knowledge for host approval, and returns answers and queued entries. The store's issue
   fields and confirmed triage are applied only when they differ from the copy the host
   last reconciled (`fields_seen`, `triage_seen`), so a host-side `issue triage` or
-  replacing import is not undone by the older text the store still shows. An answer goes through
+  replacing import is not undone by the older text the store still shows. Emptying
+  `Source URL` clears the issue's link once the host has such a copy to compare with. An answer goes through
   `App.Respond`, which resumes the same provider session. In Notion each question
   shows a reply code bound to its task and question key. A reply must include that
   code. Foreman checks it against the current page property and the pending
@@ -476,14 +496,22 @@ the same commit. The commit message records why it changed.
   erases a newly submitted reply. Notion reads answer and confirmation properties
   through a single task lookup without downloading task bodies. Obsidian tracks
   the last published question in `workspace_entries.question` and clears an answer
-  on a question change. A queued task starts oldest request first by
+  in the same note write that changes the question, so a reply typed during a publish
+  cannot reach the next question. A queued task starts oldest request first by
   `App.startQueued`. A request's age is when a pull first saw `Queue` ticked
   (`workspace_entries.queued_at`). Foreman waits for the latest shared issue fields
   and any new confirmed triage to validate and sync before starting the request.
+  A local task that never started binds no repository: its queued start chooses one
+  from the issue's current fields and triage links. A reset task keeps its repository,
+  and a `Repository` field naming another one holds the request.
   Auto mode's rules apply (confirmed triage, one allowed repository, filters,
   quota, `auto.max_concurrent`, branch proposal) whether or
   not auto mode is on. A start that cannot happen leaves `Queue` ticked and publishes the
   reason through `Blocked`.
+- **Automatic starts reserve a slot.** `App.ReserveSlot` takes one of
+  `auto.max_concurrent` slots, counting active runs and starts under way, before a
+  queued start or an auto start resolves its repository, route, and branch. It covers
+  one process; a second dashboard on the host counts only saved runs.
 - **Moving is explicit and verified.** The `workspace` table holds the cutover marker
   (backend, target, time, counts). Every database-backed command
   holds a shared file lease for its full lifetime. A move requires the exclusive
@@ -497,8 +525,8 @@ the same commit. The commit message records why it changed.
   page binds nothing. Moving back is not
   supported. `storage check` and `storage move` skip the gate, the stage files, and any
   agent. `Move.Run` refuses while a runner, a launch claim, a start lock, or a learner
-  lock is live, takes the move lock, runs the check, upserts tasks (every task, then every
-  local issue without a task) and then knowledge, trashes duplicate entries (the oldest
+  lock is live, takes the move lock, runs the check, upserts tasks (every task, one per
+  local issue, then every local issue without a task) and then knowledge, trashes duplicate entries (the oldest
   stays), reads every entry back and compares the parsed record, key fields, counts, and
   each repository's knowledge digest, and only then writes the marker in one
   transaction. A failure names the entries that differ and leaves the workspace on
@@ -1008,6 +1036,11 @@ the same commit. The commit message records why it changed.
   piped `foreman` prints usage and exits 0; control characters in dynamic text become
   spaces; widths are counted in terminal columns; GitHub refreshes run off the input
   goroutine; quitting waits for a `Start`, `Cancel`, `Reset`, or `Respond` in flight.
+  A refresh also launches runners, so every exit calls `App.StopLaunches`, which refuses
+  new launches and waits for each one between its saved claim and its spawned runner.
+  A saved claim ignores the caller's cancellation, so a signal does not abandon it.
+  Preparing the worktree and checking the account have five minutes; the outcome is
+  recorded even when that runs out.
 - **Reset is offered only where it can act.** `x` and its footer hint appear for a
   FAILED selection; on a narrow footer the hint stays and later hints drop. The
   confirmation replaces the panes with the task file's path, the runner log's path,
