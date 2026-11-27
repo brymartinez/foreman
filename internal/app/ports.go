@@ -5,6 +5,8 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -421,4 +423,87 @@ type Quota struct {
 // unknown. An error means every agent is unknown, and says why.
 type QuotaChecker interface {
 	Quota(ctx context.Context) (map[task.Agent]Quota, error)
+}
+
+// WorkspaceAnswer is an answer a person wrote in the workspace store for a task's
+// oldest unanswered question.
+type WorkspaceAnswer struct {
+	Key  task.Key
+	Text string
+	// Token identifies this answer to Ack, so one answer applies at most once.
+	Token string
+	// Question is QuestionKey of the question the answer is for. Applying checks it
+	// against the task, so an answer never lands on a question that came after it.
+	Question string
+}
+
+// WorkspaceQueued is a task a person queued in the workspace store.
+type WorkspaceQueued struct {
+	Key           task.Key
+	QueuedAt      time.Time
+	Token         string
+	BlockedReason string
+}
+
+// WorkspacePull is what a refresh finds in the store after syncing issues, triage,
+// and knowledge into the host database. Queued is oldest first.
+type WorkspacePull struct {
+	Answers []WorkspaceAnswer
+	Queued  []WorkspaceQueued
+}
+
+// WorkspaceAck says what the host did with a pulled item.
+type WorkspaceAck struct {
+	Key task.Key
+	// Kind is AckAnswer or AckQueue.
+	Kind  string
+	Token string
+	// Question is the answer's question for AckAnswer. When the task has moved on
+	// to another question, publishing already cleared the old answer, and the
+	// field may now hold the answer to the next question.
+	Question string
+}
+
+// Ack kinds.
+const (
+	AckAnswer = "answer"
+	AckQueue  = "queue"
+)
+
+// Workspace is the shared store of notion or obsidian mode. A nil Workspace is
+// sqlite mode: nothing is pulled or published.
+type Workspace interface {
+	// Pull syncs the store into the host database and returns what needs the app.
+	Pull(ctx context.Context) (WorkspacePull, error)
+	// Publish writes the saved state of one task to the store. It reads saved state
+	// only and skips the write when nothing changed.
+	Publish(ctx context.Context, key task.Key) error
+	// Blocked publishes why a queued task could not start; Queue stays ticked.
+	Blocked(ctx context.Context, key task.Key, reason string) error
+	// PublishKnowledge writes one repository's knowledge to the store.
+	PublishKnowledge(ctx context.Context, repo string) error
+	// Ack marks a pulled answer applied or a queued task started, and clears the
+	// field in the store.
+	Ack(ctx context.Context, ack WorkspaceAck) error
+}
+
+// QuestionKey names the oldest unanswered question of a task, or "" when none
+// waits. Questions from one blocked turn share a time, so the key includes how
+// many were answered before it.
+func QuestionKey(rec *task.Record) string {
+	if rec == nil {
+		return ""
+	}
+	d := rec.Pending()
+	if d == nil {
+		return ""
+	}
+	answered := 0
+	for _, x := range rec.Decisions {
+		if x.Answer != "" {
+			answered++
+		}
+	}
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%s", d.AskedAt.UTC().Format(time.RFC3339Nano), answered, d.Question.Issue)))
+	return hex.EncodeToString(sum[:])
 }

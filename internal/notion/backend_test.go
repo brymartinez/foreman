@@ -1,0 +1,1063 @@
+package notion
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/brymartinez/foreman/internal/knowledge"
+	"github.com/brymartinez/foreman/internal/portable"
+	"github.com/brymartinez/foreman/internal/task"
+	"github.com/brymartinez/foreman/internal/workspace"
+	"github.com/brymartinez/foreman/internal/workspace/backendtest"
+)
+
+func newBackend(t *testing.T) (*Backend, *fake, string) {
+	f := newFake(t)
+	parent := f.addParentPage()
+	return &Backend{C: f.client(), ParentID: parent, Now: func() time.Time { return time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC) }}, f, parent
+}
+
+func rec(id, status, plan string) workspace.Record {
+	r := workspace.Record{Format: workspace.Format, ID: id, Source: task.Local, Title: "T " + id, Status: status}
+	return r
+}
+
+func TestNotionBackendMeetsTheContract(t *testing.T) {
+	backendtest.Run(t, func(t *testing.T) backendtest.Env {
+		b, _, _ := newBackend(t)
+		ctx := context.Background()
+		return backendtest.Env{
+			Backend: b,
+			UserCreate: func(e workspace.TaskEntry) string {
+				if err := b.Ensure(ctx); err != nil {
+					t.Fatal(err)
+				}
+				props := map[string]any{"Name": map[string]any{"title": richText(e.Name)}}
+				if e.ID != "" {
+					props["Foreman ID"] = map[string]any{"rich_text": richText(e.ID)}
+				}
+				body := map[string]any{"parent": map[string]any{"type": "data_source_id", "data_source_id": b.tasks.source}, "properties": props}
+				if e.Description != "" {
+					body["children"] = paragraphs(e.Description)
+				}
+				var out struct{ ID string }
+				if err := b.C.do(ctx, "POST", "/v1/pages", body, &out); err != nil {
+					t.Fatal(err)
+				}
+				return out.ID
+			},
+			UserEdit: func(ref string, fn func(*workspace.TaskEntry)) {
+				entries, err := b.ListTasks(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, e := range entries {
+					if e.Ref != ref {
+						continue
+					}
+					fn(&e)
+					props := map[string]any{
+						"Name":             map[string]any{"title": richText(e.Name)},
+						"Repository":       map[string]any{"rich_text": richText(e.Repository)},
+						"Confirmed triage": map[string]any{"rich_text": richText(e.ConfirmedTriage)},
+						"Scope confirmed":  map[string]any{"checkbox": e.ScopeConfirmed},
+						"Queue":            map[string]any{"checkbox": e.Queue},
+						"Answer":           map[string]any{"rich_text": richText(e.Answer)},
+					}
+					if err := b.C.do(ctx, "PATCH", "/v1/pages/"+ref, map[string]any{"properties": props}, nil); err != nil {
+						t.Fatal(err)
+					}
+				}
+			},
+		}
+	})
+}
+
+func TestEnsureCreatesBothDatabasesWithEveryField(t *testing.T) {
+	b, f, parent := newBackend(t)
+	ctx := context.Background()
+	if err := b.Ensure(ctx); err != nil {
+		t.Fatal(err)
+	}
+	titles := map[string]*fdb{}
+	for _, db := range f.dbs {
+		if db.parent != parent {
+			t.Errorf("database %s is not inside the parent page", db.title)
+		}
+		titles[db.title] = db
+	}
+	if len(titles) != 2 || titles["Tasks"] == nil || titles["Repository Knowledge"] == nil {
+		t.Fatalf("databases = %v", titles)
+	}
+	tasks := f.sources[titles["Tasks"].source].props
+	for name, typ := range map[string]string{"Name": "title", "Foreman ID": "rich_text", "Status": "select", "Source": "select", "Repository": "rich_text",
+		"Source URL": "url", "Tags": "multi_select", "Confirmed triage": "rich_text", "Scope confirmed": "checkbox", "Queue": "checkbox",
+		"Question": "rich_text", "Answer": "rich_text", "Branch": "rich_text", "PR": "url", "Commit": "rich_text", "Updated by Foreman": "date"} {
+		if tasks[name] != typ {
+			t.Errorf("Tasks.%s = %q, want %s", name, tasks[name], typ)
+		}
+	}
+	know := f.sources[titles["Repository Knowledge"].source].props
+	for name, typ := range map[string]string{"Repository": "title", "Active learnings": "number", "Updated by Foreman": "date"} {
+		if know[name] != typ {
+			t.Errorf("Repository Knowledge.%s = %q, want %s", name, know[name], typ)
+		}
+	}
+	// A second backend finds them again by title and creates nothing.
+	b2 := &Backend{C: b.C, ParentID: parent}
+	if err := b2.Ensure(ctx); err != nil || len(f.dbs) != 2 {
+		t.Fatalf("second ensure: %v, %d databases", err, len(f.dbs))
+	}
+}
+
+func TestEnsureAddsMissingFieldsAndKeepsUserFields(t *testing.T) {
+	b, f, _ := newBackend(t)
+	ctx := context.Background()
+	b.Ensure(ctx)
+	src := f.sources[b.tasks.source]
+	delete(src.props, "Queue")
+	src.props["My own column"] = "rich_text"
+	if err := (&Backend{C: b.C, ParentID: b.ParentID}).Ensure(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if src.props["Queue"] != "checkbox" {
+		t.Error("the missing Queue field was not added")
+	}
+	if src.props["My own column"] != "rich_text" {
+		t.Error("a user's column must survive")
+	}
+}
+
+func TestEveryRequestUsesTheDocumentedVersionAndTheToken(t *testing.T) {
+	b, f, _ := newBackend(t)
+	b.Ensure(context.Background())
+	for _, v := range f.Versions {
+		if v != "2025-09-03" {
+			t.Fatalf("version header = %q", v)
+		}
+	}
+}
+
+func TestClientWaitsAsLongAsRetryAfterAndThenSucceeds(t *testing.T) {
+	f := newFake(t)
+	calls := 0
+	f.Fail = func(m, p string) (int, string) {
+		calls++
+		if calls <= 2 {
+			return http.StatusTooManyRequests, "3"
+		}
+		return 0, ""
+	}
+	c := f.client()
+	var slept []time.Duration
+	c.Sleep = func(d time.Duration) { slept = append(slept, d) }
+	if err := c.do(context.Background(), "GET", "/v1/users/me", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(slept) != 2 || slept[0] != 3*time.Second || slept[1] != 3*time.Second {
+		t.Fatalf("slept = %v", slept)
+	}
+}
+
+func TestClientRetriesServerErrorsFiveTimesThenFailsWithoutTheToken(t *testing.T) {
+	f := newFake(t)
+	f.Fail = func(m, p string) (int, string) { return http.StatusBadGateway, "" }
+	c := f.client()
+	var slept []time.Duration
+	c.Sleep = func(d time.Duration) { slept = append(slept, d) }
+	err := c.do(context.Background(), "GET", "/v1/users/me", nil, nil)
+	if err == nil {
+		t.Fatal("must fail")
+	}
+	if len(f.Requests) != 6 || len(slept) != 5 {
+		t.Fatalf("requests = %d, sleeps = %d; want 1 try and 5 retries", len(f.Requests), len(slept))
+	}
+	if !(slept[1] > slept[0] && slept[4] > slept[3]) {
+		t.Errorf("backoff must grow: %v", slept)
+	}
+	if strings.Contains(err.Error(), f.token) {
+		t.Fatalf("the error leaks the token: %v", err)
+	}
+}
+
+func TestClientDoesNotRetryAClientError(t *testing.T) {
+	f := newFake(t)
+	c := f.client()
+	c.Token = "wrong"
+	var e *Error
+	if err := c.do(context.Background(), "GET", "/v1/users/me", nil, nil); !errors.As(err, &e) || e.Status != 401 || len(f.Requests) != 1 {
+		t.Fatalf("err = %v, requests = %d", err, len(f.Requests))
+	}
+}
+
+func TestLongTextIsSplitIntoRichTextItemsOfAtMost2000Characters(t *testing.T) {
+	items := richText(strings.Repeat("é", 4500))
+	if len(items) != 3 {
+		t.Fatalf("items = %d", len(items))
+	}
+	for _, it := range items {
+		if n := len([]rune(it.(map[string]any)["text"].(map[string]any)["content"].(string))); n > 2000 {
+			t.Fatalf("item has %d characters", n)
+		}
+	}
+	if len(richText("")) != 0 {
+		t.Error("empty text has no items")
+	}
+}
+
+func TestAPublishWithMoreThan100BlocksAppendsInBatchesOfAtMost100(t *testing.T) {
+	b, f, _ := newBackend(t)
+	ctx := context.Background()
+	r := rec("L-0A1B2C3D", "IMPLEMENTING", "")
+	r.Work = nil
+	long := strings.Repeat("line\n", 250)
+	desc := strings.Repeat("x", 4500)
+	_, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: r, Reason: long, Create: workspace.TaskSeed{Name: "N", Description: desc}})
+	if err != nil {
+		t.Fatal(err) // the fake rejects any request with more than 100 children
+	}
+	entries, _ := b.ListTasks(ctx)
+	if len(entries) != 1 || entries[0].Description != desc || entries[0].Record == nil {
+		t.Fatalf("entries = %+v", entries)
+	}
+	for _, blk := range f.blocks {
+		if rts, ok := blk.content["rich_text"].([]any); ok {
+			for _, rt := range rts {
+				if n := len(rt.(map[string]any)["text"].(map[string]any)["content"].(string)); n > 2000 {
+					t.Fatalf("a rich-text item has %d characters", n)
+				}
+			}
+		}
+	}
+}
+
+func TestSectionIsReplacedByAppendingFirstThenDeletingTheOld(t *testing.T) {
+	b, f, _ := newBackend(t)
+	ctx := context.Background()
+	b.UpsertTask(ctx, workspace.TaskPublish{Record: rec("L-0A1B2C3D", "PLANNING", ""), Create: workspace.TaskSeed{Name: "N"}})
+	f.mu.Lock()
+	f.Requests = nil
+	f.mu.Unlock()
+	b.UpsertTask(ctx, workspace.TaskPublish{Record: rec("L-0A1B2C3D", "IMPLEMENTING", "")})
+	appendAt, deleteAt := -1, -1
+	for i, r := range f.Requests {
+		if strings.HasPrefix(r, "PATCH /v1/blocks/") && appendAt < 0 {
+			appendAt = i
+		}
+		if strings.HasPrefix(r, "DELETE /v1/blocks/") && deleteAt < 0 {
+			deleteAt = i
+		}
+	}
+	if appendAt < 0 || deleteAt < 0 || appendAt > deleteAt {
+		t.Fatalf("append at %d, delete at %d; the new section must be appended before the old is deleted: %v", appendAt, deleteAt, f.Requests)
+	}
+	entries, _ := b.ListTasks(ctx)
+	if entries[0].Record.Status != "IMPLEMENTING" {
+		t.Fatalf("status = %s", entries[0].Record.Status)
+	}
+}
+
+func TestACrashBetweenAppendAndDeleteStillReadsTheLastValidSection(t *testing.T) {
+	b, f, _ := newBackend(t)
+	ctx := context.Background()
+	b.UpsertTask(ctx, workspace.TaskPublish{Record: rec("L-0A1B2C3D", "PLANNING", ""), Create: workspace.TaskSeed{Name: "N"}})
+	f.Fail = func(m, p string) (int, string) {
+		if m == "DELETE" {
+			return 400, ""
+		}
+		return 0, ""
+	}
+	if _, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: rec("L-0A1B2C3D", "IMPLEMENTING", "")}); err == nil {
+		t.Fatal("the failed delete must be reported")
+	}
+	f.Fail = nil
+	b.forget() // a fresh process has no cache
+	entries, _ := b.ListTasks(ctx)
+	if got := entries[0].Record; got == nil || got.Status != "IMPLEMENTING" {
+		t.Fatalf("record = %+v; two sections exist and the last valid one must win", got)
+	}
+}
+
+func TestASectionWhoseAppendDidNotFinishIsIgnored(t *testing.T) {
+	b, f, _ := newBackend(t)
+	ctx := context.Background()
+	b.UpsertTask(ctx, workspace.TaskPublish{Record: rec("L-0A1B2C3D", "PLANNING", ""), Create: workspace.TaskSeed{Name: "N"}})
+	// Break the new section's payload the way a crash mid-append would.
+	f.Fail = func(m, p string) (int, string) {
+		if m == "PATCH" && strings.HasPrefix(p, "/v1/blocks/b") {
+			return 400, "" // children of the new heading never arrive
+		}
+		return 0, ""
+	}
+	_, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: rec("L-0A1B2C3D", "IMPLEMENTING", ""), Reason: strings.Repeat("why\n", 150)})
+	f.Fail = nil
+	b.forget()
+	entries, _ := b.ListTasks(ctx)
+	if err == nil {
+		t.Fatal("the failed append must be reported")
+	}
+	if got := entries[0].Record; got == nil || got.Status != "PLANNING" {
+		t.Fatalf("record = %+v; the incomplete section must lose to the older valid one", got)
+	}
+}
+
+func TestListTasksFollowsPagination(t *testing.T) {
+	b, f, _ := newBackend(t)
+	ctx := context.Background()
+	f.PageSize = 2
+	for i := 0; i < 5; i++ {
+		id := "L-0000000" + string(rune('A'+i))
+		b.UpsertTask(ctx, workspace.TaskPublish{Record: rec(id, "INBOX", ""), Create: workspace.TaskSeed{Name: id}})
+	}
+	entries, err := b.ListTasks(ctx)
+	if err != nil || len(entries) != 5 {
+		t.Fatalf("entries = %d, %v", len(entries), err)
+	}
+}
+
+func TestListTasksReusesParsedBodiesForUnchangedPages(t *testing.T) {
+	b, f, _ := newBackend(t)
+	ctx := context.Background()
+	b.UpsertTask(ctx, workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX", ""), Create: workspace.TaskSeed{Name: "N"}})
+	b.ListTasks(ctx)
+	before := f.count("GET", "/v1/blocks/")
+	b.ListTasks(ctx)
+	if after := f.count("GET", "/v1/blocks/"); after != before {
+		t.Fatalf("an unchanged page was read again: %d -> %d block requests", before, after)
+	}
+}
+
+func TestUpsertPublishesTheForemanOwnedFields(t *testing.T) {
+	b, f, _ := newBackend(t)
+	ctx := context.Background()
+	r := rec("L-0A1B2C3D", "NEEDS_DECISION", "")
+	r.Work = nil
+	r.Repo = "o/r"
+	r.Work = nil
+	b.UpsertTask(ctx, workspace.TaskPublish{Record: r, Create: workspace.TaskSeed{Name: "N", Repository: "o/r", SourceURL: "https://x.test/1", Tags: []string{"a"}}})
+	for _, pg := range f.pages {
+		if pg.source != b.tasks.source {
+			continue
+		}
+		if sel := pg.props["Status"].(map[string]any)["select"].(map[string]any)["name"]; sel != "Needs decision" {
+			t.Errorf("Status = %v", sel)
+		}
+		if sel := pg.props["Source"].(map[string]any)["select"].(map[string]any)["name"]; sel != "Local" {
+			t.Errorf("Source = %v", sel)
+		}
+		if pg.props["Updated by Foreman"] == nil {
+			t.Error("Updated by Foreman is not set")
+		}
+	}
+}
+
+func TestCheckPassesAndLeavesNoTestTask(t *testing.T) {
+	b, f, _ := newBackend(t)
+	var steps []workspace.Step
+	if err := b.Check(context.Background(), func(s workspace.Step) { steps = append(steps, s) }); err != nil {
+		t.Fatal(err)
+	}
+	names := []string{"authenticate", "ensure databases", "read Tasks data source", "create test task", "update test task", "read test task back", "confirm update is visible", "trash test task"}
+	if len(steps) != len(names) {
+		t.Fatalf("steps = %+v", steps)
+	}
+	for i, s := range steps {
+		if s.Name != names[i] || s.Err != nil {
+			t.Errorf("step %d = %+v, want %s", i, s, names[i])
+		}
+	}
+	trashed := 0
+	for _, pg := range f.pages {
+		if pg.source == b.tasks.source {
+			if !pg.trashed || !strings.HasPrefix(plain(pg.props["Name"].(map[string]any)["title"]), "Foreman connectivity check ") {
+				t.Errorf("test task not trashed or misnamed: %+v", pg.props["Name"])
+			}
+			trashed++
+		}
+	}
+	if trashed != 1 {
+		t.Errorf("test tasks = %d", trashed)
+	}
+}
+
+func TestCheckStopsAtTheFirstFailingStep(t *testing.T) {
+	// Count the requests of a passing run, then fail each one in turn.
+	b, f, _ := newBackend(t)
+	b.Check(context.Background(), func(workspace.Step) {})
+	total := len(f.Requests)
+	for n := 1; n <= total; n++ {
+		b, f, _ := newBackend(t)
+		seen := 0
+		f.Fail = func(m, p string) (int, string) {
+			seen++
+			if seen == n {
+				return http.StatusForbidden, ""
+			}
+			return 0, ""
+		}
+		var steps []workspace.Step
+		err := b.Check(context.Background(), func(s workspace.Step) { steps = append(steps, s) })
+		if err == nil {
+			t.Errorf("request %d failing: the check passed", n)
+			continue
+		}
+		last := steps[len(steps)-1]
+		if last.Err == nil {
+			t.Errorf("request %d failing: the last step reported no failure: %+v", n, steps)
+		}
+		for _, s := range steps[:len(steps)-1] {
+			if s.Err != nil {
+				t.Errorf("request %d failing: a step before the failure also failed: %+v", n, steps)
+			}
+		}
+		if strings.Contains(err.Error(), f.token) {
+			t.Errorf("the error leaks the token")
+		}
+	}
+}
+
+func TestNewReadsTheTestOnlyBaseURLOverride(t *testing.T) {
+	t.Setenv(BaseEnv, "http://127.0.0.1:9/")
+	if c := New("tok"); c.Base != "http://127.0.0.1:9" {
+		t.Fatalf("base = %q", c.Base)
+	}
+	t.Setenv(BaseEnv, "")
+	if c := New("tok"); c.Base != DefaultBase {
+		t.Fatalf("base = %q", c.Base)
+	}
+}
+
+func TestClientDoesNotRepeatACreateThatAnsweredWithAServerError(t *testing.T) {
+	f := newFake(t)
+	f.Fail = func(m, p string) (int, string) {
+		if m == "POST" && p == "/v1/pages" {
+			return http.StatusServiceUnavailable, ""
+		}
+		return 0, ""
+	}
+	c := f.client()
+	if err := c.do(context.Background(), "POST", "/v1/pages", map[string]any{}, nil); err == nil {
+		t.Fatal("must fail")
+	}
+	if n := f.count("POST", "/v1/pages"); n != 1 {
+		t.Fatalf("create requests = %d, want 1: Notion may have applied the first one", n)
+	}
+}
+
+func TestClientStillRetriesAThrottledCreate(t *testing.T) {
+	f := newFake(t)
+	calls := 0
+	f.Fail = func(m, p string) (int, string) {
+		if m == "POST" && p == "/v1/pages" && calls == 0 {
+			calls++
+			return http.StatusTooManyRequests, "0"
+		}
+		return 0, ""
+	}
+	c := f.client()
+	if err := c.do(context.Background(), "POST", "/v1/pages", map[string]any{"parent": map[string]any{"page_id": "x"}}, nil); err != nil && IsNotFound(err) == false {
+		t.Fatalf("a refused request is safe to repeat: %v", err)
+	}
+	if n := f.count("POST", "/v1/pages"); n != 2 {
+		t.Fatalf("create requests = %d, want 2", n)
+	}
+}
+
+func TestAPlanLargerThanOneRequestIsSplitByBytesAndStaysReadable(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	r := rec("L-0A1B2C3D", "IMPLEMENTING", "")
+	// Fewer than 100 blocks, but the rendered text and the payload together exceed
+	// 500 KB; the fake rejects any larger request.
+	big := strings.Repeat("0123456789", 30_000) // 300 KB, one line
+	r.Work = &portable.Work{Repo: "o/r", State: "open", Plan: big}
+	if _, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: r, Create: workspace.TaskSeed{Name: "N"}}); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := b.ListTasks(ctx)
+	if err != nil || len(entries) != 1 || entries[0].Record == nil || entries[0].Record.Work == nil || entries[0].Record.Work.Plan != big {
+		t.Fatalf("the plan did not round trip: %v", err)
+	}
+}
+
+func TestConfirmedTriageLongerThan2000CharactersIsStoredWhole(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	text := strings.Repeat("scope ", 700) // 4200 characters
+	text = strings.TrimSpace(text)
+	if _, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX", ""), Create: workspace.TaskSeed{Name: "N", ConfirmedTriage: text, ScopeConfirmed: true}}); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := b.ListTasks(ctx)
+	if len(entries) != 1 || entries[0].ConfirmedTriage != text {
+		t.Fatalf("triage = %d characters, want %d", len(entries[0].ConfirmedTriage), len(text))
+	}
+}
+
+func TestAKnowledgePageWithNoPayloadIsReportedAsNoPayloadNotAsBroken(t *testing.T) {
+	b, f, _ := newBackend(t)
+	ctx := context.Background()
+	if err := b.Ensure(ctx); err != nil {
+		t.Fatal(err)
+	}
+	body := map[string]any{"parent": map[string]any{"type": "data_source_id", "data_source_id": b.knowledge.source},
+		"properties": map[string]any{"Repository": map[string]any{"title": richText("o/r")}}}
+	if err := b.C.do(ctx, "POST", "/v1/pages", body, nil); err != nil {
+		t.Fatal(err)
+	}
+	es, err := b.ListKnowledge(ctx)
+	if err != nil || len(es) != 1 || !errors.Is(es[0].ParseErr, workspace.ErrNoPayload) {
+		t.Fatalf("entries = %+v, err = %v", es, err)
+	}
+	_ = f
+}
+
+func TestOneHugeLineOfMultiByteTextStillFitsEveryRequest(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	r := rec("L-0A1B2C3D", "IMPLEMENTING", "")
+	big := strings.Repeat("€", 180_000) // 540 KB as UTF-8, one line, fewer than 100 blocks
+	r.Work = &portable.Work{Repo: "o/r", State: "open", Plan: big}
+	if _, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: r, Create: workspace.TaskSeed{Name: "N"}}); err != nil {
+		t.Fatal(err) // the fake rejects any request over 500,000 bytes
+	}
+	entries, err := b.ListTasks(ctx)
+	if err != nil || len(entries) != 1 || entries[0].Record == nil || entries[0].Record.Work.Plan != big {
+		t.Fatalf("the plan did not round trip: %v", err)
+	}
+}
+
+func TestADescriptionThatFailedMidAppendIsCompletedByTheNextPublish(t *testing.T) {
+	b, f, _ := newBackend(t)
+	ctx := context.Background()
+	var lines []string
+	for i := 0; i < 150; i++ {
+		lines = append(lines, "line "+strings.Repeat("x", i%7))
+	}
+	desc := strings.Join(lines, "\n")
+	failed := false
+	f.Fail = func(m, p string) (int, string) {
+		if m == "PATCH" && strings.HasSuffix(p, "/children") && !failed {
+			failed = true
+			return http.StatusServiceUnavailable, ""
+		}
+		return 0, ""
+	}
+	pub := workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX", ""), Create: workspace.TaskSeed{Name: "N", Description: desc}}
+	ref, err := b.UpsertTask(ctx, pub)
+	if err == nil || ref == "" {
+		t.Fatalf("ref %q, err %v: the dropped append must fail the publish and name the page", ref, err)
+	}
+	pub.Resume = true
+	if _, err := b.UpsertTask(ctx, pub); err != nil {
+		t.Fatal(err)
+	}
+	b.forget()
+	es, _ := b.ListTasks(ctx)
+	if len(es) != 1 || es[0].Description != desc {
+		t.Fatalf("description has %d characters, want %d", len(es[0].Description), len(desc))
+	}
+}
+
+func TestAnInterruptedFirstKnowledgePublishIsNoPayloadNotBroken(t *testing.T) {
+	b, f, _ := newBackend(t)
+	ctx := context.Background()
+	f.Fail = func(m, p string) (int, string) {
+		if m == "PATCH" && strings.HasPrefix(p, "/v1/blocks/b") { // continuation of the new section
+			return http.StatusServiceUnavailable, ""
+		}
+		return 0, ""
+	}
+	snap := snapshotForTest("o/r")
+	err := b.WriteKnowledge(ctx, workspace.KnowledgePublish{Repo: "o/r", Snapshot: snap, Guidance: strings.Repeat("guidance line\n", 150)})
+	f.Fail = nil
+	if err == nil {
+		t.Fatal("the dropped append must fail the publish")
+	}
+	b.forget()
+	es, lerr := b.ListKnowledge(ctx)
+	if lerr != nil || len(es) != 1 || !errors.Is(es[0].ParseErr, workspace.ErrNoPayload) {
+		t.Fatalf("entries = %+v, err = %v", es, lerr)
+	}
+}
+
+func TestReseedReplacesTheConfirmedTriageOfAnExistingPage(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	pub := workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX", ""), Create: workspace.TaskSeed{Name: "N", Description: "keep me", ConfirmedTriage: "Scope A", ScopeConfirmed: true}}
+	if _, err := b.UpsertTask(ctx, pub); err != nil {
+		t.Fatal(err)
+	}
+	pub.Create.ConfirmedTriage = "Scope B"
+	if _, err := b.UpsertTask(ctx, pub); err != nil {
+		t.Fatal(err)
+	}
+	if es, _ := b.ListTasks(ctx); es[0].ConfirmedTriage != "Scope A" {
+		t.Fatalf("an ordinary publish must not touch user fields: %q", es[0].ConfirmedTriage)
+	}
+	pub.Reseed = true
+	if _, err := b.UpsertTask(ctx, pub); err != nil {
+		t.Fatal(err)
+	}
+	es, _ := b.ListTasks(ctx)
+	if es[0].ConfirmedTriage != "Scope B" || es[0].Description != "keep me" {
+		t.Fatalf("triage %q, description %q", es[0].ConfirmedTriage, es[0].Description)
+	}
+}
+
+func snapshotForTest(repo string) knowledge.Snapshot {
+	return knowledge.Snapshot{Format: knowledge.FormatVersion, Repo: repo, NextID: 1, Learnings: []knowledge.Learning{}, Evaluations: []knowledge.Evaluation{}}
+}
+
+func TestASectionWrittenBeforeTheEndMarkerExistedStillReads(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	if err := b.Ensure(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r := rec("L-0A1B2C3D", "IMPLEMENTING", "")
+	payload, err := r.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	heading := block("heading_2", map[string]any{"rich_text": richText(sectionTitle), "is_toggleable": true, "children": codeBlocks(string(payload))})
+	body := map[string]any{"parent": map[string]any{"type": "data_source_id", "data_source_id": b.tasks.source},
+		"properties": map[string]any{"Name": map[string]any{"title": richText("N")}, "Foreman ID": map[string]any{"rich_text": richText(r.ID)}},
+		"children":   []any{heading}}
+	if err := b.C.do(ctx, "POST", "/v1/pages", body, nil); err != nil {
+		t.Fatal(err)
+	}
+	es, err := b.ListTasks(ctx)
+	if err != nil || len(es) != 1 || es[0].Record == nil || es[0].Record.Status != "IMPLEMENTING" {
+		t.Fatalf("entries = %+v, err = %v: a complete section with no marker must still restore the task", es, err)
+	}
+}
+
+func TestALongDescriptionLineReadsBackUnchanged(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	desc := strings.Repeat("x", 60_001)
+	if _, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX", ""), Create: workspace.TaskSeed{Name: "N", Description: desc}}); err != nil {
+		t.Fatal(err)
+	}
+	es, _ := b.ListTasks(ctx)
+	if len(es) != 1 || es[0].Description != desc {
+		t.Fatalf("the description came back with %d characters, want %d", len(es[0].Description), len(desc))
+	}
+}
+
+func TestACutShortNewerSectionNeverWinsOverTheLastCompleteOne(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	older := rec("L-0A1B2C3D", "PLANNING", "")
+	older.Work = &portable.Work{Repo: "o/r", State: "open", Plan: "the full plan"}
+	if _, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: older, Create: workspace.TaskSeed{Name: "N"}}); err != nil {
+		t.Fatal(err)
+	}
+	newer := rec("L-0A1B2C3D", "IMPLEMENTING", "")
+	newer.Work = &portable.Work{Repo: "o/r", State: "open", Plan: "the full plan", Branch: "feat/x"}
+	raw, err := newer.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A write that stopped between batches leaves a prefix. Find one the format accepts.
+	lines := strings.SplitAfter(string(raw), "\n")
+	prefix := ""
+	for k := len(lines) - 1; k > 0; k-- {
+		cut := strings.Join(lines[:k], "")
+		if r, perr := workspace.Parse([]byte(cut)); perr == nil && r.Status == "IMPLEMENTING" {
+			prefix = cut
+			break
+		}
+	}
+	if prefix == "" {
+		t.Fatal("the test needs a prefix of the payload that still parses")
+	}
+	page := b.findPageForTest(t, ctx, "L-0A1B2C3D")
+	heading := block("heading_2", map[string]any{"rich_text": richText(sectionTitle), "is_toggleable": true, "children": codeBlocks(prefix)})
+	if _, err := b.C.appendBlocks(ctx, page, []any{heading}); err != nil {
+		t.Fatal(err)
+	}
+	b.forget()
+	es, _ := b.ListTasks(ctx)
+	if got := es[0].Record; got == nil || got.Status != "PLANNING" {
+		t.Fatalf("record = %+v: a cut-short section replaced the last complete one", got)
+	}
+}
+
+func TestALongLineOfCharactersThatEscapeInJSONStillFitsEveryRequest(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	desc := strings.Repeat("<", 90_000) // 540 KB once each character is escaped
+	if _, err := b.UpsertTask(ctx, workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX", ""), Create: workspace.TaskSeed{Name: "N", Description: desc}}); err != nil {
+		t.Fatal(err) // the fake rejects any request over 500,000 bytes
+	}
+	es, _ := b.ListTasks(ctx)
+	if len(es) != 1 || es[0].Description != desc {
+		t.Fatalf("the description came back with %d characters, want %d", len(es[0].Description), len(desc))
+	}
+}
+
+func (b *Backend) findPageForTest(t *testing.T, ctx context.Context, id string) string {
+	t.Helper()
+	p, err := b.findByID(ctx, b.tasks.source, "Foreman ID", id, "rich_text")
+	if err != nil || p == nil {
+		t.Fatalf("no page for %s: %v", id, err)
+	}
+	return p.ID
+}
+
+func TestRetryingAnAppendThatFailedInsideALongLineKeepsItOneLine(t *testing.T) {
+	b, f, _ := newBackend(t)
+	ctx := context.Background()
+	desc := strings.Repeat("<", 90_000)
+	failed := false
+	f.Fail = func(m, p string) (int, string) {
+		if m == "PATCH" && strings.HasSuffix(p, "/children") && !failed {
+			failed = true
+			return http.StatusServiceUnavailable, ""
+		}
+		return 0, ""
+	}
+	// Force the line across two requests: the fake limit is bytes, so the first
+	// batch holds the first block and the second block goes in a later append.
+	pub := workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX", ""), Create: workspace.TaskSeed{Name: "N", Description: desc}}
+	ref, err := b.UpsertTask(ctx, pub)
+	if err == nil {
+		t.Skip("both blocks fit one request; nothing to retry")
+	}
+	if ref == "" {
+		t.Fatal("the publish must name the page it created")
+	}
+	pub.Resume = true
+	if _, err := b.UpsertTask(ctx, pub); err != nil {
+		t.Fatal(err)
+	}
+	b.forget()
+	es, _ := b.ListTasks(ctx)
+	if len(es) != 1 || es[0].Description != desc {
+		t.Fatalf("the description came back with %d characters, want %d (a newline was inserted?)", len(es[0].Description), len(desc))
+	}
+}
+
+func TestAGrayParagraphAPersonAddedIsNotReadAsAContinuation(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	first := strings.Repeat("a", 60_000)
+	pub := workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX", ""), Create: workspace.TaskSeed{Name: "N", Description: first + "\nsecond line"}}
+	ref, err := b.UpsertTask(ctx, pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Someone colors the second paragraph in Notion.
+	blocks, _ := b.C.blocksOf(ctx, ref)
+	for _, blk := range blocks {
+		if blk.Type == "paragraph" && blk.text() == "second line" {
+			if err := b.C.do(ctx, "PATCH", "/v1/blocks/"+blk.ID, map[string]any{"paragraph": map[string]any{"color": "gray", "rich_text": richText("second line")}}, nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	b.forget()
+	es, _ := b.ListTasks(ctx)
+	if got := es[0].Description; got != first+"\nsecond line" {
+		t.Fatalf("a styled paragraph was merged into the line before it: %d characters", len(got))
+	}
+}
+
+func TestALineStartingWithTheMarkerAfterAFullLineStaysItsOwnLine(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	for _, desc := range []string{
+		strings.Repeat("a", 60_000) + "\n⁠after",
+		strings.Repeat("a", 60_000) + "\n​after",
+		strings.Repeat("a", 120_000) + "\n⁠⁠after",
+		strings.Repeat("a", 60_001) + "\n⁠after",
+		strings.Repeat("⁠", 60_000) + "\n⁠after",
+	} {
+		pub := workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX", ""), Create: workspace.TaskSeed{Name: "N", Description: desc}}
+		if _, err := b.UpsertTask(ctx, pub); err != nil {
+			t.Fatal(err)
+		}
+		b.forget()
+		es, _ := b.ListTasks(ctx)
+		if got := es[len(es)-1].Description; got != desc {
+			t.Fatalf("description with %d characters came back with %d", len(desc), len(got))
+		}
+		for _, e := range es {
+			_ = b.Trash(ctx, e.Ref)
+		}
+		b.forget()
+	}
+}
+
+func TestRetryingAnImportWithLeadingBlankLinesAppendsTheVisibleText(t *testing.T) {
+	b, f, _ := newBackend(t)
+	ctx := context.Background()
+	desc := strings.Repeat("\n", 100) + "visible"
+	failed := false
+	f.Fail = func(m, p string) (int, string) {
+		if m == "PATCH" && strings.HasSuffix(p, "/children") && !failed {
+			failed = true
+			return http.StatusServiceUnavailable, ""
+		}
+		return 0, ""
+	}
+	pub := workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX", ""), Create: workspace.TaskSeed{Name: "N", Description: desc}}
+	if _, err := b.UpsertTask(ctx, pub); err == nil {
+		t.Skip("everything fit one request; nothing to retry")
+	}
+	pub.Resume = true
+	if _, err := b.UpsertTask(ctx, pub); err != nil {
+		t.Fatal(err)
+	}
+	b.forget()
+	es, _ := b.ListTasks(ctx)
+	if len(es) != 1 || es[0].Description != desc {
+		t.Fatalf("the retried description is %q, want the visible line after 100 blank ones", es[0].Description)
+	}
+}
+
+func TestAnExistingParagraphStartingWithZeroWidthSpacesIsReadAsWritten(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	// Raw paragraphs a person typed, or that an earlier writer left: none follows a
+	// full block, so none is an escape.
+	texts := []string{"​⁠typed", "​​typed", "​⁠"}
+	var blocks []any
+	for _, tx := range texts {
+		blocks = append(blocks, block("paragraph", map[string]any{"rich_text": richText(tx)}))
+	}
+	pub := workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX", ""), Create: workspace.TaskSeed{Name: "N", Description: "x"}}
+	ref, err := b.UpsertTask(ctx, pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.C.appendBlocks(ctx, ref, blocks); err != nil {
+		t.Fatal(err)
+	}
+	b.forget()
+	es, _ := b.ListTasks(ctx)
+	want := "x\n" + strings.Join(texts, "\n")
+	if got := es[0].Description; got != want {
+		t.Fatalf("description read back as %q, want %q", got, want)
+	}
+}
+
+func TestARetryAfterLongerThanTheDeadlineFailsAtOnce(t *testing.T) {
+	f := newFake(t)
+	f.Fail = func(m, p string) (int, string) { return http.StatusTooManyRequests, "120" }
+	c := f.client()
+	c.Sleep = nil // the real wait
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	start := time.Now()
+	err := c.do(ctx, "GET", "/v1/users/me", nil, nil)
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 5*time.Second {
+		t.Fatalf("err = %v after %s, want an immediate deadline error", err, time.Since(start))
+	}
+}
+
+func TestCancellingDuringARetryWaitReturnsPromptly(t *testing.T) {
+	f := newFake(t)
+	f.Fail = func(m, p string) (int, string) { return http.StatusTooManyRequests, "120" }
+	c := f.client()
+	c.Sleep = nil
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(50*time.Millisecond, cancel)
+	start := time.Now()
+	err := c.do(ctx, "GET", "/v1/users/me", nil, nil)
+	if !errors.Is(err, context.Canceled) || time.Since(start) > 5*time.Second {
+		t.Fatalf("err = %v after %s, want a prompt cancellation", err, time.Since(start))
+	}
+}
+
+func TestANewClientWaitsOnTheContextAwareTimer(t *testing.T) {
+	if c := New("token"); c.Sleep != nil {
+		t.Fatal("a new client sleeps without watching the caller's context")
+	}
+}
+
+func TestTaskFieldsReadsOnlyTheMatchingPageProperties(t *testing.T) {
+	b, f, _ := newBackend(t)
+	ctx := context.Background()
+	p := workspace.TaskPublish{
+		Record: rec("L-0A1B2C3D", "INBOX", ""),
+		Create: workspace.TaskSeed{Name: "Task", ConfirmedTriage: "Scope", ScopeConfirmed: true},
+	}
+	if _, err := b.UpsertTask(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	f.Fail = func(method, path string) (int, string) {
+		if strings.HasPrefix(path, "/v1/blocks/") {
+			return 400, ""
+		}
+		return 0, ""
+	}
+	if e, err := b.TaskFields(ctx, p.Record.ID); err != nil || e == nil || e.ConfirmedTriage != "Scope" {
+		t.Fatalf("task fields = %+v, %v", e, err)
+	}
+	if e, err := b.TaskFields(ctx, "L-FFFFFFFF"); err != nil || e != nil {
+		t.Fatalf("unknown task = %+v, %v", e, err)
+	}
+}
+
+func TestPublishKeepsAUserHeadingNamedForemanRecord(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	p := workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX", ""), Create: workspace.TaskSeed{Name: "Task"}}
+	ref, err := b.UpsertTask(ctx, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userHeading := block("heading_2", map[string]any{
+		"rich_text":     richText(sectionTitle),
+		"is_toggleable": true,
+		"children":      paragraphs("User notes"),
+	})
+	ids, err := b.C.appendBlocks(ctx, ref, []any{userHeading})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Record.Status = "PLANNING"
+	if _, err := b.UpsertTask(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	blocks, err := b.C.blocksOf(ctx, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(blocks, func(block blockObj) bool { return block.ID == ids[0] }) {
+		t.Fatalf("publication removed the user heading, blocks = %+v", blocks)
+	}
+	es, err := b.ListTasks(ctx)
+	if err != nil || len(es) != 1 || !strings.Contains(es[0].Description, sectionTitle) {
+		t.Fatalf("user heading disappeared from issue description: %+v, %v", es, err)
+	}
+}
+
+func TestMoveRetryOverwritesSeededIssueFieldsAndKeepsOriginalTagNames(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		name := "first move uses owned description"
+		if legacy {
+			name = "previous version wrote a flat description"
+		}
+		t.Run(name, func(t *testing.T) {
+			b, f, _ := newBackend(t)
+			ctx := context.Background()
+			r := rec("L-0A1B2C3D", "INBOX", "")
+			r.Issue = &workspace.Issue{Description: "Old description", Status: "open"}
+			p := workspace.TaskPublish{
+				Record: r, Move: !legacy, Reseed: true,
+				Create: workspace.TaskSeed{Name: "Old name", Description: r.Issue.Description},
+			}
+			ref, err := b.UpsertTask(ctx, p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tags := []string{"normal", "front,back", tagAlias("front,back")}
+			p.Create = workspace.TaskSeed{
+				Name: "New name", Description: "Rewritten description",
+				Repository: "o/new", SourceURL: "https://example.com/issue", Tags: tags,
+				ConfirmedTriage: "New scope", ScopeConfirmed: true,
+			}
+			p.Record.Issue.Description = p.Create.Description
+			p.Move = true
+			for range 2 {
+				got, err := b.UpsertTask(ctx, p)
+				if err != nil || got != ref {
+					t.Fatalf("retry wrote a different page: %q %v", got, err)
+				}
+			}
+			es, err := b.ListTasks(ctx)
+			if err != nil || len(es) != 1 {
+				t.Fatalf("entries = %+v, %v", es, err)
+			}
+			e := es[0]
+			if e.Name != p.Create.Name || e.Description != p.Create.Description ||
+				e.Repository != p.Create.Repository || e.SourceURL != p.Create.SourceURL ||
+				e.ConfirmedTriage != p.Create.ConfirmedTriage || !e.ScopeConfirmed || !slices.Equal(e.Tags, tags) {
+				t.Fatalf("reseeded fields = %+v", e)
+			}
+			raw := f.pages[ref].props["Tags"].(map[string]any)["multi_select"].([]any)
+			for _, item := range raw {
+				if strings.Contains(item.(map[string]any)["name"].(string), ",") {
+					t.Fatal("the request used a comma in a Notion option name")
+				}
+			}
+		})
+	}
+}
+
+func TestMoveResumesLegacyDescriptionPrefixWithoutARecord(t *testing.T) {
+	b, f, _ := newBackend(t)
+	ctx := context.Background()
+	desc := strings.Repeat("<", 90_000)
+	r := rec("L-0A1B2C3D", "INBOX", "")
+	r.Issue = &workspace.Issue{Description: desc, Status: "open"}
+	p := workspace.TaskPublish{Record: r, Create: workspace.TaskSeed{Name: "Task", Description: desc}}
+	f.Fail = func(method, path string) (int, string) {
+		if method == "PATCH" && strings.HasPrefix(path, "/v1/blocks/") {
+			return 400, ""
+		}
+		return 0, ""
+	}
+	ref, err := b.UpsertTask(ctx, p)
+	f.Fail = nil
+	if ref == "" || err == nil {
+		t.Fatalf("legacy write should leave a partial page: ref = %q, error = %v", ref, err)
+	}
+	es, err := b.ListTasks(ctx)
+	if err != nil || len(es) != 1 || es[0].Record != nil ||
+		len(es[0].Description) != 60_000 || !strings.HasPrefix(desc, es[0].Description) {
+		t.Fatalf("unexpected legacy prefix: entries = %d, error = %v", len(es), err)
+	}
+	p.Move, p.Reseed = true, true
+	p.Create.Description = "unrelated replacement"
+	if _, err := b.UpsertTask(ctx, p); err == nil {
+		t.Fatal("move overwrote ambiguous legacy text")
+	}
+	p.Create.Description = desc
+	if got, err := b.UpsertTask(ctx, p); err != nil || got != ref {
+		t.Fatalf("resume legacy prefix: ref = %q, error = %v", got, err)
+	}
+	es, err = b.ListTasks(ctx)
+	if err != nil || len(es) != 1 || es[0].Description != desc || es[0].Record == nil {
+		t.Fatalf("legacy prefix did not resume as one line: entries = %d, error = %v", len(es), err)
+	}
+}
+
+func TestOversizedConfirmedTriageIsRefusedNotCutShort(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	if err := b.Ensure(ctx); err != nil {
+		t.Fatal(err)
+	}
+	long := strings.Repeat("a", maxRichText*maxCodeItems+1)
+	publish := workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX", ""), Create: workspace.TaskSeed{Name: "N", ConfirmedTriage: long, ScopeConfirmed: true}}
+	if _, err := b.UpsertTask(ctx, publish); err == nil || !strings.Contains(err.Error(), "confirmed triage") {
+		t.Fatalf("create = %v", err)
+	}
+	if entries, err := b.ListTasks(ctx); err != nil || len(entries) != 0 {
+		t.Fatalf("a refused create left %d entries, %v", len(entries), err)
+	}
+	publish.Create.ConfirmedTriage = "short"
+	if _, err := b.UpsertTask(ctx, publish); err != nil {
+		t.Fatal(err)
+	}
+	publish.Create.ConfirmedTriage, publish.Reseed = long, true
+	if _, err := b.UpsertTask(ctx, publish); err == nil {
+		t.Fatal("a reseed cut the scope short")
+	}
+	if wrote, err := b.ConfirmScope(ctx, "L-0A1B2C3D", long, func(string) bool { return true }); err == nil || wrote {
+		t.Fatalf("confirm = %v, %v", wrote, err)
+	}
+	if got, err := b.TaskFields(ctx, "L-0A1B2C3D"); err != nil || got.ConfirmedTriage != "short" {
+		t.Fatalf("stored scope changed: %v", err)
+	}
+}

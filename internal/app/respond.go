@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -13,11 +14,29 @@ import (
 // question is answered it relaunches the runner, which resumes the agent's session
 // with all the answers.
 func (a App) Respond(ctx context.Context, key task.Key, raw string) (*task.Record, error) {
+	return a.respond(ctx, key, raw, "")
+}
+
+// errQuestionMoved means the task's pending question is not the one an answer was
+// written for.
+var errQuestionMoved = errors.New("the task is waiting on a different question now")
+
+// respond is Respond that, given expect (a QuestionKey), refuses inside the same
+// transaction when the pending question is another one.
+func (a App) respond(ctx context.Context, key task.Key, raw, expect string) (*task.Record, error) {
 	now := a.Now()
+	release, err := a.Launches.hold()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	var token string
 	rec, err := a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
 		if cur == nil || cur.State != task.NeedsDecision || cur.Pending() == nil {
 			return nil, fmt.Errorf("%s#%d is not waiting for a decision", key.Repo, key.Number)
+		}
+		if expect != "" && QuestionKey(cur) != expect {
+			return nil, errQuestionMoved
 		}
 		d := cur.Pending()
 		answer, err := ResolveAnswer(d.Question, raw)

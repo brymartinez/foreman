@@ -32,6 +32,21 @@ type MigrationReport struct {
 	Ran bool
 }
 
+// HasLegacy reports whether the directories hold Markdown work an upgrade would move
+// into a database. A record it cannot read counts, so the upgrade reports it.
+func HasLegacy(l Legacy) bool {
+	tasks, err := readLegacyTasks(l.TasksDir)
+	if err != nil || len(tasks) > 0 {
+		return true
+	}
+	triage, err := readLegacyTriage(l.TriageDir)
+	if err != nil || len(triage) > 0 {
+		return true
+	}
+	repos, err := knowledge.LegacyRepos(l.KnowledgeDir)
+	return err != nil || len(repos) > 0
+}
+
 const (
 	metaImport  = "legacy_import"
 	metaCleanup = "legacy_cleanup"

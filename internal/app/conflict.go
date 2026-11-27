@@ -31,6 +31,11 @@ func (a App) conflict(ctx context.Context, rec *task.Record, pr PullRequest) (*t
 	if err := a.checkQuota(ctx, d.Implementer.Agent, nil); err != nil {
 		return rec, fmt.Sprintf("PR #%d conflicts with %s; repair is waiting: %v", d.PR, pr.BaseRefName, err), nil
 	}
+	release, err := a.Launches.hold()
+	if err != nil {
+		return rec, "", err
+	}
+	defer release()
 	var note, token string
 	updated, err := a.update(ctx, rec.Key, func(cur *task.Record) (*task.Record, error) {
 		// Read again under the lock: a resume or another refresh since the gate's list

@@ -84,6 +84,8 @@ foreman issue import work.yaml [--dry-run] [--on-conflict fail|skip|replace]
 foreman export markdown ~/vault/foreman       # one-way copy of tasks for Obsidian
 foreman knowledge export owner/repo -o knowledge.md
 foreman knowledge ingest knowledge.md --dry-run
+foreman knowledge review owner/repo
+foreman knowledge approve owner/repo --digest <shared-sha256> --host-digest <host-sha256>
 foreman --help
 foreman --version
 ```
@@ -189,8 +191,8 @@ when the rationale is longer than the screen. The branch field scrolls horizonta
 around the cursor for long names. Press Enter to start with the edited name, or Escape
 to cancel.
 
-Delegated work is re-read from the task files every second, so a state change shows up
-on its own. The selected issue sources refresh every `refresh` seconds, 60 by default,
+The dashboard reads delegated work from the host database every second. The selected
+issue sources refresh every `refresh` seconds, 60 by default,
 and when you press `r`. A refresh runs the searches, the readiness gate, and the DONE cleanup. The
 dashboard refreshes only while it is open and starts no background process.
 
@@ -347,8 +349,8 @@ keep the issue marker and heading.
 Before changing code, the planner checks the confirmed decisions and writes
 **Requirements** and a short **Implementation plan**. The plan gives the agent
 ordered changes and references the requirements by ID. Foreman saves both
-documents and review findings in the local task record under `tasks_dir`.
-Use `s` on the task to see its task file. Changes to confirmed scope or the
+documents and review findings in the host database.
+Use `s` on the task to see its record. Changes to confirmed scope or the
 issue description trigger a plan recheck. An implementer that needs to change
 the plan returns the affected step to the planner.
 
@@ -401,8 +403,9 @@ merged, it also deletes the local branch. A PR_CLOSED task keeps its worktree an
 branch. A FAILED task also keeps them so you can retry the run.
 
 To discard a FAILED run, select it in DELEGATED WORK and press `x`. Foreman shows
-the task file, runner log, worktree, and local branch it will remove. Press `y` to
-confirm. The replacement task record keeps the PR link, and Foreman offers the
+the task record it will replace and the runner log, worktree, and local branch it
+will remove. Press `y` to confirm. The replacement task record keeps the PR link,
+and Foreman offers the
 issue for a manual start. The reset does not change GitHub; inspect the branch for
 uncommitted work before confirming.
 
@@ -433,7 +436,7 @@ in the log directory. The dashboard shows the task's state the same either way.
 In the dashboard, Enter on the `NEEDS_DECISION` task shows each waiting question in
 turn: the issue, context, options, recommendation, and impact if wrong. You can type
 an option label, write your own answer, or press Enter to take the recommendation. Esc
-leaves the remaining questions waiting. Foreman saves each answer to the task file
+leaves the remaining questions waiting. Foreman saves each answer in the task record
 and, once all are answered, resumes the current stage's session when one exists.
 After review findings it resumes the implementation session with the findings and
 your answer. If the session is unavailable, the replacement gets the checked plan,
@@ -463,8 +466,7 @@ setting it started with, including when you restart it.
 
 Closing a delegated PR without merging it ends the task. On the next GitHub refresh,
 foreman stops the agent if one is still running, moves the task to `PR_CLOSED`, and
-drops it from DELEGATED WORK. Nothing is deleted: the task file, the worktree, and the
-branch are kept.
+drops it from DELEGATED WORK. Foreman keeps the task record, worktree, and branch.
 Closing the issue as well leaves the task `PR_CLOSED` rather than DONE, so the worktree
 is not cleaned up behind you.
 The run did not fail, so there is no failure notification.
@@ -494,27 +496,14 @@ every refresh tries again.
 | `FAILED` | The agent failed, the run was cancelled, or the runner died | `s` on the task to see why, then Enter on it in the inbox to retry or `x` on the task to reset its local run |
 | `PR_CLOSED` | You closed the PR without merging it | Nothing, or reopen the PR |
 
-## Task files
+## Task records
 
-Each task is one Markdown file with YAML frontmatter, stored in
-`~/.local/share/foreman/tasks/<owner>-<repo>-<number>.md`. The frontmatter holds the
-state, session ids, PR, validation, review rounds, CI, and decisions. The body is yours,
-so you can add notes there.
+In SQLite mode, the `database` file in `config.yaml` (default
+`<data>/foreman.db`) holds tasks, triage, local issues, and repository knowledge.
+The dashboard works directly from that database.
 
-Foreman rewrites only the frontmatter keys it owns. Keys you add, such as `tags`,
-`aliases`, or anything else, stay in place along with their comments.
-
-### Obsidian
-
-The files are ready for Obsidian. The first time you open the dashboard, Foreman
-explains the configured task directory and offers to create it. To use a folder inside
-your vault, point `tasks_dir` at it first:
-
-```yaml
-tasks_dir: ~/Documents/vault/foreman
-```
-
-Each task then appears as a note, and the frontmatter shows up as properties.
+For notes that sync with Foreman, configure the [Obsidian backend](#obsidian).
+For a one-way set of Markdown copies, run `foreman export markdown DIR`.
 
 ## Learning
 
@@ -543,6 +532,15 @@ text. Paths inside the repository are kept.
 
 The triage interview can use repository knowledge while researching an issue.
 Planning, implementation, correction, and review prompts omit repository knowledge.
+
+In shared-store mode, refresh leaves a new or changed knowledge snapshot in the store
+until you approve it on the execution host. The host keeps using its last approved
+snapshot. Run `foreman knowledge review owner/repo` to inspect the current host and
+shared snapshots and their digests. Run the printed `foreman knowledge approve`
+command to approve the exact shared snapshot you reviewed. Approval checks both
+digests again while it holds the repository publish and learner locks. If either
+snapshot changed, review it again. Refresh never applies an unapproved shared snapshot.
+Host-authored publication and the existing SQLite move remain trusted.
 
 Set `learning.enabled: false` to stop new evaluations. Triage can still use what is already learned. To forget a repository's knowledge, delete its directory. To remove
 one learning, delete its entry from `learnings.yaml`. Prompts read that file, and the
@@ -602,7 +600,7 @@ Built-in defaults:
 
 ```yaml
 triage_dir: ~/.local/share/foreman/triage
-tasks_dir: ~/.local/share/foreman/tasks
+tasks_dir: ~/.local/share/foreman/tasks # legacy Markdown task import
 worktrees_dir: ~/.local/share/foreman/worktrees
 repositories_dir: ~/.local/share/foreman/repositories # source checkouts for delegated work
 log_dir: ~/.local/share/foreman/logs
@@ -660,7 +658,7 @@ passes that call makes over the complete diff and defaults to one. Foreman recor
 B1 writing advice locally without adding a correction turn. Missing or unclear
 requirements still block planning.
 
-Planning drafts and their checks are saved in the local task file. A restart can
+Foreman saves planning drafts and their checks in the host database. A restart can
 finish posting a checked draft without planning again. If a revision changes no
 planning text, Foreman asks for a decision before spending another check. PR title
 and description edits keep existing code reviews; empty descriptions block handoff.
@@ -670,7 +668,7 @@ Runner limits live under `budgets`: `task_tokens` (2,000,000), `planning_tokens`
 count reported input and output, including cached input, and are checked between
 calls. One call can exceed the remaining tokens. Task totals survive restarts;
 planning totals use the saved call history. Older missing usage is not backfilled.
-Dollar limits apply to Claude only. The task file stores each runner call with its
+Dollar limits apply to Claude only. The task record stores each runner call with its
 stage, model, usage, times, and error; the task view shows calls and tokens by stage.
 
 ## Local issues
@@ -702,13 +700,103 @@ ID like `L-0000002A`.
   `foreman issue import work.yaml` is atomic and repeatable, `--dry-run` previews
   conflicts, and it never starts an agent or touches a tracker.
 
+## Workspace storage
+
+`storage.backend` in `config.yaml` picks where your issues, plans, questions, and PR
+links live so you can reach them from any device: `notion`, `obsidian`, or `sqlite`.
+Without a value or a configured store target, an existing workspace (including one
+from the Markdown versions) stays on `sqlite` and a new one uses `notion`. The agent host keeps the local SQLite
+database, credentials, provider sessions, worktrees, and raw logs.
+
+The machine that runs the agents (a VPS, say) keeps the dashboard open, for example
+`tmux new -s foreman foreman`. There is no daemon: each refresh pulls from the store and
+pushes to it. From a laptop or phone you only edit the store.
+
+### Notion
+
+1. Create a blank Notion page for Foreman.
+2. Create an internal connection at notion.so/profile/integrations, then share the page
+   with it (page menu, Connections).
+3. Put its token in `FOREMAN_NOTION_TOKEN` on the machine that runs the dashboard.
+   The token is never read from `config.yaml` and never printed.
+4. Set the page's ID or URL:
+
+```yaml
+storage:
+  backend: notion
+  notion:
+    parent_page_id: https://www.notion.so/Foreman-0123456789abcdef0123456789abcdef
+```
+
+5. Run `foreman storage check`. It creates the **Tasks** and **Repository Knowledge**
+   databases under the page, then creates, updates, reads, and trashes a test task and
+   reports each step.
+
+For a board, add a view of **Tasks** grouped by `Status`; Foreman creates no views.
+
+For a live read-back check, run `scripts/probe-notion.sh PAGE` on a disposable page
+shared with the integration. It reads the created task, its generated record, and
+its confirmed scope back from Notion. Use `scripts/probe-notion.sh --workflow PAGE`
+with an empty disposable page to drive queueing, two replies, and PR-link
+publication against live Notion using local stand-ins for GitHub and the agents.
+Both modes leave their test data on the disposable page.
+
+### Obsidian
+
+```yaml
+storage:
+  backend: obsidian
+  obsidian:
+    vault: ~/Documents/vault
+    folder: Foreman   # optional, the default
+```
+
+Tasks are notes in `<vault>/<folder>/Tasks/`, and knowledge is in
+`<vault>/<folder>/Repository Knowledge/<owner>/<repo>.md` (a leading or trailing dot in a name is written as `%2E`). Run `foreman storage check` to
+test it. Sync the vault to the host with whatever you already use.
+
+### Moving an existing workspace
+
+With a config that says `notion` or `obsidian`, an old database that still holds work is
+refused until you run `foreman storage move` on the machine that has it. Stop the
+dashboard and runners first. The move runs the check, copies every task, local issue,
+confirmed triage, and repository knowledge, reads everything back, and only then
+switches over. If anything differs it names the entries and stays on SQLite. Close
+other Foreman commands before the move. On retry, Foreman updates the earlier copies
+from SQLite and leaves the queue alone. Moving back to `sqlite` is not supported.
+
+### Working from the store
+
+- **Create** a page in Tasks (or a note in `Tasks/`). The next refresh gives it an
+  `L-` ID.
+- **Confirm scope** by filling `Confirmed triage` (Obsidian: a `## Confirmed triage`
+  section) and ticking `Scope confirmed`. In Obsidian, keep the hidden
+  `foreman:triage` line under the heading Foreman wrote. A note without it needs exactly
+  one such heading outside code blocks. Foreman leaves an ambiguous note unread and
+  says why in `workspace.log`. A Notion property holds at most 200,000 characters, and
+  Foreman refuses longer triage.
+- **Queue** ticks start the task on the host at the next refresh, even with auto mode off.
+  The box clears when it starts. If it cannot start, it stays ticked and the Foreman
+  section says why. A task that has not started uses the current `Repository` field
+  and triage links; a reset task stays in its repository.
+- **Answer in Notion** by copying the code in brackets shown with the current
+  question into `Answer`, followed by a space and your reply. For example, if
+  `Question` reads `[0123456789ab] Which approach?`, enter `0123456789ab A`.
+  Foreman resumes the same run and leaves the last reply visible. Replace it
+  with the new question's code and reply when you answer again.
+- **Answer in Obsidian** by typing an option label or text into the `answer`
+  key. It resumes the same run and Foreman clears the field.
+- **Status, question, branch, and PR** update after every change on the host.
+
+Foreman writes only its own fields (Obsidian: `foreman_*` keys and the region between
+`<!-- foreman:begin -->` and `<!-- foreman:end -->`). Your other keys and text are kept.
+
 ## Storage and upgrading
 
-Tasks, triage, local issues, and learnings live in one SQLite file, `database` in
-`config.yaml` (default `<data>/foreman.db`). The first start after upgrading moves your
-Markdown task files, triage records, and learnings into it; the originals stay in
-`tasks_dir/.pre-sqlite/`. It refuses while a runner is still alive, so stop running
-tasks first. **Linear support was removed:** saved Linear task records, active and
+On the first start after an upgrade from legacy Markdown storage, Foreman imports
+tasks, triage records, and repository knowledge into the host database. It keeps
+the original task files in `tasks_dir/.pre-sqlite/`. Stop running tasks before
+upgrading. **Linear support was removed:** saved Linear task records, active and
 completed, are deleted without migration. Branches, worktrees, PRs, and Linear tickets
 are untouched. Delete `linear_team`, `linear_teams`, and `linear_projects`, and use
 `github`, `local`, or `all` for `default_source`; Foreman stops with a message until you
@@ -739,8 +827,8 @@ models:
 ```
 
 `refresh` must be at least 5 seconds; foreman refuses to start with a smaller value.
-Task files and the open log are re-read every second regardless, and `r` refreshes
-the selected issue sources whenever you ask.
+The dashboard reads task records and the open log every second. Press `r` to refresh
+the selected issue sources.
 
 `include_repositories` and `exclude_repositories` accept exact repository names such as
 `acme/widgets`. A nonempty include list limits the inbox to those repositories and the

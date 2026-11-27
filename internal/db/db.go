@@ -96,6 +96,38 @@ CREATE TABLE meta (
 	value TEXT NOT NULL
 );
 `},
+	{2, "workspace cutover marker and entry map", `
+CREATE TABLE workspace (
+	id           INTEGER PRIMARY KEY CHECK (id = 1),
+	backend      TEXT NOT NULL,
+	target       TEXT NOT NULL,
+	moved_at     TEXT NOT NULL,
+	tasks        INTEGER NOT NULL DEFAULT 0,
+	issues       INTEGER NOT NULL DEFAULT 0,
+	repositories INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE workspace_entries (
+	kind             TEXT NOT NULL,
+	key              TEXT NOT NULL,
+	ref              TEXT NOT NULL DEFAULT '',
+	published_digest TEXT NOT NULL DEFAULT '',
+	answer_digest    TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (kind, key)
+);
+`},
+	{3, "workspace entry stage tracking", `
+ALTER TABLE workspace_entries ADD COLUMN stage TEXT NOT NULL DEFAULT '';
+ALTER TABLE workspace_entries ADD COLUMN stage_at TEXT NOT NULL DEFAULT '';
+`},
+	{4, "workspace entry question and store-edit tracking", `
+ALTER TABLE workspace_entries ADD COLUMN question TEXT NOT NULL DEFAULT '';
+ALTER TABLE workspace_entries ADD COLUMN fields_seen TEXT NOT NULL DEFAULT '';
+ALTER TABLE workspace_entries ADD COLUMN triage_seen TEXT NOT NULL DEFAULT '';
+`},
+	{5, "workspace queue request order", `
+ALTER TABLE workspace_entries ADD COLUMN queued_at TEXT NOT NULL DEFAULT '';
+`},
 }
 
 // SchemaVersion is the newest schema this build knows.

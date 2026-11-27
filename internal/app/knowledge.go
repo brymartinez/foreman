@@ -157,5 +157,6 @@ func (a App) IngestKnowledge(ctx context.Context, in IngestInput) (IngestResult,
 		return res, err
 	}
 	res.Saved = true
+	a.publishKnowledge(ctx, dest)
 	return res, nil
 }

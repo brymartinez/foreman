@@ -14,6 +14,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/brymartinez/foreman/internal/store"
 	"github.com/brymartinez/foreman/internal/task"
 )
 
@@ -46,7 +47,9 @@ type Config struct {
 	Notifications Notifications    `yaml:"notifications"`
 	Models        task.ModelPolicy `yaml:"models"`
 	Cleanup       Cleanup          `yaml:"cleanup"`
-	Auto          Auto             `yaml:"auto"`
+	// Storage selects where the workspace's shared records live.
+	Storage Storage `yaml:"storage"`
+	Auto    Auto    `yaml:"auto"`
 	// IncludedRepos, when nonempty, limits the inbox to these repositories and
 	// overrides ExcludedRepos.
 	IncludedRepos []task.Repo `yaml:"include_repositories"`
@@ -184,8 +187,15 @@ func Load() (Config, error) {
 	if strings.TrimSpace(cfg.Database) == "" { // database: with no value means the default
 		cfg.Database = filepath.Join(data, "foreman.db")
 	}
-	for _, p := range []*string{&cfg.Database, &cfg.TriageDir, &cfg.TasksDir, &cfg.WorktreesDir, &cfg.RepositoriesDir, &cfg.LogDir, &cfg.KnowledgeDir} {
+	for _, p := range []*string{&cfg.Database, &cfg.TriageDir, &cfg.TasksDir, &cfg.WorktreesDir, &cfg.RepositoriesDir, &cfg.LogDir, &cfg.KnowledgeDir, &cfg.Storage.Obsidian.Vault} {
 		*p = expandHome(*p, home)
+	}
+	_, statErr := os.Stat(cfg.Database)
+	// An earlier version kept its work in Markdown, and the upgrade that moves it
+	// into the database has yet to run.
+	existing := statErr == nil || store.HasLegacy(store.Legacy{TasksDir: cfg.TasksDir, TriageDir: cfg.TriageDir, KnowledgeDir: cfg.KnowledgeDir})
+	if err := resolveStorage(&cfg.Storage, existing); err != nil {
+		return Config{}, fmt.Errorf("%s: %w", path, err)
 	}
 	if cfg.Refresh < MinRefresh {
 		return Config{}, fmt.Errorf("%s: refresh is %d seconds; the minimum is %d", path, cfg.Refresh, MinRefresh)

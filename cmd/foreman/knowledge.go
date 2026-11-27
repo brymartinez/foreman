@@ -13,6 +13,8 @@ import (
 	"github.com/brymartinez/foreman/internal/cli"
 	"github.com/brymartinez/foreman/internal/config"
 	"github.com/brymartinez/foreman/internal/knowledge"
+	"github.com/brymartinez/foreman/internal/workspace"
+	"go.yaml.in/yaml/v3"
 )
 
 // runKnowledge runs `foreman knowledge export` or `ingest`. Neither needs the stage
@@ -20,6 +22,10 @@ import (
 func runKnowledge(ctx context.Context, cfg config.Config, st state, cmd cli.Command, stdout, stderr io.Writer) int {
 	a := app.App{
 		Knowledge: st.Knowledge,
+		Workspace: st.Workspace,
+		WorkspaceLog: func(format string, args ...any) {
+			fmt.Fprintf(stderr, "foreman: "+format+"\n", args...)
+		},
 		Merger: agent.Mergers{
 			Claude: agent.Claude{Bin: "claude", Exec: agent.RunCommand},
 			Codex:  agent.Codex{Bin: "codex", Exec: agent.RunCommand},
@@ -71,8 +77,62 @@ func runKnowledge(ctx context.Context, cfg config.Config, st state, cmd cli.Comm
 		if cmd.DryRun && res.Mode != app.IngestUnchanged {
 			fmt.Fprintf(stdout, "\nDry run: nothing was saved. The resulting knowledge.md:\n\n%s", res.Result.Guidance())
 		}
+	case cli.KnowledgeReview:
+		sync, err := sharedWorkspace(st)
+		if err != nil {
+			return failed(err)
+		}
+		review, err := sync.ReviewKnowledge(ctx, string(cmd.Repo))
+		if err != nil {
+			return failed(err)
+		}
+		if err := writeKnowledgeReview(stdout, review); err != nil {
+			return failed(err)
+		}
+	case cli.KnowledgeApprove:
+		sync, err := sharedWorkspace(st)
+		if err != nil {
+			return failed(err)
+		}
+		if err := sync.ApproveKnowledge(ctx, string(cmd.Repo), cmd.Digest, cmd.HostDigest); err != nil {
+			return failed(err)
+		}
+		fmt.Fprintf(stdout, "Approved %s at shared digest %s.\n", cmd.Repo, cmd.Digest)
 	}
 	return 0
+}
+
+func sharedWorkspace(st state) (*workspace.Sync, error) {
+	sync, ok := st.Workspace.(*workspace.Sync)
+	if !ok || sync == nil {
+		return nil, errors.New("knowledge review and approval require storage.backend to use notion or obsidian")
+	}
+	return sync, nil
+}
+
+func writeKnowledgeReview(w io.Writer, review workspace.KnowledgeReview) error {
+	fmt.Fprintf(w, "Repository: %s\nShared digest: %s\nHost digest: %s\n\n", review.Repo, review.SharedDigest, review.HostDigest)
+	fmt.Fprintln(w, "Current host snapshot:")
+	if err := writeReviewSnapshot(w, review.Host); err != nil {
+		return err
+	}
+	fmt.Fprintln(w, "Pending shared snapshot:")
+	if err := writeReviewSnapshot(w, review.Shared); err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "Approve the snapshot you reviewed with:\nforeman knowledge approve %s --digest %s --host-digest %s\n", review.Repo, review.SharedDigest, review.HostDigest)
+	return nil
+}
+
+func writeReviewSnapshot(w io.Writer, snapshot knowledge.Snapshot) error {
+	snapshot.ExportedAt = time.Time{}
+	snapshot.Format = knowledge.FormatVersion
+	raw, err := yaml.Marshal(snapshot)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(raw)
+	return err
 }
 
 func ingestSummary(res app.IngestResult) string {

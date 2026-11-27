@@ -31,6 +31,14 @@ func (s stubSource) Tasks(context.Context) ([]*task.Record, error) { return s.re
 func (s stubSource) Start(context.Context, app.StartRequest) (*task.Record, error) {
 	return s.rec, s.err
 }
+func (s stubSource) ReserveSlot(context.Context, task.Key) (func(), error) {
+	return func() {}, nil
+}
+func (s stubSource) StopLaunches() <-chan struct{} {
+	done := make(chan struct{})
+	close(done)
+	return done
+}
 func (s stubSource) ProposeRepository(context.Context, task.Key) (app.RepositoryProposal, error) {
 	return app.RepositoryProposal{}, s.err
 }
@@ -656,5 +664,61 @@ func TestAHiddenTaskReturnsWhenTheSourceIncludesIt(t *testing.T) {
 	readLocal(context.Background(), s, &m)
 	if len(m.Tasks) != 2 {
 		t.Errorf("both-source view tasks = %d, want 2", len(m.Tasks))
+	}
+}
+
+type fullSource struct {
+	stubSource
+	starts *int
+}
+
+func (s fullSource) ReserveSlot(context.Context, task.Key) (func(), error) {
+	return nil, fmt.Errorf("%w: 1 runs are active and auto.max_concurrent is 1", app.ErrNoSlot)
+}
+
+func (s fullSource) Start(context.Context, app.StartRequest) (*task.Record, error) {
+	*s.starts++
+	return nil, nil
+}
+
+func TestAnAutoStartWithoutAFreeSlotWaitsForTheNextRefresh(t *testing.T) {
+	starts := 0
+	key := task.Key{Repo: "a/b", Number: 1}
+	var m Model
+	m.tried = mark(m.tried, key)
+	m.starting = mark(m.starting, key)
+	r := autoStart(context.Background(), fullSource{starts: &starts}, app.StartRequest{Repo: "a/b", Issue: 1}, nil)
+	m.Done(r.key)
+	apply(&m, r)
+	if starts != 0 || !strings.Contains(m.Message, "free slot") {
+		t.Fatalf("starts %d, message %q", starts, m.Message)
+	}
+	if !m.tried[key] || m.prior(key) != nil {
+		t.Fatalf("tried %v, prior %+v: it must wait, with no route to reuse", m.tried[key], m.prior(key))
+	}
+	m.retryWaiting()
+	if m.tried[key] {
+		t.Fatal("the next refresh must try it again")
+	}
+}
+
+func TestQuittingWaitsForALaunchUnderWay(t *testing.T) {
+	m := Model{Width: 100, Height: 30}
+	launched := make(chan struct{})
+	returned := make(chan struct{})
+	go func() {
+		awaitLaunches(io.Discard, &m, launched)
+		close(returned)
+	}()
+	select {
+	case <-returned:
+		t.Fatal("the dashboard exited while a launch was under way")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(launched)
+	select {
+	case <-returned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the dashboard never exited")
 	}
 }

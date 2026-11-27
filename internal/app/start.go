@@ -40,6 +40,7 @@ var ErrDelegated = errors.New("already delegated")
 // Start prepares the worktree and task file, then launches the detached runner.
 // Rerunning it for a FAILED task, or one whose runner died, resumes from durable state.
 func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) {
+	defer trackStart(req.Key, req.Repo, req.Issue)()
 	if a.Triage != nil && req.Key.Source == task.Local {
 		unlock, err := a.Triage.LockStart(req.Key)
 		if err != nil {
@@ -230,6 +231,12 @@ func (a App) Start(ctx context.Context, req StartRequest) (*task.Record, error) 
 	}
 
 	now := a.Now()
+	// Held from the claim to the spawn, so a quitting dashboard finishes this start.
+	release, err := a.Launches.hold()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	var token string
 	_, err = a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
 		if cur == nil {
@@ -442,15 +449,24 @@ func (a App) sourceRepo(ctx context.Context, req *StartRequest) (RepoInfo, error
 	return info, nil
 }
 
+// launchTimeout bounds the work between a saved claim and its runner, which no
+// longer ends with the caller's context.
+var launchTimeout = 5 * time.Minute
+
 // launch spawns the runner for the launch claim token, taken with the update that
 // moved the task into a runnable stage, and records its log. If it can't, it marks
-// the task FAILED and releases the claim.
+// the task FAILED and releases the claim. The claim is already saved, so a caller
+// cancelled by a signal does not stop it: that would leave an active task with no
+// runner.
 func (a App) launch(ctx context.Context, key task.Key, token string) (*task.Record, error) {
+	ctx = context.WithoutCancel(ctx)
+	prepare, cancel := context.WithTimeout(ctx, launchTimeout)
+	defer cancel()
 	var pid int
 	var logPath string
-	spawnErr := a.restoreWorktree(ctx, key)
+	spawnErr := a.restoreWorktree(prepare, key)
 	if spawnErr == nil {
-		spawnErr = a.launchAccount(ctx, key)
+		spawnErr = a.launchAccount(prepare, key)
 	}
 	if errors.Is(spawnErr, errTaskRemoved) {
 		return nil, spawnErr

@@ -98,6 +98,10 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			}
 			ci.CheckedAt = a.Now()
 		}
+		release, err := a.Launches.hold()
+		if err != nil {
+			continue // quitting: the next refresh advances the task
+		}
 		var note, token string
 		updated, err := a.update(ctx, r.Key, func(cur *task.Record) (*task.Record, error) {
 			if cur.Delegation == nil || cur.Delegation.PR != r.Delegation.PR {
@@ -125,13 +129,12 @@ func (a App) gate(ctx context.Context, recs []*task.Record) (map[task.Key][]stri
 			}
 			return cur, nil
 		})
+		if err == nil && token != "" {
+			updated, err = a.launch(ctx, r.Key, token)
+		}
+		release()
 		if err != nil {
 			return nil, nil, nil, err
-		}
-		if token != "" {
-			if updated, err = a.launch(ctx, r.Key, token); err != nil {
-				return nil, nil, nil, err
-			}
 		}
 		if note != "" {
 			notes[r.Key] = append(notes[r.Key], note)
@@ -280,6 +283,11 @@ func (a App) recheckHandoffPlan(ctx context.Context, rec *task.Record, pr PullRe
 	if readErr == nil && !changed {
 		return nil, "", nil
 	}
+	release, err := a.Launches.hold()
+	if err != nil {
+		return nil, "", err
+	}
+	defer release()
 	var note, token string
 	updated, err := a.update(ctx, rec.Key, func(cur *task.Record) (*task.Record, error) {
 		if cur == nil || cur.Delegation == nil || cur.Delegation.PR != pr.Key.Number || cur.State != rec.State || cur.Delegation.RunnerPID != 0 || launching(cur) {
@@ -510,6 +518,11 @@ func handBackOrHold(rec *task.Record, now time.Time) bool {
 // launchFinalCheck starts the runner for a task handBackOrHold sent to its final check,
 // unless a runner or launch already has it.
 func (a App) launchFinalCheck(ctx context.Context, key task.Key) (*task.Record, error) {
+	release, err := a.Launches.hold()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	var token string
 	updated, err := a.update(ctx, key, func(cur *task.Record) (*task.Record, error) {
 		var err error
