@@ -119,8 +119,9 @@ usage error. An exhausted provider was not observed live.
 The backend in `internal/notion` relies on the behavior below. The unit tests check it
 against a stand-in (`internal/notion/fake_test.go`, `scripts/notion-stub.py`), which is
 written from Notion's documentation, not from a real workspace. Run
-`scripts/probe-notion.sh` with a token to re-verify it against a real page before
-trusting a change here.
+`scripts/probe-notion.sh PAGE` with a token and a disposable page to verify live task,
+record, and scope read-back. `--workflow PAGE` exercises live queueing, replies, and
+PR-link publication on an empty disposable page with stub agents and GitHub.
 
 - Every request sends `Authorization: Bearer <token>` and `Notion-Version: 2025-09-03`.
 - Databases are created with `POST /v1/databases` under a parent page, with the schema in

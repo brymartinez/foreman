@@ -1610,7 +1610,7 @@ PY
 # device: create, confirm scope, queue, answer two questions, and see the PR. The store
 # adapter is a set of functions named <store>_create, _confirm, _queue, _answer, _field.
 workflow() {
-	local s=$1 id file
+	local s=$1 id file dump
 	"${s}_create"
 	check "a refresh gives the new entry an L- ID" refresh_until 20 "[[ \"\$(${s}_field 'Foreman ID')\" =~ ^L-[0-9A-F]{8}\$ ]]"
 	id=$("${s}_field" 'Foreman ID')
@@ -1624,7 +1624,7 @@ workflow() {
 	"${s}_queue"
 	check "queueing starts the task with auto mode off" refresh_until 30 "grep -q '^state: NEEDS_DECISION' '$file'"
 	check "the question reaches the store" refresh_until 30 "${s}_field Question | grep -qF 'Retry 4xx?'"
-	check "the start clears the Queue box" refresh_until 20 "! ${s}_field Queue | grep -qi true"
+	check "the start clears the Queue box" refresh_until 20 "${s}_queue_ack"
 	sleep 1
 	"${s}_answer" B
 	check "the first answer leaves the second question" refresh_until 30 "${s}_field Question | grep -qF 'Cap retries?'"
@@ -1636,8 +1636,9 @@ workflow() {
 	check "the PR link reaches the store" refresh_until 40 "${s}_field PR | grep -q 'pull/'"
 	check "the planner resumed once" test "$(grep -c 'planner resume' "$state/role-sessions.log")" = 1
 	check "resume carries both answers" bash -c "grep -qF 'Decision: B. 4xx and 5xx' '$state/prompt.txt' && grep -qF 'Decision: A. 3 tries' '$state/prompt.txt'"
-	check "the store holds no host path" bash -c "! ${s}_dump | grep -qF '$sandbox'"
-	check "nor a provider session id or runner pid" bash -c "! ${s}_dump | grep -qi 'session_id\\|runner_pid'"
+	dump=$("${s}_dump")
+	check "the store holds no host path" bash -c '! grep -qF "$1" <<<"$2"' bash "$sandbox" "$dump"
+	check "nor a provider session id or runner pid" bash -c '! grep -qiE "session_id|runner_pid" <<<"$1"' bash "$dump"
 }
 
 obsidian_note() { echo "$sandbox/vault/Foreman/Tasks/Search page.md"; }
@@ -1650,6 +1651,7 @@ obsidian_confirm() {
 	note_set "$(obsidian_note)" scope_confirmed true
 }
 obsidian_queue() { note_set "$(obsidian_note)" queue true; }
+obsidian_queue_ack() { [ "$(obsidian_field Queue)" = false ]; }
 obsidian_answer() { note_set "$(obsidian_note)" answer "$1"; }
 obsidian_answer_ack() { [ -z "$(obsidian_field Answer)" ]; }
 obsidian_dump() { cat "$(obsidian_note)"; }
@@ -1689,22 +1691,40 @@ scenario_obsidian() {
 }
 
 notion_stub() { python3 -I "$root/scripts/notion-stub.py" "$@"; }
+notion_live_probe() { python3 -I "$root/scripts/notion-probe.py" "$@"; }
 notion_admin() { # notion_admin <verb> [json]
-	if [ $# -gt 1 ]; then
+	if [ -n "${FOREMAN_PROBE_TASKS_SOURCE:-}" ]; then
+		local verb=$1
+		shift
+		notion_live_probe "$verb" "$FOREMAN_PROBE_TASKS_SOURCE" "$@"
+	elif [ $# -gt 1 ]; then
 		curl -fsS -X POST -H 'Content-Type: application/json' -d "$2" "$FOREMAN_NOTION_API/__admin/$1"
 	else
 		curl -fsS "$FOREMAN_NOTION_API/__admin/$1"
 	fi
 }
 notion_json() { python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(d.get(sys.argv[1], "") if isinstance(d, dict) else "")' "$1"; }
-notion_page() { curl -fsS -G --data-urlencode "prop=Name" --data-urlencode "equals=Search page" "$FOREMAN_NOTION_API/__admin/page"; }
+notion_page() {
+	if [ -n "${FOREMAN_PROBE_TASKS_SOURCE:-}" ]; then
+		notion_live_probe page "$FOREMAN_PROBE_TASKS_SOURCE"
+	else
+		curl -fsS -G --data-urlencode "prop=Name" --data-urlencode "equals=Search page" "$FOREMAN_NOTION_API/__admin/page"
+	fi
+}
 notion_field() { notion_page 2>/dev/null | notion_json "$1"; }
-notion_dump() { notion_admin pages; }
+notion_dump() {
+	if [ -n "${FOREMAN_PROBE_TASKS_SOURCE:-}" ]; then
+		notion_admin dump
+	else
+		notion_admin pages
+	fi
+}
 notion_create() { notion_admin create '{"set":{"Name":"Search page","Repository":"acme/widgets"}}' >/dev/null; }
 notion_confirm() {
 	notion_admin edit '{"find":{"Name":"Search page"},"set":{"Confirmed triage":"Proceed with search as described. Implement in https://github.com/acme/widgets.","Scope confirmed":true}}' >/dev/null
 }
 notion_queue() { notion_admin edit '{"find":{"Name":"Search page"},"set":{"Queue":true}}' >/dev/null; }
+notion_queue_ack() { [ "$(notion_field Queue)" = False ]; }
 notion_answer() {
 	local code
 	code=$(notion_field Question | sed -n 's/^\[\([0-9a-f][0-9a-f]*\)\].*/\1/p')
@@ -1712,7 +1732,7 @@ notion_answer() {
 	notion_admin edit "{\"find\":{\"Name\":\"Search page\"},\"set\":{\"Answer\":\"$code $1\"}}" >/dev/null
 }
 notion_answer_ack() { notion_field Answer | grep -qE '^[a-f0-9]{12} B$'; }
-export -f notion_admin notion_json notion_page notion_field notion_dump
+export -f notion_live_probe notion_admin notion_json notion_page notion_field notion_dump
 
 scenario_notion() {
 	echo "notion: move a workspace into Notion with a retry, then run a task from pages"
@@ -1744,6 +1764,25 @@ scenario_notion() {
 	workflow notion
 	check "the token never reaches the logs or the task files" bash -c "! grep -rqF secret_stub_token '$sandbox/logs' '$sandbox/tasks' 2>/dev/null"
 	unset FOREMAN_NOTION_API FOREMAN_NOTION_TOKEN
+}
+
+# Only scripts/probe-notion.sh --workflow opts into this scenario.
+scenario_notion_live() {
+	[ -n "${FOREMAN_PROBE_NOTION_PARENT:-}" ] && [ -n "${FOREMAN_PROBE_NOTION_VERSION:-}" ] || {
+		echo "use scripts/probe-notion.sh --workflow <empty disposable page>" >&2
+		return 1
+	}
+	notion_live_probe blank "$FOREMAN_PROBE_NOTION_PARENT"
+	setup notion-live
+	use_storage "storage:
+  backend: notion
+  notion:
+    parent_page_id: $FOREMAN_PROBE_NOTION_PARENT"
+	foreman storage check
+	FOREMAN_PROBE_TASKS_SOURCE="$(notion_live_probe source "$FOREMAN_PROBE_NOTION_PARENT")"
+	export FOREMAN_PROBE_TASKS_SOURCE
+	workflow notion
+	unset FOREMAN_PROBE_TASKS_SOURCE
 }
 
 scenarios=${*:-runner review_before_pr retry_committed_correction self_assessment complete_diff_review quota_pause full_check final_check_stop plan_reuse notify logs inbox inbox_lifecycle rereview conflicts respond cancel reset feedback conflict tui history local account knowledge_transfer obsidian notion}

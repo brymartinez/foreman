@@ -1,23 +1,29 @@
 #!/usr/bin/env bash
-# Re-verifies the Notion API behavior foreman's Notion backend depends on, against a
-# real page. It is not part of the e2e suite and needs a token:
-#
-#   FOREMAN_NOTION_TOKEN=secret_... scripts/probe-notion.sh <parent page id or URL>
-#
-# The page must be shared with the integration. The probe creates the Tasks and
-# Repository Knowledge databases under it if they are missing, runs
-# `foreman storage check`, then adds one probe issue and confirms its scope from a
-# throwaway workspace, which publishes the entry and then updates it. It does not run
-# `storage move`: a move expects the store to hold only the workspace it copies, so
-# it would reject the entries a populated Tasks database already has. It never reads
-# or changes another page. The probe task stays in Tasks for you to trash.
-# Rerun it after Notion changes its API version.
+# Probe a designated disposable Notion page shared with FOREMAN_NOTION_TOKEN.
+# The default mode reads back a CLI-created task, its payload, and its confirmation.
+# --workflow drives a local sandbox against live Notion with stub agents and GitHub.
+# Both modes leave the created databases and probe task on the disposable page.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 [ -n "${FOREMAN_NOTION_TOKEN:-}" ] || { echo "set FOREMAN_NOTION_TOKEN" >&2; exit 2; }
-[ $# -eq 1 ] || { echo "usage: $0 <parent page id or URL>" >&2; exit 2; }
-parent="$1"
+mode=readback
+if [ "${1:-}" = "--workflow" ]; then
+	mode=workflow
+	shift
+fi
+[ $# -eq 1 ] || { echo "usage: $0 [--workflow] <disposable parent page ID or URL>" >&2; exit 2; }
+export FOREMAN_PROBE_NOTION_VERSION="$(sed -n 's/^const Version = "\([^"]*\)".*/\1/p' "$root/internal/notion/client.go")"
+[ -n "$FOREMAN_PROBE_NOTION_VERSION" ] || { echo "could not read the Notion API version" >&2; exit 1; }
+unset FOREMAN_NOTION_API
+probe() { python3 -I "$root/scripts/notion-probe.py" "$@"; }
+parent="$(probe page-id "$1")"
+cd "$root"
+
+if [ "$mode" = "workflow" ]; then
+	export FOREMAN_PROBE_NOTION_PARENT="$parent"
+	exec "$root/scripts/e2e.sh" notion_live
+fi
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -39,10 +45,14 @@ YAML
 export FOREMAN_CONFIG="$work/config.yaml"
 printf 'Probe scope.\n' >"$work/triage.md"
 
-echo "# Notion-Version $(sed -n "s/^const Version = //p" "$root/internal/notion/client.go")"
+echo "# Notion-Version $FOREMAN_PROBE_NOTION_VERSION"
 "$work/foreman" storage check
-id="$(printf 'Created by scripts/probe-notion.sh.' | "$work/foreman" issue add --title "Foreman probe $(date -u +%Y-%m-%dT%H:%M:%SZ)" --description-file -)"
-echo "ok   created $id"
+source="$(probe source "$parent")"
+title="Foreman probe $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+id="$(printf 'Created by scripts/probe-notion.sh.' | "$work/foreman" issue add --title "$title" --description-file -)"
+probe check "$source" "$id" "$title"
+echo "ok   read back the published task $id and its record"
 "$work/foreman" issue triage "$id" --file "$work/triage.md"
-echo "ok   confirmed its scope, which updates the entry"
-echo "The probe task $id stays in the Tasks database. Trash it in Notion when done."
+probe check "$source" "$id" "$title" "Probe scope."
+echo "ok   read back the confirmed scope"
+echo "The probe task $id stays in the disposable Tasks database."

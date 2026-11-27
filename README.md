@@ -734,6 +734,13 @@ storage:
 
 For a board, add a view of **Tasks** grouped by `Status`; Foreman creates no views.
 
+For a live read-back check, run `scripts/probe-notion.sh PAGE` on a disposable page
+shared with the integration. It reads the created task, its generated record, and
+its confirmed scope back from Notion. Use `scripts/probe-notion.sh --workflow PAGE`
+with an empty disposable page to drive queueing, two replies, and PR-link
+publication against live Notion using local stand-ins for GitHub and the agents.
+Both modes leave their test data on the disposable page.
+
 ### Obsidian
 
 ```yaml
