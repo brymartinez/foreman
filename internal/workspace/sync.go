@@ -322,6 +322,15 @@ type built struct {
 	prev    row
 }
 
+func (b built) seed() TaskSeed {
+	seed := TaskSeed{Name: b.r.Title, Repository: b.r.Repo, SourceURL: b.r.URL, ConfirmedTriage: b.triage, ScopeConfirmed: b.triage != ""}
+	if b.li != nil {
+		seed.Name, seed.Repository, seed.SourceURL = b.li.Title, b.li.Repo, b.li.SourceURL
+		seed.Description, seed.Tags = b.li.Description, b.li.Tags
+	}
+	return seed
+}
+
 // build makes the record for key from saved state. It reports false when the host
 // holds neither a task nor a local issue for key.
 func (s *Sync) build(ctx context.Context, key task.Key) (built, bool, error) {
@@ -371,7 +380,7 @@ func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
 	if err != nil || !ok {
 		return err
 	}
-	r, li, triage, prev, status, stageAt := b.r, b.li, b.triage, b.prev, b.status, b.stageAt
+	r, triage, prev, status, stageAt := b.r, b.triage, b.prev, b.status, b.stageAt
 	digest := hash(r.Digest(), reason)
 	qk := app.QuestionKey(b.rec)
 	var code string
@@ -402,10 +411,7 @@ func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
 		}
 		return nil
 	}
-	seed := TaskSeed{Name: r.Title, Repository: r.Repo, SourceURL: r.URL, ConfirmedTriage: triage, ScopeConfirmed: triage != ""}
-	if li != nil {
-		seed.Description, seed.Tags = li.Description, li.Tags
-	}
+	seed := b.seed()
 	if !coded && stored != prev.Question && !adopt {
 		// An answer already in the store was typed before this question existed.
 		if err := s.clearStaleAnswer(ctx, id); err != nil {
@@ -424,7 +430,7 @@ func (s *Sync) publish(ctx context.Context, key task.Key, reason string) error {
 			return fmt.Errorf("read the shared confirmation for %s: %w", id, err)
 		}
 	}
-	ref, err := s.Backend.UpsertTask(ctx, TaskPublish{Record: r, ReplyCode: code, Reason: scrubHost(reason, b.rec), Create: seed, Resume: unfinished || s.Reseed, Reseed: s.Reseed || confirm})
+	ref, err := s.Backend.UpsertTask(ctx, TaskPublish{Record: r, ReplyCode: code, Reason: scrubHost(reason, b.rec), Create: seed, Resume: unfinished, Reseed: s.Reseed || confirm, Move: s.Reseed})
 	if err != nil {
 		if prev.Ref == "" {
 			// The entry may exist half written, and a create whose response was lost

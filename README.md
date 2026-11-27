@@ -754,8 +754,9 @@ With a config that says `notion` or `obsidian`, an old database that still holds
 refused until you run `foreman storage move` on the machine that has it. Stop the
 dashboard and runners first. The move runs the check, copies every task, local issue,
 confirmed triage, and repository knowledge, reads everything back, and only then
-switches over. If anything differs it names the entries and stays on SQLite. It is safe
-to run again, and it sets no `Queue` box. Moving back to `sqlite` is not supported.
+switches over. If anything differs it names the entries and stays on SQLite. Close
+other Foreman commands before the move. On retry, Foreman updates the earlier copies
+from SQLite and leaves the queue alone. Moving back to `sqlite` is not supported.
 
 ### Working from the store
 

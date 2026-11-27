@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -903,5 +904,92 @@ func TestTaskFieldsReadsOnlyTheMatchingPageProperties(t *testing.T) {
 	}
 	if e, err := b.TaskFields(ctx, "L-FFFFFFFF"); err != nil || e != nil {
 		t.Fatalf("unknown task = %+v, %v", e, err)
+	}
+}
+
+func TestPublishKeepsAUserHeadingNamedForemanRecord(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	p := workspace.TaskPublish{Record: rec("L-0A1B2C3D", "INBOX", ""), Create: workspace.TaskSeed{Name: "Task"}}
+	ref, err := b.UpsertTask(ctx, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userHeading := block("heading_2", map[string]any{
+		"rich_text":     richText(sectionTitle),
+		"is_toggleable": true,
+		"children":      paragraphs("User notes"),
+	})
+	ids, err := b.C.appendBlocks(ctx, ref, []any{userHeading})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Record.Status = "PLANNING"
+	if _, err := b.UpsertTask(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	blocks, err := b.C.blocksOf(ctx, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(blocks, func(block blockObj) bool { return block.ID == ids[0] }) {
+		t.Fatalf("publication removed the user heading, blocks = %+v", blocks)
+	}
+	es, err := b.ListTasks(ctx)
+	if err != nil || len(es) != 1 || !strings.Contains(es[0].Description, sectionTitle) {
+		t.Fatalf("user heading disappeared from issue description: %+v, %v", es, err)
+	}
+}
+
+func TestMoveRetryOverwritesSeededIssueFieldsAndKeepsOriginalTagNames(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		name := "first move uses owned description"
+		if legacy {
+			name = "previous version wrote a flat description"
+		}
+		t.Run(name, func(t *testing.T) {
+			b, f, _ := newBackend(t)
+			ctx := context.Background()
+			r := rec("L-0A1B2C3D", "INBOX", "")
+			r.Issue = &workspace.Issue{Description: "Old description", Status: "open"}
+			p := workspace.TaskPublish{
+				Record: r, Move: !legacy, Reseed: true,
+				Create: workspace.TaskSeed{Name: "Old name", Description: r.Issue.Description},
+			}
+			ref, err := b.UpsertTask(ctx, p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tags := []string{"normal", "front,back", tagAlias("front,back")}
+			p.Create = workspace.TaskSeed{
+				Name: "New name", Description: "Rewritten description",
+				Repository: "o/new", SourceURL: "https://example.com/issue", Tags: tags,
+				ConfirmedTriage: "New scope", ScopeConfirmed: true,
+			}
+			p.Record.Issue.Description = p.Create.Description
+			p.Move = true
+			for range 2 {
+				got, err := b.UpsertTask(ctx, p)
+				if err != nil || got != ref {
+					t.Fatalf("retry wrote a different page: %q %v", got, err)
+				}
+			}
+			es, err := b.ListTasks(ctx)
+			if err != nil || len(es) != 1 {
+				t.Fatalf("entries = %+v, %v", es, err)
+			}
+			e := es[0]
+			if e.Name != p.Create.Name || e.Description != p.Create.Description ||
+				e.Repository != p.Create.Repository || e.SourceURL != p.Create.SourceURL ||
+				e.ConfirmedTriage != p.Create.ConfirmedTriage || !e.ScopeConfirmed || !slices.Equal(e.Tags, tags) {
+				t.Fatalf("reseeded fields = %+v", e)
+			}
+			raw := f.pages[ref].props["Tags"].(map[string]any)["multi_select"].([]any)
+			for _, item := range raw {
+				if strings.Contains(item.(map[string]any)["name"].(string), ",") {
+					t.Fatal("the request used a comma in a Notion option name")
+				}
+			}
+		})
 	}
 }

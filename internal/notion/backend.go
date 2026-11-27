@@ -2,6 +2,7 @@ package notion
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -68,7 +69,7 @@ func tasksSchema() map[string]map[string]any {
 		"Name": spec("title"), "Foreman ID": spec("rich_text"), "Status": spec("select"),
 		"Source":     {"select": map[string]any{"options": []any{map[string]any{"name": "GitHub"}, map[string]any{"name": "Local"}}}},
 		"Repository": spec("rich_text"), "Source URL": spec("url"), "Tags": spec("multi_select"),
-		"Confirmed triage": spec("rich_text"), "Scope confirmed": spec("checkbox"), "Queue": spec("checkbox"),
+		"Foreman tag aliases": spec("rich_text"), "Confirmed triage": spec("rich_text"), "Scope confirmed": spec("checkbox"), "Queue": spec("checkbox"),
 		"Question": spec("rich_text"), "Answer": spec("rich_text"), "Branch": spec("rich_text"),
 		"PR": spec("url"), "Commit": spec("rich_text"), "Updated by Foreman": spec("date"),
 	}
@@ -245,8 +246,14 @@ func taskFields(p pageObj) workspace.TaskEntry {
 	if u := pr["Source URL"].URL; u != nil {
 		e.SourceURL = *u
 	}
+	var aliases map[string]string
+	_ = json.Unmarshal([]byte(plainOf(pr["Foreman tag aliases"].RichText)), &aliases)
 	for _, t := range pr["Tags"].MultiSelect {
-		e.Tags = append(e.Tags, t.Name)
+		tag := t.Name
+		if original, ok := aliases[tag]; ok && tagAlias(original) == tag {
+			tag = original
+		}
+		e.Tags = append(e.Tags, tag)
 	}
 	if question, ok := strings.CutPrefix(plainOf(pr["Question"].RichText), "["); ok {
 		e.ReplyCode, _, _ = strings.Cut(question, "] ")
@@ -354,6 +361,39 @@ func foremanProps(r workspace.Record, replyCode string, at time.Time) map[string
 	return props
 }
 
+const tagAliasPrefix = "~foreman-tag-"
+
+func tagAlias(tag string) string {
+	hash := sha256.Sum256([]byte(tag))
+	return fmt.Sprintf("%s%x", tagAliasPrefix, hash[:12])
+}
+
+func seedIssueProps(props map[string]any, s workspace.TaskSeed) error {
+	props["Name"] = map[string]any{"title": richText(s.Name)}
+	props["Repository"] = rt(s.Repository)
+	props["Source URL"] = map[string]any{"url": nil}
+	if s.SourceURL != "" {
+		props["Source URL"] = map[string]any{"url": s.SourceURL}
+	}
+	tags := make([]any, 0, len(s.Tags))
+	aliases := map[string]string{}
+	for _, name := range s.Tags {
+		if strings.Contains(name, ",") || strings.HasPrefix(strings.ToLower(name), tagAliasPrefix) {
+			alias := tagAlias(name)
+			aliases[alias] = name
+			name = alias
+		}
+		tags = append(tags, map[string]any{"name": name})
+	}
+	raw, err := json.Marshal(aliases)
+	if err != nil {
+		return err
+	}
+	props["Tags"] = map[string]any{"multi_select": tags}
+	props["Foreman tag aliases"] = rtLong(string(raw))
+	return nil
+}
+
 func (b *Backend) findByID(ctx context.Context, source, prop, id string, kind string) (*pageObj, error) {
 	pages, err := b.queryPages(ctx, source, map[string]any{"property": prop, kind: map[string]any{"equals": id}})
 	if err != nil || len(pages) == 0 {
@@ -382,20 +422,13 @@ func (b *Backend) UpsertTask(ctx context.Context, p workspace.TaskPublish) (stri
 	if page == nil {
 		s := p.Create
 		props := foremanProps(p.Record, p.ReplyCode, b.now())
-		props["Name"] = map[string]any{"title": richText(s.Name)}
-		props["Repository"] = rt(s.Repository)
+		if err := seedIssueProps(props, s); err != nil {
+			return "", err
+		}
 		props["Confirmed triage"] = rtLong(strings.TrimSpace(s.ConfirmedTriage))
 		props["Scope confirmed"] = map[string]any{"checkbox": s.ScopeConfirmed}
-		if s.SourceURL != "" {
-			props["Source URL"] = map[string]any{"url": s.SourceURL}
-		}
-		tags := []any{}
-		for _, t := range s.Tags {
-			tags = append(tags, map[string]any{"name": t})
-		}
-		props["Tags"] = map[string]any{"multi_select": tags}
 		var desc []any
-		if strings.TrimSpace(s.Description) != "" {
+		if !p.Move && strings.TrimSpace(s.Description) != "" {
 			desc = paragraphs(s.Description)
 		}
 		first := desc[:takeBlocks(desc)]
@@ -416,6 +449,11 @@ func (b *Backend) UpsertTask(ctx context.Context, p workspace.TaskPublish) (stri
 	} else {
 		ref = page.ID
 		props := foremanProps(p.Record, p.ReplyCode, b.now())
+		if p.Move && p.Record.Issue != nil {
+			if err := seedIssueProps(props, p.Create); err != nil {
+				return ref, err
+			}
+		}
 		if p.Reseed {
 			props["Confirmed triage"] = rtLong(strings.TrimSpace(p.Create.ConfirmedTriage))
 			props["Scope confirmed"] = map[string]any{"checkbox": p.Create.ScopeConfirmed}
@@ -430,7 +468,65 @@ func (b *Backend) UpsertTask(ctx context.Context, p workspace.TaskPublish) (stri
 		}
 	}
 	b.invalidate(ref)
+	if p.Move && p.Record.Issue != nil {
+		if err := b.reseedDescription(ctx, ref, p); err != nil {
+			return ref, err
+		}
+	}
 	return ref, b.C.replaceSection(ctx, ref, text, string(payload))
+}
+
+// reseedDescription reconciles descriptions copied from SQLite. Linked sections
+// are owned by Foreman. Legacy flat paragraphs can be removed only when they
+// match what the previous import wrote.
+func (b *Backend) reseedDescription(ctx context.Context, ref string, p workspace.TaskPublish) error {
+	body, err := b.C.readBody(ctx, ref)
+	if err != nil {
+		return err
+	}
+	want := strings.TrimSpace(p.Create.Description)
+	if strings.TrimSpace(body.Description) == want {
+		return nil
+	}
+	if len(body.LegacyParagraphs) > 0 || body.LegacyDescription != "" {
+		previous, err := previousDescription(body.Payloads, p.Record.ID)
+		if err != nil || len(body.LegacyParagraphs) != body.DescBlocks ||
+			!strings.HasSuffix(strings.TrimSpace(previous), strings.TrimSpace(body.LegacyDescription)) {
+			return fmt.Errorf("cannot safely replace the existing description of %s; reconcile its user blocks before retrying the move", p.Record.ID)
+		}
+	}
+	var kids []any
+	if want != "" {
+		kids = paragraphs(want)
+	}
+	if err := b.C.replaceOwnedSection(ctx, ref, descriptionTitle, descriptionEnd, kids); err != nil {
+		return err
+	}
+	for _, id := range body.LegacyParagraphs {
+		if err := b.C.do(ctx, "DELETE", "/v1/blocks/"+id, nil, nil); err != nil && !IsNotFound(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+func previousDescription(payloads []sectionPayload, id string) (string, error) {
+	var desc string
+	i, err := selectPayload(payloads, func(text string) error {
+		r, err := workspace.Parse([]byte(text))
+		if err != nil {
+			return err
+		}
+		if r.ID != id || r.Issue == nil {
+			return fmt.Errorf("record does not belong to %s", id)
+		}
+		desc = r.Issue.Description
+		return nil
+	})
+	if i < 0 && err == nil {
+		err = workspace.ErrNoPayload
+	}
+	return desc, err
 }
 
 // completeDescription appends the rest of a description whose first batch of
@@ -681,7 +777,7 @@ func selectPayload(ps []sectionPayload, parse func(string) error) (int, error) {
 		}
 	}
 	for i := len(ps) - 1; i >= 0; i-- {
-		if !ps[i].Complete && parse(ps[i].Text) == nil {
+		if !ps[i].Owned && !ps[i].Complete && parse(ps[i].Text) == nil {
 			return i, nil
 		}
 	}

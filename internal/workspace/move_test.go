@@ -386,3 +386,34 @@ func TestAMoveThatWaitedForTheLockStopsWhenAnotherMoveFinishedFirst(t *testing.T
 		t.Fatal("the second move wrote to its store")
 	}
 }
+
+func TestMoveRetryUsesChangedIssueFieldsAndVerifiesTheScopeFlag(t *testing.T) {
+	h := newHarness(t)
+	h.seedWorkspace()
+	h.mem.FailOnWrite = 4
+	if _, err := h.mover().Run(h.ctx); err == nil {
+		t.Fatal("the first copy must fail")
+	}
+	if _, err := h.s.DB.Exec(`UPDATE local_issues SET title = ?, description = ?, repo = ?, source_url = ?, tags = ? WHERE id = 'L-0B0B0B0B'`,
+		"New title", "Rewritten description", "o/new", "https://example.com/issue", `["a,b"]`); err != nil {
+		t.Fatal(err)
+	}
+	h.mem.Mangle = func(e *TaskEntry) {
+		if e.ID == "L-0B0B0B0B" {
+			e.ScopeConfirmed = false
+		}
+	}
+	if _, err := h.mover().Run(h.ctx); err == nil || h.marker() != nil {
+		t.Fatal("a missing confirmation must keep the workspace on SQLite")
+	}
+	h.mem.Mangle = nil
+	if _, err := h.mover().Run(h.ctx); err != nil {
+		t.Fatalf("retry failed to use the rewritten SQLite issue: %v", err)
+	}
+	h.pull()
+	li, err := localissues.GetIn(h.s.DB, "L-0B0B0B0B")
+	if err != nil || li.Title != "New title" || li.Description != "Rewritten description" || li.Repo != "o/new" ||
+		li.SourceURL != "https://example.com/issue" || len(li.Tags) != 1 || li.Tags[0] != "a,b" {
+		t.Fatalf("issue after first sync = %+v, %v", li, err)
+	}
+}

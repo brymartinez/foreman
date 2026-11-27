@@ -60,10 +60,10 @@ type TaskPublish struct {
 	// writing it, so a description that is only the start of Create.Description is
 	// completed.
 	Resume bool
-	// Reseed makes an existing entry take Create's confirmed triage and scope flag.
-	// Only a move sets it: until the cutover SQLite owns the workspace, so a retry
-	// must carry scope that changed there since the first attempt.
+	// Reseed copies the host's confirmed triage and scope flag.
 	Reseed bool
+	// Move rewrites the task fields copied by an earlier attempt at cutover.
+	Move bool
 }
 
 // TaskSeed is the user-owned content of a new entry.

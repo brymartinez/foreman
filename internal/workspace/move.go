@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -239,7 +240,9 @@ func (m Move) verify(ctx context.Context, keys []task.Key, repos []string) []str
 			diffs = append(diffs, fmt.Sprintf("%s: cannot rebuild from the database: %v", id, err))
 			continue
 		}
-		if want := strings.TrimSpace(b.triage); want != strings.TrimSpace(got[0].ConfirmedTriage) {
+		seed := b.seed()
+		if strings.TrimSpace(seed.ConfirmedTriage) != strings.TrimSpace(got[0].ConfirmedTriage) ||
+			seed.ScopeConfirmed != got[0].ScopeConfirmed {
 			// The payload holds the full text; the user-facing field is what the first
 			// refresh reads back as an edit, so it must hold the full text too.
 			diffs = append(diffs, fmt.Sprintf("%s: the Confirmed triage field differs from the saved scope", id))
@@ -249,6 +252,12 @@ func (m Move) verify(ctx context.Context, keys []task.Key, repos []string) []str
 			// A page whose description append failed holds a start of it. Pull would read
 			// that as an edit and save it over the complete local text.
 			diffs = append(diffs, fmt.Sprintf("%s: the description in the store differs from the issue", id))
+			continue
+		}
+		if b.li != nil && (strings.TrimSpace(seed.Name) != strings.TrimSpace(got[0].Name) ||
+			strings.TrimSpace(seed.Repository) != strings.TrimSpace(got[0].Repository) ||
+			seed.SourceURL != got[0].SourceURL || !slices.Equal(seed.Tags, got[0].Tags)) {
+			diffs = append(diffs, fmt.Sprintf("%s: the title, repository, URL, or tags in the store differ from the issue", id))
 			continue
 		}
 		g := got[0].Record

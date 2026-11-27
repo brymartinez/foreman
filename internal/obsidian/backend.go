@@ -227,7 +227,7 @@ func entryOf(f found) workspace.TaskEntry {
 	// note Foreman named reads back under its real title unless someone renamed it.
 	if t := n.str("foreman_title"); t != "" {
 		base := strings.TrimSuffix(filepath.Base(f.path), ".md")
-		if st := sanitizeName(t); base == safeName(t) || e.ID != "" && base == safeName(t)+" "+safeName(e.ID) ||
+		if st := sanitizeName(t); base == n.str("foreman_title_file") || base == safeName(t) || e.ID != "" && base == safeName(t)+" "+safeName(e.ID) ||
 			st != "" && (base == st || e.ID != "" && base == st+" "+sanitizeName(e.ID)) {
 			e.Name = t
 		}
@@ -312,8 +312,17 @@ func (b *Backend) UpsertTask(ctx context.Context, p workspace.TaskPublish) (stri
 				if err != nil {
 					return err
 				}
+				if p.Move {
+					if err := reseedIssueFields(n, filepath.Base(f.path), p.Create); err != nil {
+						return err
+					}
+				}
 				if p.Reseed {
-					region, err = reseedTriage(n, region, p.Create)
+					desc, _ := userText(region.userBody())
+					if p.Move {
+						desc = strings.TrimSpace(p.Create.Description)
+					}
+					region, err = reseedTriage(n, desc, p.Create)
 					if err != nil {
 						return err
 					}
@@ -580,12 +589,32 @@ func (b *Backend) Check(ctx context.Context, report func(workspace.Step)) error 
 	return nil
 }
 
-// reseedTriage replaces the user triage and scope flag while keeping the description.
-func reseedTriage(n *note, region noteRegion, s workspace.TaskSeed) (noteRegion, error) {
+func reseedIssueFields(n *note, filename string, s workspace.TaskSeed) error {
+	tags := s.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+	for _, kv := range []struct {
+		key   string
+		value any
+	}{
+		{"foreman_title", s.Name},
+		{"foreman_title_file", strings.TrimSuffix(filename, ".md")},
+		{"repository", s.Repository},
+		{"source_url", s.SourceURL},
+		{"tags", tags},
+	} {
+		if err := n.set(kv.key, kv.value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func reseedTriage(n *note, desc string, s workspace.TaskSeed) (noteRegion, error) {
 	if err := n.set("scope_confirmed", s.ScopeConfirmed); err != nil {
 		return noteRegion{}, err
 	}
-	desc, _ := userText(region.userBody())
 	var user strings.Builder
 	if desc != "" {
 		user.WriteString(desc + "\n\n")

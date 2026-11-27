@@ -428,8 +428,11 @@ the same commit. The commit message records why it changed.
   an owned region is escaped. Foreman reads its terminal YAML block independently
   of the readable Markdown and keeps an unreadable payload out of user fields).
   It writes user fields only to
-  seed a new entry, to clear `Queue` after a start, to clear `Answer` after applying
-  it, and to write a new entry's `Foreman ID`. Obsidian writes go through a temporary
+  seed a new entry, to clear `Queue` after a start, to clear an Obsidian answer after applying it, and to
+  write a new entry's `Foreman ID`. Notion stores tags containing commas or using
+  the Foreman alias prefix under safe option names, with the original names in the
+  alias property. Unmarked legacy record sections remain readable. Foreman only
+  replaces Notion sections whose ownership link identifies that page. Obsidian writes go through a temporary
   file and a rename, and a note that changed since it was read is read again and the
   change retried. Frontmatter is edited as a `yaml.Node`, so other keys, comments, and
   text survive. A note whose frontmatter does not parse is reported and left alone.
@@ -482,8 +485,10 @@ the same commit. The commit message records why it changed.
   not auto mode is on. A start that cannot happen leaves `Queue` ticked and publishes the
   reason through `Blocked`.
 - **Moving is explicit and verified.** The `workspace` table holds the cutover marker
-  (backend, target, time, counts). `workspace.Gate` runs in `openState`: while the move
-  lock is held every other command refuses; before the marker, a `notion` or `obsidian`
+  (backend, target, time, counts). Every database-backed command
+  holds a shared file lease for its full lifetime. A move requires the exclusive
+  lease before opening the database, so processes already admitted cannot change
+  what it copies. `workspace.Gate` runs in `openState`. Before the marker, a `notion` or `obsidian`
   config over a database with tasks, local issues, triage, or learnings is refused with
   a message naming `foreman storage move`; an empty database is marked at first setup;
   after the marker, a different backend or target is refused. An empty database is marked
@@ -499,11 +504,13 @@ the same commit. The commit message records why it changed.
   transaction. A failure names the entries that differ and leaves the workspace on
   SQLite. Entries are found by Foreman ID, so a retry makes no duplicates, and each move first
   clears `workspace_entries` so a retry against another destination copies everything.
-  A retry also rewrites the Confirmed triage of entries a failed attempt created, since
-  SQLite owns the workspace until the cutover. A publish that created an entry and failed
-  leaves a partial row, and the next publish completes the description.
-  Verification also compares the user-facing Confirmed triage field with the saved
-  scope and each issue's description with the host's. Every publish of a move resumes an unfinished description. The move
+  A retry reseeds the SQLite-owned issue fields and confirmed triage. Notion copies
+  imported descriptions into a linked section, so replacements can complete before
+  the prior section is removed. Flat paragraphs from an older copy are retired only
+  when they can be matched to that copy's record. Verification checks the title,
+  repository, URL, tags, description, confirmed triage, and scope checkbox as seen by
+  refresh. For ordinary publishing, an unfinished new entry is retried and its
+  partial description completed. The move
   sets no `Queue` and starts nothing. A second run after the marker reports that the
   workspace already moved. GitHub-only triage (no task yet) stays in the host database.
 - **Knowledge follows the store after host approval.** Shared entries hold the common

@@ -43,7 +43,7 @@ func ensureStore(s config.Storage) error {
 // storageMove copies the SQLite workspace into the configured store. It opens the
 // database without the gate and builds no runner, learner, or agent.
 func storageMove(ctx context.Context, cfg config.Config, stdout, stderr io.Writer) int {
-	st, err := openStateGated(cfg, stderr, false)
+	st, err := openStateWithMode(cfg, stderr, true)
 	if err != nil {
 		fmt.Fprintf(stderr, "foreman: %v\n", err)
 		return 1

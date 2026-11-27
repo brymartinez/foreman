@@ -130,6 +130,10 @@ func (m *Memory) UpsertTask(_ context.Context, p TaskPublish) (string, error) {
 			SourceURL: s.SourceURL, Tags: s.Tags, Description: s.Description, ConfirmedTriage: s.ConfirmedTriage, ScopeConfirmed: s.ScopeConfirmed}
 		m.tasks = append(m.tasks, e)
 	}
+	if p.Move {
+		e.Name, e.Repository, e.SourceURL = p.Create.Name, p.Create.Repository, p.Create.SourceURL
+		e.Description, e.Tags = p.Create.Description, p.Create.Tags
+	}
 	if p.Resume && e.Description != "" {
 		if want := strings.TrimSpace(p.Create.Description); want != e.Description && strings.HasPrefix(want, e.Description) {
 			e.Description = want

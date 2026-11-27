@@ -5,13 +5,18 @@ import (
 	"encoding/json"
 	"net/url"
 	"strings"
+
+	"github.com/brymartinez/foreman/internal/knowledge"
+	"github.com/brymartinez/foreman/internal/workspace"
 )
 
 const (
-	maxRichText  = 2000 // characters per rich-text item
-	maxAppend    = 100  // blocks per append request
-	maxCodeItems = 100  // rich-text items per block
-	sectionTitle = "Foreman record"
+	maxRichText      = 2000 // characters per rich-text item
+	maxAppend        = 100  // blocks per append request
+	maxCodeItems     = 100  // rich-text items per block
+	sectionTitle     = "Foreman record"
+	descriptionTitle = "Issue description"
+	descriptionEnd   = "End of imported issue description"
 	// endMarker is the last block of a complete section. A heading with children
 	// but no marker is a publish that failed midway, and readers skip it.
 	endMarker = "End of Foreman record"
@@ -127,6 +132,9 @@ type richItem struct {
 	PlainText string `json:"plain_text"`
 	Text      struct {
 		Content string `json:"content"`
+		Link    *struct {
+			URL string `json:"url"`
+		} `json:"link"`
 	} `json:"text"`
 }
 
@@ -157,16 +165,40 @@ func (b *blockObj) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, &b.raw)
 }
 
-func (b blockObj) text() string {
-	var c struct {
+func (b blockObj) richText() []richItem {
+	var value struct {
 		RichText []richItem `json:"rich_text"`
-		Title    string     `json:"title"`
 	}
-	_ = json.Unmarshal(b.raw[b.Type], &c)
+	_ = json.Unmarshal(b.raw[b.Type], &value)
+	return value.RichText
+}
+
+func (b blockObj) text() string {
 	if b.Type == "child_database" {
-		return c.Title
+		var value struct {
+			Title string `json:"title"`
+		}
+		_ = json.Unmarshal(b.raw[b.Type], &value)
+		return value.Title
 	}
-	return plainOf(c.RichText)
+	return plainOf(b.richText())
+}
+
+func sectionLink(page, title string) string {
+	kind := "record"
+	if title == descriptionTitle {
+		kind = "description"
+	}
+	return "https://github.com/brymartinez/foreman#notion-" + kind + "-" + strings.ReplaceAll(page, "-", "")
+}
+
+func (b blockObj) ownsSection(page, title string) bool {
+	if b.Type != "heading_2" {
+		return false
+	}
+	items := b.richText()
+	return len(items) == 1 && plainOf(items) == title && items[0].Text.Link != nil &&
+		items[0].Text.Link.URL == sectionLink(page, title)
 }
 
 type listResp struct {
@@ -246,11 +278,14 @@ func (c *Client) appendBlocks(ctx context.Context, parent string, blocks []any) 
 type sectionPayload struct {
 	Text     string
 	Complete bool
+	Owned    bool
 }
 
 // pageBody is what a page holds below its properties.
 type pageBody struct {
-	Description string
+	Description       string
+	LegacyDescription string
+	LegacyParagraphs  []string
 	// DescBlocks is how many top-level blocks make up Description.
 	DescBlocks int
 	// Payloads is each Foreman record section's code blocks, in page order.
@@ -265,29 +300,77 @@ func (c *Client) readBody(ctx context.Context, page string) (pageBody, error) {
 		return pageBody{}, err
 	}
 	var body pageBody
-	var lines []string
-	prevRunes := 0
+	var userBlocks, imported []blockObj
 	for _, b := range blocks {
-		if b.Type == "heading_2" && b.text() == sectionTitle {
+		if b.ownsSection(page, descriptionTitle) {
+			kids, err := c.blocksOf(ctx, b.ID)
+			if err != nil {
+				return pageBody{}, err
+			}
+			if endsWith(kids, descriptionEnd) {
+				imported = kids[:len(kids)-1]
+			}
+			continue
+		}
+		if b.Type == "heading_2" && b.text() == sectionTitle && (b.HasChildren || b.ownsSection(page, sectionTitle)) {
 			kids, err := c.blocksOf(ctx, b.ID)
 			if err != nil {
 				return pageBody{}, err
 			}
 			var payload strings.Builder
-			complete := len(kids) > 0 && kids[len(kids)-1].Type == "paragraph" && kids[len(kids)-1].text() == endMarker
 			for _, k := range kids {
 				if k.Type == "code" {
 					payload.WriteString(k.text())
 				}
 			}
-			body.Payloads = append(body.Payloads, sectionPayload{Text: payload.String(), Complete: complete})
-			continue
+			owned := b.ownsSection(page, sectionTitle)
+			complete := endsWith(kids, endMarker)
+			if owned || complete && payload.Len() > 0 || legacyPayload(payload.String()) {
+				body.Payloads = append(body.Payloads, sectionPayload{Text: payload.String(), Complete: complete, Owned: owned})
+				continue
+			}
 		}
+		userBlocks = append(userBlocks, b)
+	}
+	lines, count := descriptionLines(userBlocks)
+	body.DescBlocks = count
+	body.LegacyDescription = strings.Join(lines, "\n")
+	for _, b := range userBlocks {
+		if b.Type != "paragraph" || b.HasChildren {
+			body.LegacyParagraphs = nil
+			break
+		}
+		body.LegacyParagraphs = append(body.LegacyParagraphs, b.ID)
+	}
+	importedLines, _ := descriptionLines(imported)
+	body.Description = strings.Join(append(importedLines, lines...), "\n")
+	return body, nil
+}
+
+func legacyPayload(payload string) bool {
+	if payload == "" {
+		return false
+	}
+	if _, err := workspace.Parse([]byte(payload)); err == nil {
+		return true
+	}
+	_, err := knowledge.Parse([]byte(payload))
+	return err == nil
+}
+
+func endsWith(kids []blockObj, text string) bool {
+	return len(kids) > 0 && kids[len(kids)-1].Type == "paragraph" && kids[len(kids)-1].text() == text
+}
+
+func descriptionLines(blocks []blockObj) ([]string, int) {
+	var lines []string
+	count, prevRunes := 0, 0
+	for _, b := range blocks {
 		if t := b.text(); b.Type == "paragraph" && len(lines) > 0 && prevRunes == blockRunes && strings.HasPrefix(t, continuationMark) {
 			t = unescapeChunk(strings.TrimPrefix(t, continuationMark))
 			lines[len(lines)-1] += t
 			prevRunes = len([]rune(t))
-			body.DescBlocks++
+			count++
 			continue
 		}
 		switch b.Type {
@@ -298,39 +381,28 @@ func (c *Client) readBody(ctx context.Context, page string) (pageBody, error) {
 			}
 			lines = append(lines, t)
 			prevRunes = len([]rune(t))
-			body.DescBlocks++
+			count++
 		}
 	}
-	body.Description = strings.Join(lines, "\n")
-	return body, nil
+	return lines, count
 }
 
-// sectionIDs lists the IDs of a page's Foreman record sections.
-func (c *Client) sectionIDs(ctx context.Context, page string) ([]string, error) {
-	blocks, err := c.blocksOf(ctx, page)
-	if err != nil {
-		return nil, err
-	}
-	var ids []string
-	for _, b := range blocks {
-		if b.Type == "heading_2" && b.text() == sectionTitle {
-			ids = append(ids, b.ID)
-		}
-	}
-	return ids, nil
-}
-
-// replaceSection appends a new Foreman record section, with the payload in its last
-// block, and only then deletes the old sections. A reader uses the last section
-// whose payload parses, so a crash at any point leaves a readable page.
 func (c *Client) replaceSection(ctx context.Context, page string, text, payload string) error {
-	old, err := c.sectionIDs(ctx, page)
+	kids := append(paragraphs(text), codeBlocks(payload)...)
+	return c.replaceOwnedSection(ctx, page, sectionTitle, endMarker, kids)
+}
+
+func (c *Client) replaceOwnedSection(ctx context.Context, page, title, end string, kids []any) error {
+	blocks, err := c.blocksOf(ctx, page)
 	if err != nil {
 		return err
 	}
-	kids := append(append(paragraphs(text), codeBlocks(payload)...), block("paragraph", map[string]any{"rich_text": richText(endMarker)}))
+	kids = append(kids, block("paragraph", map[string]any{"rich_text": richText(end)}))
 	first := kids[:takeBlocks(kids)]
-	heading := block("heading_2", map[string]any{"rich_text": richText(sectionTitle), "is_toggleable": true, "children": first})
+	label := []any{map[string]any{"type": "text", "text": map[string]any{
+		"content": title, "link": map[string]string{"url": sectionLink(page, title)},
+	}}}
+	heading := block("heading_2", map[string]any{"rich_text": label, "is_toggleable": true, "children": first})
 	ids, err := c.appendBlocks(ctx, page, []any{heading})
 	if err != nil {
 		return err
@@ -343,9 +415,11 @@ func (c *Client) replaceSection(ctx context.Context, page string, text, payload 
 			return err
 		}
 	}
-	for _, id := range old {
-		if err := c.do(ctx, "DELETE", "/v1/blocks/"+id, nil, nil); err != nil && !IsNotFound(err) {
-			return err
+	for _, old := range blocks {
+		if old.ownsSection(page, title) {
+			if err := c.do(ctx, "DELETE", "/v1/blocks/"+old.ID, nil, nil); err != nil && !IsNotFound(err) {
+				return err
+			}
 		}
 	}
 	return nil
